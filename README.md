@@ -29,23 +29,23 @@ requirements.txt
 1. `python -m venv .venv`
 2. `.venv\Scripts\activate`
 3. `python -m pip install -r requirements.txt`
-4. `python -m pip install pyinstaller`
+   - This installs all Python dependencies (including `requests`).
 
 ### Obtain FFmpeg binaries
-Place `ffmpeg.exe` and `ffprobe.exe` in `bin\`.
+Option 1 (recommended): run `download_ffmpeg.bat`
 
-Option A (manual):
-- Download FFmpeg from https://www.gyan.dev/ffmpeg/builds/
-- Extract and copy `ffmpeg.exe` and `ffprobe.exe` into `bin\`
-
-Option B (scripted, requires 7-Zip in PATH):
-- Double-click `download_ffmpeg.bat`
+Option 2: install FFmpeg via winget:
+```
+winget install -e --id Gyan.FFmpeg
+```
 
 ## Run from source (developer testing)
 ```
 .venv\Scripts\activate
 python -m app.main
 ```
+The app will use `bin\ffmpeg.exe`/`bin\ffprobe.exe` if present, otherwise it will fall back to
+FFmpeg installed on PATH.
 
 ## Build the Windows executable
 Double-click `build_exe.bat` or run:
@@ -57,6 +57,7 @@ Output will be:
 ```
 dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
 ```
+Then double-click `dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe`.
 
 ## Portable install
 1. Copy the `dist\HebrewSubtitleGUI\` folder to `C:\Program Files\HebrewSubtitleGUI` (or any folder).
@@ -70,5 +71,5 @@ dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
 
 ## Troubleshooting
 - **CUDA missing DLLs / GPU error**: The app automatically falls back to CPU and logs the CUDA error.
-- **FFmpeg not found**: Ensure `bin\ffmpeg.exe` and `bin\ffprobe.exe` exist before building.
+- **FFmpeg not found**: Run `download_ffmpeg.bat` or install FFmpeg via winget.
 - **Audio copy fails during burn-in**: The app retries with AAC audio and logs the fallback.

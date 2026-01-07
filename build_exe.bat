@@ -2,21 +2,79 @@
 setlocal enabledelayedexpansion
 
 if not exist .venv\Scripts\activate.bat (
-  echo [ERROR] .venv not found. Create it with: python -m venv .venv
-  exit /b 1
+  echo [INFO] Creating virtual environment...
+  python -m venv .venv
+  if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] Failed to create virtual environment.
+    exit /b 1
+  )
 )
 
 call .venv\Scripts\activate.bat
 
+python -m pip install --upgrade pip
+if %ERRORLEVEL% NEQ 0 (
+  echo [ERROR] Failed to upgrade pip.
+  exit /b 1
+)
+
+python -m pip install -r requirements.txt
+if %ERRORLEVEL% NEQ 0 (
+  echo [ERROR] Failed to install requirements.
+  exit /b 1
+)
+
+python -m pip show pyinstaller >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+  python -m pip install pyinstaller
+  if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] Failed to install PyInstaller.
+    exit /b 1
+  )
+)
+
+if not exist bin mkdir bin
+
+set "FFMPEG_EXE="
+set "FFPROBE_EXE="
+for /f "delims=" %%F in ('where ffmpeg 2^>nul') do if not defined FFMPEG_EXE set "FFMPEG_EXE=%%F"
+for /f "delims=" %%F in ('where ffprobe 2^>nul') do if not defined FFPROBE_EXE set "FFPROBE_EXE=%%F"
+
 if not exist bin\ffmpeg.exe (
-  echo [ERROR] Missing bin\ffmpeg.exe
-  echo Run download_ffmpeg.bat or place ffmpeg.exe in bin\
+  if defined FFMPEG_EXE (
+    copy /Y "%FFMPEG_EXE%" "bin\ffmpeg.exe" >nul
+  )
+)
+
+if not exist bin\ffprobe.exe (
+  if defined FFPROBE_EXE (
+    copy /Y "%FFPROBE_EXE%" "bin\ffprobe.exe" >nul
+  )
+)
+
+if not exist bin\ffmpeg.exe (
+  call download_ffmpeg.bat
+  if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] download_ffmpeg.bat failed.
+    exit /b 1
+  )
+)
+
+if not exist bin\ffprobe.exe (
+  call download_ffmpeg.bat
+  if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] download_ffmpeg.bat failed.
+    exit /b 1
+  )
+)
+
+if not exist bin\ffmpeg.exe (
+  echo [ERROR] FFmpeg is missing. Run download_ffmpeg.bat or install via winget: winget install -e --id Gyan.FFmpeg
   exit /b 1
 )
 
 if not exist bin\ffprobe.exe (
-  echo [ERROR] Missing bin\ffprobe.exe
-  echo Run download_ffmpeg.bat or place ffprobe.exe in bin\
+  echo [ERROR] FFprobe is missing. Run download_ffmpeg.bat or install via winget: winget install -e --id Gyan.FFmpeg
   exit /b 1
 )
 
