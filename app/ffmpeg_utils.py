@@ -1,21 +1,34 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 BIN_DIR_NAME = "bin"
+MISSING_FFMPEG_MESSAGE = (
+    "FFmpeg not found. Run download_ffmpeg.bat or install via winget: "
+    "winget install -e --id Gyan.FFmpeg"
+)
 
 
 def _is_frozen() -> bool:
-    return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+    return getattr(sys, "frozen", False)
 
 
 def get_resource_root() -> Path:
-    if _is_frozen():
-        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
     return Path(__file__).resolve().parents[1]
+
+
+def get_runtime_mode() -> str:
+    if _is_frozen():
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        if meipass and meipass.exists():
+            return "pyinstaller-onefile"
+        return "pyinstaller-onefolder"
+    return "source"
 
 
 def get_ffmpeg_path() -> Path:
@@ -26,19 +39,49 @@ def get_ffprobe_path() -> Path:
     return get_resource_root() / BIN_DIR_NAME / "ffprobe.exe"
 
 
-def ensure_ffmpeg_available() -> tuple[Path, Path]:
-    ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = get_ffprobe_path()
-    if not ffmpeg_path.exists() or not ffprobe_path.exists():
-        missing = []
-        if not ffmpeg_path.exists():
-            missing.append(str(ffmpeg_path))
-        if not ffprobe_path.exists():
-            missing.append(str(ffprobe_path))
-        raise FileNotFoundError(
-            "Bundled FFmpeg binaries not found: " + ", ".join(missing)
+def resolve_ffmpeg_paths() -> tuple[Optional[Path], Optional[Path], str]:
+    if _is_frozen():
+        exe_dir = Path(sys.executable).resolve().parent
+        packaged_candidates = [
+            ("pyinstaller-onefolder", exe_dir / BIN_DIR_NAME),
+        ]
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        if meipass and meipass.exists():
+            packaged_candidates.append(("pyinstaller-onefile", meipass / BIN_DIR_NAME))
+
+        for mode, bin_dir in packaged_candidates:
+            ffmpeg_path = bin_dir / "ffmpeg.exe"
+            if ffmpeg_path.exists():
+                ffprobe_path = bin_dir / "ffprobe.exe"
+                return ffmpeg_path, (ffprobe_path if ffprobe_path.exists() else None), mode
+
+    source_bin_dir = get_resource_root() / BIN_DIR_NAME
+    ffmpeg_path = source_bin_dir / "ffmpeg.exe"
+    if ffmpeg_path.exists():
+        ffprobe_path = source_bin_dir / "ffprobe.exe"
+        return ffmpeg_path, (ffprobe_path if ffprobe_path.exists() else None), "source-bin"
+
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        system_ffprobe = shutil.which("ffprobe")
+        return (
+            Path(system_ffmpeg),
+            (Path(system_ffprobe) if system_ffprobe else None),
+            "system-path",
         )
-    return ffmpeg_path, ffprobe_path
+
+    return None, None, "missing"
+
+
+def ensure_ffmpeg_available() -> tuple[Path, Optional[Path], str]:
+    ffmpeg_path, ffprobe_path, mode = resolve_ffmpeg_paths()
+    if not ffmpeg_path:
+        raise FileNotFoundError(MISSING_FFMPEG_MESSAGE)
+    return ffmpeg_path, ffprobe_path, mode
+
+
+def get_ffmpeg_missing_message() -> str:
+    return MISSING_FFMPEG_MESSAGE
 
 
 def escape_subtitles_filter_path(path: os.PathLike | str) -> str:
