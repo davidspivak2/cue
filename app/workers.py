@@ -158,7 +158,7 @@ class Worker(QtCore.QObject):
         }
 
     def _extract_audio(self, audio_path: Path, apply_filter: bool) -> None:
-        ffmpeg_path, _ = ensure_ffmpeg_available()
+        ffmpeg_path, _, _ = ensure_ffmpeg_available()
         command = [
             str(ffmpeg_path),
             "-y",
@@ -192,7 +192,7 @@ class Worker(QtCore.QObject):
             raise FileNotFoundError(f"SRT not found: {srt_path}")
 
         output_path = output_dir / f"{self.video_path.stem}_subtitled.mp4"
-        ffmpeg_path, _ = ensure_ffmpeg_available()
+        ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
         escaped_path = escape_subtitles_filter_path(srt_path)
         style = format_filter_style(

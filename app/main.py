@@ -7,7 +7,12 @@ from typing import Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .ffmpeg_utils import ensure_ffmpeg_available
+from .ffmpeg_utils import (
+    ensure_ffmpeg_available,
+    get_ffmpeg_missing_message,
+    get_runtime_mode,
+    resolve_ffmpeg_paths,
+)
 from .workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
@@ -25,8 +30,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_output_video: Optional[Path] = None
         self._worker_thread: Optional[QtCore.QThread] = None
         self._worker: Optional[Worker] = None
+        self._ffmpeg_available = False
+        self._ffprobe_available = False
 
         self._build_ui()
+        self._log_diagnostics()
         self._update_ui_state(idle=True)
 
     def _build_ui(self) -> None:
@@ -150,9 +158,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _probe_video(self, path: Path) -> None:
         try:
-            _, ffprobe_path = ensure_ffmpeg_available()
+            _, ffprobe_path, _ = ensure_ffmpeg_available()
         except FileNotFoundError as exc:
             self._log(str(exc))
+            return
+        if not ffprobe_path:
+            self._log("Warning: ffprobe not found; skipping video probe.")
             return
 
         command = [
@@ -232,6 +243,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self.log_box.clear()
+        self._log_ffmpeg_resolution()
         self._worker_thread = QtCore.QThread()
         self._worker = Worker(
             task_type=task_type,
@@ -311,10 +323,39 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log_box.appendPlainText(message)
         self.log_box.verticalScrollBar().setValue(self.log_box.verticalScrollBar().maximum())
 
+    def _refresh_ffmpeg_status(self) -> None:
+        ffmpeg_path, ffprobe_path, _ = resolve_ffmpeg_paths()
+        self._ffmpeg_available = ffmpeg_path is not None
+        self._ffprobe_available = ffprobe_path is not None
+
+    def _log_ffmpeg_resolution(self) -> None:
+        ffmpeg_path, ffprobe_path, mode = resolve_ffmpeg_paths()
+        if not ffmpeg_path:
+            self._log(get_ffmpeg_missing_message())
+            return
+
+        self._log(f"FFmpeg resolver: mode={mode}, ffmpeg={ffmpeg_path}")
+        if ffprobe_path:
+            self._log(f"FFprobe resolver: {ffprobe_path}")
+        else:
+            self._log("Warning: ffprobe not found; some metadata checks may be skipped.")
+
+    def _log_diagnostics(self) -> None:
+        runtime_mode = get_runtime_mode()
+        ffmpeg_path, _, _ = resolve_ffmpeg_paths()
+        ffmpeg_display = str(ffmpeg_path) if ffmpeg_path else "NOT FOUND"
+        self._log(
+            "Diagnostics: "
+            f"Python {sys.version.split()[0]} | mode: {runtime_mode} | ffmpeg: {ffmpeg_display}"
+        )
+        self._log_ffmpeg_resolution()
+
     def _update_ui_state(self, *, idle: bool) -> None:
+        self._refresh_ffmpeg_status()
         has_video = self._video_path is not None
-        self.generate_button.setEnabled(idle and has_video)
-        self.burn_button.setEnabled(idle and has_video)
+        ffmpeg_ready = self._ffmpeg_available
+        self.generate_button.setEnabled(idle and has_video and ffmpeg_ready)
+        self.burn_button.setEnabled(idle and has_video and ffmpeg_ready)
         self.cancel_button.setEnabled(not idle)
         self.open_folder_button.setEnabled(has_video)
         self.open_srt_button.setEnabled(self._last_srt_path is not None)
