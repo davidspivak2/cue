@@ -86,17 +86,26 @@ if not exist bin\ffprobe.exe (
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 
-pyinstaller --noconfirm --windowed --name HebrewSubtitleGUI ^
-  --add-binary "bin\ffmpeg.exe;bin" ^
-  --add-binary "bin\ffprobe.exe;bin" ^
-  --add-data "app\ui\styles.qss;app\ui" ^
-  --collect-all faster_whisper ^
-  --collect-all ctranslate2 ^
-  run_app.py
+pyinstaller --noconfirm HebrewSubtitleGUI.spec
 
 if errorlevel 1 (
   echo [ERROR] PyInstaller failed.
   exit /b 1
+)
+
+set "INTERNAL_DIR=dist\HebrewSubtitleGUI\_internal"
+if exist "%INTERNAL_DIR%" (
+  echo [INFO] Scanning for OpenMP DLL duplicates...
+  set "KEEP_OMP_DLL="
+  for /f "delims=" %%F in ('dir /b /s "%INTERNAL_DIR%\libiomp5md.dll" 2^>nul') do (
+    if not defined KEEP_OMP_DLL (
+      set "KEEP_OMP_DLL=%%F"
+      echo [INFO] Keeping %%F
+    ) else (
+      echo [INFO] Removing duplicate %%F
+      del /f /q "%%F" >nul 2>&1
+    )
+  )
 )
 
 echo Build complete. Output in dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
