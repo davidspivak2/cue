@@ -18,6 +18,7 @@ from .ffmpeg_utils import (
     get_runtime_mode,
     resolve_ffmpeg_paths,
 )
+from .ui.theme import apply_theme
 from .workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
@@ -666,6 +667,7 @@ def main() -> int:
 
     logger, log_path, log_dir, handler = _configure_logging()
     logger.info("Log file: %s", log_path)
+    apply_theme(app, logger)
     try:
         faulthandler.enable(file=handler.stream, all_threads=True)
     except Exception:  # noqa: BLE001
