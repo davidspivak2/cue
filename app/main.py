@@ -516,7 +516,7 @@ class MainWindow(QtWidgets.QMainWindow):
             elif "FFmpeg failed" in message:
                 QtWidgets.QMessageBox.critical(self, "FFmpeg failed", "FFmpeg failed. Check logs.")
             elif "Transcription failed" in message:
-                self._show_transcription_error()
+                self._show_transcription_error(message)
             else:
                 QtWidgets.QMessageBox.critical(self, "Error", message)
             self.set_state(AppState.VIDEO_SELECTED if self._video_path else AppState.EMPTY)
@@ -608,11 +608,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.details_toggle.setArrowType(arrow)
         self.details_toggle.setText("Hide details" if checked else "Show details")
 
-    def _show_transcription_error(self) -> None:
+    def _show_transcription_error(self, details: Optional[str] = None) -> None:
         message = (
             "Transcription failed.\n"
             f"A log file was saved to:\n{self._log_path}"
         )
+        if details:
+            message = f"{message}\n\nDetails:\n{details}"
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Critical)
         box.setWindowTitle("Transcription failed")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import sys
 import threading
@@ -19,6 +20,9 @@ from .ffmpeg_utils import (
     get_runtime_mode,
     get_subprocess_kwargs,
 )
+from .paths import get_models_dir
+
+TRANSCRIBE_MODEL_NAME = "large-v3"
 
 
 class CancelledError(Exception):
@@ -174,16 +178,31 @@ class Worker(QtCore.QObject):
                 or exc.srt_size == 0
             )
             if should_retry:
+                model_dir = get_models_dir() / TRANSCRIBE_MODEL_NAME
+                if exc.return_code == 3221225477 and model_dir.exists():
+                    self.signals.log.emit(
+                        f"Clearing model cache due to access violation: {model_dir}",
+                        True,
+                    )
+                    shutil.rmtree(model_dir, ignore_errors=True)
                 self.signals.log.emit(
                     "GPU transcription failed; retrying on CPU. This may take longer.",
                     True,
                 )
-                self._run_transcription_subprocess(
-                    audio_path=audio_path,
-                    srt_path=srt_path,
-                    duration_seconds=duration_seconds,
-                    force_cpu=True,
-                )
+                try:
+                    self._run_transcription_subprocess(
+                        audio_path=audio_path,
+                        srt_path=srt_path,
+                        duration_seconds=duration_seconds,
+                        force_cpu=True,
+                    )
+                except TranscriptionError as retry_exc:
+                    message = (
+                        "Transcription failed after CPU retry.\n"
+                        f"Return code: {retry_exc.return_code}\n"
+                        f"Models dir: {get_models_dir()}"
+                    )
+                    raise RuntimeError(message) from retry_exc
             else:
                 self.signals.log.emit(f"Transcription failed; keeping WAV: {audio_path}", True)
                 raise

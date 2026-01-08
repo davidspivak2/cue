@@ -3,12 +3,17 @@ from __future__ import annotations
 import argparse
 import faulthandler
 import os
+import shutil
 import sys
+import threading
 import traceback
 from ctypes import CDLL
 from pathlib import Path
 
 from .srt_utils import SrtSegment, segments_to_srt
+from .paths import get_models_dir
+
+MODEL_NAME = "large-v3"
 
 
 def _print(message: str) -> None:
@@ -66,40 +71,61 @@ def _gpu_is_available() -> bool:
     return False
 
 
-def _load_model(prefer_gpu: bool):
+def _validate_model_dir(model_dir: Path) -> bool:
+    return (model_dir / "model.bin").exists() and (model_dir / "config.json").exists()
+
+
+def _start_heartbeat(label: str, stop_event: threading.Event) -> threading.Thread:
+    def _beat() -> None:
+        while not stop_event.wait(10.0):
+            _print(f"HEARTBEAT {label}")
+
+    thread = threading.Thread(target=_beat, daemon=True)
+    thread.start()
+    return thread
+
+
+def _load_model(prefer_gpu: bool, *, models_dir: Path):
     from faster_whisper import WhisperModel
 
+    compute_type = "float16" if prefer_gpu else "int8"
+    device = "cuda" if prefer_gpu else "cpu"
+    _print(f"MODEL_DEVICE {device} compute_type={compute_type}")
     if prefer_gpu:
         try:
             _print("MODE gpu")
             _print("Loading model (GPU)...")
             model = WhisperModel(
-                "large-v3",
+                MODEL_NAME,
                 device="cuda",
-                compute_type="float16",
+                compute_type=compute_type,
                 cpu_threads=2,
                 num_workers=1,
+                download_root=str(models_dir),
             )
             return model
         except Exception as exc:  # noqa: BLE001
             summary = str(exc).replace("\n", " ")
             _print(f"MODE cpu {summary}")
             _print("Loading model (CPU)...")
+            _print("MODEL_DEVICE cpu compute_type=int8")
             return WhisperModel(
-                "large-v3",
+                MODEL_NAME,
                 device="cpu",
                 compute_type="int8",
                 cpu_threads=2,
                 num_workers=1,
+                download_root=str(models_dir),
             )
     _print("MODE cpu")
     _print("Loading model (CPU)...")
     return WhisperModel(
-        "large-v3",
+        MODEL_NAME,
         device="cpu",
         compute_type="int8",
         cpu_threads=2,
         num_workers=1,
+        download_root=str(models_dir),
     )
 
 
@@ -147,12 +173,29 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001
             _print(f"ERROR importing whisper deps: {exc}")
         _print("READY")
+        models_dir = get_models_dir()
+        model_dir = models_dir / MODEL_NAME
+        _print(f"MODEL_NAME {MODEL_NAME}")
+        _print(f"MODELS_DIR {models_dir}")
+        _print(f"MODEL_DIR {model_dir}")
+        if model_dir.exists():
+            is_valid = _validate_model_dir(model_dir)
+            _print(f"MODEL_VALIDATE {is_valid}")
+            if not is_valid:
+                _print("MODEL_INVALID removing")
+                shutil.rmtree(model_dir, ignore_errors=True)
         prefer_gpu = args.prefer_gpu and not args.force_cpu
         if prefer_gpu:
             if not _gpu_is_available():
                 _print("GPU not available; falling back to CPU.")
                 prefer_gpu = False
-        model = _load_model(prefer_gpu)
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
+        try:
+            model = _load_model(prefer_gpu, models_dir=models_dir)
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1)
         segments_iter, info = model.transcribe(
             str(wav_path),
             language=args.lang,

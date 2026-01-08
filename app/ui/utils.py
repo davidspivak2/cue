@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import subprocess
 from pathlib import Path
 from typing import Iterable, Optional
 
 from ..ffmpeg_utils import ensure_ffmpeg_available, get_media_duration, get_subprocess_kwargs
+from ..paths import get_app_data_dir
 
 
 def format_duration(seconds: Optional[float]) -> str:
@@ -20,13 +20,6 @@ def format_duration(seconds: Optional[float]) -> str:
     if hours > 0:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes}:{secs:02d}"
-
-
-def get_app_data_dir() -> Path:
-    local_appdata = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    path = local_appdata / "HebrewSubtitleGUI"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 
 def get_media_duration_seconds(path: Path) -> Optional[float]:
