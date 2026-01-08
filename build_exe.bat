@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 if not exist .venv\Scripts\activate.bat (
   echo [INFO] Creating virtual environment...
   python -m venv .venv
-  if %ERRORLEVEL% NEQ 0 (
+  if errorlevel 1 (
     echo [ERROR] Failed to create virtual environment.
     exit /b 1
   )
@@ -13,24 +13,29 @@ if not exist .venv\Scripts\activate.bat (
 call .venv\Scripts\activate.bat
 
 python -m pip install --upgrade pip
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   echo [ERROR] Failed to upgrade pip.
   exit /b 1
 )
 
 python -m pip install -r requirements.txt
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   echo [ERROR] Failed to install requirements.
   exit /b 1
 )
 
 python -m pip show pyinstaller >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   python -m pip install pyinstaller
-  if %ERRORLEVEL% NEQ 0 (
+  if errorlevel 1 (
     echo [ERROR] Failed to install PyInstaller.
     exit /b 1
   )
+)
+pyinstaller --version >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] PyInstaller is not available after install.
+  exit /b 1
 )
 
 if not exist bin mkdir bin
@@ -54,7 +59,7 @@ if not exist bin\ffprobe.exe (
 
 if not exist bin\ffmpeg.exe (
   call download_ffmpeg.bat
-  if %ERRORLEVEL% NEQ 0 (
+  if errorlevel 1 (
     echo [ERROR] download_ffmpeg.bat failed.
     exit /b 1
   )
@@ -62,7 +67,7 @@ if not exist bin\ffmpeg.exe (
 
 if not exist bin\ffprobe.exe (
   call download_ffmpeg.bat
-  if %ERRORLEVEL% NEQ 0 (
+  if errorlevel 1 (
     echo [ERROR] download_ffmpeg.bat failed.
     exit /b 1
   )
@@ -85,9 +90,9 @@ pyinstaller --noconfirm --windowed --name HebrewSubtitleGUI ^
   --collect-all ctranslate2 ^
   app\main.py
 
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   echo [ERROR] PyInstaller failed.
-  exit /b %ERRORLEVEL%
+  exit /b 1
 )
 
 echo Build complete. Output in dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
