@@ -103,8 +103,9 @@ class MainWindow(QtWidgets.QMainWindow):
         style_layout.addWidget(self.margin_spin, 2, 1)
 
         self.progress_bar = QtWidgets.QProgressBar()
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
 
         self.status_label = QtWidgets.QLabel("Idle")
         self.status_label.setStyleSheet("font-weight: bold;")
@@ -255,6 +256,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._worker.moveToThread(self._worker_thread)
         self._worker_thread.started.connect(self._worker.run)
         self._worker.signals.log.connect(self._log)
+        self._worker.signals.progress.connect(self._on_worker_progress)
         self._worker.signals.started.connect(self._on_worker_started)
         self._worker.signals.finished.connect(self._on_worker_finished)
         self._worker_thread.start()
@@ -263,12 +265,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_worker_started(self, status: str) -> None:
         self.status_label.setText(status)
-        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
 
     def _on_worker_finished(self, success: bool, message: str, payload: dict) -> None:
-        self.progress_bar.setVisible(False)
         self._update_ui_state(idle=True)
-        self.status_label.setText("Idle")
+        if success:
+            self.progress_bar.setValue(100)
+            self.status_label.setText("Done")
+        elif message == "Operation cancelled.":
+            self.progress_bar.setValue(0)
+            self.status_label.setText("Cancelled")
+        else:
+            self.progress_bar.setValue(0)
+            self.status_label.setText("Idle")
 
         if self._worker_thread:
             self._worker_thread.quit()
@@ -277,15 +286,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self._worker = None
 
         if payload.get("srt_path"):
-            self._last_srt_path = Path(payload["srt_path"])
+            candidate = Path(payload["srt_path"])
+            self._last_srt_path = candidate if candidate.exists() else None
         if payload.get("output_path"):
-            self._last_output_video = Path(payload["output_path"])
+            candidate = Path(payload["output_path"])
+            self._last_output_video = candidate if candidate.exists() else None
 
         if success:
             QtWidgets.QMessageBox.information(self, "Success", message)
         else:
             if message == "Operation cancelled.":
                 QtWidgets.QMessageBox.information(self, "Cancelled", message)
+            elif message.startswith("SRT was not created"):
+                QtWidgets.QMessageBox.critical(self, "SRT was not created", message)
             elif "FFmpeg failed" in message:
                 QtWidgets.QMessageBox.critical(self, "FFmpeg failed", "FFmpeg failed. Check logs.")
             elif "Transcription failed" in message:
@@ -320,8 +333,18 @@ class MainWindow(QtWidgets.QMainWindow):
         os.startfile(self._last_output_video)  # type: ignore[arg-type]
 
     def _log(self, message: str) -> None:
+        scrollbar = self.log_box.verticalScrollBar()
+        at_bottom = scrollbar.value() >= scrollbar.maximum() - 2
+        old_value = scrollbar.value()
         self.log_box.appendPlainText(message)
-        self.log_box.verticalScrollBar().setValue(self.log_box.verticalScrollBar().maximum())
+        if at_bottom:
+            scrollbar.setValue(scrollbar.maximum())
+        else:
+            scrollbar.setValue(old_value)
+
+    def _on_worker_progress(self, percent: int, status: str) -> None:
+        self.progress_bar.setValue(percent)
+        self.status_label.setText(status)
 
     def _refresh_ffmpeg_status(self) -> None:
         ffmpeg_path, ffprobe_path, _ = resolve_ffmpeg_paths()
