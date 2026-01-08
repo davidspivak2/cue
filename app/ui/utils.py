@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, Optional
 
-from ..ffmpeg_utils import ensure_ffmpeg_available, get_media_duration
+from ..ffmpeg_utils import ensure_ffmpeg_available, get_media_duration, get_subprocess_kwargs
 
 
 def format_duration(seconds: Optional[float]) -> str:
@@ -105,7 +105,13 @@ def generate_thumbnail(
             str(output_path),
         ]
         try:
-            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                **get_subprocess_kwargs(),
+            )
         except Exception:
             if logger:
                 logger.info("Thumbnail generation failed: ffmpeg invocation error.")
