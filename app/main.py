@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import datetime
+import faulthandler
+import logging
 import os
+import platform
 import sys
 from pathlib import Path
 from typing import Optional
@@ -19,12 +23,15 @@ VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, logger: logging.Logger, log_path: Path, log_dir: Path) -> None:
         super().__init__()
         self.setWindowTitle("Hebrew Subtitle GUI")
         self.setMinimumSize(720, 640)
         self.setAcceptDrops(True)
 
+        self._logger = logger
+        self._log_path = log_path
+        self._log_dir = log_dir
         self._video_path: Optional[Path] = None
         self._last_srt_path: Optional[Path] = None
         self._last_output_video: Optional[Path] = None
@@ -52,10 +59,6 @@ class MainWindow(QtWidgets.QMainWindow):
         file_layout.addWidget(self.browse_button, 0, 2)
         file_layout.addWidget(self.output_label, 1, 0, 1, 3)
 
-        self.filter_checkbox = QtWidgets.QCheckBox("Apply audio cleanup filter")
-        self.filter_checkbox.setChecked(True)
-        file_layout.addWidget(self.filter_checkbox, 2, 0, 1, 3)
-
         controls_group = QtWidgets.QGroupBox("Actions")
         controls_layout = QtWidgets.QHBoxLayout(controls_group)
         self.generate_button = QtWidgets.QPushButton("Generate SRT")
@@ -73,6 +76,9 @@ class MainWindow(QtWidgets.QMainWindow):
         open_layout.addWidget(self.open_srt_button)
         open_layout.addWidget(self.open_video_button)
         open_layout.addWidget(self.open_folder_button)
+
+        self.filter_checkbox = QtWidgets.QCheckBox("Apply audio cleanup filter")
+        self.filter_checkbox.setChecked(True)
 
         style_group = QtWidgets.QGroupBox("Subtitle style (burn-in)")
         style_layout = QtWidgets.QGridLayout(style_group)
@@ -115,13 +121,37 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log_box.setMinimumHeight(220)
 
         layout.addWidget(file_group)
-        layout.addWidget(style_group)
         layout.addWidget(controls_group)
         layout.addWidget(open_group)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.status_label)
-        layout.addWidget(QtWidgets.QLabel("Logs"))
-        layout.addWidget(self.log_box)
+
+        self.details_toggle = QtWidgets.QToolButton()
+        self.details_toggle.setText("Show details")
+        self.details_toggle.setCheckable(True)
+        self.details_toggle.setArrowType(QtCore.Qt.RightArrow)
+        self.details_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        layout.addWidget(self.details_toggle)
+
+        self.details_panel = QtWidgets.QWidget()
+        details_layout = QtWidgets.QVBoxLayout(self.details_panel)
+
+        advanced_group = QtWidgets.QGroupBox("Advanced options")
+        advanced_layout = QtWidgets.QVBoxLayout(advanced_group)
+        advanced_layout.addWidget(self.filter_checkbox)
+        advanced_layout.addWidget(style_group)
+        details_layout.addWidget(advanced_group)
+
+        log_group = QtWidgets.QGroupBox("Logs")
+        log_layout = QtWidgets.QVBoxLayout(log_group)
+        log_layout.addWidget(self.log_box)
+        self.open_log_button = QtWidgets.QPushButton("Open Log File")
+        log_layout.addWidget(self.open_log_button)
+        details_layout.addWidget(log_group)
+        details_layout.addStretch()
+
+        self.details_panel.setVisible(False)
+        layout.addWidget(self.details_panel)
 
         self.setCentralWidget(central)
 
@@ -132,6 +162,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_folder_button.clicked.connect(self._open_folder)
         self.open_srt_button.clicked.connect(self._open_srt)
         self.open_video_button.clicked.connect(self._open_output_video)
+        self.open_log_button.clicked.connect(self._open_log_file)
+        self.details_toggle.toggled.connect(self._toggle_details)
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
@@ -154,6 +186,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.path_edit.setText(str(path))
         self.output_label.setText(f"Output folder: {path.parent}")
         self._log(f"Selected video: {path}")
+        self._log(f"Output folder: {path.parent}")
         self._probe_video(path)
         self._update_ui_state(idle=True)
 
@@ -302,9 +335,7 @@ class MainWindow(QtWidgets.QMainWindow):
             elif "FFmpeg failed" in message:
                 QtWidgets.QMessageBox.critical(self, "FFmpeg failed", "FFmpeg failed. Check logs.")
             elif "Transcription failed" in message:
-                QtWidgets.QMessageBox.critical(
-                    self, "Transcription failed", "Transcription failed. Check logs."
-                )
+                self._show_transcription_error()
             else:
                 QtWidgets.QMessageBox.critical(self, "Error", message)
 
@@ -332,7 +363,16 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         os.startfile(self._last_output_video)  # type: ignore[arg-type]
 
-    def _log(self, message: str) -> None:
+    def _open_log_file(self) -> None:
+        if not self._log_path.exists():
+            QtWidgets.QMessageBox.information(self, "Log missing", "No log file found.")
+            return
+        QtCore.QProcess.startDetached("notepad.exe", [str(self._log_path)])
+
+    def _log(self, message: str, show_in_ui: bool = True) -> None:
+        self._logger.info(message)
+        if not show_in_ui:
+            return
         scrollbar = self.log_box.verticalScrollBar()
         at_bottom = scrollbar.value() >= scrollbar.maximum() - 2
         old_value = scrollbar.value()
@@ -367,11 +407,39 @@ class MainWindow(QtWidgets.QMainWindow):
         runtime_mode = get_runtime_mode()
         ffmpeg_path, _, _ = resolve_ffmpeg_paths()
         ffmpeg_display = str(ffmpeg_path) if ffmpeg_path else "NOT FOUND"
+        app_version = getattr(sys.modules.get("__main__"), "__version__", "unknown")
+        self._log(f"App version: {app_version}")
+        self._log(f"OS: {platform.platform()}")
         self._log(
             "Diagnostics: "
             f"Python {sys.version.split()[0]} | mode: {runtime_mode} | ffmpeg: {ffmpeg_display}"
         )
         self._log_ffmpeg_resolution()
+
+    def _toggle_details(self, checked: bool) -> None:
+        self.details_panel.setVisible(checked)
+        arrow = QtCore.Qt.DownArrow if checked else QtCore.Qt.RightArrow
+        self.details_toggle.setArrowType(arrow)
+        self.details_toggle.setText("Hide details" if checked else "Show details")
+
+    def _show_transcription_error(self) -> None:
+        message = (
+            "Transcription failed.\n"
+            f"A log file was saved to:\n{self._log_path}"
+        )
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Critical)
+        box.setWindowTitle("Transcription failed")
+        box.setText(message)
+        open_log_button = box.addButton("Open Log", QtWidgets.QMessageBox.ActionRole)
+        open_folder_button = box.addButton("Open Folder", QtWidgets.QMessageBox.ActionRole)
+        box.addButton("OK", QtWidgets.QMessageBox.AcceptRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == open_log_button:
+            self._open_log_file()
+        elif clicked == open_folder_button:
+            os.startfile(self._log_dir)  # type: ignore[arg-type]
 
     def _update_ui_state(self, *, idle: bool) -> None:
         self._refresh_ffmpeg_status()
@@ -385,9 +453,65 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_video_button.setEnabled(self._last_output_video is not None)
 
 
+def _configure_logging() -> tuple[logging.Logger, Path, Path, logging.FileHandler]:
+    local_appdata = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    log_dir = local_appdata / "HebrewSubtitleGUI" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = log_dir / f"hebrew_subtitle_gui_{timestamp}.log"
+
+    logger = logging.getLogger("hebrew_subtitle_gui")
+    logger.setLevel(logging.INFO)
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger, log_path, log_dir, handler
+
+
+def _install_exception_hook(
+    logger: logging.Logger,
+    log_path: Path,
+) -> None:
+    def _handle_exception(exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
+        logger.error("Uncaught exception", exc_info=(exc_type, exc, tb))
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return
+        message = (
+            "An unexpected error occurred. The application will stay open.\n"
+            f"A log file was saved to:\n{log_path}"
+        )
+        QtWidgets.QMessageBox.critical(None, "Unexpected error", message)
+
+    sys.excepthook = _handle_exception
+
+
+def _apply_inactive_progress_palette(app: QtWidgets.QApplication) -> None:
+    palette = app.palette()
+    active_highlight = palette.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight)
+    palette.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, active_highlight)
+    active_text = palette.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText)
+    palette.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, active_text)
+    app.setPalette(palette)
+
+
 def main() -> int:
     app = QtWidgets.QApplication(sys.argv)
-    window = MainWindow()
+    _apply_inactive_progress_palette(app)
+
+    logger, log_path, log_dir, handler = _configure_logging()
+    logger.info("Log file: %s", log_path)
+    try:
+        faulthandler.enable(file=handler.stream, all_threads=True)
+    except Exception:  # noqa: BLE001
+        logger.info("Warning: failed to enable faulthandler.")
+
+    _install_exception_hook(logger, log_path)
+
+    window = MainWindow(logger, log_path, log_dir)
     window.show()
     return app.exec()
 

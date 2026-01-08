@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -82,6 +83,32 @@ def ensure_ffmpeg_available() -> tuple[Path, Optional[Path], str]:
 
 def get_ffmpeg_missing_message() -> str:
     return MISSING_FFMPEG_MESSAGE
+
+
+def get_media_duration(path: Path) -> Optional[float]:
+    _, ffprobe_path, _ = ensure_ffmpeg_available()
+    if not ffprobe_path:
+        return None
+    command = [
+        str(ffprobe_path),
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return None
 
 
 def escape_subtitles_filter_path(path: os.PathLike | str) -> str:

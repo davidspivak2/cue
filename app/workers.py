@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -9,14 +11,12 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6 import QtCore
-from faster_whisper import WhisperModel
-
 from .ffmpeg_utils import (
     ensure_ffmpeg_available,
     escape_subtitles_filter_path,
     format_filter_style,
+    get_media_duration,
 )
-from .srt_utils import SrtSegment, segments_to_srt
 
 
 class CancelledError(Exception):
@@ -38,7 +38,7 @@ class BurnInSettings:
 
 
 class WorkerSignals(QtCore.QObject):
-    log = QtCore.Signal(str)
+    log = QtCore.Signal(str, bool)
     finished = QtCore.Signal(bool, str, dict)
     started = QtCore.Signal(str)
     progress = QtCore.Signal(int, str)
@@ -70,6 +70,7 @@ class Worker(QtCore.QObject):
         self._progress_value = 0
         self._progress_label = ""
         self._progress_phase = ""
+        self._logger = logging.getLogger("hebrew_subtitle_gui")
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -83,7 +84,8 @@ class Worker(QtCore.QObject):
             if self.task_type == TaskType.GENERATE_SRT:
                 self.signals.started.emit("Generating SRT")
                 result = self._run_generate_srt()
-                self.signals.finished.emit(True, "SRT generated successfully.", result)
+                message = f"SRT created: {result['srt_path']}"
+                self.signals.finished.emit(True, message, result)
             elif self.task_type == TaskType.BURN_IN:
                 self.signals.started.emit("Hardcoding subtitles")
                 result = self._run_burn_in()
@@ -93,8 +95,9 @@ class Worker(QtCore.QObject):
         except CancelledError:
             self.signals.finished.emit(False, "Operation cancelled.", {})
         except Exception as exc:  # noqa: BLE001
-            self.signals.log.emit("Exception occurred:")
-            self.signals.log.emit(str(exc))
+            self._logger.exception("Unhandled worker exception")
+            self.signals.log.emit("Exception occurred:", True)
+            self.signals.log.emit(str(exc), True)
             self.signals.finished.emit(False, str(exc), {})
 
     def _run_generate_srt(self) -> dict:
@@ -105,16 +108,19 @@ class Worker(QtCore.QObject):
         output_dir = self.video_path.parent
         audio_path = output_dir / f"{self.video_path.stem}_audio_for_whisper.wav"
         srt_path = output_dir / f"{self.video_path.stem}.srt"
-        self.signals.log.emit(f"Output WAV: {audio_path}")
-        self.signals.log.emit(f"Output SRT: {srt_path}")
+        self.signals.log.emit(f"Output WAV: {audio_path}", True)
+        self.signals.log.emit(f"Output SRT: {srt_path}", True)
 
         video_duration = self._probe_duration(self.video_path)
         if video_duration:
-            self.signals.log.emit(f"Video duration: {video_duration:.2f}s")
+            self.signals.log.emit(f"Video duration: {video_duration:.2f}s", True)
         else:
-            self.signals.log.emit("Warning: unable to read video duration; progress may be limited.")
+            self.signals.log.emit(
+                "Warning: unable to read video duration; progress may be limited.",
+                True,
+            )
 
-        self.signals.log.emit("Extracting audio via FFmpeg...")
+        self.signals.log.emit("Extracting audio via FFmpeg...", True)
         self._emit_progress(0, "Extracting audio")
         self._extract_audio(audio_path, settings.apply_audio_filter, video_duration)
 
@@ -123,69 +129,42 @@ class Worker(QtCore.QObject):
 
         audio_duration = self._probe_duration(audio_path)
         if audio_duration:
-            self.signals.log.emit(f"Audio duration: {audio_duration:.2f}s")
+            self.signals.log.emit(f"Audio duration: {audio_duration:.2f}s", True)
         else:
-            self.signals.log.emit("Warning: unable to read audio duration; using video duration.")
+            self.signals.log.emit(
+                "Warning: unable to read audio duration; using video duration.",
+                True,
+            )
         duration_seconds = audio_duration or video_duration
-
-        self.signals.log.emit("Loading Whisper model (large-v3). First run may download files...")
-        try:
-            model, device_used, fallback_error = self._load_model()
-        except Exception as exc:  # noqa: BLE001
-            self.signals.log.emit(str(exc))
-            raise RuntimeError("Transcription failed. See logs for details.") from exc
-
-        self.signals.log.emit(f"Whisper running on: {device_used}")
-        if fallback_error:
-            self.signals.log.emit(f"CUDA fallback error: {fallback_error}")
 
         if self._cancelled.is_set():
             raise CancelledError()
 
-        self.signals.log.emit("Transcribing audio...")
-        self._emit_progress(0, "Transcribing")
         try:
-            segments_iter, info = model.transcribe(
-                str(audio_path),
-                language="he",
-                task="transcribe",
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 400},
-                word_timestamps=True,
+            self._run_transcription_subprocess(
+                audio_path=audio_path,
+                srt_path=srt_path,
+                duration_seconds=duration_seconds,
             )
-            self.signals.log.emit(
-                f"Detected language: {info.language} (prob={info.language_probability:.2f})"
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.signals.log.emit(str(exc))
-            raise RuntimeError("Transcription failed. See logs for details.") from exc
+        except Exception:
+            self.signals.log.emit(f"Transcription failed; keeping WAV: {audio_path}", True)
+            raise
 
-        segments = []
-        index = 1
-        max_end_seconds = 0.0
-        for segment in segments_iter:
-            if self._cancelled.is_set():
-                raise CancelledError()
-            segments.append(SrtSegment(index=index, start=segment.start, end=segment.end, text=segment.text))
-            if duration_seconds:
-                max_end_seconds = max(max_end_seconds, segment.end)
-                percent = (max_end_seconds / duration_seconds) * 100
-                percent = min(max(percent, 0.0), 99.0)
-                self._emit_progress(percent, "Transcribing")
-            index += 1
-
-        srt_content = segments_to_srt(segments)
-        srt_path.write_text(srt_content, encoding="utf-8")
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             raise RuntimeError(f"SRT was not created: {srt_path}")
-        self.signals.log.emit(f"Saved SRT: {srt_path}")
-        self._emit_progress(100, "Transcribing")
+
+        try:
+            audio_path.unlink(missing_ok=True)
+            self.signals.log.emit(f"Deleted WAV: {audio_path}", True)
+        except Exception as exc:  # noqa: BLE001
+            self.signals.log.emit(
+                f"Warning: failed to delete WAV ({audio_path}): {exc}",
+                True,
+            )
 
         return {
             "audio_path": str(audio_path),
             "srt_path": str(srt_path),
-            "device_used": device_used,
         }
 
     def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:
@@ -224,8 +203,8 @@ class Worker(QtCore.QObject):
             raise FileNotFoundError(f"SRT not found: {srt_path}")
 
         output_path = output_dir / f"{self.video_path.stem}_subtitled.mp4"
-        self.signals.log.emit(f"SRT input: {srt_path}")
-        self.signals.log.emit(f"Output video: {output_path}")
+        self.signals.log.emit(f"SRT input: {srt_path}", True)
+        self.signals.log.emit(f"Output video: {output_path}", True)
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
         escaped_path = escape_subtitles_filter_path(srt_path)
@@ -256,14 +235,14 @@ class Worker(QtCore.QObject):
             "+faststart",
         ]
 
-        self.signals.log.emit("Burning subtitles with audio copy...")
+        self.signals.log.emit("Burning subtitles with audio copy...", True)
         copy_command = base_command + ["-c:a", "copy", str(output_path)]
         try:
             self._run_ffmpeg(copy_command)
             return {"output_path": str(output_path)}
         except RuntimeError as exc:
-            self.signals.log.emit("Audio copy failed, retrying with AAC...")
-            self.signals.log.emit(str(exc))
+            self.signals.log.emit("Audio copy failed, retrying with AAC...", True)
+            self.signals.log.emit(str(exc), True)
 
         aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
         self._run_ffmpeg(aac_command)
@@ -273,7 +252,7 @@ class Worker(QtCore.QObject):
         if self._cancelled.is_set():
             raise CancelledError()
 
-        self.signals.log.emit(f"FFmpeg command: {subprocess.list2cmdline(command)}")
+        self.signals.log.emit(f"FFmpeg command: {subprocess.list2cmdline(command)}", True)
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -288,7 +267,7 @@ class Worker(QtCore.QObject):
         assert process.stderr is not None
         for line in process.stderr:
             stderr_tail.append(line.rstrip())
-            self.signals.log.emit(line.rstrip())
+            self.signals.log.emit(line.rstrip(), True)
             if self._cancelled.is_set():
                 process.terminate()
                 raise CancelledError()
@@ -309,7 +288,7 @@ class Worker(QtCore.QObject):
         if self._cancelled.is_set():
             raise CancelledError()
 
-        self.signals.log.emit(f"FFmpeg command: {subprocess.list2cmdline(command)}")
+        self.signals.log.emit(f"FFmpeg command: {subprocess.list2cmdline(command)}", True)
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -329,7 +308,7 @@ class Worker(QtCore.QObject):
                 stderr_tail.append(text)
                 if text:
                     with log_lock:
-                        self.signals.log.emit(text)
+                        self.signals.log.emit(text, True)
                 if self._cancelled.is_set():
                     break
 
@@ -353,7 +332,10 @@ class Worker(QtCore.QObject):
                 self._emit_progress(percent, phase_label)
                 now = time.monotonic()
                 if now - last_log_time >= 0.25:
-                    self.signals.log.emit(f"{phase_label} progress: {int(percent)}%")
+                    self.signals.log.emit(
+                        f"{phase_label} progress: {int(percent)}%",
+                        True,
+                    )
                     last_log_time = now
             elif text == "progress=end":
                 self._emit_progress(100, phase_label)
@@ -369,16 +351,105 @@ class Worker(QtCore.QObject):
             tail_text = "\n".join(stderr_tail)
             raise RuntimeError("FFmpeg failed. Last output:\n" + tail_text)
 
-    def _load_model(self) -> tuple[WhisperModel, str, Optional[str]]:
-        fallback_error: Optional[str] = None
-        try:
-            model = WhisperModel("large-v3", device="cuda", compute_type="float16")
-            return model, "GPU (cuda float16)", fallback_error
-        except Exception as exc:  # noqa: BLE001
-            fallback_error = str(exc)
-            self.signals.log.emit("CUDA load failed, falling back to CPU...")
-            model = WhisperModel("large-v3", device="cpu", compute_type="int8")
-            return model, "CPU (int8)", fallback_error
+    def _run_transcription_subprocess(
+        self,
+        audio_path: Path,
+        srt_path: Path,
+        duration_seconds: Optional[float],
+    ) -> None:
+        self.signals.log.emit("Starting Whisper worker subprocess...", True)
+        command = [
+            sys.executable,
+            "-m",
+            "app.transcribe_worker",
+            "--wav",
+            str(audio_path),
+            "--srt",
+            str(srt_path),
+            "--lang",
+            "he",
+            "--prefer-gpu",
+        ]
+        if duration_seconds:
+            command += ["--duration-seconds", f"{duration_seconds:.2f}"]
+
+        self.signals.log.emit(f"Whisper command: {subprocess.list2cmdline(command)}", True)
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        self._process = process
+
+        stderr_tail: deque[str] = deque(maxlen=50)
+        log_lock = threading.Lock()
+
+        def _emit_log(message: str, show_in_ui: bool = True) -> None:
+            with log_lock:
+                self.signals.log.emit(message, show_in_ui)
+
+        def _read_stderr() -> None:
+            assert process.stderr is not None
+            for line in process.stderr:
+                text = line.rstrip()
+                if text:
+                    stderr_tail.append(text)
+                    _emit_log(text, True)
+                if self._cancelled.is_set():
+                    break
+
+        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+        stderr_thread.start()
+
+        max_end_seconds = 0.0
+        last_progress_log = 0.0
+        saw_done = False
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            if self._cancelled.is_set():
+                process.terminate()
+                raise CancelledError()
+            text = line.strip()
+            if not text:
+                continue
+            if text.startswith("PROGRESS_END"):
+                _emit_log(text, False)
+                if duration_seconds:
+                    try:
+                        end_value = float(text.split(" ", 1)[1])
+                    except (IndexError, ValueError):
+                        continue
+                    if end_value > max_end_seconds:
+                        max_end_seconds = end_value
+                        percent = min(99, int((max_end_seconds / duration_seconds) * 100))
+                        self._emit_progress(percent, "Transcribing")
+                now = time.monotonic()
+                if now - last_progress_log >= 2.0:
+                    _emit_log("Transcribing progress update received.", True)
+                    last_progress_log = now
+                continue
+
+            _emit_log(text, True)
+            if text.startswith("MODE"):
+                continue
+            if text.startswith("READY"):
+                self._emit_progress(0, "Transcribing")
+                continue
+            if text.startswith("DONE"):
+                saw_done = True
+                self._emit_progress(100, "Transcribing")
+
+        return_code = process.wait()
+        stderr_thread.join(timeout=1)
+        self._process = None
+
+        if return_code != 0 or not saw_done:
+            tail_text = "\n".join(stderr_tail)
+            raise RuntimeError("Transcription failed. Last output:\n" + tail_text)
 
     def _emit_progress(self, percent: float, phase_label: str) -> None:
         percent_int = int(round(percent))
@@ -396,27 +467,8 @@ class Worker(QtCore.QObject):
             self.signals.progress.emit(percent_int, status)
 
     def _probe_duration(self, path: Path) -> Optional[float]:
-        _, ffprobe_path, _ = ensure_ffmpeg_available()
-        if not ffprobe_path:
-            return None
-        command = [
-            str(ffprobe_path),
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
-        ]
         try:
-            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            return get_media_duration(path)
         except Exception as exc:  # noqa: BLE001
-            self.signals.log.emit(f"FFprobe failed: {exc}")
-            return None
-        if result.returncode != 0:
-            return None
-        try:
-            return float(result.stdout.strip())
-        except ValueError:
+            self.signals.log.emit(f"FFprobe failed: {exc}", True)
             return None
