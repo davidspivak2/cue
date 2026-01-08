@@ -299,7 +299,10 @@ class Worker(QtCore.QObject):
         )
         self._process = process
         stderr_tail: deque[str] = deque(maxlen=50)
+        stdout_tail: deque[str] = deque(maxlen=50)
         log_lock = threading.Lock()
+        output_lock = threading.Lock()
+        last_output_time = time.monotonic()
 
         def _read_stderr() -> None:
             assert process.stderr is not None
@@ -385,11 +388,19 @@ class Worker(QtCore.QObject):
         self._process = process
 
         stderr_tail: deque[str] = deque(maxlen=50)
+        stdout_tail: deque[str] = deque(maxlen=50)
         log_lock = threading.Lock()
+        output_lock = threading.Lock()
+        last_output_time = time.monotonic()
 
         def _emit_log(message: str, show_in_ui: bool = True) -> None:
             with log_lock:
                 self.signals.log.emit(message, show_in_ui)
+
+        def _mark_output() -> None:
+            nonlocal last_output_time
+            with output_lock:
+                last_output_time = time.monotonic()
 
         def _read_stderr() -> None:
             assert process.stderr is not None
@@ -397,6 +408,7 @@ class Worker(QtCore.QObject):
                 text = line.rstrip()
                 if text:
                     stderr_tail.append(text)
+                    _mark_output()
                     _emit_log(text, True)
                 if self._cancelled.is_set():
                     break
@@ -406,7 +418,33 @@ class Worker(QtCore.QObject):
 
         max_end_seconds = 0.0
         last_progress_log = 0.0
-        saw_done = False
+        done_seen = False
+        done_srt_path: Optional[Path] = None
+        watchdog_triggered = False
+        watchdog_elapsed = 0.0
+        watchdog_stop = threading.Event()
+        no_output_timeout = 60.0
+
+        def _watchdog() -> None:
+            nonlocal watchdog_triggered, watchdog_elapsed
+            while not watchdog_stop.is_set():
+                time.sleep(1.0)
+                if done_seen:
+                    continue
+                with output_lock:
+                    elapsed = time.monotonic() - last_output_time
+                if elapsed > no_output_timeout and process.poll() is None:
+                    watchdog_triggered = True
+                    watchdog_elapsed = elapsed
+                    _emit_log(
+                        f"Watchdog timeout: no output for {elapsed:.1f}s; terminating Whisper worker.",
+                        True,
+                    )
+                    process.terminate()
+                    break
+
+        watchdog_thread = threading.Thread(target=_watchdog, daemon=True)
+        watchdog_thread.start()
 
         assert process.stdout is not None
         for line in process.stdout:
@@ -416,6 +454,8 @@ class Worker(QtCore.QObject):
             text = line.strip()
             if not text:
                 continue
+            stdout_tail.append(text)
+            _mark_output()
             if text.startswith("PROGRESS_END"):
                 _emit_log(text, False)
                 if duration_seconds:
@@ -440,16 +480,53 @@ class Worker(QtCore.QObject):
                 self._emit_progress(0, "Transcribing")
                 continue
             if text.startswith("DONE"):
-                saw_done = True
+                done_seen = True
+                watchdog_stop.set()
+                parts = text.split(" ", 1)
+                if len(parts) == 2:
+                    done_srt_path = Path(parts[1].strip())
                 self._emit_progress(100, "Transcribing")
 
         return_code = process.wait()
+        watchdog_stop.set()
+        watchdog_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
         self._process = None
 
-        if return_code != 0 or not saw_done:
-            tail_text = "\n".join(stderr_tail)
-            raise RuntimeError("Transcription failed. Last output:\n" + tail_text)
+        srt_candidate = done_srt_path or srt_path
+        srt_exists = srt_candidate.exists()
+        srt_size = srt_candidate.stat().st_size if srt_exists else 0
+
+        if done_seen and srt_exists and srt_size > 0:
+            if return_code != 0:
+                _emit_log(
+                    f"Whisper worker exited with code {return_code}, but DONE was received and "
+                    f"SRT exists; continuing.",
+                    True,
+                )
+            return
+
+        diagnostics = [
+            f"Return code: {return_code}",
+            f"DONE seen: {done_seen}",
+            f"SRT path: {srt_candidate}",
+            f"SRT exists: {srt_exists}",
+            f"SRT size: {srt_size}",
+        ]
+        if watchdog_triggered:
+            diagnostics.append(f"Watchdog timeout after {watchdog_elapsed:.1f}s since last output.")
+
+        stdout_tail_text = "\n".join(stdout_tail) or "(empty)"
+        stderr_tail_text = "\n".join(stderr_tail) or "(empty)"
+        error_message = (
+            "Transcription failed.\n"
+            + "\n".join(diagnostics)
+            + "\n\n--- stdout tail ---\n"
+            + stdout_tail_text
+            + "\n\n--- stderr tail ---\n"
+            + stderr_tail_text
+        )
+        raise RuntimeError(error_message)
 
     def _emit_progress(self, percent: float, phase_label: str) -> None:
         percent_int = int(round(percent))
