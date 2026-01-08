@@ -32,7 +32,7 @@ requirements.txt
    - This installs all Python dependencies (including `requests`).
 
 ### Obtain FFmpeg binaries
-Option 1 (recommended): run `download_ffmpeg.bat`
+Option 1 (recommended): run `download_ffmpeg.bat` (invokes the bundled PowerShell script).
 
 Option 2: install FFmpeg via winget:
 ```
