@@ -32,14 +32,14 @@ def _write_srt(segments: list[SrtSegment], srt_path: Path) -> None:
     srt_path.write_text(srt_content, encoding="utf-8")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Whisper transcription worker")
     parser.add_argument("--wav", required=True)
     parser.add_argument("--srt", required=True)
     parser.add_argument("--lang", default="he")
     parser.add_argument("--prefer-gpu", action="store_true")
     parser.add_argument("--duration-seconds", type=float)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     wav_path = Path(args.wav)
     srt_path = Path(args.srt)
