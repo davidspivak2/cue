@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,7 @@ class WorkerSignals(QtCore.QObject):
     log = QtCore.Signal(str)
     finished = QtCore.Signal(bool, str, dict)
     started = QtCore.Signal(str)
+    progress = QtCore.Signal(int, str)
 
 
 class TaskType:
@@ -65,6 +67,9 @@ class Worker(QtCore.QObject):
         self.burnin_settings = burnin_settings
         self._cancelled = threading.Event()
         self._process: Optional[subprocess.Popen[str]] = None
+        self._progress_value = 0
+        self._progress_label = ""
+        self._progress_phase = ""
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -100,12 +105,28 @@ class Worker(QtCore.QObject):
         output_dir = self.video_path.parent
         audio_path = output_dir / f"{self.video_path.stem}_audio_for_whisper.wav"
         srt_path = output_dir / f"{self.video_path.stem}.srt"
+        self.signals.log.emit(f"Output WAV: {audio_path}")
+        self.signals.log.emit(f"Output SRT: {srt_path}")
+
+        video_duration = self._probe_duration(self.video_path)
+        if video_duration:
+            self.signals.log.emit(f"Video duration: {video_duration:.2f}s")
+        else:
+            self.signals.log.emit("Warning: unable to read video duration; progress may be limited.")
 
         self.signals.log.emit("Extracting audio via FFmpeg...")
-        self._extract_audio(audio_path, settings.apply_audio_filter)
+        self._emit_progress(0, "Extracting audio")
+        self._extract_audio(audio_path, settings.apply_audio_filter, video_duration)
 
         if self._cancelled.is_set():
             raise CancelledError()
+
+        audio_duration = self._probe_duration(audio_path)
+        if audio_duration:
+            self.signals.log.emit(f"Audio duration: {audio_duration:.2f}s")
+        else:
+            self.signals.log.emit("Warning: unable to read audio duration; using video duration.")
+        duration_seconds = audio_duration or video_duration
 
         self.signals.log.emit("Loading Whisper model (large-v3). First run may download files...")
         try:
@@ -122,6 +143,7 @@ class Worker(QtCore.QObject):
             raise CancelledError()
 
         self.signals.log.emit("Transcribing audio...")
+        self._emit_progress(0, "Transcribing")
         try:
             segments_iter, info = model.transcribe(
                 str(audio_path),
@@ -141,15 +163,24 @@ class Worker(QtCore.QObject):
 
         segments = []
         index = 1
+        max_end_seconds = 0.0
         for segment in segments_iter:
             if self._cancelled.is_set():
                 raise CancelledError()
             segments.append(SrtSegment(index=index, start=segment.start, end=segment.end, text=segment.text))
+            if duration_seconds:
+                max_end_seconds = max(max_end_seconds, segment.end)
+                percent = (max_end_seconds / duration_seconds) * 100
+                percent = min(max(percent, 0.0), 99.0)
+                self._emit_progress(percent, "Transcribing")
             index += 1
 
         srt_content = segments_to_srt(segments)
         srt_path.write_text(srt_content, encoding="utf-8")
+        if not srt_path.exists() or srt_path.stat().st_size == 0:
+            raise RuntimeError(f"SRT was not created: {srt_path}")
         self.signals.log.emit(f"Saved SRT: {srt_path}")
+        self._emit_progress(100, "Transcribing")
 
         return {
             "audio_path": str(audio_path),
@@ -157,7 +188,7 @@ class Worker(QtCore.QObject):
             "device_used": device_used,
         }
 
-    def _extract_audio(self, audio_path: Path, apply_filter: bool) -> None:
+    def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
         command = [
             str(ffmpeg_path),
@@ -178,8 +209,9 @@ class Worker(QtCore.QObject):
                 "-af",
                 "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,loudnorm=I=-16:TP=-1.5:LRA=11",
             ]
+        command += ["-progress", "pipe:1", "-nostats"]
         command.append(str(audio_path))
-        self._run_ffmpeg(command)
+        self._run_ffmpeg_with_progress(command, duration_seconds, "Extracting audio")
 
     def _run_burn_in(self) -> dict:
         settings = self.burnin_settings
@@ -192,6 +224,8 @@ class Worker(QtCore.QObject):
             raise FileNotFoundError(f"SRT not found: {srt_path}")
 
         output_path = output_dir / f"{self.video_path.stem}_subtitled.mp4"
+        self.signals.log.emit(f"SRT input: {srt_path}")
+        self.signals.log.emit(f"Output video: {output_path}")
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
         escaped_path = escape_subtitles_filter_path(srt_path)
@@ -266,6 +300,75 @@ class Worker(QtCore.QObject):
             tail_text = "\n".join(stderr_tail)
             raise RuntimeError("FFmpeg failed. Last output:\n" + tail_text)
 
+    def _run_ffmpeg_with_progress(
+        self,
+        command: list[str],
+        duration_seconds: Optional[float],
+        phase_label: str,
+    ) -> None:
+        if self._cancelled.is_set():
+            raise CancelledError()
+
+        self.signals.log.emit(f"FFmpeg command: {subprocess.list2cmdline(command)}")
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        self._process = process
+        stderr_tail: deque[str] = deque(maxlen=50)
+        log_lock = threading.Lock()
+
+        def _read_stderr() -> None:
+            assert process.stderr is not None
+            for line in process.stderr:
+                text = line.rstrip()
+                stderr_tail.append(text)
+                if text:
+                    with log_lock:
+                        self.signals.log.emit(text)
+                if self._cancelled.is_set():
+                    break
+
+        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+        stderr_thread.start()
+
+        last_log_time = 0.0
+        assert process.stdout is not None
+        for line in process.stdout:
+            if self._cancelled.is_set():
+                process.terminate()
+                raise CancelledError()
+            text = line.strip()
+            if text.startswith("out_time_ms=") and duration_seconds:
+                try:
+                    out_time_ms = int(text.split("=", 1)[1])
+                except ValueError:
+                    continue
+                percent = (out_time_ms / (duration_seconds * 1_000_000)) * 100
+                percent = max(0.0, min(percent, 100.0))
+                self._emit_progress(percent, phase_label)
+                now = time.monotonic()
+                if now - last_log_time >= 0.25:
+                    self.signals.log.emit(f"{phase_label} progress: {int(percent)}%")
+                    last_log_time = now
+            elif text == "progress=end":
+                self._emit_progress(100, phase_label)
+
+        return_code = process.wait()
+        stderr_thread.join(timeout=1)
+        self._process = None
+
+        if return_code == 0:
+            self._emit_progress(100, phase_label)
+
+        if return_code != 0:
+            tail_text = "\n".join(stderr_tail)
+            raise RuntimeError("FFmpeg failed. Last output:\n" + tail_text)
+
     def _load_model(self) -> tuple[WhisperModel, str, Optional[str]]:
         fallback_error: Optional[str] = None
         try:
@@ -276,3 +379,44 @@ class Worker(QtCore.QObject):
             self.signals.log.emit("CUDA load failed, falling back to CPU...")
             model = WhisperModel("large-v3", device="cpu", compute_type="int8")
             return model, "CPU (int8)", fallback_error
+
+    def _emit_progress(self, percent: float, phase_label: str) -> None:
+        percent_int = int(round(percent))
+        percent_int = max(0, min(percent_int, 100))
+        if phase_label != self._progress_phase:
+            self._progress_phase = phase_label
+            self._progress_value = 0
+            self._progress_label = ""
+        if percent_int < self._progress_value:
+            percent_int = self._progress_value
+        status = f"{phase_label} ({percent_int}%)"
+        if percent_int != self._progress_value or status != self._progress_label:
+            self._progress_value = percent_int
+            self._progress_label = status
+            self.signals.progress.emit(percent_int, status)
+
+    def _probe_duration(self, path: Path) -> Optional[float]:
+        _, ffprobe_path, _ = ensure_ffmpeg_available()
+        if not ffprobe_path:
+            return None
+        command = [
+            str(ffprobe_path),
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+        except Exception as exc:  # noqa: BLE001
+            self.signals.log.emit(f"FFprobe failed: {exc}")
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            return float(result.stdout.strip())
+        except ValueError:
+            return None
