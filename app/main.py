@@ -18,6 +18,7 @@ from .ffmpeg_utils import (
     get_runtime_mode,
     resolve_ffmpeg_paths,
 )
+from .ui.state import AppState
 from .ui.theme import apply_theme
 from .workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
 
@@ -44,48 +45,44 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ffprobe_available = False
         self._subtitles_reviewed = False
         self._subtitle_edit_path = self._load_subtitle_edit_path()
+        self._state = AppState.EMPTY
 
         self._build_ui()
         self._log_diagnostics()
-        self._update_ui_state(idle=True)
+        self.set_state(AppState.EMPTY)
 
     def _build_ui(self) -> None:
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(central)
 
-        file_group = QtWidgets.QGroupBox("Input")
-        file_layout = QtWidgets.QGridLayout(file_group)
         self.path_edit = QtWidgets.QLineEdit()
         self.path_edit.setReadOnly(True)
         self.path_edit.setPlaceholderText("Drop a video here or click Browse")
         self.browse_button = QtWidgets.QPushButton("Browse")
         self.clear_button = QtWidgets.QPushButton("Clear")
         self.output_label = QtWidgets.QLabel("Output folder: -")
-        file_layout.addWidget(QtWidgets.QLabel("Video file:"), 0, 0)
-        file_layout.addWidget(self.path_edit, 0, 1)
-        file_layout.addWidget(self.browse_button, 0, 2)
-        file_layout.addWidget(self.clear_button, 0, 3)
-        file_layout.addWidget(self.output_label, 1, 0, 1, 4)
 
-        controls_group = QtWidgets.QGroupBox("Actions")
-        controls_layout = QtWidgets.QHBoxLayout(controls_group)
-        self.generate_button = QtWidgets.QPushButton("Generate SRT")
-        self.review_button = QtWidgets.QPushButton("Review/Edit subtitles")
-        self.burn_button = QtWidgets.QPushButton("Hardcode subtitles")
+        self.generate_button = QtWidgets.QPushButton("Create subtitles")
+        self.review_button = QtWidgets.QPushButton("Edit subtitles")
+        self.burn_button = QtWidgets.QPushButton("Export video with subtitles")
         self.cancel_button = QtWidgets.QPushButton("Cancel")
-        controls_layout.addWidget(self.generate_button)
-        controls_layout.addWidget(self.review_button)
-        controls_layout.addWidget(self.burn_button)
-        controls_layout.addWidget(self.cancel_button)
 
-        open_group = QtWidgets.QGroupBox("Quick actions")
-        open_layout = QtWidgets.QHBoxLayout(open_group)
-        self.open_srt_button = QtWidgets.QPushButton("Open SRT")
-        self.open_video_button = QtWidgets.QPushButton("Open Output Video")
-        self.open_folder_button = QtWidgets.QPushButton("Open Folder")
-        open_layout.addWidget(self.open_srt_button)
-        open_layout.addWidget(self.open_video_button)
-        open_layout.addWidget(self.open_folder_button)
+        self.empty_choose_button = QtWidgets.QPushButton("Choose video...")
+
+        self.ready_open_srt_button = QtWidgets.QPushButton("Open subtitles")
+        self.ready_open_video_button = QtWidgets.QPushButton("Open output video")
+        self.ready_open_folder_button = QtWidgets.QPushButton("Open folder")
+
+        self.done_open_video_button = QtWidgets.QPushButton("Open video")
+        self.done_open_folder_button = QtWidgets.QPushButton("Open folder")
+
+        for button in (
+            self.ready_open_srt_button,
+            self.ready_open_video_button,
+            self.ready_open_folder_button,
+        ):
+            button.setFlat(True)
+            button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.filter_checkbox = QtWidgets.QCheckBox("Apply audio cleanup filter")
         self.filter_checkbox.setChecked(True)
@@ -131,11 +128,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log_box.setReadOnly(True)
         self.log_box.setMinimumHeight(220)
 
-        layout.addWidget(file_group)
-        layout.addWidget(controls_group)
-        layout.addWidget(open_group)
-        layout.addWidget(self.progress_bar)
-        layout.addWidget(self.status_label)
+        self.stack = QtWidgets.QStackedWidget()
+        self._page_index = {
+            AppState.EMPTY: self.stack.addWidget(self._build_empty_page()),
+            AppState.VIDEO_SELECTED: self.stack.addWidget(self._build_video_selected_page()),
+            AppState.WORKING: self.stack.addWidget(self._build_working_page()),
+            AppState.SUBTITLES_READY: self.stack.addWidget(self._build_subtitles_ready_page()),
+            AppState.EXPORT_DONE: self.stack.addWidget(self._build_done_page()),
+        }
+        layout.addWidget(self.stack)
 
         self.details_toggle = QtWidgets.QToolButton()
         self.details_toggle.setText("Show details")
@@ -166,17 +167,130 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setCentralWidget(central)
 
+        self.empty_choose_button.clicked.connect(self._browse_video)
         self.browse_button.clicked.connect(self._browse_video)
         self.clear_button.clicked.connect(self._clear_video)
         self.generate_button.clicked.connect(self._on_generate)
         self.review_button.clicked.connect(self._on_review)
         self.burn_button.clicked.connect(self._on_burn)
         self.cancel_button.clicked.connect(self._on_cancel)
-        self.open_folder_button.clicked.connect(self._open_folder)
-        self.open_srt_button.clicked.connect(self._open_srt)
-        self.open_video_button.clicked.connect(self._open_output_video)
+        self.ready_open_srt_button.clicked.connect(self._open_srt)
+        self.ready_open_video_button.clicked.connect(self._open_output_video)
+        self.ready_open_folder_button.clicked.connect(self._open_folder)
+        self.done_open_video_button.clicked.connect(self._open_output_video)
+        self.done_open_folder_button.clicked.connect(self._open_folder)
         self.open_log_button.clicked.connect(self._open_log_file)
         self.details_toggle.toggled.connect(self._toggle_details)
+
+    def _build_empty_page(self) -> QtWidgets.QWidget:
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.addStretch()
+        title = QtWidgets.QLabel("Add a video to get started")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.empty_choose_button)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        helper = QtWidgets.QLabel("You can also drag & drop a video here.")
+        helper.setAlignment(QtCore.Qt.AlignCenter)
+        helper.setStyleSheet("color: #888;")
+        layout.addWidget(helper)
+        layout.addStretch()
+        return page
+
+    def _build_video_selected_page(self) -> QtWidgets.QWidget:
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+
+        file_group = QtWidgets.QGroupBox("Input")
+        file_layout = QtWidgets.QGridLayout(file_group)
+        file_layout.addWidget(QtWidgets.QLabel("Video file:"), 0, 0)
+        file_layout.addWidget(self.path_edit, 0, 1)
+        file_layout.addWidget(self.browse_button, 0, 2)
+        file_layout.addWidget(self.clear_button, 0, 3)
+        file_layout.addWidget(self.output_label, 1, 0, 1, 4)
+        layout.addWidget(file_group)
+
+        action_layout = QtWidgets.QHBoxLayout()
+        action_layout.addStretch()
+        action_layout.addWidget(self.generate_button)
+        action_layout.addStretch()
+        layout.addLayout(action_layout)
+        layout.addStretch()
+        return page
+
+    def _build_working_page(self) -> QtWidgets.QWidget:
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.addStretch()
+        self.status_label.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(self.status_label)
+        layout.addWidget(self.progress_bar)
+        cancel_layout = QtWidgets.QHBoxLayout()
+        cancel_layout.addStretch()
+        cancel_layout.addWidget(self.cancel_button)
+        cancel_layout.addStretch()
+        layout.addLayout(cancel_layout)
+        layout.addStretch()
+        return page
+
+    def _build_subtitles_ready_page(self) -> QtWidgets.QWidget:
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        title = QtWidgets.QLabel("Subtitles are ready")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+
+        primary_layout = QtWidgets.QHBoxLayout()
+        primary_layout.addStretch()
+        primary_layout.addWidget(self.review_button)
+        primary_layout.addStretch()
+        layout.addLayout(primary_layout)
+
+        secondary_layout = QtWidgets.QHBoxLayout()
+        secondary_layout.addStretch()
+        secondary_layout.addWidget(self.burn_button)
+        secondary_layout.addStretch()
+        layout.addLayout(secondary_layout)
+
+        links_layout = QtWidgets.QHBoxLayout()
+        links_layout.addStretch()
+        links_layout.addWidget(self.ready_open_srt_button)
+        links_layout.addWidget(self.ready_open_video_button)
+        links_layout.addWidget(self.ready_open_folder_button)
+        links_layout.addStretch()
+        layout.addLayout(links_layout)
+        layout.addStretch()
+        return page
+
+    def _build_done_page(self) -> QtWidgets.QWidget:
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        title = QtWidgets.QLabel("Export finished")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+
+        primary_layout = QtWidgets.QHBoxLayout()
+        primary_layout.addStretch()
+        primary_layout.addWidget(self.done_open_video_button)
+        primary_layout.addStretch()
+        layout.addLayout(primary_layout)
+
+        secondary_layout = QtWidgets.QHBoxLayout()
+        secondary_layout.addStretch()
+        secondary_layout.addWidget(self.done_open_folder_button)
+        secondary_layout.addStretch()
+        layout.addLayout(secondary_layout)
+        layout.addStretch()
+        return page
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
         if event.mimeData().hasUrls():
@@ -186,6 +300,12 @@ class MainWindow(QtWidgets.QMainWindow):
         urls = event.mimeData().urls()
         if urls:
             self._set_video_path(Path(urls[0].toLocalFile()))
+
+    def set_state(self, state: AppState) -> None:
+        self._state = state
+        page_index = self._page_index.get(state, 0)
+        self.stack.setCurrentIndex(page_index)
+        self._update_ui_state(idle=state != AppState.WORKING)
 
     def _browse_video(self) -> None:
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -202,7 +322,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._log(f"Selected video: {path}")
         self._log(f"Output folder: {path.parent}")
         self._probe_video(path)
-        self._update_ui_state(idle=True)
+        self.set_state(AppState.VIDEO_SELECTED)
 
     def _probe_video(self, path: Path) -> None:
         try:
@@ -353,10 +473,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_worker_started(self, status: str) -> None:
         self.status_label.setText(status)
         self.progress_bar.setValue(0)
+        self.set_state(AppState.WORKING)
 
     def _on_worker_finished(self, success: bool, message: str, payload: dict) -> None:
         task_type = self._worker.task_type if self._worker else None
-        self._update_ui_state(idle=True)
         if success:
             self.progress_bar.setValue(100)
             self.status_label.setText("Done")
@@ -389,9 +509,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     "Subtitles created. Next: click ‘Review/Edit subtitles’ to check them before "
                     "hardcoding.",
                 )
-                self._update_ui_state(idle=True)
+                self.set_state(AppState.SUBTITLES_READY)
             else:
                 QtWidgets.QMessageBox.information(self, "Success", message)
+                self.set_state(AppState.EXPORT_DONE)
         else:
             if message == "Operation cancelled.":
                 QtWidgets.QMessageBox.information(self, "Cancelled", message)
@@ -403,6 +524,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._show_transcription_error()
             else:
                 QtWidgets.QMessageBox.critical(self, "Error", message)
+            self.set_state(AppState.VIDEO_SELECTED if self._video_path else AppState.EMPTY)
 
     def _on_cancel(self) -> None:
         if self._worker:
@@ -515,15 +637,31 @@ class MainWindow(QtWidgets.QMainWindow):
         has_video = self._video_path is not None
         ffmpeg_ready = self._ffmpeg_available
         srt_ready = self._is_srt_ready(self._get_default_srt_path())
-        self.generate_button.setEnabled(idle and has_video and ffmpeg_ready)
-        self.review_button.setEnabled(idle and has_video and srt_ready)
-        self.burn_button.setEnabled(
+        can_generate = idle and has_video and ffmpeg_ready
+        can_review = idle and has_video and srt_ready
+        can_burn = (
             idle and has_video and ffmpeg_ready and srt_ready and self._subtitles_reviewed
         )
-        self.cancel_button.setEnabled(not idle)
-        self.open_folder_button.setEnabled(has_video)
-        self.open_srt_button.setEnabled(srt_ready or self._last_srt_path is not None)
-        self.open_video_button.setEnabled(self._last_output_video is not None)
+        can_open_srt = srt_ready or self._last_srt_path is not None
+        can_open_video = self._last_output_video is not None
+
+        self.empty_choose_button.setEnabled(idle and self._state == AppState.EMPTY)
+        self.browse_button.setEnabled(idle and self._state == AppState.VIDEO_SELECTED)
+        self.clear_button.setEnabled(idle and self._state == AppState.VIDEO_SELECTED and has_video)
+        self.generate_button.setEnabled(
+            can_generate and self._state == AppState.VIDEO_SELECTED
+        )
+        self.review_button.setEnabled(can_review and self._state == AppState.SUBTITLES_READY)
+        self.burn_button.setEnabled(can_burn and self._state == AppState.SUBTITLES_READY)
+        self.cancel_button.setEnabled(self._state == AppState.WORKING and not idle)
+
+        ready_state = self._state == AppState.SUBTITLES_READY
+        done_state = self._state == AppState.EXPORT_DONE
+        self.ready_open_srt_button.setEnabled(ready_state and can_open_srt)
+        self.ready_open_video_button.setEnabled(ready_state and can_open_video)
+        self.ready_open_folder_button.setEnabled(ready_state and has_video)
+        self.done_open_video_button.setEnabled(done_state and can_open_video)
+        self.done_open_folder_button.setEnabled(done_state and has_video)
 
     def _apply_progress_bar_style(self) -> None:
         palette = QtWidgets.QApplication.palette()
@@ -540,7 +678,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.output_label.setText("Output folder: -")
         self.progress_bar.setValue(0)
         self.status_label.setText("Idle")
-        self._update_ui_state(idle=True)
+        self.set_state(AppState.EMPTY)
 
     def _reset_video_state(self) -> None:
         self._last_srt_path = None
