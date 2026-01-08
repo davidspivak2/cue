@@ -83,8 +83,15 @@ if not exist bin\ffprobe.exe (
   exit /b 1
 )
 
+if exist HebrewSubtitleGUI.spec del /f /q HebrewSubtitleGUI.spec
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
+
+copy /Y "tools\\pyinstaller.spec.in" "HebrewSubtitleGUI.spec" >nul
+if errorlevel 1 (
+  echo [ERROR] Failed to prepare HebrewSubtitleGUI.spec.
+  exit /b 1
+)
 
 pyinstaller --noconfirm HebrewSubtitleGUI.spec
 
