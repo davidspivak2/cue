@@ -8,8 +8,6 @@ import traceback
 from ctypes import CDLL
 from pathlib import Path
 
-from faster_whisper import WhisperModel
-
 from .srt_utils import SrtSegment, segments_to_srt
 
 
@@ -17,9 +15,26 @@ def _print(message: str) -> None:
     print(message, flush=True)
 
 
-def _add_cuda_paths() -> None:
-    candidates: list[str] = []
+def _stabilize_runtime() -> None:
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
+    base_dir = None
+    if getattr(sys, "frozen", False):
+        base_dir = Path(getattr(sys, "_MEIPASS", ""))
+        if not base_dir.exists():
+            base_dir = Path(sys.executable).resolve().parent / "_internal"
+    if base_dir and base_dir.exists():
+        try:
+            if hasattr(os, "add_dll_directory"):
+                os.add_dll_directory(str(base_dir))
+        except OSError as exc:
+            _print(f"Warning: failed to add DLL directory: {exc}")
+        os.environ["PATH"] = f"{base_dir};{os.environ.get('PATH', '')}"
+
     cuda_path = os.environ.get("CUDA_PATH")
+    candidates: list[str] = []
     if cuda_path:
         candidates.append(str(Path(cuda_path) / "bin"))
     cuda_root = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA")
@@ -33,8 +48,7 @@ def _add_cuda_paths() -> None:
     if new_paths:
         os.environ["PATH"] = ";".join(new_paths + [existing])
         _print(f"CUDA PATH added: {', '.join(new_paths)}")
-
-
+    
 def _gpu_is_available() -> bool:
     dll_candidates = [
         "cublas64_12.dll",
@@ -52,21 +66,41 @@ def _gpu_is_available() -> bool:
     return False
 
 
-def _load_model(prefer_gpu: bool) -> WhisperModel:
+def _load_model(prefer_gpu: bool):
+    from faster_whisper import WhisperModel
+
     if prefer_gpu:
         try:
             _print("MODE gpu")
             _print("Loading model (GPU)...")
-            model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+            model = WhisperModel(
+                "large-v3",
+                device="cuda",
+                compute_type="float16",
+                cpu_threads=2,
+                num_workers=1,
+            )
             return model
         except Exception as exc:  # noqa: BLE001
             summary = str(exc).replace("\n", " ")
             _print(f"MODE cpu {summary}")
             _print("Loading model (CPU)...")
-            return WhisperModel("large-v3", device="cpu", compute_type="int8")
+            return WhisperModel(
+                "large-v3",
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=2,
+                num_workers=1,
+            )
     _print("MODE cpu")
     _print("Loading model (CPU)...")
-    return WhisperModel("large-v3", device="cpu", compute_type="int8")
+    return WhisperModel(
+        "large-v3",
+        device="cpu",
+        compute_type="int8",
+        cpu_threads=2,
+        num_workers=1,
+    )
 
 
 def _write_srt(segments: list[SrtSegment], srt_path: Path) -> None:
@@ -76,6 +110,17 @@ def _write_srt(segments: list[SrtSegment], srt_path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     faulthandler.enable()
+    _print(f"Executable: {sys.executable}")
+    _print(f"Args: {sys.argv}")
+    _print(f"Frozen: {getattr(sys, 'frozen', False)}")
+    _print(f"MEIPASS: {getattr(sys, '_MEIPASS', '')}")
+    _print(f"CWD: {os.getcwd()}")
+    _print(f"sys.path[:5]: {sys.path[:5]}")
+    path_value = os.environ.get("PATH", "")
+    _print(f"PATH length: {len(path_value)}")
+    _print(
+        f"PATH has _MEIPASS/_internal: {'_MEIPASS' in path_value or '_internal' in path_value}"
+    )
     parser = argparse.ArgumentParser(description="Whisper transcription worker")
     parser.add_argument("--wav", required=True)
     parser.add_argument("--srt", required=True)
@@ -89,10 +134,21 @@ def main(argv: list[str] | None = None) -> int:
     srt_path = Path(args.srt)
 
     try:
+        _stabilize_runtime()
+        _print("ABOUT_TO_IMPORT_WHISPER")
+        try:
+            import ctranslate2
+            import faster_whisper
+            import tokenizers
+
+            _print(f"faster_whisper: {getattr(faster_whisper, '__version__', 'unknown')}")
+            _print(f"ctranslate2: {getattr(ctranslate2, '__version__', 'unknown')}")
+            _print(f"tokenizers: {getattr(tokenizers, '__version__', 'unknown')}")
+        except Exception as exc:  # noqa: BLE001
+            _print(f"ERROR importing whisper deps: {exc}")
         _print("READY")
         prefer_gpu = args.prefer_gpu and not args.force_cpu
         if prefer_gpu:
-            _add_cuda_paths()
             if not _gpu_is_available():
                 _print("GPU not available; falling back to CPU.")
                 prefer_gpu = False
