@@ -5,6 +5,7 @@ from typing import Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .theme import ACCENT, BORDER, SURFACE, SURFACE_2
 from .utils import format_duration
 
 
@@ -74,6 +75,19 @@ class DropZone(QtWidgets.QFrame):
         if urls:
             self.video_dropped.emit(Path(urls[0].toLocalFile()))
             event.acceptProposedAction()
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        rect = self.rect().adjusted(2, 2, -2, -2)
+        background = QtGui.QColor(SURFACE_2 if self.property("dragOver") else SURFACE)
+        painter.setBrush(background)
+        pen_color = QtGui.QColor(ACCENT if self.property("dragOver") else BORDER)
+        pen = QtGui.QPen(pen_color, 2)
+        pen.setStyle(QtCore.Qt.DashLine)
+        painter.setPen(pen)
+        painter.drawRoundedRect(rect, 10, 10)
 
     def _set_drag_over(self, active: bool) -> None:
         self.setProperty("dragOver", active)

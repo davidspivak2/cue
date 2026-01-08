@@ -16,6 +16,7 @@ from .ffmpeg_utils import (
     escape_subtitles_filter_path,
     format_filter_style,
     get_media_duration,
+    get_runtime_mode,
 )
 
 
@@ -361,10 +362,19 @@ class Worker(QtCore.QObject):
         duration_seconds: Optional[float],
     ) -> None:
         self.signals.log.emit("Starting Whisper worker subprocess...", True)
-        command = [
-            sys.executable,
-            "-m",
-            "app.transcribe_worker",
+        runtime_mode = get_runtime_mode()
+        if runtime_mode == "source":
+            command = [
+                sys.executable,
+                "-m",
+                "app.transcribe_worker",
+            ]
+        else:
+            command = [
+                sys.executable,
+                "--run-transcribe-worker",
+            ]
+        command += [
             "--wav",
             str(audio_path),
             "--srt",

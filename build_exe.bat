@@ -83,9 +83,13 @@ if not exist bin\ffprobe.exe (
   exit /b 1
 )
 
+if exist build rmdir /s /q build
+if exist dist rmdir /s /q dist
+
 pyinstaller --noconfirm --windowed --name HebrewSubtitleGUI ^
   --add-binary "bin\ffmpeg.exe;bin" ^
   --add-binary "bin\ffprobe.exe;bin" ^
+  --add-data "app\ui\styles.qss;app\ui" ^
   --collect-all faster_whisper ^
   --collect-all ctranslate2 ^
   run_app.py
