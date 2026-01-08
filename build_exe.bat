@@ -88,7 +88,7 @@ pyinstaller --noconfirm --windowed --name HebrewSubtitleGUI ^
   --add-binary "bin\ffprobe.exe;bin" ^
   --collect-all faster_whisper ^
   --collect-all ctranslate2 ^
-  app\main.py
+  run_app.py
 
 if errorlevel 1 (
   echo [ERROR] PyInstaller failed.

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+if __name__ == "__main__" and __package__ is None:
+    import os
+    import sys
+
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import datetime
 import json
 import faulthandler
@@ -12,17 +18,17 @@ from typing import Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .ffmpeg_utils import (
+from app.ffmpeg_utils import (
     ensure_ffmpeg_available,
     get_ffmpeg_missing_message,
     get_runtime_mode,
     resolve_ffmpeg_paths,
 )
-from .ui.state import AppState
-from .ui.theme import apply_theme
-from .ui.utils import generate_thumbnail, get_media_duration_seconds
-from .ui.widgets import DropZone, VideoCard
-from .workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
+from app.ui.state import AppState
+from app.ui.theme import apply_theme
+from app.ui.utils import generate_thumbnail, get_media_duration_seconds
+from app.ui.widgets import DropZone, VideoCard
+from app.workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
 DEFAULT_SUBTITLE_EDIT_PATH = Path(r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe")
