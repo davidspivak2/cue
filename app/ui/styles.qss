@@ -13,6 +13,68 @@ QLabel {{
   color: {TEXT};
 }}
 
+QLabel#DropZoneHeadline {{
+  font-size: 18px;
+  font-weight: bold;
+}}
+
+QLabel#DropZoneSubtext {{
+  color: {MUTED_TEXT};
+}}
+
+QFrame#DropZone {{
+  border: 2px dashed {BORDER};
+  border-radius: {RADIUS}px;
+  background-color: {SURFACE};
+  padding: {SPACING_LG}px;
+}}
+
+QFrame#DropZone[dragOver="true"] {{
+  border-color: {ACCENT};
+  background-color: {SURFACE_2};
+}}
+
+QWidget#VideoCard {{
+  border: 1px solid {BORDER};
+  border-radius: {RADIUS}px;
+  background-color: {SURFACE};
+  padding: {SPACING_MD}px;
+}}
+
+QWidget#VideoCard[dragOver="true"] {{
+  border-color: {ACCENT};
+}}
+
+QFrame#VideoCardThumbnail {{
+  border: 1px solid {BORDER};
+  border-radius: {RADIUS}px;
+  background-color: {SURFACE_2};
+}}
+
+QLabel#VideoCardFilename {{
+  font-size: 14px;
+  font-weight: bold;
+}}
+
+QLabel#VideoCardDuration {{
+  color: {MUTED_TEXT};
+}}
+
+QLabel#VideoCardPlaceholder {{
+  color: {MUTED_TEXT};
+  font-size: 12px;
+}}
+
+QToolButton#VideoCardClear {{
+  background-color: rgba(0, 0, 0, 0.5);
+  border: 1px solid {BORDER};
+  border-radius: 13px;
+}}
+
+QToolButton#VideoCardClear:hover {{
+  border: 1px solid {ACCENT};
+}}
+
 QGroupBox {{
   border: 1px solid {BORDER};
   border-radius: {RADIUS}px;

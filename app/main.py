@@ -20,6 +20,8 @@ from .ffmpeg_utils import (
 )
 from .ui.state import AppState
 from .ui.theme import apply_theme
+from .ui.utils import generate_thumbnail, get_media_duration_seconds
+from .ui.widgets import DropZone, VideoCard
 from .workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
@@ -55,19 +57,13 @@ class MainWindow(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(central)
 
-        self.path_edit = QtWidgets.QLineEdit()
-        self.path_edit.setReadOnly(True)
-        self.path_edit.setPlaceholderText("Drop a video here or click Browse")
-        self.browse_button = QtWidgets.QPushButton("Browse")
-        self.clear_button = QtWidgets.QPushButton("Clear")
-        self.output_label = QtWidgets.QLabel("Output folder: -")
+        self.drop_zone = DropZone()
+        self.video_card = VideoCard()
 
         self.generate_button = QtWidgets.QPushButton("Create subtitles")
         self.review_button = QtWidgets.QPushButton("Edit subtitles")
         self.burn_button = QtWidgets.QPushButton("Export video with subtitles")
         self.cancel_button = QtWidgets.QPushButton("Cancel")
-
-        self.empty_choose_button = QtWidgets.QPushButton("Choose video...")
 
         self.ready_open_srt_button = QtWidgets.QPushButton("Open subtitles")
         self.ready_open_video_button = QtWidgets.QPushButton("Open output video")
@@ -167,9 +163,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setCentralWidget(central)
 
-        self.empty_choose_button.clicked.connect(self._browse_video)
-        self.browse_button.clicked.connect(self._browse_video)
-        self.clear_button.clicked.connect(self._clear_video)
+        self.drop_zone.choose_clicked.connect(self._browse_video)
+        self.drop_zone.video_dropped.connect(self._handle_video_dropped)
+        self.video_card.clear_clicked.connect(self._clear_video)
+        self.video_card.video_dropped.connect(self._handle_video_dropped)
         self.generate_button.clicked.connect(self._on_generate)
         self.review_button.clicked.connect(self._on_review)
         self.burn_button.clicked.connect(self._on_burn)
@@ -186,36 +183,14 @@ class MainWindow(QtWidgets.QMainWindow):
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
         layout.addStretch()
-        title = QtWidgets.QLabel("Add a video to get started")
-        title.setAlignment(QtCore.Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        layout.addWidget(title)
-
-        button_layout = QtWidgets.QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.empty_choose_button)
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
-
-        helper = QtWidgets.QLabel("You can also drag & drop a video here.")
-        helper.setAlignment(QtCore.Qt.AlignCenter)
-        helper.setStyleSheet("color: #888;")
-        layout.addWidget(helper)
+        layout.addWidget(self.drop_zone)
         layout.addStretch()
         return page
 
     def _build_video_selected_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
-
-        file_group = QtWidgets.QGroupBox("Input")
-        file_layout = QtWidgets.QGridLayout(file_group)
-        file_layout.addWidget(QtWidgets.QLabel("Video file:"), 0, 0)
-        file_layout.addWidget(self.path_edit, 0, 1)
-        file_layout.addWidget(self.browse_button, 0, 2)
-        file_layout.addWidget(self.clear_button, 0, 3)
-        file_layout.addWidget(self.output_label, 1, 0, 1, 4)
-        layout.addWidget(file_group)
+        layout.addWidget(self.video_card)
 
         action_layout = QtWidgets.QHBoxLayout()
         action_layout.addStretch()
@@ -293,13 +268,17 @@ class MainWindow(QtWidgets.QMainWindow):
         return page
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
+        if self._state == AppState.WORKING:
+            return
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dropEvent(self, event: QtGui.QDropEvent) -> None:  # noqa: N802
+        if self._state == AppState.WORKING:
+            return
         urls = event.mimeData().urls()
         if urls:
-            self._set_video_path(Path(urls[0].toLocalFile()))
+            self._handle_video_dropped(Path(urls[0].toLocalFile()))
 
     def set_state(self, state: AppState) -> None:
         self._state = state
@@ -308,6 +287,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_ui_state(idle=state != AppState.WORKING)
 
     def _browse_video(self) -> None:
+        if self._state == AppState.WORKING:
+            return
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Select video", "", VIDEO_FILTER
         )
@@ -315,14 +296,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_video_path(Path(file_path))
 
     def _set_video_path(self, path: Path) -> None:
+        if not path.exists():
+            return
         self._reset_video_state()
         self._video_path = path
-        self.path_edit.setText(str(path))
-        self.output_label.setText(f"Output folder: {path.parent}")
         self._log(f"Selected video: {path}")
         self._log(f"Output folder: {path.parent}")
+        duration_seconds = get_media_duration_seconds(path)
+        thumbnail_path = generate_thumbnail(path, duration_seconds)
+        self.video_card.set_video(path, duration_seconds, thumbnail_path)
         self._probe_video(path)
         self.set_state(AppState.VIDEO_SELECTED)
+
+    def _handle_video_dropped(self, path: Path) -> None:
+        if self._state == AppState.WORKING:
+            return
+        self._set_video_path(path)
 
     def _probe_video(self, path: Path) -> None:
         try:
@@ -645,9 +634,8 @@ class MainWindow(QtWidgets.QMainWindow):
         can_open_srt = srt_ready or self._last_srt_path is not None
         can_open_video = self._last_output_video is not None
 
-        self.empty_choose_button.setEnabled(idle and self._state == AppState.EMPTY)
-        self.browse_button.setEnabled(idle and self._state == AppState.VIDEO_SELECTED)
-        self.clear_button.setEnabled(idle and self._state == AppState.VIDEO_SELECTED and has_video)
+        self.drop_zone.setEnabled(idle and self._state == AppState.EMPTY)
+        self.video_card.setEnabled(idle and self._state == AppState.VIDEO_SELECTED)
         self.generate_button.setEnabled(
             can_generate and self._state == AppState.VIDEO_SELECTED
         )
@@ -674,8 +662,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _clear_video(self) -> None:
         self._reset_video_state()
         self._video_path = None
-        self.path_edit.clear()
-        self.output_label.setText("Output folder: -")
+        self.video_card.clear()
         self.progress_bar.setValue(0)
         self.status_label.setText("Idle")
         self.set_state(AppState.EMPTY)
