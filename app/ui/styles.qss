@@ -1,0 +1,94 @@
+QWidget {{
+  background-color: {BG};
+  color: {TEXT};
+  font-family: "Segoe UI", "Inter", sans-serif;
+  font-size: 12px;
+}}
+
+QMainWindow {{
+  background-color: {BG};
+}}
+
+QLabel {{
+  color: {TEXT};
+}}
+
+QGroupBox {{
+  border: 1px solid {BORDER};
+  border-radius: {RADIUS}px;
+  margin-top: {SPACING_MD}px;
+  padding: {SPACING_MD}px;
+}}
+
+QGroupBox::title {{
+  color: {MUTED_TEXT};
+  subcontrol-origin: margin;
+  left: {SPACING_SM}px;
+  padding: 0 {SPACING_SM}px;
+}}
+
+QLineEdit,
+QPlainTextEdit,
+QTextEdit {{
+  background-color: {SURFACE};
+  color: {TEXT};
+  border: 1px solid {BORDER};
+  border-radius: {RADIUS}px;
+  padding: {SPACING_SM}px;
+  selection-background-color: {ACCENT};
+}}
+
+QLineEdit:focus,
+QPlainTextEdit:focus,
+QTextEdit:focus {{
+  border: 1px solid {ACCENT};
+}}
+
+QPushButton {{
+  background-color: {SURFACE_2};
+  color: {TEXT};
+  border: 1px solid {BORDER};
+  border-radius: {RADIUS}px;
+  padding: {SPACING_SM}px {SPACING_MD}px;
+}}
+
+QPushButton:hover {{
+  background-color: {SURFACE};
+  border: 1px solid {ACCENT};
+}}
+
+QPushButton:pressed {{
+  background-color: {BG};
+}}
+
+QProgressBar {{
+  background-color: {SURFACE};
+  border: 1px solid {BORDER};
+  border-radius: {RADIUS}px;
+  text-align: center;
+  color: {TEXT};
+  height: 18px;
+}}
+
+QProgressBar::chunk {{
+  background-color: {ACCENT};
+  border-radius: {RADIUS}px;
+}}
+
+QScrollBar:vertical {{
+  background: {SURFACE_2};
+  width: 10px;
+  margin: 0px;
+}}
+
+QScrollBar::handle:vertical {{
+  background: {BORDER};
+  min-height: 20px;
+  border-radius: 5px;
+}}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {{
+  background: none;
+  height: 0px;
+}}
