@@ -1,0 +1,4 @@
+.venv/
+_ffmpeg_tmp/
+__pycache__/
+*.pyc
