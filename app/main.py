@@ -303,7 +303,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._log(f"Selected video: {path}")
         self._log(f"Output folder: {path.parent}")
         duration_seconds = get_media_duration_seconds(path)
-        thumbnail_path = generate_thumbnail(path, duration_seconds)
+        thumbnail_path = generate_thumbnail(path, duration_seconds, self._logger)
         self.video_card.set_video(path, duration_seconds, thumbnail_path)
         self._probe_video(path)
         self.set_state(AppState.VIDEO_SELECTED)

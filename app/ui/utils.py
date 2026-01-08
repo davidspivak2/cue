@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -70,19 +71,26 @@ def _candidate_timestamps(duration_seconds: Optional[float]) -> Iterable[float]:
 def generate_thumbnail(
     video_path: Path,
     duration_seconds: Optional[float],
+    logger: Optional[logging.Logger] = None,
 ) -> Optional[Path]:
     try:
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
     except FileNotFoundError:
+        if logger:
+            logger.info("Thumbnail skipped: ffmpeg not available.")
         return None
 
     cache_key = _thumbnail_cache_key(video_path)
     cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".png"
     output_path = _thumbnail_cache_dir() / cache_name
     if output_path.exists():
+        if logger:
+            logger.info("Thumbnail cache hit: %s", output_path)
         return output_path
 
     for timestamp in _candidate_timestamps(duration_seconds):
+        if logger:
+            logger.info("Thumbnail generation start: t=%.2fs, video=%s", timestamp, video_path)
         command = [
             str(ffmpeg_path),
             "-y",
@@ -99,13 +107,29 @@ def generate_thumbnail(
         try:
             result = subprocess.run(command, capture_output=True, text=True, check=False)
         except Exception:
+            if logger:
+                logger.info("Thumbnail generation failed: ffmpeg invocation error.")
             continue
         if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+            if logger:
+                logger.info("Thumbnail generated: %s", output_path)
             return output_path
+        if logger:
+            stderr = (result.stderr or "").strip().replace("\n", " ")
+            if stderr:
+                logger.info(
+                    "Thumbnail generation failed: exit=%s stderr=%s",
+                    result.returncode,
+                    stderr[:240],
+                )
+            else:
+                logger.info("Thumbnail generation failed: exit=%s", result.returncode)
 
     if output_path.exists():
         try:
             output_path.unlink()
         except OSError:
             pass
+    if logger:
+        logger.info("Thumbnail generation failed: no valid frame captured.")
     return None

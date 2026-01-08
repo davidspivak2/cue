@@ -98,6 +98,10 @@ class VideoCard(QtWidgets.QWidget):
 
         self.thumbnail_frame = AspectRatioFrame()
         self.thumbnail_frame.setObjectName("VideoCardThumbnail")
+        self.thumbnail_frame.setMinimumHeight(180)
+        self.thumbnail_frame.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
         thumb_layout = QtWidgets.QGridLayout(self.thumbnail_frame)
         thumb_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -121,6 +125,7 @@ class VideoCard(QtWidgets.QWidget):
             0,
             alignment=QtCore.Qt.AlignTop | QtCore.Qt.AlignRight,
         )
+        self.clear_button.raise_()
 
         self.filename_label = QtWidgets.QLabel("")
         self.filename_label.setObjectName("VideoCardFilename")
@@ -186,7 +191,7 @@ class VideoCard(QtWidgets.QWidget):
     def _set_placeholder(self) -> None:
         self._thumbnail_pixmap = None
         self.thumbnail_label.setPixmap(QtGui.QPixmap())
-        self.thumbnail_label.setText("🎬 Preview unavailable")
+        self.thumbnail_label.setText("Preview unavailable")
         self.thumbnail_label.setObjectName("VideoCardPlaceholder")
         self._refresh_label_style()
 
