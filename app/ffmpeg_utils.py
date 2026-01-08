@@ -4,9 +4,8 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import Any, Optional
 from pathlib import Path
-from typing import Optional
-
 
 BIN_DIR_NAME = "bin"
 MISSING_FFMPEG_MESSAGE = (
@@ -74,6 +73,18 @@ def resolve_ffmpeg_paths() -> tuple[Optional[Path], Optional[Path], str]:
     return None, None, "missing"
 
 
+def get_subprocess_kwargs() -> dict[str, Any]:
+    if os.name != "nt":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+        "startupinfo": startupinfo,
+    }
+
+
 def ensure_ffmpeg_available() -> tuple[Path, Optional[Path], str]:
     ffmpeg_path, ffprobe_path, mode = resolve_ffmpeg_paths()
     if not ffmpeg_path:
@@ -100,7 +111,13 @@ def get_media_duration(path: Path) -> Optional[float]:
         str(path),
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            **get_subprocess_kwargs(),
+        )
     except Exception:
         return None
     if result.returncode != 0:

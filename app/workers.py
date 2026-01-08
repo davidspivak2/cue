@@ -17,11 +17,29 @@ from .ffmpeg_utils import (
     format_filter_style,
     get_media_duration,
     get_runtime_mode,
+    get_subprocess_kwargs,
 )
 
 
 class CancelledError(Exception):
     pass
+
+
+class TranscriptionError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        return_code: Optional[int],
+        watchdog_triggered: bool,
+        srt_exists: bool,
+        srt_size: int,
+    ) -> None:
+        super().__init__(message)
+        self.return_code = return_code
+        self.watchdog_triggered = watchdog_triggered
+        self.srt_exists = srt_exists
+        self.srt_size = srt_size
 
 
 @dataclass
@@ -146,7 +164,29 @@ class Worker(QtCore.QObject):
                 audio_path=audio_path,
                 srt_path=srt_path,
                 duration_seconds=duration_seconds,
+                force_cpu=False,
             )
+        except TranscriptionError as exc:
+            should_retry = (
+                exc.return_code == 3221225477
+                or exc.watchdog_triggered
+                or not exc.srt_exists
+                or exc.srt_size == 0
+            )
+            if should_retry:
+                self.signals.log.emit(
+                    "GPU transcription failed; retrying on CPU. This may take longer.",
+                    True,
+                )
+                self._run_transcription_subprocess(
+                    audio_path=audio_path,
+                    srt_path=srt_path,
+                    duration_seconds=duration_seconds,
+                    force_cpu=True,
+                )
+            else:
+                self.signals.log.emit(f"Transcription failed; keeping WAV: {audio_path}", True)
+                raise
         except Exception:
             self.signals.log.emit(f"Transcription failed; keeping WAV: {audio_path}", True)
             raise
@@ -261,6 +301,7 @@ class Worker(QtCore.QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
+            **get_subprocess_kwargs(),
         )
         self._process = process
         stderr_tail: deque[str] = deque(maxlen=50)
@@ -297,6 +338,7 @@ class Worker(QtCore.QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
+            **get_subprocess_kwargs(),
         )
         self._process = process
         stderr_tail: deque[str] = deque(maxlen=50)
@@ -360,6 +402,7 @@ class Worker(QtCore.QObject):
         audio_path: Path,
         srt_path: Path,
         duration_seconds: Optional[float],
+        force_cpu: bool,
     ) -> None:
         self.signals.log.emit("Starting Whisper worker subprocess...", True)
         runtime_mode = get_runtime_mode()
@@ -381,8 +424,11 @@ class Worker(QtCore.QObject):
             str(srt_path),
             "--lang",
             "he",
-            "--prefer-gpu",
         ]
+        if force_cpu:
+            command.append("--force-cpu")
+        else:
+            command.append("--prefer-gpu")
         if duration_seconds:
             command += ["--duration-seconds", f"{duration_seconds:.2f}"]
 
@@ -394,6 +440,7 @@ class Worker(QtCore.QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
+            **get_subprocess_kwargs(),
         )
         self._process = process
 
@@ -536,7 +583,13 @@ class Worker(QtCore.QObject):
             + "\n\n--- stderr tail ---\n"
             + stderr_tail_text
         )
-        raise RuntimeError(error_message)
+        raise TranscriptionError(
+            error_message,
+            return_code=return_code,
+            watchdog_triggered=watchdog_triggered,
+            srt_exists=srt_exists,
+            srt_size=srt_size,
+        )
 
     def _emit_progress(self, percent: float, phase_label: str) -> None:
         percent_int = int(round(percent))
