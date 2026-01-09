@@ -78,6 +78,7 @@ class Worker(QtCore.QObject):
         self,
         task_type: str,
         video_path: Path,
+        output_dir: Path,
         srt_path: Optional[Path] = None,
         transcription_settings: Optional[TranscriptionSettings] = None,
         burnin_settings: Optional[BurnInSettings] = None,
@@ -86,6 +87,7 @@ class Worker(QtCore.QObject):
         self.signals = WorkerSignals()
         self.task_type = task_type
         self.video_path = video_path
+        self.output_dir = output_dir
         self.srt_path = srt_path
         self.transcription_settings = transcription_settings
         self.burnin_settings = burnin_settings
@@ -130,9 +132,8 @@ class Worker(QtCore.QObject):
         if settings is None:
             raise ValueError("Missing transcription settings")
 
-        output_dir = self.video_path.parent
-        audio_path = output_dir / f"{self.video_path.stem}_audio_for_whisper.wav"
-        srt_path = output_dir / f"{self.video_path.stem}.srt"
+        audio_path = self.output_dir / f"{self.video_path.stem}_audio_for_whisper.wav"
+        srt_path = self.output_dir / f"{self.video_path.stem}.srt"
         self.signals.log.emit(f"Output WAV: {audio_path}", True)
         self.signals.log.emit(f"Output SRT: {srt_path}", True)
 
@@ -260,12 +261,11 @@ class Worker(QtCore.QObject):
         if settings is None:
             raise ValueError("Missing burn-in settings")
 
-        output_dir = self.video_path.parent
-        srt_path = self.srt_path or output_dir / f"{self.video_path.stem}.srt"
+        srt_path = self.srt_path or self.output_dir / f"{self.video_path.stem}.srt"
         if not srt_path.exists():
             raise FileNotFoundError(f"SRT not found: {srt_path}")
 
-        output_path = output_dir / f"{self.video_path.stem}_subtitled.mp4"
+        output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
         self.signals.log.emit(f"SRT input: {srt_path}", True)
         self.signals.log.emit(f"Output video: {output_path}", True)
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
