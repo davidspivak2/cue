@@ -432,10 +432,14 @@ class Worker(QtCore.QObject):
                 "app.transcribe_worker",
             ]
         else:
-            command = [
-                sys.executable,
-                "--run-transcribe-worker",
-            ]
+            worker_exe = Path(sys.executable).with_name("HebrewSubtitleWorker.exe")
+            if worker_exe.exists():
+                command = [str(worker_exe)]
+            else:
+                command = [
+                    sys.executable,
+                    "--run-transcribe-worker",
+                ]
         command += [
             "--wav",
             str(audio_path),

@@ -144,8 +144,19 @@ def _hard_exit(code: int) -> NoReturn:
         os._exit(code)
 
 
+def _enable_faulthandler() -> None:
+    if sys.stderr is not None:
+        faulthandler.enable()
+        return
+    log_dir = get_models_dir().parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "transcribe_worker_faulthandler.log"
+    with log_path.open("a", encoding="utf-8") as handle:
+        faulthandler.enable(file=handle)
+
+
 def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
-    faulthandler.enable()
+    _enable_faulthandler()
     _print(f"Executable: {sys.executable}")
     _print(f"Args: {sys.argv}")
     _print(f"Frozen: {getattr(sys, 'frozen', False)}")
