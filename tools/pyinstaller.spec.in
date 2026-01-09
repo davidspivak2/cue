@@ -39,6 +39,15 @@ runtime_hooks = [os.path.join("runtime_hooks", "runtime_env_setup.py")]
 
 from PyInstaller.building.build_main import Analysis, EXE, PYZ, COLLECT  # noqa: E402
 
+
+def script_name(entry: object) -> str:
+    name = getattr(entry, "name", None)
+    if name:
+        return name
+    if isinstance(entry, tuple) and entry:
+        return str(entry[0])
+    return str(entry)
+
 a = Analysis(
     ["run_app.py", "run_worker.py"],
     pathex=[project_dir],
@@ -58,7 +67,11 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 gui_exe = EXE(
     pyz,
-    [script for script in a.scripts if script.name == "run_app"],
+    [
+        script
+        for script in a.scripts
+        if os.path.splitext(script_name(script))[0] == "run_app"
+    ],
     [],
     exclude_binaries=True,
     name="HebrewSubtitleGUI",
@@ -72,7 +85,11 @@ gui_exe = EXE(
 
 worker_exe = EXE(
     pyz,
-    [script for script in a.scripts if script.name == "run_worker"],
+    [
+        script
+        for script in a.scripts
+        if os.path.splitext(script_name(script))[0] == "run_worker"
+    ],
     [],
     exclude_binaries=True,
     name="HebrewSubtitleWorker",
