@@ -9,6 +9,7 @@ import sys
 import threading
 import traceback
 from pathlib import Path
+from typing import NoReturn
 
 from .srt_utils import SrtSegment, segments_to_srt
 from .paths import get_models_dir
@@ -135,7 +136,15 @@ def _write_srt(segments: list[SrtSegment], srt_path: Path) -> None:
     srt_path.write_text(srt_content, encoding="utf-8")
 
 
-def main(argv: list[str] | None = None) -> int:
+def _hard_exit(code: int) -> NoReturn:
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(code)
+
+
+def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     faulthandler.enable()
     _print(f"Executable: {sys.executable}")
     _print(f"Args: {sys.argv}")
@@ -225,22 +234,20 @@ def main(argv: list[str] | None = None) -> int:
         _write_srt(segments, srt_path)
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             _print(f"ERROR SRT_WRITE_FAILED {srt_path}")
+            if hard_exit:
+                _hard_exit(2)
             return 2
         _print(f"DONE {srt_path}")
+        if hard_exit:
+            _hard_exit(0)
         return 0
     except Exception as exc:  # noqa: BLE001
         _print(f"ERROR {exc}")
         _print(traceback.format_exc())
+        if hard_exit:
+            _hard_exit(1)
         return 1
 
 
 if __name__ == "__main__":
-    import os
-    import sys
-
-    code = main()
-    try:
-        sys.stdout.flush()
-        sys.stderr.flush()
-    finally:
-        os._exit(code)
+    main(hard_exit=True)
