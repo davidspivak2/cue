@@ -9,8 +9,7 @@ from pathlib import Path
 
 BIN_DIR_NAME = "bin"
 MISSING_FFMPEG_MESSAGE = (
-    "FFmpeg not found. Run download_ffmpeg.bat or install via winget: "
-    "winget install -e --id Gyan.FFmpeg"
+    "Video tools not found. Run download_ffmpeg.bat or install them with winget."
 )
 
 
