@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import os
 
-from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 block_cipher = None
 
@@ -36,7 +40,7 @@ runtime_hooks = [os.path.join("runtime_hooks", "runtime_env_setup.py")]
 from PyInstaller.building.build_main import Analysis, EXE, PYZ, COLLECT  # noqa: E402
 
 a = Analysis(
-    ["run_app.py"],
+    ["run_app.py", "run_worker.py"],
     pathex=[project_dir],
     binaries=binaries,
     datas=datas,
@@ -52,9 +56,9 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
+gui_exe = EXE(
     pyz,
-    a.scripts,
+    [script for script in a.scripts if script.name == "run_app"],
     [],
     exclude_binaries=True,
     name="HebrewSubtitleGUI",
@@ -66,8 +70,23 @@ exe = EXE(
     disable_windowed_traceback=False,
 )
 
+worker_exe = EXE(
+    pyz,
+    [script for script in a.scripts if script.name == "run_worker"],
+    [],
+    exclude_binaries=True,
+    name="HebrewSubtitleWorker",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+)
+
 coll = COLLECT(
-    exe,
+    gui_exe,
+    worker_exe,
     a.binaries,
     a.zipfiles,
     a.datas,
