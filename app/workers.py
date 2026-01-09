@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -94,6 +95,7 @@ class Worker(QtCore.QObject):
         self._progress_label = ""
         self._progress_phase = ""
         self._logger = logging.getLogger("hebrew_subtitle_gui")
+        self._last_audio_extract_command: Optional[list[str]] = None
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -250,6 +252,7 @@ class Worker(QtCore.QObject):
             ]
         command += ["-progress", "pipe:1", "-nostats"]
         command.append(str(audio_path))
+        self._last_audio_extract_command = command
         self._run_ffmpeg_with_progress(command, duration_seconds, "Extracting audio")
 
     def _run_burn_in(self) -> dict:
@@ -454,7 +457,23 @@ class Worker(QtCore.QObject):
             command.append("--prefer-gpu")
         if duration_seconds:
             command += ["--duration-seconds", f"{duration_seconds:.2f}"]
+        if self._last_audio_extract_command:
+            command += [
+                "--ffmpeg-args-json",
+                json.dumps(self._last_audio_extract_command),
+            ]
 
+        parent_config = {
+            "model_name": TRANSCRIBE_MODEL_NAME,
+            "models_dir": str(get_models_dir()),
+            "prefer_gpu": not force_cpu,
+            "force_cpu": force_cpu,
+            "ffmpeg_args": self._last_audio_extract_command,
+        }
+        self.signals.log.emit(
+            f"TRANSCRIBE_PARENT_CONFIG {json.dumps(parent_config, sort_keys=True)}",
+            True,
+        )
         self.signals.log.emit(f"Whisper command: {subprocess.list2cmdline(command)}", True)
         process = subprocess.Popen(
             command,
@@ -500,6 +519,7 @@ class Worker(QtCore.QObject):
         last_progress_log = 0.0
         done_seen = False
         done_srt_path: Optional[Path] = None
+        transcribe_config_json: Optional[str] = None
         watchdog_triggered = False
         watchdog_elapsed = 0.0
         watchdog_stop = threading.Event()
@@ -536,6 +556,8 @@ class Worker(QtCore.QObject):
                 continue
             stdout_tail.append(text)
             _mark_output()
+            if text.startswith("TRANSCRIBE_CONFIG_JSON "):
+                transcribe_config_json = text
             if text.startswith("PROGRESS_END"):
                 _emit_log(text, False)
                 if duration_seconds:
@@ -597,6 +619,8 @@ class Worker(QtCore.QObject):
             diagnostics.append(f"Watchdog timeout after {watchdog_elapsed:.1f}s since last output.")
 
         stdout_tail_text = "\n".join(stdout_tail) or "(empty)"
+        if transcribe_config_json and transcribe_config_json not in stdout_tail_text:
+            stdout_tail_text = f"{transcribe_config_json}\n{stdout_tail_text}"
         stderr_tail_text = "\n".join(stderr_tail) or "(empty)"
         error_message = (
             "Transcription failed.\n"
