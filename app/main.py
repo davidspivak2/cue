@@ -27,7 +27,7 @@ from app.ffmpeg_utils import (
 from app.ui.state import AppState
 from app.ui.theme import apply_theme
 from app.ui.utils import generate_thumbnail, get_media_duration_seconds
-from app.ui.widgets import DropZone, VideoCard
+from app.ui.widgets import DropZone, SaveToRow, VideoCard
 from app.workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
@@ -45,6 +45,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._log_path = log_path
         self._log_dir = log_dir
         self._video_path: Optional[Path] = None
+        self._output_dir: Optional[Path] = None
         self._last_srt_path: Optional[Path] = None
         self._last_output_video: Optional[Path] = None
         self._worker_thread: Optional[QtCore.QThread] = None
@@ -65,6 +66,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.drop_zone = DropZone()
         self.video_card = VideoCard()
+        self.save_to_row = SaveToRow()
 
         self.generate_button = QtWidgets.QPushButton("Create subtitles")
         self.review_button = QtWidgets.QPushButton("Edit subtitles")
@@ -138,6 +140,7 @@ class MainWindow(QtWidgets.QMainWindow):
             AppState.SUBTITLES_READY: self.stack.addWidget(self._build_subtitles_ready_page()),
             AppState.EXPORT_DONE: self.stack.addWidget(self._build_done_page()),
         }
+        layout.addWidget(self.save_to_row)
         layout.addWidget(self.stack)
 
         self.details_toggle = QtWidgets.QToolButton()
@@ -173,6 +176,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.drop_zone.video_dropped.connect(self._handle_video_dropped)
         self.video_card.clear_clicked.connect(self._clear_video)
         self.video_card.video_dropped.connect(self._handle_video_dropped)
+        self.save_to_row.change_clicked.connect(self._change_output_dir)
         self.generate_button.clicked.connect(self._on_generate)
         self.review_button.clicked.connect(self._on_review)
         self.burn_button.clicked.connect(self._on_burn)
@@ -306,8 +310,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._reset_video_state()
         self._video_path = path
+        self._set_output_dir(path.parent)
         self._log(f"Selected video: {path}")
-        self._log(f"Output folder: {path.parent}")
         duration_seconds = get_media_duration_seconds(path)
         thumbnail_path = generate_thumbnail(path, duration_seconds, self._logger)
         self.video_card.set_video(path, duration_seconds, thumbnail_path)
@@ -448,9 +452,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log_box.clear()
         self._log_ffmpeg_resolution()
         self._worker_thread = QtCore.QThread()
+        output_dir = self._output_dir or video_path.parent
         self._worker = Worker(
             task_type=task_type,
             video_path=video_path,
+            output_dir=output_dir,
             srt_path=srt_path,
             transcription_settings=transcription_settings,
             burnin_settings=burnin_settings,
@@ -527,9 +533,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._worker.cancel()
 
     def _open_folder(self) -> None:
-        if not self._video_path:
+        if not self._output_dir:
             return
-        os.startfile(self._video_path.parent)  # type: ignore[arg-type]
+        os.startfile(self._output_dir)  # type: ignore[arg-type]
 
     def _open_srt(self) -> None:
         srt_path = self._get_default_srt_path()
@@ -644,6 +650,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.drop_zone.setEnabled(idle and self._state == AppState.EMPTY)
         self.video_card.setEnabled(idle and self._state == AppState.VIDEO_SELECTED)
+        self.save_to_row.setVisible(has_video)
+        self.save_to_row.set_change_enabled(idle and has_video)
         self.generate_button.setEnabled(
             can_generate and self._state == AppState.VIDEO_SELECTED
         )
@@ -670,6 +678,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _clear_video(self) -> None:
         self._reset_video_state()
         self._video_path = None
+        self._output_dir = None
+        self.save_to_row.set_path(None)
         self.video_card.clear()
         self.progress_bar.setValue(0)
         self.status_label.setText("Idle")
@@ -679,11 +689,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_srt_path = None
         self._last_output_video = None
         self._subtitles_reviewed = False
+        self._output_dir = None
 
     def _get_default_srt_path(self) -> Optional[Path]:
-        if not self._video_path:
+        if not self._video_path or not self._output_dir:
             return None
-        return self._video_path.parent / f"{self._video_path.stem}.srt"
+        return self._output_dir / f"{self._video_path.stem}.srt"
+
+    def _set_output_dir(self, path: Path) -> None:
+        self._output_dir = path
+        self.save_to_row.set_path(path)
+        self._log(f"Output folder: {path}")
+
+    def _change_output_dir(self) -> None:
+        if not self._output_dir:
+            return
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select output folder",
+            str(self._output_dir),
+        )
+        if not folder:
+            return
+        self._set_output_dir(Path(folder))
 
     def _is_srt_ready(self, srt_path: Optional[Path]) -> bool:
         if not srt_path or not srt_path.exists():

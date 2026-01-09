@@ -130,6 +130,21 @@ QPushButton:pressed {{
   background-color: {BG};
 }}
 
+QPushButton#SaveToChange {{
+  background-color: transparent;
+  border: none;
+  color: {ACCENT};
+  padding: 0;
+}}
+
+QPushButton#SaveToChange:hover {{
+  color: {TEXT};
+}}
+
+QPushButton#SaveToChange:disabled {{
+  color: {MUTED_TEXT};
+}}
+
 QProgressBar {{
   background-color: {SURFACE};
   border: 1px solid {BORDER};
