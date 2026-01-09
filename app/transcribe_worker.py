@@ -154,6 +154,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     _print(f"sys.path[:5]: {sys.path[:5]}")
     path_value = os.environ.get("PATH", "")
     _print(f"PATH length: {len(path_value)}")
+    _print(f"PATH head: {path_value[:300]}")
     _print(
         f"PATH has _MEIPASS/_internal: {'_MEIPASS' in path_value or '_internal' in path_value}"
     )
@@ -176,10 +177,13 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             import ctranslate2
             import faster_whisper
             import tokenizers
+            import av
 
             _print(f"faster_whisper: {getattr(faster_whisper, '__version__', 'unknown')}")
             _print(f"ctranslate2: {getattr(ctranslate2, '__version__', 'unknown')}")
             _print(f"tokenizers: {getattr(tokenizers, '__version__', 'unknown')}")
+            _print(f"ctranslate2.__file__: {getattr(ctranslate2, '__file__', 'unknown')}")
+            _print(f"av.__file__: {getattr(av, '__file__', 'unknown')}")
         except Exception as exc:  # noqa: BLE001
             _print(f"ERROR importing whisper deps: {exc}")
         _print("READY")
