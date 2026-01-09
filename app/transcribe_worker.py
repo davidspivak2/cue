@@ -235,8 +235,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    # Avoid Windows teardown crashes from GPU/native libs by skipping interpreter shutdown.
-    exit_code = main()
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(exit_code)
+    import os
+    import sys
+
+    code = main()
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(code)
