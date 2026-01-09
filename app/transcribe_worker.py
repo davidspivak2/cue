@@ -105,7 +105,14 @@ def _start_heartbeat(label: str, stop_event: threading.Event) -> threading.Threa
     return thread
 
 
-def _load_model(prefer_gpu: bool, *, models_dir: Path):
+def _cpu_threads_for_device(device: str) -> int:
+    if device != "cpu":
+        return 2
+    cpu_count = os.cpu_count() or 2
+    return max(2, min(4, cpu_count))
+
+
+def _load_model(prefer_gpu: bool, *, models_dir: Path, cpu_threads_cpu: int):
     from faster_whisper import WhisperModel
 
     compute_type = "float16" if prefer_gpu else "int8"
@@ -133,7 +140,7 @@ def _load_model(prefer_gpu: bool, *, models_dir: Path):
                 MODEL_NAME,
                 device="cpu",
                 compute_type="int8",
-                cpu_threads=2,
+                cpu_threads=cpu_threads_cpu,
                 num_workers=1,
                 download_root=str(models_dir),
             )
@@ -143,7 +150,7 @@ def _load_model(prefer_gpu: bool, *, models_dir: Path):
         MODEL_NAME,
         device="cpu",
         compute_type="int8",
-        cpu_threads=2,
+        cpu_threads=cpu_threads_cpu,
         num_workers=1,
         download_root=str(models_dir),
     )
@@ -239,6 +246,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             _print("GPU not available; falling back to CPU.")
         device = "cuda" if prefer_gpu else "cpu"
         compute_type = "float16" if prefer_gpu else "int8"
+        cpu_threads_cpu = _cpu_threads_for_device("cpu")
+        cpu_threads_active = _cpu_threads_for_device(device)
         transcribe_kwargs = {
             "language": args.lang,
             "task": "transcribe",
@@ -256,7 +265,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         whisper_model_kwargs = {
             "device": device,
             "compute_type": compute_type,
-            "cpu_threads": 2,
+            "cpu_threads": cpu_threads_active,
             "num_workers": 1,
             "download_root": str(models_dir),
         }
@@ -265,7 +274,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             whisper_model_fallback_kwargs = {
                 "device": "cpu",
                 "compute_type": "int8",
-                "cpu_threads": 2,
+                "cpu_threads": cpu_threads_cpu,
                 "num_workers": 1,
                 "download_root": str(models_dir),
             }
@@ -299,7 +308,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         heartbeat_stop = threading.Event()
         heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
         try:
-            model = _load_model(prefer_gpu, models_dir=models_dir)
+            model = _load_model(
+                prefer_gpu,
+                models_dir=models_dir,
+                cpu_threads_cpu=cpu_threads_cpu,
+            )
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=1)
