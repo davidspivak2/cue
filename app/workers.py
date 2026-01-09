@@ -109,14 +109,14 @@ class Worker(QtCore.QObject):
         try:
             ensure_ffmpeg_available()
             if self.task_type == TaskType.GENERATE_SRT:
-                self.signals.started.emit("Generating SRT")
+                self.signals.started.emit("Preparing audio")
                 result = self._run_generate_srt()
-                message = f"SRT created: {result['srt_path']}"
+                message = f"Subtitles created: {result['srt_path']}"
                 self.signals.finished.emit(True, message, result)
             elif self.task_type == TaskType.BURN_IN:
-                self.signals.started.emit("Hardcoding subtitles")
+                self.signals.started.emit("Exporting video")
                 result = self._run_burn_in()
-                self.signals.finished.emit(True, "Subtitles hardcoded successfully.", result)
+                self.signals.finished.emit(True, "Your video is ready.", result)
             else:
                 raise ValueError(f"Unknown task type: {self.task_type}")
         except CancelledError:
@@ -134,8 +134,8 @@ class Worker(QtCore.QObject):
 
         audio_path = self.output_dir / f"{self.video_path.stem}_audio_for_whisper.wav"
         srt_path = self.output_dir / f"{self.video_path.stem}.srt"
-        self.signals.log.emit(f"Output WAV: {audio_path}", True)
-        self.signals.log.emit(f"Output SRT: {srt_path}", True)
+        self.signals.log.emit(f"Audio file: {audio_path}", True)
+        self.signals.log.emit(f"Subtitles file: {srt_path}", True)
 
         video_duration = self._probe_duration(self.video_path)
         if video_duration:
@@ -146,7 +146,7 @@ class Worker(QtCore.QObject):
                 True,
             )
 
-        self.signals.log.emit("Extracting audio via FFmpeg...", True)
+        self.signals.log.emit("Preparing audio...", True)
         self._emit_progress(0, "Extracting audio")
         self._extract_audio(audio_path, settings.apply_audio_filter, video_duration)
 
@@ -184,12 +184,12 @@ class Worker(QtCore.QObject):
                 model_dir = get_models_dir() / TRANSCRIBE_MODEL_NAME
                 if exc.return_code == 3221225477 and model_dir.exists():
                     self.signals.log.emit(
-                        f"Clearing model cache due to access violation: {model_dir}",
+                        f"Clearing cached data due to an access issue: {model_dir}",
                         True,
                     )
                     shutil.rmtree(model_dir, ignore_errors=True)
                 self.signals.log.emit(
-                    "GPU transcription failed; retrying on CPU. This may take longer.",
+                    "Fast mode failed; retrying in compatibility mode. This may take longer.",
                     True,
                 )
                 try:
@@ -201,27 +201,32 @@ class Worker(QtCore.QObject):
                     )
                 except TranscriptionError as retry_exc:
                     message = (
-                        "Transcription failed after CPU retry.\n"
-                        f"Return code: {retry_exc.return_code}\n"
-                        f"Models dir: {get_models_dir()}"
+                        "Couldn't create subtitles after a retry.\n"
+                        f"Return code: {retry_exc.return_code}"
                     )
                     raise RuntimeError(message) from retry_exc
             else:
-                self.signals.log.emit(f"Transcription failed; keeping WAV: {audio_path}", True)
+                self.signals.log.emit(
+                    f"Couldn't create subtitles; keeping audio file: {audio_path}",
+                    True,
+                )
                 raise
         except Exception:
-            self.signals.log.emit(f"Transcription failed; keeping WAV: {audio_path}", True)
+            self.signals.log.emit(
+                f"Couldn't create subtitles; keeping audio file: {audio_path}",
+                True,
+            )
             raise
 
         if not srt_path.exists() or srt_path.stat().st_size == 0:
-            raise RuntimeError(f"SRT was not created: {srt_path}")
+            raise RuntimeError(f"Subtitles were not created: {srt_path}")
 
         try:
             audio_path.unlink(missing_ok=True)
-            self.signals.log.emit(f"Deleted WAV: {audio_path}", True)
+            self.signals.log.emit(f"Deleted audio file: {audio_path}", True)
         except Exception as exc:  # noqa: BLE001
             self.signals.log.emit(
-                f"Warning: failed to delete WAV ({audio_path}): {exc}",
+                f"Warning: failed to delete audio file ({audio_path}): {exc}",
                 True,
             )
 
@@ -263,11 +268,11 @@ class Worker(QtCore.QObject):
 
         srt_path = self.srt_path or self.output_dir / f"{self.video_path.stem}.srt"
         if not srt_path.exists():
-            raise FileNotFoundError(f"SRT not found: {srt_path}")
+            raise FileNotFoundError(f"Subtitles file not found: {srt_path}")
 
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
-        self.signals.log.emit(f"SRT input: {srt_path}", True)
-        self.signals.log.emit(f"Output video: {output_path}", True)
+        self.signals.log.emit(f"Subtitles file: {srt_path}", True)
+        self.signals.log.emit(f"Video file: {output_path}", True)
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
         escaped_path = escape_subtitles_filter_path(srt_path)
@@ -298,13 +303,13 @@ class Worker(QtCore.QObject):
             "+faststart",
         ]
 
-        self.signals.log.emit("Burning subtitles with audio copy...", True)
+        self.signals.log.emit("Adding subtitles to the video...", True)
         copy_command = base_command + ["-c:a", "copy", str(output_path)]
         try:
             self._run_ffmpeg(copy_command)
             return {"output_path": str(output_path)}
         except RuntimeError as exc:
-            self.signals.log.emit("Audio copy failed, retrying with AAC...", True)
+            self.signals.log.emit("Audio copy failed, trying another format...", True)
             self.signals.log.emit(str(exc), True)
 
         aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
@@ -315,7 +320,7 @@ class Worker(QtCore.QObject):
         if self._cancelled.is_set():
             raise CancelledError()
 
-        self.signals.log.emit(f"FFmpeg command: {subprocess.list2cmdline(command)}", True)
+        self.signals.log.emit(f"Video tool command: {subprocess.list2cmdline(command)}", True)
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -341,7 +346,7 @@ class Worker(QtCore.QObject):
 
         if return_code != 0:
             tail_text = "\n".join(stderr_tail)
-            raise RuntimeError("FFmpeg failed. Last output:\n" + tail_text)
+            raise RuntimeError("Video processing failed. Details:\n" + tail_text)
 
     def _run_ffmpeg_with_progress(
         self,
@@ -352,7 +357,7 @@ class Worker(QtCore.QObject):
         if self._cancelled.is_set():
             raise CancelledError()
 
-        self.signals.log.emit(f"FFmpeg command: {subprocess.list2cmdline(command)}", True)
+        self.signals.log.emit(f"Video tool command: {subprocess.list2cmdline(command)}", True)
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -417,7 +422,7 @@ class Worker(QtCore.QObject):
 
         if return_code != 0:
             tail_text = "\n".join(stderr_tail)
-            raise RuntimeError("FFmpeg failed. Last output:\n" + tail_text)
+            raise RuntimeError("Video processing failed. Details:\n" + tail_text)
 
     def _run_transcription_subprocess(
         self,
@@ -426,7 +431,8 @@ class Worker(QtCore.QObject):
         duration_seconds: Optional[float],
         force_cpu: bool,
     ) -> None:
-        self.signals.log.emit("Starting Whisper worker subprocess...", True)
+        self.signals.started.emit("Creating subtitles")
+        self.signals.log.emit("Starting subtitles worker...", True)
         runtime_mode = get_runtime_mode()
         if runtime_mode == "source":
             command = [
@@ -474,7 +480,7 @@ class Worker(QtCore.QObject):
             f"TRANSCRIBE_PARENT_CONFIG {json.dumps(parent_config, sort_keys=True)}",
             True,
         )
-        self.signals.log.emit(f"Whisper command: {subprocess.list2cmdline(command)}", True)
+        self.signals.log.emit(f"Subtitles command: {subprocess.list2cmdline(command)}", True)
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -537,7 +543,7 @@ class Worker(QtCore.QObject):
                     watchdog_triggered = True
                     watchdog_elapsed = elapsed
                     _emit_log(
-                        f"Watchdog timeout: no output for {elapsed:.1f}s; terminating Whisper worker.",
+                        f"No updates for {elapsed:.1f}s; stopping subtitles worker.",
                         True,
                     )
                     process.terminate()
@@ -568,10 +574,10 @@ class Worker(QtCore.QObject):
                     if end_value > max_end_seconds:
                         max_end_seconds = end_value
                         percent = min(99, int((max_end_seconds / duration_seconds) * 100))
-                        self._emit_progress(percent, "Transcribing")
+                        self._emit_progress(percent, "Listening")
                 now = time.monotonic()
                 if now - last_progress_log >= 2.0:
-                    _emit_log("Transcribing progress update received.", True)
+                    _emit_log("Listening progress update received.", True)
                     last_progress_log = now
                 continue
 
@@ -579,7 +585,7 @@ class Worker(QtCore.QObject):
             if text.startswith("MODE"):
                 continue
             if text.startswith("READY"):
-                self._emit_progress(0, "Transcribing")
+                self._emit_progress(0, "Listening")
                 continue
             if text.startswith("DONE"):
                 done_seen = True
@@ -587,7 +593,7 @@ class Worker(QtCore.QObject):
                 parts = text.split(" ", 1)
                 if len(parts) == 2:
                     done_srt_path = Path(parts[1].strip())
-                self._emit_progress(100, "Transcribing")
+                self._emit_progress(100, "Listening")
 
         return_code = process.wait()
         watchdog_stop.set()
@@ -602,8 +608,8 @@ class Worker(QtCore.QObject):
         if done_seen and srt_exists and srt_size > 0:
             if return_code != 0:
                 _emit_log(
-                    f"Whisper worker exited with code {return_code}, but DONE was received and "
-                    f"SRT exists; continuing.",
+                    f"Subtitles worker exited with code {return_code}, but DONE was received and "
+                    f"subtitles file exists; continuing.",
                     True,
                 )
             return
@@ -611,19 +617,21 @@ class Worker(QtCore.QObject):
         diagnostics = [
             f"Return code: {return_code}",
             f"DONE seen: {done_seen}",
-            f"SRT path: {srt_candidate}",
-            f"SRT exists: {srt_exists}",
-            f"SRT size: {srt_size}",
+            f"Subtitles path: {srt_candidate}",
+            f"Subtitles file exists: {srt_exists}",
+            f"Subtitles file size: {srt_size}",
         ]
         if watchdog_triggered:
-            diagnostics.append(f"Watchdog timeout after {watchdog_elapsed:.1f}s since last output.")
+            diagnostics.append(
+                f"Watchdog timeout after {watchdog_elapsed:.1f}s since the last update."
+            )
 
         stdout_tail_text = "\n".join(stdout_tail) or "(empty)"
         if transcribe_config_json and transcribe_config_json not in stdout_tail_text:
             stdout_tail_text = f"{transcribe_config_json}\n{stdout_tail_text}"
         stderr_tail_text = "\n".join(stderr_tail) or "(empty)"
         error_message = (
-            "Transcription failed.\n"
+            "Couldn't create subtitles.\n"
             + "\n".join(diagnostics)
             + "\n\n--- stdout tail ---\n"
             + stdout_tail_text
@@ -647,7 +655,7 @@ class Worker(QtCore.QObject):
             self._progress_label = ""
         if percent_int < self._progress_value:
             percent_int = self._progress_value
-        status = f"{phase_label} ({percent_int}%)"
+        status = f"{phase_label} — {percent_int}%"
         if percent_int != self._progress_value or status != self._progress_label:
             self._progress_value = percent_int
             self._progress_label = status
@@ -657,5 +665,5 @@ class Worker(QtCore.QObject):
         try:
             return get_media_duration(path)
         except Exception as exc:  # noqa: BLE001
-            self.signals.log.emit(f"FFprobe failed: {exc}", True)
+            self.signals.log.emit(f"Video check failed: {exc}", True)
             return None
