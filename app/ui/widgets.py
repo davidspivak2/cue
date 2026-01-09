@@ -49,7 +49,7 @@ class DropZone(QtWidgets.QFrame):
         subtext.setObjectName("DropZoneSubtext")
         subtext.setAlignment(QtCore.Qt.AlignCenter)
 
-        self.choose_button = QtWidgets.QPushButton("Choose video...")
+        self.choose_button = QtWidgets.QPushButton("Choose video…")
         self.choose_button.clicked.connect(self.choose_clicked.emit)
 
         layout.addWidget(headline)
@@ -128,7 +128,7 @@ class VideoCard(QtWidgets.QWidget):
         self.clear_button.setObjectName("VideoCardClear")
         self.clear_button.setText("✕")
         self.clear_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.clear_button.setToolTip("Clear selection")
+        self.clear_button.setToolTip("Remove video")
         self.clear_button.setFixedSize(26, 26)
         self.clear_button.clicked.connect(self.clear_clicked.emit)
 
@@ -206,7 +206,7 @@ class VideoCard(QtWidgets.QWidget):
     def _set_placeholder(self) -> None:
         self._thumbnail_pixmap = None
         self.thumbnail_label.setPixmap(QtGui.QPixmap())
-        self.thumbnail_label.setText("Preview unavailable")
+        self.thumbnail_label.setText("Preview not available")
         self.thumbnail_label.setObjectName("VideoCardPlaceholder")
         self._refresh_label_style()
 
@@ -257,7 +257,7 @@ class SaveToRow(QtWidgets.QWidget):
             QtWidgets.QSizePolicy.Preferred,
         )
 
-        self.change_button = QtWidgets.QPushButton("Change...")
+        self.change_button = QtWidgets.QPushButton("Change…")
         self.change_button.setObjectName("SaveToChange")
         self.change_button.setFlat(True)
         self.change_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))

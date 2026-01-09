@@ -37,7 +37,7 @@ DEFAULT_SUBTITLE_EDIT_PATH = Path(r"C:\Program Files\Subtitle Edit\SubtitleEdit.
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, logger: logging.Logger, log_path: Path, log_dir: Path) -> None:
         super().__init__()
-        self.setWindowTitle("Hebrew Subtitle GUI")
+        self.setWindowTitle("Hebrew Subtitles")
         self.setMinimumSize(720, 640)
         self.setAcceptDrops(True)
 
@@ -69,29 +69,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_to_row = SaveToRow()
 
         self.generate_button = QtWidgets.QPushButton("Create subtitles")
-        self.review_button = QtWidgets.QPushButton("Edit subtitles")
+        self.review_button = QtWidgets.QPushButton("Edit in Subtitle Edit")
         self.burn_button = QtWidgets.QPushButton("Export video with subtitles")
         self.cancel_button = QtWidgets.QPushButton("Cancel")
 
         self.ready_open_srt_button = QtWidgets.QPushButton("Open subtitles")
-        self.ready_open_video_button = QtWidgets.QPushButton("Open output video")
         self.ready_open_folder_button = QtWidgets.QPushButton("Open folder")
 
-        self.done_open_video_button = QtWidgets.QPushButton("Open video")
+        self.done_open_video_button = QtWidgets.QPushButton("Play video")
         self.done_open_folder_button = QtWidgets.QPushButton("Open folder")
+        self.done_edit_button = QtWidgets.QPushButton("Edit subtitles and export again")
 
         for button in (
             self.ready_open_srt_button,
-            self.ready_open_video_button,
             self.ready_open_folder_button,
         ):
             button.setFlat(True)
             button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
-        self.filter_checkbox = QtWidgets.QCheckBox("Apply audio cleanup filter")
+        self.done_edit_button.setFlat(True)
+        self.done_edit_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.filter_checkbox = QtWidgets.QCheckBox("Improve voice clarity")
         self.filter_checkbox.setChecked(True)
 
-        style_group = QtWidgets.QGroupBox("Subtitle style (burn-in)")
+        style_group = QtWidgets.QGroupBox("Subtitle style")
         style_layout = QtWidgets.QGridLayout(style_group)
         self.font_combo = QtWidgets.QComboBox()
         self.font_combo.addItems(["Segoe UI", "Tahoma", "Arial"])
@@ -116,7 +118,7 @@ class MainWindow(QtWidgets.QMainWindow):
         style_layout.addWidget(self.outline_spin, 1, 1)
         style_layout.addWidget(QtWidgets.QLabel("Shadow"), 1, 2)
         style_layout.addWidget(self.shadow_spin, 1, 3)
-        style_layout.addWidget(QtWidgets.QLabel("MarginV"), 2, 0)
+        style_layout.addWidget(QtWidgets.QLabel("Bottom margin"), 2, 0)
         style_layout.addWidget(self.margin_spin, 2, 1)
 
         self.progress_bar = QtWidgets.QProgressBar()
@@ -125,7 +127,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.progress_bar.setVisible(True)
         self._apply_progress_bar_style()
 
-        self.status_label = QtWidgets.QLabel("Idle")
+        self.status_label = QtWidgets.QLabel("Ready")
         self.status_label.setStyleSheet("font-weight: bold;")
 
         self.log_box = QtWidgets.QPlainTextEdit()
@@ -153,16 +155,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.details_panel = QtWidgets.QWidget()
         details_layout = QtWidgets.QVBoxLayout(self.details_panel)
 
-        advanced_group = QtWidgets.QGroupBox("Advanced options")
+        advanced_group = QtWidgets.QGroupBox("Options")
         advanced_layout = QtWidgets.QVBoxLayout(advanced_group)
         advanced_layout.addWidget(self.filter_checkbox)
         advanced_layout.addWidget(style_group)
         details_layout.addWidget(advanced_group)
 
-        log_group = QtWidgets.QGroupBox("Logs")
+        log_group = QtWidgets.QGroupBox("Details")
         log_layout = QtWidgets.QVBoxLayout(log_group)
         log_layout.addWidget(self.log_box)
-        self.open_log_button = QtWidgets.QPushButton("Open Log File")
+        self.open_log_button = QtWidgets.QPushButton("Open details file")
         log_layout.addWidget(self.open_log_button)
         details_layout.addWidget(log_group)
         details_layout.addStretch()
@@ -182,10 +184,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.burn_button.clicked.connect(self._on_burn)
         self.cancel_button.clicked.connect(self._on_cancel)
         self.ready_open_srt_button.clicked.connect(self._open_srt)
-        self.ready_open_video_button.clicked.connect(self._open_output_video)
         self.ready_open_folder_button.clicked.connect(self._open_folder)
         self.done_open_video_button.clicked.connect(self._open_output_video)
         self.done_open_folder_button.clicked.connect(self._open_folder)
+        self.done_edit_button.clicked.connect(self._edit_subtitles_again)
         self.open_log_button.clicked.connect(self._open_log_file)
         self.details_toggle.toggled.connect(self._toggle_details)
 
@@ -248,7 +250,6 @@ class MainWindow(QtWidgets.QMainWindow):
         links_layout = QtWidgets.QHBoxLayout()
         links_layout.addStretch()
         links_layout.addWidget(self.ready_open_srt_button)
-        links_layout.addWidget(self.ready_open_video_button)
         links_layout.addWidget(self.ready_open_folder_button)
         links_layout.addStretch()
         layout.addLayout(links_layout)
@@ -258,7 +259,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_done_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
-        title = QtWidgets.QLabel("Export finished")
+        title = QtWidgets.QLabel("Your video is ready")
         title.setAlignment(QtCore.Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
@@ -274,6 +275,12 @@ class MainWindow(QtWidgets.QMainWindow):
         secondary_layout.addWidget(self.done_open_folder_button)
         secondary_layout.addStretch()
         layout.addLayout(secondary_layout)
+
+        tertiary_layout = QtWidgets.QHBoxLayout()
+        tertiary_layout.addStretch()
+        tertiary_layout.addWidget(self.done_edit_button)
+        tertiary_layout.addStretch()
+        layout.addLayout(tertiary_layout)
         layout.addStretch()
         return page
 
@@ -300,7 +307,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._state == AppState.WORKING:
             return
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Select video", "", VIDEO_FILTER
+            self, "Choose video…", "", VIDEO_FILTER
         )
         if file_path:
             self._set_video_path(Path(file_path))
@@ -330,7 +337,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log(str(exc))
             return
         if not ffprobe_path:
-            self._log("Warning: ffprobe not found; skipping video probe.")
+            self._log("Warning: video details tool not found; skipping checks.")
             return
 
         command = [
@@ -348,21 +355,21 @@ class MainWindow(QtWidgets.QMainWindow):
             if result != 0:
                 QtWidgets.QMessageBox.warning(
                     self,
-                    "FFprobe warning",
-                    "FFprobe could not read this file. It may still work, but "
+                    "Video check warning",
+                    "We couldn't read details for this file. It may still work, but "
                     "please confirm the file is valid.",
                 )
         except Exception as exc:  # noqa: BLE001
-            self._log(f"FFprobe failed: {exc}")
+            self._log(f"Video check failed: {exc}")
 
     def _on_generate(self) -> None:
         if not self._video_path:
-            QtWidgets.QMessageBox.warning(self, "Missing input", "Select a video file first.")
+            QtWidgets.QMessageBox.warning(self, "No video selected", "Choose a video first.")
             return
         try:
             ensure_ffmpeg_available()
         except FileNotFoundError as exc:
-            QtWidgets.QMessageBox.critical(self, "FFmpeg missing", str(exc))
+            QtWidgets.QMessageBox.critical(self, "Video tools missing", str(exc))
             return
 
         self._subtitles_reviewed = False
@@ -371,13 +378,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_review(self) -> None:
         if not self._video_path:
-            QtWidgets.QMessageBox.warning(self, "Missing input", "Select a video file first.")
+            QtWidgets.QMessageBox.warning(self, "No video selected", "Choose a video first.")
             return
 
         srt_path = self._get_default_srt_path()
         if not self._is_srt_ready(srt_path):
             QtWidgets.QMessageBox.information(
-                self, "Missing subtitles", "Generate subtitles before reviewing them."
+                self, "Subtitles not ready", "Create subtitles first."
             )
             return
 
@@ -396,8 +403,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not started:
             QtWidgets.QMessageBox.critical(
                 self,
-                "Launch failed",
-                "Subtitle Edit could not be launched. Please check the executable path.",
+                "Couldn't open Subtitle Edit",
+                "Subtitle Edit couldn't be opened. Please check the app path.",
             )
             return
 
@@ -406,25 +413,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_burn(self) -> None:
         if not self._video_path:
-            QtWidgets.QMessageBox.warning(self, "Missing input", "Select a video file first.")
+            QtWidgets.QMessageBox.warning(self, "No video selected", "Choose a video first.")
             return
         if not self._subtitles_reviewed:
             QtWidgets.QMessageBox.information(
                 self,
-                "Review required",
-                "Review/Edit subtitles before hardcoding them.",
+                "Edit before exporting",
+                "Edit subtitles before exporting the video.",
             )
             return
         try:
             ensure_ffmpeg_available()
         except FileNotFoundError as exc:
-            QtWidgets.QMessageBox.critical(self, "FFmpeg missing", str(exc))
+            QtWidgets.QMessageBox.critical(self, "Video tools missing", str(exc))
             return
 
         srt_path = self._get_default_srt_path()
         if not self._is_srt_ready(srt_path):
             QtWidgets.QMessageBox.information(
-                self, "Missing subtitles", "Generate subtitles before hardcoding them."
+                self, "Subtitles not ready", "Create subtitles first."
             )
             return
 
@@ -446,7 +453,7 @@ class MainWindow(QtWidgets.QMainWindow):
         burnin_settings: Optional[BurnInSettings],
     ) -> None:
         if self._worker_thread:
-            QtWidgets.QMessageBox.warning(self, "Busy", "Another task is running.")
+            QtWidgets.QMessageBox.warning(self, "Please wait", "Another task is running.")
             return
 
         self.log_box.clear()
@@ -474,6 +481,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_worker_started(self, status: str) -> None:
         self.status_label.setText(status)
         self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("")
         self.set_state(AppState.WORKING)
 
     def _on_worker_finished(self, success: bool, message: str, payload: dict) -> None:
@@ -486,7 +494,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.status_label.setText("Cancelled")
         else:
             self.progress_bar.setValue(0)
-            self.status_label.setText("Idle")
+            self.status_label.setText("Ready")
 
         if self._worker_thread:
             self._worker_thread.quit()
@@ -506,22 +514,23 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._subtitles_reviewed = False
                 QtWidgets.QMessageBox.information(
                     self,
-                    "Subtitles created",
-                    "Subtitles created. Next: click ‘Review/Edit subtitles’ to check them before "
-                    "hardcoding.",
+                    "Subtitles are ready",
+                    "Subtitles are ready. Next: edit them in Subtitle Edit, then export the video.",
                 )
                 self.set_state(AppState.SUBTITLES_READY)
             else:
-                QtWidgets.QMessageBox.information(self, "Success", message)
+                QtWidgets.QMessageBox.information(self, "Your video is ready", message)
                 self.set_state(AppState.EXPORT_DONE)
         else:
             if message == "Operation cancelled.":
                 QtWidgets.QMessageBox.information(self, "Cancelled", message)
-            elif message.startswith("SRT was not created"):
-                QtWidgets.QMessageBox.critical(self, "SRT was not created", message)
-            elif "FFmpeg failed" in message:
-                QtWidgets.QMessageBox.critical(self, "FFmpeg failed", "FFmpeg failed. Check logs.")
-            elif "Transcription failed" in message:
+            elif message.startswith("Subtitles were not created"):
+                QtWidgets.QMessageBox.critical(self, "Subtitles were not created", message)
+            elif "Video processing failed" in message:
+                QtWidgets.QMessageBox.critical(
+                    self, "Video processing failed", "Video processing failed. Check details."
+                )
+            elif "Couldn't create subtitles" in message:
                 self._show_transcription_error(message)
             else:
                 QtWidgets.QMessageBox.critical(self, "Error", message)
@@ -531,6 +540,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._worker:
             self._log("Cancelling task...")
             self._worker.cancel()
+
+    def _edit_subtitles_again(self) -> None:
+        self.set_state(AppState.SUBTITLES_READY)
+        self._on_review()
 
     def _open_folder(self) -> None:
         if not self._output_dir:
@@ -543,21 +556,23 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.QProcess.startDetached("notepad.exe", [str(srt_path)])
             return
         if not self._last_srt_path or not self._last_srt_path.exists():
-            QtWidgets.QMessageBox.information(self, "Missing SRT", "Generate an SRT first.")
+            QtWidgets.QMessageBox.information(
+                self, "Subtitles not ready", "Create subtitles first."
+            )
             return
         QtCore.QProcess.startDetached("notepad.exe", [str(self._last_srt_path)])
 
     def _open_output_video(self) -> None:
         if not self._last_output_video or not self._last_output_video.exists():
-            QtWidgets.QMessageBox.information(
-                self, "Missing output", "Hardcode subtitles to create the output video."
-            )
+            QtWidgets.QMessageBox.information(self, "Video not ready", "Export the video first.")
             return
         os.startfile(self._last_output_video)  # type: ignore[arg-type]
 
     def _open_log_file(self) -> None:
         if not self._log_path.exists():
-            QtWidgets.QMessageBox.information(self, "Log missing", "No log file found.")
+            QtWidgets.QMessageBox.information(
+                self, "Details file missing", "No details file found."
+            )
             return
         QtCore.QProcess.startDetached("notepad.exe", [str(self._log_path)])
 
@@ -576,7 +591,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_worker_progress(self, percent: int, status: str) -> None:
         self.progress_bar.setValue(percent)
-        self.status_label.setText(status)
+        self.progress_bar.setFormat(status)
 
     def _refresh_ffmpeg_status(self) -> None:
         ffmpeg_path, ffprobe_path, _ = resolve_ffmpeg_paths()
@@ -589,11 +604,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log(get_ffmpeg_missing_message())
             return
 
-        self._log(f"FFmpeg resolver: mode={mode}, ffmpeg={ffmpeg_path}")
+        self._log(f"Video tools resolver: mode={mode}, path={ffmpeg_path}")
         if ffprobe_path:
-            self._log(f"FFprobe resolver: {ffprobe_path}")
+            self._log(f"Video details tool: {ffprobe_path}")
         else:
-            self._log("Warning: ffprobe not found; some metadata checks may be skipped.")
+            self._log("Warning: video details tool not found; some checks may be skipped.")
 
     def _log_diagnostics(self) -> None:
         runtime_mode = get_runtime_mode()
@@ -604,7 +619,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._log(f"OS: {platform.platform()}")
         self._log(
             "Diagnostics: "
-            f"Python {sys.version.split()[0]} | mode: {runtime_mode} | ffmpeg: {ffmpeg_display}"
+            f"Python {sys.version.split()[0]} | mode: {runtime_mode} | video tools: {ffmpeg_display}"
         )
         self._log_ffmpeg_resolution()
 
@@ -614,18 +629,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.details_toggle.setArrowType(arrow)
         self.details_toggle.setText("Hide details" if checked else "Show details")
 
+    def _update_details_visibility(self, *, idle: bool) -> None:
+        show_toggle = idle and self._state == AppState.VIDEO_SELECTED
+        if not show_toggle:
+            self.details_toggle.blockSignals(True)
+            self.details_toggle.setChecked(False)
+            self.details_toggle.blockSignals(False)
+            self.details_panel.setVisible(False)
+        self.details_toggle.setVisible(show_toggle)
+
     def _show_transcription_error(self, details: Optional[str] = None) -> None:
         message = (
-            "Transcription failed.\n"
-            f"A log file was saved to:\n{self._log_path}"
+            "Couldn't create subtitles.\n"
+            f"A details file was saved to:\n{self._log_path}"
         )
         if details:
             message = f"{message}\n\nDetails:\n{details}"
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Critical)
-        box.setWindowTitle("Transcription failed")
+        box.setWindowTitle("Couldn't create subtitles")
         box.setText(message)
-        open_log_button = box.addButton("Open Log", QtWidgets.QMessageBox.ActionRole)
+        open_log_button = box.addButton("Open details file", QtWidgets.QMessageBox.ActionRole)
         open_folder_button = box.addButton("Open Folder", QtWidgets.QMessageBox.ActionRole)
         box.addButton("OK", QtWidgets.QMessageBox.AcceptRole)
         box.exec()
@@ -662,10 +686,11 @@ class MainWindow(QtWidgets.QMainWindow):
         ready_state = self._state == AppState.SUBTITLES_READY
         done_state = self._state == AppState.EXPORT_DONE
         self.ready_open_srt_button.setEnabled(ready_state and can_open_srt)
-        self.ready_open_video_button.setEnabled(ready_state and can_open_video)
         self.ready_open_folder_button.setEnabled(ready_state and has_video)
         self.done_open_video_button.setEnabled(done_state and can_open_video)
         self.done_open_folder_button.setEnabled(done_state and has_video)
+        self.done_edit_button.setEnabled(done_state and can_open_srt)
+        self._update_details_visibility(idle=idle)
 
     def _apply_progress_bar_style(self) -> None:
         palette = QtWidgets.QApplication.palette()
@@ -682,7 +707,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_to_row.set_path(None)
         self.video_card.clear()
         self.progress_bar.setValue(0)
-        self.status_label.setText("Idle")
+        self.status_label.setText("Ready")
         self.set_state(AppState.EMPTY)
 
     def _reset_video_state(self) -> None:
@@ -699,14 +724,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_output_dir(self, path: Path) -> None:
         self._output_dir = path
         self.save_to_row.set_path(path)
-        self._log(f"Output folder: {path}")
+        self._log(f"Save folder: {path}")
 
     def _change_output_dir(self) -> None:
         if not self._output_dir:
             return
         folder = QtWidgets.QFileDialog.getExistingDirectory(
             self,
-            "Select output folder",
+            "Choose folder…",
             str(self._output_dir),
         )
         if not folder:
@@ -754,10 +779,10 @@ class MainWindow(QtWidgets.QMainWindow):
         box.setIcon(QtWidgets.QMessageBox.Warning)
         box.setWindowTitle("Subtitle Edit not found")
         box.setText(
-            "Subtitle Edit was not found. Please install it or browse for SubtitleEdit.exe."
+            "Subtitle Edit wasn't found. Please install it or choose SubtitleEdit.exe."
         )
         browse_button = box.addButton(
-            "Browse for SubtitleEdit.exe", QtWidgets.QMessageBox.ActionRole
+            "Choose Subtitle Edit…", QtWidgets.QMessageBox.ActionRole
         )
         box.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
         box.exec()
@@ -766,7 +791,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
-            "Locate SubtitleEdit.exe",
+            "Choose Subtitle Edit…",
             str(self._get_app_data_dir()),
             "Executable (*.exe)",
         )
@@ -804,7 +829,7 @@ def _install_exception_hook(
             return
         message = (
             "An unexpected error occurred. The application will stay open.\n"
-            f"A log file was saved to:\n{log_path}"
+            f"A details file was saved to:\n{log_path}"
         )
         QtWidgets.QMessageBox.critical(None, "Unexpected error", message)
 
