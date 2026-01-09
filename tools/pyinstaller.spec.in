@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules
 
 block_cipher = None
 
@@ -20,13 +20,16 @@ if os.path.exists(ffprobe_path):
 fw_datas, fw_binaries, fw_hidden = collect_all("faster_whisper")
 ct_datas, ct_binaries, ct_hidden = collect_all("ctranslate2")
 tok_datas, tok_binaries, tok_hidden = collect_all("tokenizers")
+av_datas, av_binaries, av_hidden = collect_all("av")
+av_dynamic = collect_dynamic_libs("av")
+av_submodules = collect_submodules("av")
 
 datas = [(os.path.join("app", "ui", "styles.qss"), os.path.join("app", "ui"))]
-datas += fw_datas + ct_datas + tok_datas
+datas += fw_datas + ct_datas + tok_datas + av_datas
 
-binaries += fw_binaries + ct_binaries + tok_binaries
+binaries += fw_binaries + ct_binaries + tok_binaries + av_binaries + av_dynamic
 
-hiddenimports = fw_hidden + ct_hidden + tok_hidden
+hiddenimports = fw_hidden + ct_hidden + tok_hidden + av_hidden + av_submodules
 
 runtime_hooks = [os.path.join("runtime_hooks", "runtime_env_setup.py")]
 
