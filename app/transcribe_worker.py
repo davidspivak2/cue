@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
+import importlib
 import os
 import shutil
 import sys
 import threading
 import traceback
-from ctypes import CDLL
 from pathlib import Path
 
 from .srt_utils import SrtSegment, segments_to_srt
@@ -54,21 +54,22 @@ def _stabilize_runtime() -> None:
         os.environ["PATH"] = ";".join(new_paths + [existing])
         _print(f"CUDA PATH added: {', '.join(new_paths)}")
     
-def _gpu_is_available() -> bool:
-    dll_candidates = [
-        "cublas64_12.dll",
-        "cublas64_11.dll",
-        "cudart64_120.dll",
-        "cudart64_110.dll",
-        "cudart64_101.dll",
-    ]
-    for dll_name in dll_candidates:
-        try:
-            CDLL(dll_name)
-            return True
-        except OSError:
-            continue
-    return False
+def _ctranslate2_cuda_device_count() -> int:
+    try:
+        ctranslate2 = importlib.import_module("ctranslate2")
+        return int(ctranslate2.get_cuda_device_count())
+    except Exception as exc:  # noqa: BLE001
+        _print(f"CTRANSLATE2_CUDA_PROBE_ERROR {exc}")
+        return 0
+
+
+def _should_use_gpu(prefer_gpu: bool, force_cpu: bool) -> tuple[bool, str]:
+    if force_cpu:
+        return False, "GPU disabled: --force-cpu"
+    if not prefer_gpu:
+        return False, "GPU not requested"
+    count = _ctranslate2_cuda_device_count()
+    return count > 0, f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}"
 
 
 def _validate_model_dir(model_dir: Path) -> bool:
@@ -184,11 +185,10 @@ def main(argv: list[str] | None = None) -> int:
             if not is_valid:
                 _print("MODEL_INVALID removing")
                 shutil.rmtree(model_dir, ignore_errors=True)
-        prefer_gpu = args.prefer_gpu and not args.force_cpu
-        if prefer_gpu:
-            if not _gpu_is_available():
-                _print("GPU not available; falling back to CPU.")
-                prefer_gpu = False
+        prefer_gpu, gpu_reason = _should_use_gpu(args.prefer_gpu, args.force_cpu)
+        _print(gpu_reason)
+        if not prefer_gpu and args.prefer_gpu and not args.force_cpu:
+            _print("GPU not available; falling back to CPU.")
         heartbeat_stop = threading.Event()
         heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
         try:
