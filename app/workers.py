@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import sys
 import threading
@@ -16,11 +17,33 @@ from .ffmpeg_utils import (
     escape_subtitles_filter_path,
     format_filter_style,
     get_media_duration,
+    get_runtime_mode,
+    get_subprocess_kwargs,
 )
+from .paths import get_models_dir
+
+TRANSCRIBE_MODEL_NAME = "large-v3"
 
 
 class CancelledError(Exception):
     pass
+
+
+class TranscriptionError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        return_code: Optional[int],
+        watchdog_triggered: bool,
+        srt_exists: bool,
+        srt_size: int,
+    ) -> None:
+        super().__init__(message)
+        self.return_code = return_code
+        self.watchdog_triggered = watchdog_triggered
+        self.srt_exists = srt_exists
+        self.srt_size = srt_size
 
 
 @dataclass
@@ -145,7 +168,44 @@ class Worker(QtCore.QObject):
                 audio_path=audio_path,
                 srt_path=srt_path,
                 duration_seconds=duration_seconds,
+                force_cpu=False,
             )
+        except TranscriptionError as exc:
+            should_retry = (
+                exc.return_code == 3221225477
+                or exc.watchdog_triggered
+                or not exc.srt_exists
+                or exc.srt_size == 0
+            )
+            if should_retry:
+                model_dir = get_models_dir() / TRANSCRIBE_MODEL_NAME
+                if exc.return_code == 3221225477 and model_dir.exists():
+                    self.signals.log.emit(
+                        f"Clearing model cache due to access violation: {model_dir}",
+                        True,
+                    )
+                    shutil.rmtree(model_dir, ignore_errors=True)
+                self.signals.log.emit(
+                    "GPU transcription failed; retrying on CPU. This may take longer.",
+                    True,
+                )
+                try:
+                    self._run_transcription_subprocess(
+                        audio_path=audio_path,
+                        srt_path=srt_path,
+                        duration_seconds=duration_seconds,
+                        force_cpu=True,
+                    )
+                except TranscriptionError as retry_exc:
+                    message = (
+                        "Transcription failed after CPU retry.\n"
+                        f"Return code: {retry_exc.return_code}\n"
+                        f"Models dir: {get_models_dir()}"
+                    )
+                    raise RuntimeError(message) from retry_exc
+            else:
+                self.signals.log.emit(f"Transcription failed; keeping WAV: {audio_path}", True)
+                raise
         except Exception:
             self.signals.log.emit(f"Transcription failed; keeping WAV: {audio_path}", True)
             raise
@@ -260,6 +320,7 @@ class Worker(QtCore.QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
+            **get_subprocess_kwargs(),
         )
         self._process = process
         stderr_tail: deque[str] = deque(maxlen=50)
@@ -296,6 +357,7 @@ class Worker(QtCore.QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
+            **get_subprocess_kwargs(),
         )
         self._process = process
         stderr_tail: deque[str] = deque(maxlen=50)
@@ -359,20 +421,37 @@ class Worker(QtCore.QObject):
         audio_path: Path,
         srt_path: Path,
         duration_seconds: Optional[float],
+        force_cpu: bool,
     ) -> None:
         self.signals.log.emit("Starting Whisper worker subprocess...", True)
-        command = [
-            sys.executable,
-            "-m",
-            "app.transcribe_worker",
+        runtime_mode = get_runtime_mode()
+        if runtime_mode == "source":
+            command = [
+                sys.executable,
+                "-m",
+                "app.transcribe_worker",
+            ]
+        else:
+            worker_exe = Path(sys.executable).with_name("HebrewSubtitleWorker.exe")
+            if worker_exe.exists():
+                command = [str(worker_exe)]
+            else:
+                command = [
+                    sys.executable,
+                    "--run-transcribe-worker",
+                ]
+        command += [
             "--wav",
             str(audio_path),
             "--srt",
             str(srt_path),
             "--lang",
             "he",
-            "--prefer-gpu",
         ]
+        if force_cpu:
+            command.append("--force-cpu")
+        else:
+            command.append("--prefer-gpu")
         if duration_seconds:
             command += ["--duration-seconds", f"{duration_seconds:.2f}"]
 
@@ -384,6 +463,7 @@ class Worker(QtCore.QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
+            **get_subprocess_kwargs(),
         )
         self._process = process
 
@@ -526,7 +606,13 @@ class Worker(QtCore.QObject):
             + "\n\n--- stderr tail ---\n"
             + stderr_tail_text
         )
-        raise RuntimeError(error_message)
+        raise TranscriptionError(
+            error_message,
+            return_code=return_code,
+            watchdog_triggered=watchdog_triggered,
+            srt_exists=srt_exists,
+            srt_size=srt_size,
+        )
 
     def _emit_progress(self, percent: float, phase_label: str) -> None:
         percent_int = int(round(percent))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from importlib import resources
 from pathlib import Path
 from typing import Optional
 
@@ -38,7 +39,10 @@ def _theme_tokens() -> dict[str, str]:
 def load_stylesheet() -> str:
     stylesheet_path = Path(__file__).with_name("styles.qss")
     try:
-        raw_qss = stylesheet_path.read_text(encoding="utf-8")
+        try:
+            raw_qss = resources.files("app.ui").joinpath("styles.qss").read_text(encoding="utf-8")
+        except Exception:
+            raw_qss = stylesheet_path.read_text(encoding="utf-8")
         return raw_qss.format(**_theme_tokens())
     except Exception:
         return (

@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 if not exist .venv\Scripts\activate.bat (
   echo [INFO] Creating virtual environment...
   python -m venv .venv
-  if %ERRORLEVEL% NEQ 0 (
+  if errorlevel 1 (
     echo [ERROR] Failed to create virtual environment.
     exit /b 1
   )
@@ -13,24 +13,29 @@ if not exist .venv\Scripts\activate.bat (
 call .venv\Scripts\activate.bat
 
 python -m pip install --upgrade pip
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   echo [ERROR] Failed to upgrade pip.
   exit /b 1
 )
 
 python -m pip install -r requirements.txt
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   echo [ERROR] Failed to install requirements.
   exit /b 1
 )
 
 python -m pip show pyinstaller >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
+if errorlevel 1 (
   python -m pip install pyinstaller
-  if %ERRORLEVEL% NEQ 0 (
+  if errorlevel 1 (
     echo [ERROR] Failed to install PyInstaller.
     exit /b 1
   )
+)
+pyinstaller --version >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] PyInstaller is not available after install.
+  exit /b 1
 )
 
 if not exist bin mkdir bin
@@ -54,7 +59,7 @@ if not exist bin\ffprobe.exe (
 
 if not exist bin\ffmpeg.exe (
   call download_ffmpeg.bat
-  if %ERRORLEVEL% NEQ 0 (
+  if errorlevel 1 (
     echo [ERROR] download_ffmpeg.bat failed.
     exit /b 1
   )
@@ -62,7 +67,7 @@ if not exist bin\ffmpeg.exe (
 
 if not exist bin\ffprobe.exe (
   call download_ffmpeg.bat
-  if %ERRORLEVEL% NEQ 0 (
+  if errorlevel 1 (
     echo [ERROR] download_ffmpeg.bat failed.
     exit /b 1
   )
@@ -78,16 +83,36 @@ if not exist bin\ffprobe.exe (
   exit /b 1
 )
 
-pyinstaller --noconfirm --windowed --name HebrewSubtitleGUI ^
-  --add-binary "bin\ffmpeg.exe;bin" ^
-  --add-binary "bin\ffprobe.exe;bin" ^
-  --collect-all faster_whisper ^
-  --collect-all ctranslate2 ^
-  app\main.py
+if exist HebrewSubtitleGUI.spec del /f /q HebrewSubtitleGUI.spec
+if exist build rmdir /s /q build
+if exist dist rmdir /s /q dist
 
-if %ERRORLEVEL% NEQ 0 (
+copy /Y "tools\\pyinstaller.spec.in" "HebrewSubtitleGUI.spec" >nul
+if errorlevel 1 (
+  echo [ERROR] Failed to prepare HebrewSubtitleGUI.spec.
+  exit /b 1
+)
+
+pyinstaller --noconfirm HebrewSubtitleGUI.spec
+
+if errorlevel 1 (
   echo [ERROR] PyInstaller failed.
-  exit /b %ERRORLEVEL%
+  exit /b 1
+)
+
+set "INTERNAL_DIR=dist\HebrewSubtitleGUI\_internal"
+if exist "%INTERNAL_DIR%" (
+  echo [INFO] Scanning for OpenMP DLL duplicates...
+  set "KEEP_OMP_DLL="
+  for /f "delims=" %%F in ('dir /b /s "%INTERNAL_DIR%\libiomp5md.dll" 2^>nul') do (
+    if not defined KEEP_OMP_DLL (
+      set "KEEP_OMP_DLL=%%F"
+      echo [INFO] Keeping %%F
+    ) else (
+      echo [INFO] Removing duplicate %%F
+      del /f /q "%%F" >nul 2>&1
+    )
+  )
 )
 
 echo Build complete. Output in dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
