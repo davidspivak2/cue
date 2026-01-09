@@ -34,3 +34,6 @@ def test_print_transcribe_config(monkeypatch, capsys) -> None:
     assert transcribe_kwargs["beam_size"] == 5
     assert transcribe_kwargs["vad_filter"] is True
     assert transcribe_kwargs["word_timestamps"] is True
+    post_splitter = payload["post_splitter"]
+    assert post_splitter["enabled"] is True
+    assert post_splitter["apply_if"]["segment_duration_sec"] == 12.0

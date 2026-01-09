@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import NoReturn
 
 from .srt_utils import SrtSegment, segments_to_srt
+from .srt_splitter import (
+    SplitApplyThresholds,
+    SplitMaxCue,
+    SplitterConfig,
+    split_segments_into_cues,
+)
 from .paths import get_models_dir
 from .transcription_config import build_transcription_config
 
@@ -256,6 +262,20 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             "vad_parameters": {"min_silence_duration_ms": 400},
             "word_timestamps": True,
         }
+        splitter_config = SplitterConfig(
+            apply_if=SplitApplyThresholds(
+                duration_sec=12.0,
+                text_length_chars=160,
+                word_count=26,
+            ),
+            max_cue=SplitMaxCue(
+                duration_sec=8.0,
+                text_length_chars=90,
+                word_count=14,
+            ),
+            gap_sec=0.4,
+            prefer=("punctuation", "gap"),
+        )
         audio_extraction = None
         if args.ffmpeg_args_json:
             try:
@@ -296,6 +316,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "text_trim": "strip",
                 "segment_separator": "blank_line",
             },
+            post_splitter=splitter_config.to_dict(),
             audio_extraction=audio_extraction,
         )
         _log_transcribe_config(config.to_json(), config.to_pretty_text())
@@ -322,17 +343,15 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             f"(prob={info.language_probability:.2f})"
         )
 
+        raw_segments = list(segments_iter)
+        cues = split_segments_into_cues(raw_segments, config=splitter_config)
         segments: list[SrtSegment] = []
         max_end = 0.0
-        index = 1
-        for segment in segments_iter:
-            segments.append(
-                SrtSegment(index=index, start=segment.start, end=segment.end, text=segment.text)
-            )
-            if segment.end > max_end:
-                max_end = segment.end
+        for index, cue in enumerate(cues, start=1):
+            segments.append(SrtSegment(index=index, start=cue.start, end=cue.end, text=cue.text))
+            if cue.end > max_end:
+                max_end = cue.end
                 _print(f"PROGRESS_END {max_end:.3f}")
-            index += 1
 
         _write_srt(segments, srt_path)
         if not srt_path.exists() or srt_path.stat().st_size == 0:
