@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import faulthandler
 import importlib
+import json
 import os
 import shutil
 import sys
@@ -13,12 +14,29 @@ from typing import NoReturn
 
 from .srt_utils import SrtSegment, segments_to_srt
 from .paths import get_models_dir
+from .transcription_config import build_transcription_config
 
 MODEL_NAME = "large-v3"
+TRANSCRIBE_DEFAULTS = [
+    "best_of",
+    "temperature",
+    "condition_on_previous_text",
+    "compression_ratio_threshold",
+    "log_prob_threshold",
+    "no_speech_threshold",
+    "patience",
+    "length_penalty",
+]
 
 
 def _print(message: str) -> None:
     print(message, flush=True)
+
+
+def _log_transcribe_config(config_json: str, config_text: str) -> None:
+    _print(f"TRANSCRIBE_CONFIG_JSON {config_json}")
+    for line in config_text.splitlines():
+        _print(f"TRANSCRIBE_CONFIG_TEXT {line}")
 
 
 def _stabilize_runtime() -> None:
@@ -87,7 +105,14 @@ def _start_heartbeat(label: str, stop_event: threading.Event) -> threading.Threa
     return thread
 
 
-def _load_model(prefer_gpu: bool, *, models_dir: Path):
+def _cpu_threads_for_device(device: str) -> int:
+    if device != "cpu":
+        return 2
+    cpu_count = os.cpu_count() or 2
+    return max(2, min(4, cpu_count))
+
+
+def _load_model(prefer_gpu: bool, *, models_dir: Path, cpu_threads_cpu: int):
     from faster_whisper import WhisperModel
 
     compute_type = "float16" if prefer_gpu else "int8"
@@ -115,7 +140,7 @@ def _load_model(prefer_gpu: bool, *, models_dir: Path):
                 MODEL_NAME,
                 device="cpu",
                 compute_type="int8",
-                cpu_threads=2,
+                cpu_threads=cpu_threads_cpu,
                 num_workers=1,
                 download_root=str(models_dir),
             )
@@ -125,7 +150,7 @@ def _load_model(prefer_gpu: bool, *, models_dir: Path):
         MODEL_NAME,
         device="cpu",
         compute_type="int8",
-        cpu_threads=2,
+        cpu_threads=cpu_threads_cpu,
         num_workers=1,
         download_root=str(models_dir),
     )
@@ -170,33 +195,39 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         f"PATH has _MEIPASS/_internal: {'_MEIPASS' in path_value or '_internal' in path_value}"
     )
     parser = argparse.ArgumentParser(description="Whisper transcription worker")
-    parser.add_argument("--wav", required=True)
-    parser.add_argument("--srt", required=True)
+    parser.add_argument("--wav")
+    parser.add_argument("--srt")
     parser.add_argument("--lang", default="he")
     parser.add_argument("--prefer-gpu", action="store_true")
     parser.add_argument("--force-cpu", action="store_true")
     parser.add_argument("--duration-seconds", type=float)
+    parser.add_argument("--print-transcribe-config", action="store_true")
+    parser.add_argument("--ffmpeg-args-json")
     args = parser.parse_args(argv)
 
-    wav_path = Path(args.wav)
-    srt_path = Path(args.srt)
+    if not args.print_transcribe_config and (not args.wav or not args.srt):
+        parser.error("--wav and --srt are required unless --print-transcribe-config is used.")
+
+    wav_path = Path(args.wav) if args.wav else None
+    srt_path = Path(args.srt) if args.srt else None
 
     try:
         _stabilize_runtime()
-        _print("ABOUT_TO_IMPORT_WHISPER")
-        try:
-            import ctranslate2
-            import faster_whisper
-            import tokenizers
-            import av
+        if not args.print_transcribe_config:
+            _print("ABOUT_TO_IMPORT_WHISPER")
+            try:
+                import ctranslate2
+                import faster_whisper
+                import tokenizers
+                import av
 
-            _print(f"faster_whisper: {getattr(faster_whisper, '__version__', 'unknown')}")
-            _print(f"ctranslate2: {getattr(ctranslate2, '__version__', 'unknown')}")
-            _print(f"tokenizers: {getattr(tokenizers, '__version__', 'unknown')}")
-            _print(f"ctranslate2.__file__: {getattr(ctranslate2, '__file__', 'unknown')}")
-            _print(f"av.__file__: {getattr(av, '__file__', 'unknown')}")
-        except Exception as exc:  # noqa: BLE001
-            _print(f"ERROR importing whisper deps: {exc}")
+                _print(f"faster_whisper: {getattr(faster_whisper, '__version__', 'unknown')}")
+                _print(f"ctranslate2: {getattr(ctranslate2, '__version__', 'unknown')}")
+                _print(f"tokenizers: {getattr(tokenizers, '__version__', 'unknown')}")
+                _print(f"ctranslate2.__file__: {getattr(ctranslate2, '__file__', 'unknown')}")
+                _print(f"av.__file__: {getattr(av, '__file__', 'unknown')}")
+            except Exception as exc:  # noqa: BLE001
+                _print(f"ERROR importing whisper deps: {exc}")
         _print("READY")
         models_dir = get_models_dir()
         model_dir = models_dir / MODEL_NAME
@@ -213,22 +244,79 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         _print(gpu_reason)
         if not prefer_gpu and args.prefer_gpu and not args.force_cpu:
             _print("GPU not available; falling back to CPU.")
+        device = "cuda" if prefer_gpu else "cpu"
+        compute_type = "float16" if prefer_gpu else "int8"
+        cpu_threads_cpu = _cpu_threads_for_device("cpu")
+        cpu_threads_active = _cpu_threads_for_device(device)
+        transcribe_kwargs = {
+            "language": args.lang,
+            "task": "transcribe",
+            "beam_size": 5,
+            "vad_filter": True,
+            "vad_parameters": {"min_silence_duration_ms": 400},
+            "word_timestamps": True,
+        }
+        audio_extraction = None
+        if args.ffmpeg_args_json:
+            try:
+                audio_extraction = {"ffmpeg_args": json.loads(args.ffmpeg_args_json)}
+            except json.JSONDecodeError as exc:
+                _print(f"WARNING invalid ffmpeg args JSON: {exc}")
+        whisper_model_kwargs = {
+            "device": device,
+            "compute_type": compute_type,
+            "cpu_threads": cpu_threads_active,
+            "num_workers": 1,
+            "download_root": str(models_dir),
+        }
+        whisper_model_fallback_kwargs = None
+        if prefer_gpu:
+            whisper_model_fallback_kwargs = {
+                "device": "cpu",
+                "compute_type": "int8",
+                "cpu_threads": cpu_threads_cpu,
+                "num_workers": 1,
+                "download_root": str(models_dir),
+            }
+        config = build_transcription_config(
+            model_name=MODEL_NAME,
+            models_dir=models_dir,
+            prefer_gpu=args.prefer_gpu,
+            force_cpu=args.force_cpu,
+            device=device,
+            compute_type=compute_type,
+            gpu_probe_reason=gpu_reason,
+            whisper_model_kwargs=whisper_model_kwargs,
+            whisper_model_fallback_kwargs=whisper_model_fallback_kwargs,
+            transcribe_kwargs=transcribe_kwargs,
+            transcribe_defaults=TRANSCRIBE_DEFAULTS,
+            srt_formatting={
+                "timestamp_format": "HH:MM:SS,mmm",
+                "index_start": 1,
+                "text_trim": "strip",
+                "segment_separator": "blank_line",
+            },
+            audio_extraction=audio_extraction,
+        )
+        _log_transcribe_config(config.to_json(), config.to_pretty_text())
+        if args.print_transcribe_config:
+            if hard_exit:
+                _hard_exit(0)
+            return 0
+        if wav_path is None or srt_path is None:
+            raise ValueError("Missing WAV or SRT path.")
         heartbeat_stop = threading.Event()
         heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
         try:
-            model = _load_model(prefer_gpu, models_dir=models_dir)
+            model = _load_model(
+                prefer_gpu,
+                models_dir=models_dir,
+                cpu_threads_cpu=cpu_threads_cpu,
+            )
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=1)
-        segments_iter, info = model.transcribe(
-            str(wav_path),
-            language=args.lang,
-            task="transcribe",
-            beam_size=5,
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 400},
-            word_timestamps=True,
-        )
+        segments_iter, info = model.transcribe(str(wav_path), **transcribe_kwargs)
         _print(
             f"Detected language: {info.language} "
             f"(prob={info.language_probability:.2f})"
