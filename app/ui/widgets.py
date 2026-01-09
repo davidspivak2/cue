@@ -198,6 +198,7 @@ class VideoCard(QtWidgets.QWidget):
             self.video_dropped.emit(Path(urls[0].toLocalFile()))
             event.acceptProposedAction()
 
+
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._update_thumbnail()
@@ -232,3 +233,65 @@ class VideoCard(QtWidgets.QWidget):
         self.style().unpolish(self)
         self.style().polish(self)
         self.update()
+
+
+class SaveToRow(QtWidgets.QWidget):
+    change_clicked = QtCore.Signal()
+
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        self._path_text = ""
+
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.label = QtWidgets.QLabel("Save to")
+        self.label.setObjectName("SaveToLabel")
+
+        self.path_label = QtWidgets.QLabel("")
+        self.path_label.setObjectName("SaveToPath")
+        self.path_label.setToolTip("")
+        self.path_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred,
+        )
+
+        self.change_button = QtWidgets.QPushButton("Change...")
+        self.change_button.setObjectName("SaveToChange")
+        self.change_button.setFlat(True)
+        self.change_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.change_button.clicked.connect(self.change_clicked.emit)
+
+        layout.addWidget(self.label)
+        layout.addWidget(self.path_label, stretch=1)
+        layout.addWidget(self.change_button)
+
+    def set_path(self, path: Optional[Path]) -> None:
+        if path is None:
+            self._path_text = ""
+            self.path_label.setText("")
+            self.path_label.setToolTip("")
+            return
+        self._path_text = str(path)
+        self.path_label.setToolTip(self._path_text)
+        self._update_elided_text()
+
+    def set_change_enabled(self, enabled: bool) -> None:
+        self.change_button.setEnabled(enabled)
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self) -> None:
+        if not self._path_text:
+            self.path_label.setText("")
+            return
+        metrics = self.path_label.fontMetrics()
+        elided = metrics.elidedText(
+            self._path_text,
+            QtCore.Qt.ElideMiddle,
+            max(0, self.path_label.width()),
+        )
+        self.path_label.setText(elided)
