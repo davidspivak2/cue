@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
-import importlib
 import json
 import os
 import shutil
@@ -21,6 +20,7 @@ from .srt_splitter import (
 )
 from .paths import get_models_dir
 from .transcription_config import build_transcription_config
+from .transcription_device import get_cuda_device_count
 
 MODEL_NAME = "large-v3"
 TRANSCRIBE_DEFAULTS = [
@@ -79,22 +79,38 @@ def _stabilize_runtime() -> None:
         os.environ["PATH"] = ";".join(new_paths + [existing])
         _print(f"CUDA PATH added: {', '.join(new_paths)}")
     
-def _ctranslate2_cuda_device_count() -> int:
-    try:
-        ctranslate2 = importlib.import_module("ctranslate2")
-        return int(ctranslate2.get_cuda_device_count())
-    except Exception as exc:  # noqa: BLE001
-        _print(f"CTRANSLATE2_CUDA_PROBE_ERROR {exc}")
-        return 0
-
-
-def _should_use_gpu(prefer_gpu: bool, force_cpu: bool) -> tuple[bool, str]:
+def _resolve_device(
+    requested_device: str,
+    *,
+    prefer_gpu: bool,
+    force_cpu: bool,
+) -> tuple[str, str]:
     if force_cpu:
-        return False, "GPU disabled: --force-cpu"
+        return "cpu", "GPU disabled: --force-cpu"
+    if requested_device == "cpu":
+        return "cpu", "Device requested: cpu"
+    count = get_cuda_device_count()
+    if requested_device == "cuda":
+        if count > 0:
+            return "cuda", f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}"
+        return "cpu", f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}"
     if not prefer_gpu:
-        return False, "GPU not requested"
-    count = _ctranslate2_cuda_device_count()
-    return count > 0, f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}"
+        return "cpu", "GPU not requested"
+    return (
+        ("cuda", f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}")
+        if count > 0
+        else ("cpu", f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}")
+    )
+
+
+def _resolve_compute_type(requested_type: str, device: str) -> str:
+    if requested_type != "auto":
+        if requested_type == "float16" and device != "cuda":
+            return "int16"
+        return requested_type
+    if device == "cuda":
+        return "float16"
+    return "int16"
 
 
 def _validate_model_dir(model_dir: Path) -> bool:
@@ -118,13 +134,18 @@ def _cpu_threads_for_device(device: str) -> int:
     return max(2, min(4, cpu_count))
 
 
-def _load_model(prefer_gpu: bool, *, models_dir: Path, cpu_threads_cpu: int):
+def _load_model(
+    device: str,
+    compute_type: str,
+    *,
+    models_dir: Path,
+    cpu_threads_cpu: int,
+    cpu_threads_active: int,
+):
     from faster_whisper import WhisperModel
 
-    compute_type = "float16" if prefer_gpu else "int8"
-    device = "cuda" if prefer_gpu else "cpu"
     _print(f"MODEL_DEVICE {device} compute_type={compute_type}")
-    if prefer_gpu:
+    if device == "cuda":
         try:
             _print("MODE gpu")
             _print("Loading model (GPU)...")
@@ -155,8 +176,8 @@ def _load_model(prefer_gpu: bool, *, models_dir: Path, cpu_threads_cpu: int):
     return WhisperModel(
         MODEL_NAME,
         device="cpu",
-        compute_type="int8",
-        cpu_threads=cpu_threads_cpu,
+        compute_type=compute_type,
+        cpu_threads=cpu_threads_active,
         num_workers=1,
         download_root=str(models_dir),
     )
@@ -206,6 +227,12 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     parser.add_argument("--lang", default="he")
     parser.add_argument("--prefer-gpu", action="store_true")
     parser.add_argument("--force-cpu", action="store_true")
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument(
+        "--compute-type",
+        choices=["auto", "int8", "int16", "float16", "float32"],
+        default="auto",
+    )
     parser.add_argument("--duration-seconds", type=float)
     parser.add_argument("--print-transcribe-config", action="store_true")
     parser.add_argument("--ffmpeg-args-json")
@@ -246,12 +273,19 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             if not is_valid:
                 _print("MODEL_INVALID removing")
                 shutil.rmtree(model_dir, ignore_errors=True)
-        prefer_gpu, gpu_reason = _should_use_gpu(args.prefer_gpu, args.force_cpu)
+        device, gpu_reason = _resolve_device(
+            args.device,
+            prefer_gpu=args.prefer_gpu,
+            force_cpu=args.force_cpu,
+        )
         _print(gpu_reason)
-        if not prefer_gpu and args.prefer_gpu and not args.force_cpu:
+        if device != "cuda" and args.device == "cuda":
             _print("GPU not available; falling back to CPU.")
-        device = "cuda" if prefer_gpu else "cpu"
-        compute_type = "float16" if prefer_gpu else "int8"
+        elif device != "cuda" and args.prefer_gpu and not args.force_cpu:
+            _print("GPU not available; falling back to CPU.")
+        compute_type = _resolve_compute_type(args.compute_type, device)
+        prefer_gpu = device == "cuda"
+        force_cpu = device == "cpu"
         cpu_threads_cpu = _cpu_threads_for_device("cpu")
         cpu_threads_active = _cpu_threads_for_device(device)
         transcribe_kwargs = {
@@ -301,8 +335,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         config = build_transcription_config(
             model_name=MODEL_NAME,
             models_dir=models_dir,
-            prefer_gpu=args.prefer_gpu,
-            force_cpu=args.force_cpu,
+            prefer_gpu=prefer_gpu,
+            force_cpu=force_cpu,
             device=device,
             compute_type=compute_type,
             gpu_probe_reason=gpu_reason,
@@ -330,9 +364,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
         try:
             model = _load_model(
-                prefer_gpu,
+                device,
+                compute_type,
                 models_dir=models_dir,
                 cpu_threads_cpu=cpu_threads_cpu,
+                cpu_threads_active=cpu_threads_active,
             )
         finally:
             heartbeat_stop.set()
