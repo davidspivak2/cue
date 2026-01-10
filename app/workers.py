@@ -53,6 +53,7 @@ class TranscriptionSettings:
     apply_audio_filter: bool
     device: str
     compute_type: str
+    quality: str
 
 
 @dataclass
@@ -102,12 +103,15 @@ class Worker(QtCore.QObject):
         self._step_progress: dict[str, float] = {}
         self._last_progress_emit = 0.0
         self._smooth_progress: Optional[SmoothProgress] = None
+        self._transcribe_estimator_stop: Optional[threading.Event] = None
+        self._transcribe_estimator_thread: Optional[threading.Thread] = None
         self._logger = logging.getLogger("hebrew_subtitle_gui")
         self._last_audio_extract_command: Optional[list[str]] = None
 
     def cancel(self) -> None:
         self._cancelled.set()
         self._stop_smooth_progress()
+        self._stop_transcribe_estimator()
         if self._process and self._process.poll() is None:
             self._process.terminate()
 
@@ -486,7 +490,7 @@ class Worker(QtCore.QObject):
         self._emit_step_progress(
             ProgressStep.TRANSCRIBE,
             0.0,
-            "Listening to audio",
+            "Loading model",
             force=True,
         )
         runtime_mode = get_runtime_mode()
@@ -581,6 +585,10 @@ class Worker(QtCore.QObject):
         stderr_thread.start()
 
         max_end_seconds = 0.0
+        progress_lock = threading.Lock()
+        real_progress = 0.0
+        real_progress_seen = False
+        transcribe_started = False
         last_progress_log = 0.0
         done_seen = False
         done_srt_path: Optional[Path] = None
@@ -589,8 +597,49 @@ class Worker(QtCore.QObject):
         watchdog_elapsed = 0.0
         watchdog_stop = threading.Event()
         no_output_timeout = 60.0
+        smooth_transcribe_started = False
         if duration_seconds is None:
-            self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Listening to audio")
+            self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Loading model")
+        else:
+            rtf_est = self._resolve_transcribe_rtf_est(
+                self.transcription_settings,
+                device,
+                compute_type,
+            )
+            estimator_stop = threading.Event()
+            self._transcribe_estimator_stop = estimator_stop
+
+            def _estimate_progress() -> None:
+                start_time = time.monotonic()
+                while not estimator_stop.wait(0.5):
+                    if self._cancelled.is_set():
+                        break
+                    elapsed = time.monotonic() - start_time
+                    processed_seconds_est = elapsed / rtf_est
+                    step_progress_est = processed_seconds_est / duration_seconds
+                    with progress_lock:
+                        current_real = real_progress
+                        has_real = real_progress_seen
+                        has_started = transcribe_started
+                    if not has_real:
+                        step_progress_est = min(step_progress_est, 0.85)
+                    else:
+                        step_progress_est = min(
+                            step_progress_est,
+                            min(0.99, current_real + 0.02),
+                        )
+                    step_progress = max(current_real, step_progress_est)
+                    label = "Listening to audio" if has_started else "Loading model"
+                    self._emit_step_progress(
+                        ProgressStep.TRANSCRIBE,
+                        step_progress,
+                        label,
+                    )
+
+            self._transcribe_estimator_thread = threading.Thread(
+                target=_estimate_progress, daemon=True
+            )
+            self._transcribe_estimator_thread.start()
 
         def _watchdog() -> None:
             nonlocal watchdog_triggered, watchdog_elapsed
@@ -635,10 +684,23 @@ class Worker(QtCore.QObject):
                     if end_value > max_end_seconds:
                         max_end_seconds = end_value
                         progress = min(0.99, max_end_seconds / duration_seconds)
+                        with progress_lock:
+                            real_progress = progress
+                            real_progress_seen = True
+                            transcribe_started = True
                         self._emit_step_progress(
                             ProgressStep.TRANSCRIBE,
                             progress,
                             "Listening to audio",
+                        )
+                else:
+                    transcribe_started = True
+                    if not smooth_transcribe_started:
+                        smooth_transcribe_started = True
+                        self._start_smooth_progress(
+                            ProgressStep.TRANSCRIBE,
+                            "Listening to audio",
+                            start=self._step_progress.get(ProgressStep.TRANSCRIBE, 0.0),
                         )
                 now = time.monotonic()
                 if now - last_progress_log >= 2.0:
@@ -649,11 +711,34 @@ class Worker(QtCore.QObject):
             _emit_log(text, True)
             if text.startswith("MODE"):
                 continue
+            if text.startswith("HEARTBEAT MODEL_LOAD") or text.startswith("Loading model"):
+                self._emit_step_progress(
+                    ProgressStep.TRANSCRIBE,
+                    None,
+                    "Loading model",
+                )
+                continue
+            if text.startswith("HEARTBEAT TRANSCRIBE"):
+                with progress_lock:
+                    transcribe_started = True
+                if duration_seconds is None and not smooth_transcribe_started:
+                    smooth_transcribe_started = True
+                    self._start_smooth_progress(
+                        ProgressStep.TRANSCRIBE,
+                        "Listening to audio",
+                        start=self._step_progress.get(ProgressStep.TRANSCRIBE, 0.0),
+                    )
+                self._emit_step_progress(
+                    ProgressStep.TRANSCRIBE,
+                    None,
+                    "Listening to audio",
+                )
+                continue
             if text.startswith("READY"):
                 self._emit_step_progress(
                     ProgressStep.TRANSCRIBE,
                     0.0,
-                    "Listening to audio",
+                    "Loading model",
                     force=True,
                 )
                 continue
@@ -664,6 +749,7 @@ class Worker(QtCore.QObject):
                 if len(parts) == 2:
                     done_srt_path = Path(parts[1].strip())
                 self._stop_smooth_progress()
+                self._stop_transcribe_estimator()
                 self._emit_step_progress(
                     ProgressStep.TRANSCRIBE,
                     1.0,
@@ -677,6 +763,7 @@ class Worker(QtCore.QObject):
         stderr_thread.join(timeout=1)
         self._process = None
         self._stop_smooth_progress()
+        self._stop_transcribe_estimator()
 
         srt_candidate = done_srt_path or srt_path
         srt_exists = srt_candidate.exists()
@@ -781,6 +868,31 @@ class Worker(QtCore.QObject):
         if self._smooth_progress:
             self._smooth_progress.stop()
             self._smooth_progress = None
+
+    def _resolve_transcribe_rtf_est(
+        self,
+        settings: TranscriptionSettings,
+        device: str,
+        compute_type: str,
+    ) -> float:
+        quality = settings.quality
+        if quality == "fast":
+            return 4.0
+        if quality == "accurate":
+            return 6.0
+        if quality == "ultra":
+            return 10.0
+        if device == "cuda" and compute_type == "float16":
+            return 1.5
+        return 6.0
+
+    def _stop_transcribe_estimator(self) -> None:
+        if self._transcribe_estimator_stop:
+            self._transcribe_estimator_stop.set()
+        if self._transcribe_estimator_thread:
+            self._transcribe_estimator_thread.join(timeout=1)
+        self._transcribe_estimator_stop = None
+        self._transcribe_estimator_thread = None
 
     def _probe_duration(self, path: Path) -> Optional[float]:
         try:
