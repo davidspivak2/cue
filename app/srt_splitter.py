@@ -275,16 +275,35 @@ def _align_words_to_text(
     for word in words:
         raw = word.text.strip()
         if not raw:
-            return None
-        match_start = segment_text.find(raw, cursor)
-        match_token = raw
+            continue
+        raw_strip_trailing = raw.strip(_TRAILING_STRIP)
+        raw_strip_trailing_and_punct = raw.strip(
+            _TRAILING_STRIP + "".join(_PUNCTUATION)
+        )
+        candidates = [
+            raw,
+            raw_strip_trailing,
+            raw_strip_trailing_and_punct,
+        ]
+        match_start = -1
+        match_token = ""
+        for candidate in candidates:
+            if not candidate:
+                continue
+            variants = [candidate]
+            if "..." in candidate:
+                variants.append(candidate.replace("...", "…"))
+            if "…" in candidate:
+                variants.append(candidate.replace("…", "..."))
+            for variant in variants:
+                match_start = segment_text.find(variant, cursor)
+                if match_start != -1:
+                    match_token = variant
+                    break
+            if match_start != -1:
+                break
         if match_start == -1:
-            cleaned = raw.strip(_TRAILING_STRIP)
-            if cleaned and cleaned != raw:
-                match_start = segment_text.find(cleaned, cursor)
-                match_token = cleaned
-        if match_start == -1:
-            return None
+            continue
         match_end = match_start + len(match_token)
         spans[word.index] = (match_start, match_end)
         cursor = match_end
@@ -301,33 +320,58 @@ def _reconstruct_text(
         return _join_words(words)
     first_span = None
     last_span = None
+    matched_count = 0
     for word in words:
         span = word_spans[word.index] if word.index < len(word_spans) else None
         if span is None:
-            _LOGGER.warning("Failed to align word index %s in segment text.", word.index)
-            return _join_words(words)
+            continue
         if first_span is None:
             first_span = span
         last_span = span
+        matched_count += 1
     if not first_span or not last_span:
+        return _join_words(words)
+    if not words or matched_count / len(words) < 0.6:
+        _LOGGER.warning(
+            "Alignment coverage too low (%s/%s); falling back to word join.",
+            matched_count,
+            len(words),
+        )
         return _join_words(words)
     start, _ = first_span
     _, end = last_span
     if start >= end or start < 0 or end > len(segment_text):
         _LOGGER.warning("Invalid alignment span in segment text.")
         return _join_words(words)
-    end_extended = end
-    while end_extended < len(segment_text):
-        char = segment_text[end_extended]
-        if char.isspace():
-            break
-        if char in _PUNCTUATION or char in _TRAILING_STRIP:
-            end_extended += 1
-            continue
-        if char.isalnum():
-            break
-        break
-    reconstructed = segment_text[start:end_extended].strip()
+    reconstructed = None
+    if end < len(segment_text):
+        if segment_text[end].isspace():
+            scan = end
+            while scan < len(segment_text) and segment_text[scan].isspace():
+                scan += 1
+            if scan < len(segment_text) and (
+                segment_text[scan] in _PUNCTUATION
+                or segment_text[scan] in _TRAILING_STRIP
+            ):
+                punct_end = scan
+                while punct_end < len(segment_text) and (
+                    segment_text[punct_end] in _PUNCTUATION
+                    or segment_text[punct_end] in _TRAILING_STRIP
+                ):
+                    punct_end += 1
+                reconstructed = segment_text[start:end].rstrip() + segment_text[
+                    scan:punct_end
+                ]
+        elif segment_text[end] in _PUNCTUATION or segment_text[end] in _TRAILING_STRIP:
+            punct_end = end
+            while punct_end < len(segment_text) and (
+                segment_text[punct_end] in _PUNCTUATION
+                or segment_text[punct_end] in _TRAILING_STRIP
+            ):
+                punct_end += 1
+            reconstructed = segment_text[start:punct_end].strip()
+    if reconstructed is None:
+        reconstructed = segment_text[start:end].strip()
     return reconstructed or _join_words(words)
 
 

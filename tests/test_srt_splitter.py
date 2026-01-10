@@ -155,3 +155,15 @@ def test_reconstruct_text_stops_before_next_word() -> None:
     word_spans = _align_words_to_text(segment_text, words)
     reconstructed = _reconstruct_text(segment_text, words, word_spans)
     assert reconstructed == "עוד משפט"
+
+
+def test_reconstruct_text_keeps_commas_with_partial_alignment() -> None:
+    segment_text = "Hello, world , again."
+    words = [
+        _Word(start=0.0, end=0.2, text="Hello", index=0),
+        _Word(start=0.25, end=0.5, text="world", index=1),
+        _Word(start=0.55, end=0.8, text="missing", index=2),
+    ]
+    word_spans = _align_words_to_text(segment_text, words)
+    reconstructed = _reconstruct_text(segment_text, words, word_spans)
+    assert reconstructed == "Hello, world,"
