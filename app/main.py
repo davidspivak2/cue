@@ -13,6 +13,7 @@ import logging
 import os
 import platform
 import sys
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -70,6 +71,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ffprobe_available = False
         self._subtitles_reviewed = False
         self._progress_controller: Optional[ProgressController] = None
+        self._worker_start_time: Optional[float] = None
+        self._elapsed_timer = QtCore.QTimer(self)
+        self._elapsed_timer.setInterval(500)
+        self._elapsed_timer.timeout.connect(self._update_elapsed_label)
         self._config = self._load_config()
         self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
         self._save_policy = self._load_save_policy()
@@ -151,6 +156,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_label.setStyleSheet("font-weight: bold;")
         self.substatus_label = QtWidgets.QLabel("")
         self.substatus_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.elapsed_label = QtWidgets.QLabel("")
+        self.elapsed_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.elapsed_label.setStyleSheet("color: #777;")
 
         self.log_box = QtWidgets.QPlainTextEdit()
         self.log_box.setReadOnly(True)
@@ -277,6 +285,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_label.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(self.status_label)
         layout.addWidget(self.substatus_label)
+        layout.addWidget(self.elapsed_label)
         layout.addWidget(self.progress_bar)
         cancel_layout = QtWidgets.QHBoxLayout()
         cancel_layout.addStretch()
@@ -559,6 +568,7 @@ class MainWindow(QtWidgets.QMainWindow):
             apply_audio_filter=self.filter_checkbox.isChecked(),
             device=device,
             compute_type=compute_type,
+            quality=self._transcription_quality.value,
         )
         self._start_worker(TaskType.GENERATE_SRT, self._video_path, None, settings, None)
 
@@ -667,8 +677,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_worker_started(self, status: str) -> None:
         self.status_label.setText(status)
         self.substatus_label.setText("")
+        self.elapsed_label.setText("")
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("0%")
+        self._worker_start_time = time.monotonic()
+        self._elapsed_timer.start()
         self.set_state(AppState.WORKING)
 
     def _on_worker_finished(self, success: bool, message: str, payload: dict) -> None:
@@ -677,14 +690,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self.progress_bar.setValue(100)
             self.status_label.setText("Done")
             self.substatus_label.setText("")
+            self.elapsed_label.setText("")
         elif message == "Operation cancelled.":
             self.progress_bar.setValue(0)
             self.status_label.setText("Cancelled")
             self.substatus_label.setText("")
+            self.elapsed_label.setText("")
         else:
             self.progress_bar.setValue(0)
             self.status_label.setText("Ready")
             self.substatus_label.setText("")
+            self.elapsed_label.setText("")
+
+        self._elapsed_timer.stop()
+        self._worker_start_time = None
 
         if self._worker_thread:
             self._worker_thread.quit()
@@ -794,6 +813,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.progress_bar.setValue(percent)
         self.progress_bar.setFormat(f"{percent}%")
         self.substatus_label.setText(status)
+
+    def _update_elapsed_label(self) -> None:
+        if self._worker_start_time is None or self._state != AppState.WORKING:
+            return
+        elapsed = int(time.monotonic() - self._worker_start_time)
+        minutes, seconds = divmod(elapsed, 60)
+        text = f"Elapsed: {minutes:02d}:{seconds:02d}"
+        if self.elapsed_label.text() != text:
+            self.elapsed_label.setText(text)
 
     def _refresh_ffmpeg_status(self) -> None:
         ffmpeg_path, ffprobe_path, _ = resolve_ffmpeg_paths()
