@@ -59,6 +59,7 @@ class TranscriptionSettings:
     device: str
     compute_type: str
     quality: str
+    punctuation_mode: str
 
 
 @dataclass
@@ -573,6 +574,7 @@ class Worker(QtCore.QObject):
             "--lang",
             "he",
         ]
+        command += ["--punctuation-mode", self.transcription_settings.punctuation_mode]
         if force_cpu_flag:
             command.append("--force-cpu")
         else:
@@ -593,6 +595,7 @@ class Worker(QtCore.QObject):
             "force_cpu": force_cpu_flag,
             "device": device,
             "compute_type": compute_type,
+            "punctuation_mode": self.transcription_settings.punctuation_mode,
             "ffmpeg_args": self._last_audio_extract_command,
         }
         self.signals.log.emit(

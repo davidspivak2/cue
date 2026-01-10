@@ -58,6 +58,11 @@ class TranscriptionQuality(Enum):
     ULTRA = "ultra"
 
 
+class PunctuationMode(Enum):
+    AUTO = "auto"
+    OFF = "off"
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, logger: logging.Logger, log_path: Path, log_dir: Path) -> None:
         super().__init__()
@@ -87,6 +92,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._save_policy = self._load_save_policy()
         self._fixed_output_dir = self._get_config_path("save_folder")
         self._transcription_quality = self._load_transcription_quality()
+        self._punctuation_mode = self._load_punctuation_mode()
         self._diagnostics_settings = self._load_diagnostics_settings()
         self._state = AppState.EMPTY
 
@@ -262,6 +268,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings_button.clicked.connect(self._show_settings_page)
         self.settings_back_button.clicked.connect(self._show_home_page)
         self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
+        self.punctuation_combo.currentIndexChanged.connect(self._on_punctuation_changed)
         self.save_policy_group.buttonToggled.connect(self._on_save_policy_toggled)
         self.browse_button.clicked.connect(self._browse_fixed_output_dir)
         self.diagnostics_enabled_checkbox.toggled.connect(
@@ -434,6 +441,27 @@ class MainWindow(QtWidgets.QMainWindow):
         performance_grid.addWidget(self.quality_run_label, 1, 1)
         performance_grid.addWidget(QtWidgets.QLabel(""), 2, 0)
         performance_grid.addWidget(self.quality_helper_label, 2, 1)
+
+        punctuation_label = QtWidgets.QLabel("Punctuation")
+        punctuation_label.setFixedWidth(170)
+
+        self.punctuation_combo = QtWidgets.QComboBox()
+        self.punctuation_combo.addItems(["Auto", "Off"])
+        self.punctuation_combo.setFixedHeight(36)
+        self.punctuation_combo.setMinimumWidth(320)
+        self.punctuation_combo.setMaximumWidth(360)
+
+        self.punctuation_helper_label = QtWidgets.QLabel(
+            "Auto adds commas and periods based on pauses only when Whisper output has "
+            "almost no punctuation. This does not change timings."
+        )
+        self.punctuation_helper_label.setObjectName("SettingsHelperText")
+        self.punctuation_helper_label.setWordWrap(True)
+
+        performance_grid.addWidget(punctuation_label, 3, 0)
+        performance_grid.addWidget(self.punctuation_combo, 3, 1)
+        performance_grid.addWidget(QtWidgets.QLabel(""), 4, 0)
+        performance_grid.addWidget(self.punctuation_helper_label, 4, 1)
         layout.addLayout(performance_grid)
 
         save_title = QtWidgets.QLabel("Save location")
@@ -620,6 +648,7 @@ class MainWindow(QtWidgets.QMainWindow):
             device=device,
             compute_type=compute_type,
             quality=self._transcription_quality.value,
+            punctuation_mode=self._punctuation_mode.value,
         )
         self._start_worker(TaskType.GENERATE_SRT, self._video_path, None, settings, None)
 
@@ -929,6 +958,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quality_combo.setCurrentIndex(quality_index[self._transcription_quality])
         self.quality_combo.blockSignals(False)
 
+        punctuation_index = {
+            PunctuationMode.AUTO: 0,
+            PunctuationMode.OFF: 1,
+        }
+        self.punctuation_combo.blockSignals(True)
+        self.punctuation_combo.setCurrentIndex(punctuation_index[self._punctuation_mode])
+        self.punctuation_combo.blockSignals(False)
+
         self.save_policy_group.blockSignals(True)
         if self._save_policy == SaveLocationPolicy.SAME_FOLDER:
             self.save_same_radio.setChecked(True)
@@ -1052,6 +1089,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config["transcription_quality"] = quality.value
         self._save_config()
         self._update_quality_summary()
+
+    def _on_punctuation_changed(self, index: int) -> None:
+        mode_map = {
+            0: PunctuationMode.AUTO,
+            1: PunctuationMode.OFF,
+        }
+        mode = mode_map.get(index, PunctuationMode.AUTO)
+        if mode == self._punctuation_mode:
+            return
+        self._punctuation_mode = mode
+        self._config["punctuation_mode"] = mode.value
+        self._save_config()
 
     def _resolve_transcription_device(self) -> tuple[str, str]:
         if self._transcription_quality == TranscriptionQuality.AUTO:
@@ -1268,6 +1317,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return TranscriptionQuality(value)
         except ValueError:
             return TranscriptionQuality.AUTO
+
+    def _load_punctuation_mode(self) -> PunctuationMode:
+        value = self._config.get("punctuation_mode")
+        try:
+            return PunctuationMode(value)
+        except ValueError:
+            return PunctuationMode.AUTO
 
     def _load_diagnostics_settings(self) -> DiagnosticsSettings:
         default_categories = {

@@ -58,6 +58,13 @@ class SplitterConfig:
 
 
 @dataclass(frozen=True)
+class PausePunctuationConfig:
+    enabled: bool = False
+    comma_gap_sec: float = 0.7
+    period_gap_sec: float = 1.3
+
+
+@dataclass(frozen=True)
 class Cue:
     start: float
     end: float
@@ -81,28 +88,45 @@ def split_segments_into_cues(
     segments: Iterable[SegmentLike],
     *,
     config: SplitterConfig = SplitterConfig(),
+    punctuation_config: PausePunctuationConfig | None = None,
 ) -> list[Cue]:
     cues: list[Cue] = []
     for segment in segments:
-        cues.extend(_split_segment(segment, config))
+        cues.extend(_split_segment(segment, config, punctuation_config))
     return cues
 
 
-def _split_segment(segment: SegmentLike, config: SplitterConfig) -> list[Cue]:
+def _split_segment(
+    segment: SegmentLike,
+    config: SplitterConfig,
+    punctuation_config: PausePunctuationConfig | None,
+) -> list[Cue]:
     raw_words = list(getattr(segment, "words", []) or [])
     if not _should_split(segment, config.apply_if, raw_words):
+        text = str(segment.text)
+        if punctuation_config and punctuation_config.enabled:
+            words = _normalize_words(raw_words)
+            word_spans = (
+                _align_words_to_text(str(segment.text), words) if words else None
+            )
+            text = _build_cue_text(
+                str(segment.text),
+                words,
+                word_spans,
+                punctuation_config,
+            )
         return [
             Cue(
                 start=float(segment.start),
                 end=float(segment.end),
-                text=str(segment.text),
+                text=text,
             )
         ]
     words = _normalize_words(raw_words)
     if not words:
         return _split_segment_by_time_and_text(segment, config.max_cue)
     word_spans = _align_words_to_text(str(segment.text), words)
-    return _split_segment_by_words(segment, words, word_spans, config)
+    return _split_segment_by_words(segment, words, word_spans, config, punctuation_config)
 
 
 def _should_split(
@@ -169,6 +193,7 @@ def _split_segment_by_words(
     words: list[_Word],
     word_spans: list[tuple[int, int] | None] | None,
     config: SplitterConfig,
+    punctuation_config: PausePunctuationConfig | None,
 ) -> list[Cue]:
     cues: list[Cue] = []
     current_words: list[_Word] = []
@@ -197,6 +222,7 @@ def _split_segment_by_words(
                     segment,
                     words[start_idx : split_idx + 1],
                     word_spans,
+                    punctuation_config,
                 )
             )
             current_words = []
@@ -211,7 +237,7 @@ def _split_segment_by_words(
                 gap_candidate = i - 1
         i += 1
     if current_words:
-        cues.append(_build_cue(segment, current_words, word_spans))
+        cues.append(_build_cue(segment, current_words, word_spans, punctuation_config))
     return cues
 
 
@@ -219,11 +245,12 @@ def _build_cue(
     segment: SegmentLike,
     words: list[_Word],
     word_spans: list[tuple[int, int] | None] | None,
+    punctuation_config: PausePunctuationConfig | None,
 ) -> Cue:
     start = max(float(segment.start), words[0].start)
     end = min(float(segment.end), words[-1].end)
     segment_text = str(segment.text)
-    text = _reconstruct_text(segment_text, words, word_spans)
+    text = _build_cue_text(segment_text, words, word_spans, punctuation_config)
     return Cue(start=start, end=end, text=text)
 
 
@@ -262,6 +289,47 @@ def _join_words(words: list[_Word]) -> str:
         else:
             parts.append(" " + raw.lstrip())
     return "".join(parts).strip()
+
+
+def _join_words_with_pause_punctuation(
+    words: list[_Word],
+    config: PausePunctuationConfig,
+) -> str:
+    if not words:
+        return ""
+    parts: list[str] = []
+    for index, word in enumerate(words):
+        raw = word.text
+        if not parts:
+            parts.append(raw.lstrip() if raw[:1].isspace() else raw)
+        else:
+            prev_word = words[index - 1]
+            gap = word.start - prev_word.end
+            punctuation = None
+            if gap >= config.period_gap_sec:
+                punctuation = "."
+            elif gap >= config.comma_gap_sec:
+                punctuation = ","
+            if punctuation and not _ends_with_punctuation(parts[-1]):
+                parts[-1] = parts[-1].rstrip() + punctuation
+            if raw[:1].isspace():
+                parts.append(raw)
+            else:
+                parts.append(" " + raw.lstrip())
+    return "".join(parts).strip()
+
+
+def _build_cue_text(
+    segment_text: str,
+    words: list[_Word],
+    word_spans: list[tuple[int, int] | None] | None,
+    punctuation_config: PausePunctuationConfig | None,
+) -> str:
+    if not words:
+        return segment_text
+    if punctuation_config and punctuation_config.enabled:
+        return _join_words_with_pause_punctuation(words, punctuation_config)
+    return _reconstruct_text(segment_text, words, word_spans)
 
 
 def _align_words_to_text(

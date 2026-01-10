@@ -13,6 +13,7 @@ from typing import NoReturn
 
 from .srt_utils import SrtSegment, segments_to_srt
 from .srt_splitter import (
+    PausePunctuationConfig,
     SplitApplyThresholds,
     SplitMaxCue,
     SplitterConfig,
@@ -33,6 +34,9 @@ TRANSCRIBE_DEFAULTS = [
     "patience",
     "length_penalty",
 ]
+COMMA_GAP_SEC = 0.7
+PERIOD_GAP_SEC = 1.3
+PUNCTUATION_NEAR_ZERO_THRESHOLD = 1
 
 
 def _print(message: str) -> None:
@@ -207,6 +211,22 @@ def _enable_faulthandler() -> None:
         faulthandler.enable(file=handle)
 
 
+def _count_punctuation(text: str) -> dict[str, int]:
+    counts = {".": 0, ",": 0, "?": 0, "!": 0, "…": 0, "total": 0}
+    for char in text:
+        if char in counts:
+            counts[char] += 1
+            counts["total"] += 1
+    return counts
+
+
+def _merge_counts(base: dict[str, int], updates: dict[str, int]) -> dict[str, int]:
+    merged = dict(base)
+    for key, value in updates.items():
+        merged[key] = merged.get(key, 0) + value
+    return merged
+
+
 def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     _enable_faulthandler()
     _print(f"Executable: {sys.executable}")
@@ -231,6 +251,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     parser.add_argument(
         "--compute-type",
         choices=["auto", "int8", "int16", "float16", "float32"],
+        default="auto",
+    )
+    parser.add_argument(
+        "--punctuation-mode",
+        choices=["auto", "off"],
         default="auto",
     )
     parser.add_argument("--duration-seconds", type=float)
@@ -310,6 +335,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             gap_sec=0.4,
             prefer=("punctuation", "gap"),
         )
+        punctuation_config = PausePunctuationConfig(
+            enabled=False,
+            comma_gap_sec=COMMA_GAP_SEC,
+            period_gap_sec=PERIOD_GAP_SEC,
+        )
         audio_extraction = None
         if args.ffmpeg_args_json:
             try:
@@ -351,6 +381,12 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "segment_separator": "blank_line",
             },
             post_splitter=splitter_config.to_dict(),
+            punctuation={
+                "mode": args.punctuation_mode,
+                "comma_gap_sec": COMMA_GAP_SEC,
+                "period_gap_sec": PERIOD_GAP_SEC,
+                "near_zero_threshold": PUNCTUATION_NEAR_ZERO_THRESHOLD,
+            },
             audio_extraction=audio_extraction,
         )
         _log_transcribe_config(config.to_json(), config.to_pretty_text())
@@ -383,12 +419,16 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         transcribe_heartbeat_thread = _start_heartbeat("TRANSCRIBE", transcribe_heartbeat_stop)
         try:
             raw_segments = []
+            raw_punctuation = {".": 0, ",": 0, "?": 0, "!": 0, "…": 0, "total": 0}
             max_end = 0.0
             last_reported_end = 0.0
             last_reported_percent = 0.0
             duration_seconds = args.duration_seconds
             for segment in segments_iter:
                 raw_segments.append(segment)
+                raw_punctuation = _merge_counts(
+                    raw_punctuation, _count_punctuation(segment.text)
+                )
                 if segment.end > max_end:
                     max_end = segment.end
                 should_report = max_end - last_reported_end >= 0.5
@@ -401,12 +441,46 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     last_reported_end = max_end
                     if duration_seconds:
                         last_reported_percent = max_end / duration_seconds
-            cues = split_segments_into_cues(raw_segments, config=splitter_config)
+            should_restore_punctuation = (
+                args.lang == "he"
+                and args.punctuation_mode == "auto"
+                and raw_punctuation["total"] <= PUNCTUATION_NEAR_ZERO_THRESHOLD
+            )
+            if should_restore_punctuation:
+                punctuation_config = PausePunctuationConfig(
+                    enabled=True,
+                    comma_gap_sec=COMMA_GAP_SEC,
+                    period_gap_sec=PERIOD_GAP_SEC,
+                )
+            cues = split_segments_into_cues(
+                raw_segments,
+                config=splitter_config,
+                punctuation_config=punctuation_config,
+            )
+            final_punctuation = {".": 0, ",": 0, "?": 0, "!": 0, "…": 0, "total": 0}
+            for cue in cues:
+                final_punctuation = _merge_counts(
+                    final_punctuation, _count_punctuation(cue.text)
+                )
             segments: list[SrtSegment] = []
             for index, cue in enumerate(cues, start=1):
                 segments.append(
                     SrtSegment(index=index, start=cue.start, end=cue.end, text=cue.text)
                 )
+
+            punctuation_summary = {
+                "mode": args.punctuation_mode,
+                "language": args.lang,
+                "applied": should_restore_punctuation,
+                "raw_counts": raw_punctuation,
+                "final_counts": final_punctuation,
+            }
+            config_payload = config.to_dict()
+            config_payload["punctuation_restoration"] = punctuation_summary
+            _print(
+                "TRANSCRIBE_CONFIG_JSON "
+                + json.dumps(config_payload, sort_keys=True, ensure_ascii=False)
+            )
 
             _write_srt(segments, srt_path)
         finally:
