@@ -343,17 +343,39 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             f"(prob={info.language_probability:.2f})"
         )
 
-        raw_segments = list(segments_iter)
-        cues = split_segments_into_cues(raw_segments, config=splitter_config)
-        segments: list[SrtSegment] = []
-        max_end = 0.0
-        for index, cue in enumerate(cues, start=1):
-            segments.append(SrtSegment(index=index, start=cue.start, end=cue.end, text=cue.text))
-            if cue.end > max_end:
-                max_end = cue.end
-                _print(f"PROGRESS_END {max_end:.3f}")
+        transcribe_heartbeat_stop = threading.Event()
+        transcribe_heartbeat_thread = _start_heartbeat("TRANSCRIBE", transcribe_heartbeat_stop)
+        try:
+            raw_segments = []
+            max_end = 0.0
+            last_reported_end = 0.0
+            last_reported_percent = 0.0
+            duration_seconds = args.duration_seconds
+            for segment in segments_iter:
+                raw_segments.append(segment)
+                if segment.end > max_end:
+                    max_end = segment.end
+                should_report = max_end - last_reported_end >= 0.5
+                if duration_seconds:
+                    current_percent = max_end / duration_seconds
+                    if current_percent - last_reported_percent >= 0.01:
+                        should_report = True
+                if should_report and max_end > last_reported_end:
+                    _print(f"PROGRESS_END {max_end:.3f}")
+                    last_reported_end = max_end
+                    if duration_seconds:
+                        last_reported_percent = max_end / duration_seconds
+            cues = split_segments_into_cues(raw_segments, config=splitter_config)
+            segments: list[SrtSegment] = []
+            for index, cue in enumerate(cues, start=1):
+                segments.append(
+                    SrtSegment(index=index, start=cue.start, end=cue.end, text=cue.text)
+                )
 
-        _write_srt(segments, srt_path)
+            _write_srt(segments, srt_path)
+        finally:
+            transcribe_heartbeat_stop.set()
+            transcribe_heartbeat_thread.join(timeout=1)
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             _print(f"ERROR SRT_WRITE_FAILED {srt_path}")
             if hard_exit:

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6 import QtCore
+from .progress import ProgressStep
 from .ffmpeg_utils import (
     ensure_ffmpeg_available,
     escape_subtitles_filter_path,
@@ -65,7 +66,7 @@ class WorkerSignals(QtCore.QObject):
     log = QtCore.Signal(str, bool)
     finished = QtCore.Signal(bool, str, dict)
     started = QtCore.Signal(str)
-    progress = QtCore.Signal(int, str)
+    progress = QtCore.Signal(str, object, str)
 
 
 class TaskType:
@@ -96,11 +97,15 @@ class Worker(QtCore.QObject):
         self._progress_value = 0
         self._progress_label = ""
         self._progress_phase = ""
+        self._step_progress: dict[str, float] = {}
+        self._last_progress_emit = 0.0
+        self._smooth_progress: Optional[SmoothProgress] = None
         self._logger = logging.getLogger("hebrew_subtitle_gui")
         self._last_audio_extract_command: Optional[list[str]] = None
 
     def cancel(self) -> None:
         self._cancelled.set()
+        self._stop_smooth_progress()
         if self._process and self._process.poll() is None:
             self._process.terminate()
 
@@ -145,9 +150,8 @@ class Worker(QtCore.QObject):
                 "Warning: unable to read video duration; progress may be limited.",
                 True,
             )
-
         self.signals.log.emit("Preparing audio...", True)
-        self._emit_progress(0, "Extracting audio")
+        self._emit_step_progress(ProgressStep.PREPARE_AUDIO, 0.0, "Extracting audio", force=True)
         self._extract_audio(audio_path, settings.apply_audio_filter, video_duration)
 
         if self._cancelled.is_set():
@@ -259,7 +263,12 @@ class Worker(QtCore.QObject):
         command += ["-progress", "pipe:1", "-nostats"]
         command.append(str(audio_path))
         self._last_audio_extract_command = command
-        self._run_ffmpeg_with_progress(command, duration_seconds, "Extracting audio")
+        self._run_ffmpeg_with_progress(
+            command,
+            duration_seconds,
+            ProgressStep.PREPARE_AUDIO,
+            "Extracting audio",
+        )
 
     def _run_burn_in(self) -> dict:
         settings = self.burnin_settings
@@ -273,6 +282,14 @@ class Worker(QtCore.QObject):
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
         self.signals.log.emit(f"Subtitles file: {srt_path}", True)
         self.signals.log.emit(f"Video file: {output_path}", True)
+        video_duration = self._probe_duration(self.video_path)
+        if video_duration:
+            self.signals.log.emit(f"Video duration: {video_duration:.2f}s", True)
+        else:
+            self.signals.log.emit(
+                "Warning: unable to read video duration; progress may be limited.",
+                True,
+            )
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
         escaped_path = escape_subtitles_filter_path(srt_path)
@@ -291,6 +308,9 @@ class Worker(QtCore.QObject):
             "-hide_banner",
             "-i",
             str(self.video_path),
+            "-progress",
+            "pipe:1",
+            "-nostats",
             "-vf",
             subtitles_filter,
             "-c:v",
@@ -304,16 +324,27 @@ class Worker(QtCore.QObject):
         ]
 
         self.signals.log.emit("Adding subtitles to the video...", True)
+        self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
         copy_command = base_command + ["-c:a", "copy", str(output_path)]
         try:
-            self._run_ffmpeg(copy_command)
+            self._run_ffmpeg_with_progress(
+                copy_command,
+                video_duration,
+                ProgressStep.EXPORT,
+                "Encoding",
+            )
             return {"output_path": str(output_path)}
         except RuntimeError as exc:
             self.signals.log.emit("Audio copy failed, trying another format...", True)
             self.signals.log.emit(str(exc), True)
 
         aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
-        self._run_ffmpeg(aac_command)
+        self._run_ffmpeg_with_progress(
+            aac_command,
+            video_duration,
+            ProgressStep.EXPORT,
+            "Encoding",
+        )
         return {"output_path": str(output_path)}
 
     def _run_ffmpeg(self, command: list[str]) -> None:
@@ -352,7 +383,8 @@ class Worker(QtCore.QObject):
         self,
         command: list[str],
         duration_seconds: Optional[float],
-        phase_label: str,
+        step_id: str,
+        status_label: str,
     ) -> None:
         if self._cancelled.is_set():
             raise CancelledError()
@@ -389,6 +421,9 @@ class Worker(QtCore.QObject):
         stderr_thread.start()
 
         last_log_time = 0.0
+        end_emitted = False
+        if duration_seconds is None:
+            self._start_smooth_progress(step_id, status_label)
         assert process.stdout is not None
         for line in process.stdout:
             if self._cancelled.is_set():
@@ -400,25 +435,28 @@ class Worker(QtCore.QObject):
                     out_time_ms = int(text.split("=", 1)[1])
                 except ValueError:
                     continue
-                percent = (out_time_ms / (duration_seconds * 1_000_000)) * 100
-                percent = max(0.0, min(percent, 100.0))
-                self._emit_progress(percent, phase_label)
+                progress = out_time_ms / (duration_seconds * 1_000_000)
+                progress = max(0.0, min(progress, 1.0))
+                self._emit_step_progress(step_id, progress, status_label)
                 now = time.monotonic()
                 if now - last_log_time >= 0.25:
                     self.signals.log.emit(
-                        f"{phase_label} progress: {int(percent)}%",
+                        f"{status_label} progress: {int(progress * 100)}%",
                         True,
                     )
                     last_log_time = now
             elif text == "progress=end":
-                self._emit_progress(100, phase_label)
+                self._emit_step_progress(step_id, 1.0, status_label, force=True)
+                end_emitted = True
 
         return_code = process.wait()
         stderr_thread.join(timeout=1)
         self._process = None
 
         if return_code == 0:
-            self._emit_progress(100, phase_label)
+            if not end_emitted:
+                self._emit_step_progress(step_id, 1.0, status_label, force=True)
+        self._stop_smooth_progress()
 
         if return_code != 0:
             tail_text = "\n".join(stderr_tail)
@@ -433,6 +471,12 @@ class Worker(QtCore.QObject):
     ) -> None:
         self.signals.started.emit("Creating subtitles")
         self.signals.log.emit("Starting subtitles worker...", True)
+        self._emit_step_progress(
+            ProgressStep.TRANSCRIBE,
+            0.0,
+            "Listening to audio",
+            force=True,
+        )
         runtime_mode = get_runtime_mode()
         if runtime_mode == "source":
             command = [
@@ -530,6 +574,8 @@ class Worker(QtCore.QObject):
         watchdog_elapsed = 0.0
         watchdog_stop = threading.Event()
         no_output_timeout = 60.0
+        if duration_seconds is None:
+            self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Listening to audio")
 
         def _watchdog() -> None:
             nonlocal watchdog_triggered, watchdog_elapsed
@@ -573,8 +619,12 @@ class Worker(QtCore.QObject):
                         continue
                     if end_value > max_end_seconds:
                         max_end_seconds = end_value
-                        percent = min(99, int((max_end_seconds / duration_seconds) * 100))
-                        self._emit_progress(percent, "Listening")
+                        progress = min(0.99, max_end_seconds / duration_seconds)
+                        self._emit_step_progress(
+                            ProgressStep.TRANSCRIBE,
+                            progress,
+                            "Listening to audio",
+                        )
                 now = time.monotonic()
                 if now - last_progress_log >= 2.0:
                     _emit_log("Listening progress update received.", True)
@@ -585,7 +635,12 @@ class Worker(QtCore.QObject):
             if text.startswith("MODE"):
                 continue
             if text.startswith("READY"):
-                self._emit_progress(0, "Listening")
+                self._emit_step_progress(
+                    ProgressStep.TRANSCRIBE,
+                    0.0,
+                    "Listening to audio",
+                    force=True,
+                )
                 continue
             if text.startswith("DONE"):
                 done_seen = True
@@ -593,13 +648,20 @@ class Worker(QtCore.QObject):
                 parts = text.split(" ", 1)
                 if len(parts) == 2:
                     done_srt_path = Path(parts[1].strip())
-                self._emit_progress(100, "Listening")
+                self._stop_smooth_progress()
+                self._emit_step_progress(
+                    ProgressStep.TRANSCRIBE,
+                    1.0,
+                    "Writing subtitles",
+                    force=True,
+                )
 
         return_code = process.wait()
         watchdog_stop.set()
         watchdog_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
         self._process = None
+        self._stop_smooth_progress()
 
         srt_candidate = done_srt_path or srt_path
         srt_exists = srt_candidate.exists()
@@ -646,20 +708,64 @@ class Worker(QtCore.QObject):
             srt_size=srt_size,
         )
 
-    def _emit_progress(self, percent: float, phase_label: str) -> None:
-        percent_int = int(round(percent))
-        percent_int = max(0, min(percent_int, 100))
-        if phase_label != self._progress_phase:
-            self._progress_phase = phase_label
+    def _emit_step_progress(
+        self,
+        step_id: str,
+        step_progress: Optional[float],
+        label: str,
+        *,
+        force: bool = False,
+    ) -> None:
+        if step_id != self._progress_phase:
+            self._progress_phase = step_id
             self._progress_value = 0
             self._progress_label = ""
-        if percent_int < self._progress_value:
+        percent_int: Optional[int] = None
+        if step_progress is not None:
+            clamped = max(0.0, min(step_progress, 1.0))
+            clamped = max(clamped, self._step_progress.get(step_id, 0.0))
+            self._step_progress[step_id] = clamped
+            percent_int = int(round(clamped * 100))
+
+        status = label
+        now = time.monotonic()
+        if not force and now - self._last_progress_emit < 0.1:
+            return
+        if status == self._progress_label and percent_int == self._progress_value:
+            return
+        if percent_int is None:
             percent_int = self._progress_value
-        status = f"{phase_label} — {percent_int}%"
-        if percent_int != self._progress_value or status != self._progress_label:
-            self._progress_value = percent_int
-            self._progress_label = status
-            self.signals.progress.emit(percent_int, status)
+        self._progress_value = percent_int
+        self._progress_label = status
+        self._last_progress_emit = now
+        self.signals.progress.emit(step_id, step_progress, status)
+
+    def _start_smooth_progress(
+        self,
+        step_id: str,
+        label: str,
+        *,
+        start: float = 0.0,
+        cap: float = 0.95,
+        increment: float = 0.002,
+        interval: float = 0.3,
+    ) -> None:
+        self._stop_smooth_progress()
+        smooth = SmoothProgress(self._emit_step_progress)
+        smooth.start(
+            step_id=step_id,
+            label=label,
+            start=start,
+            cap=cap,
+            increment=increment,
+            interval=interval,
+        )
+        self._smooth_progress = smooth
+
+    def _stop_smooth_progress(self) -> None:
+        if self._smooth_progress:
+            self._smooth_progress.stop()
+            self._smooth_progress = None
 
     def _probe_duration(self, path: Path) -> Optional[float]:
         try:
@@ -667,3 +773,42 @@ class Worker(QtCore.QObject):
         except Exception as exc:  # noqa: BLE001
             self.signals.log.emit(f"Video check failed: {exc}", True)
             return None
+
+
+class SmoothProgress:
+    def __init__(self, emit_callback) -> None:
+        self._emit_callback = emit_callback
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(
+        self,
+        *,
+        step_id: str,
+        label: str,
+        start: float,
+        cap: float,
+        increment: float,
+        interval: float,
+    ) -> None:
+        self.stop()
+        self._stop_event = threading.Event()
+        progress_value = start
+
+        def _run() -> None:
+            nonlocal progress_value
+            while not self._stop_event.wait(interval):
+                if progress_value >= cap:
+                    continue
+                progress_value = min(cap, progress_value + increment)
+                self._emit_callback(step_id, progress_value, label)
+
+        self._thread = threading.Thread(target=_run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if not self._thread:
+            return
+        self._stop_event.set()
+        self._thread.join(timeout=1)
+        self._thread = None
