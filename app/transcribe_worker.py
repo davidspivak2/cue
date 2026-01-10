@@ -23,6 +23,9 @@ from .transcription_config import build_transcription_config
 from .transcription_device import get_cuda_device_count
 
 MODEL_NAME = "large-v3"
+HEBREW_PUNCTUATION_PROMPT = (
+    "הוסף סימני פיסוק (פסיקים, נקודות, סימני שאלה וסימני קריאה) בטקסט."
+)
 TRANSCRIBE_DEFAULTS = [
     "best_of",
     "temperature",
@@ -132,6 +135,21 @@ def _cpu_threads_for_device(device: str) -> int:
         return 2
     cpu_count = os.cpu_count() or 2
     return max(2, min(4, cpu_count))
+
+
+def build_transcribe_kwargs(lang: str) -> dict[str, object]:
+    transcribe_kwargs: dict[str, object] = {
+        "language": lang,
+        "task": "transcribe",
+        "beam_size": 5,
+        "vad_filter": True,
+        "vad_parameters": {"min_silence_duration_ms": 400},
+        "word_timestamps": True,
+        "condition_on_previous_text": True,
+    }
+    if lang == "he":
+        transcribe_kwargs["initial_prompt"] = HEBREW_PUNCTUATION_PROMPT
+    return transcribe_kwargs
 
 
 def _load_model(
@@ -288,14 +306,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         force_cpu = device == "cpu"
         cpu_threads_cpu = _cpu_threads_for_device("cpu")
         cpu_threads_active = _cpu_threads_for_device(device)
-        transcribe_kwargs = {
-            "language": args.lang,
-            "task": "transcribe",
-            "beam_size": 5,
-            "vad_filter": True,
-            "vad_parameters": {"min_silence_duration_ms": 400},
-            "word_timestamps": True,
-        }
+        transcribe_kwargs = build_transcribe_kwargs(args.lang)
         splitter_config = SplitterConfig(
             apply_if=SplitApplyThresholds(
                 duration_sec=12.0,
