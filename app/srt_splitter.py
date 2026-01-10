@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Iterable, Protocol
 
@@ -68,10 +69,12 @@ class _Word:
     start: float
     end: float
     text: str
+    index: int
 
 
 _TRAILING_STRIP = "\"'“”‘’()[]{}״׳"
 _PUNCTUATION = {".", ",", "?", "!", ";", ":", "—", "–"}
+_LOGGER = logging.getLogger(__name__)
 
 
 def split_segments_into_cues(
@@ -98,7 +101,8 @@ def _split_segment(segment: SegmentLike, config: SplitterConfig) -> list[Cue]:
     words = _normalize_words(raw_words)
     if not words:
         return _split_segment_by_time_and_text(segment, config.max_cue)
-    return _split_segment_by_words(segment, words, config)
+    word_spans = _align_words_to_text(str(segment.text), words)
+    return _split_segment_by_words(segment, words, word_spans, config)
 
 
 def _should_split(
@@ -163,6 +167,7 @@ def _split_text_into_chunks(words: list[str], total_cues: int) -> list[str]:
 def _split_segment_by_words(
     segment: SegmentLike,
     words: list[_Word],
+    word_spans: list[tuple[int, int] | None] | None,
     config: SplitterConfig,
 ) -> list[Cue]:
     cues: list[Cue] = []
@@ -191,6 +196,7 @@ def _split_segment_by_words(
                 _build_cue(
                     segment,
                     words[start_idx : split_idx + 1],
+                    word_spans,
                 )
             )
             current_words = []
@@ -205,14 +211,19 @@ def _split_segment_by_words(
                 gap_candidate = i - 1
         i += 1
     if current_words:
-        cues.append(_build_cue(segment, current_words))
+        cues.append(_build_cue(segment, current_words, word_spans))
     return cues
 
 
-def _build_cue(segment: SegmentLike, words: list[_Word]) -> Cue:
+def _build_cue(
+    segment: SegmentLike,
+    words: list[_Word],
+    word_spans: list[tuple[int, int] | None] | None,
+) -> Cue:
     start = max(float(segment.start), words[0].start)
     end = min(float(segment.end), words[-1].end)
-    text = _join_words(words)
+    segment_text = str(segment.text)
+    text = _reconstruct_text(segment_text, words, word_spans)
     return Cue(start=start, end=end, text=text)
 
 
@@ -224,7 +235,10 @@ def _normalize_words(words: Iterable[WordLike] | None) -> list[_Word]:
         text = _word_text(word)
         if text is None:
             continue
-        normalized.append(_Word(start=float(word.start), end=float(word.end), text=text))
+        index = len(normalized)
+        normalized.append(
+            _Word(start=float(word.start), end=float(word.end), text=text, index=index)
+        )
     return normalized
 
 
@@ -248,6 +262,62 @@ def _join_words(words: list[_Word]) -> str:
         else:
             parts.append(" " + raw.lstrip())
     return "".join(parts).strip()
+
+
+def _align_words_to_text(
+    segment_text: str,
+    words: list[_Word],
+) -> list[tuple[int, int] | None] | None:
+    if not segment_text or not words:
+        return None
+    spans: list[tuple[int, int] | None] = [None] * len(words)
+    cursor = 0
+    for word in words:
+        raw = word.text.strip()
+        if not raw:
+            return None
+        match_start = segment_text.find(raw, cursor)
+        match_token = raw
+        if match_start == -1:
+            cleaned = raw.strip(_TRAILING_STRIP)
+            if cleaned and cleaned != raw:
+                match_start = segment_text.find(cleaned, cursor)
+                match_token = cleaned
+        if match_start == -1:
+            return None
+        match_end = match_start + len(match_token)
+        spans[word.index] = (match_start, match_end)
+        cursor = match_end
+    return spans
+
+
+def _reconstruct_text(
+    segment_text: str,
+    words: list[_Word],
+    word_spans: list[tuple[int, int] | None] | None,
+) -> str:
+    if not word_spans:
+        _LOGGER.warning("Failed to align segment text; falling back to word join.")
+        return _join_words(words)
+    first_span = None
+    last_span = None
+    for word in words:
+        span = word_spans[word.index] if word.index < len(word_spans) else None
+        if span is None:
+            _LOGGER.warning("Failed to align word index %s in segment text.", word.index)
+            return _join_words(words)
+        if first_span is None:
+            first_span = span
+        last_span = span
+    if not first_span or not last_span:
+        return _join_words(words)
+    start, _ = first_span
+    _, end = last_span
+    if start >= end or start < 0 or end > len(segment_text):
+        _LOGGER.warning("Invalid alignment span in segment text.")
+        return _join_words(words)
+    reconstructed = segment_text[start:end].strip()
+    return reconstructed or _join_words(words)
 
 
 def _ends_with_punctuation(word_text: str) -> bool:
