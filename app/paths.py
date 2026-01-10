@@ -15,3 +15,15 @@ def get_models_dir() -> Path:
     path = get_app_data_dir() / "models"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_logs_dir() -> Path:
+    path = get_app_data_dir() / "logs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_diagnostics_dir() -> Path:
+    path = get_logs_dir() / "diagnostics"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

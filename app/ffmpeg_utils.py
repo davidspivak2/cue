@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -124,6 +125,38 @@ def get_media_duration(path: Path) -> Optional[float]:
     try:
         return float(result.stdout.strip())
     except ValueError:
+        return None
+
+
+def get_ffprobe_json(path: Path) -> Optional[dict[str, Any]]:
+    _, ffprobe_path, _ = resolve_ffmpeg_paths()
+    if not ffprobe_path:
+        return None
+    command = [
+        str(ffprobe_path),
+        "-v",
+        "error",
+        "-show_format",
+        "-show_streams",
+        "-print_format",
+        "json",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            **get_subprocess_kwargs(),
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
         return None
 
 
