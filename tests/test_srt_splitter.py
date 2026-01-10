@@ -6,6 +6,9 @@ from app.srt_splitter import (
     SplitApplyThresholds,
     SplitMaxCue,
     SplitterConfig,
+    _Word,
+    _align_words_to_text,
+    _reconstruct_text,
     split_segments_into_cues,
 )
 
@@ -130,3 +133,25 @@ def test_joined_words_are_stripped() -> None:
     )
     cues = split_segments_into_cues([segment], config=config)
     assert cues[0].text == "hello world"
+
+
+def test_reconstruct_text_includes_trailing_punctuation() -> None:
+    segment_text = "בקטע קצר, שהוא השראה בשבילי,"
+    words = [
+        _Word(start=0.0, end=0.2, text="בקטע", index=0),
+        _Word(start=0.25, end=0.5, text="קצר", index=1),
+    ]
+    word_spans = _align_words_to_text(segment_text, words)
+    reconstructed = _reconstruct_text(segment_text, words, word_spans)
+    assert reconstructed == "בקטע קצר,"
+
+
+def test_reconstruct_text_stops_before_next_word() -> None:
+    segment_text = "עוד משפט כאן"
+    words = [
+        _Word(start=0.0, end=0.2, text="עוד", index=0),
+        _Word(start=0.25, end=0.5, text="משפט", index=1),
+    ]
+    word_spans = _align_words_to_text(segment_text, words)
+    reconstructed = _reconstruct_text(segment_text, words, word_spans)
+    assert reconstructed == "עוד משפט"
