@@ -73,7 +73,7 @@ class _Word:
 
 
 _TRAILING_STRIP = "\"'“”‘’()[]{}״׳"
-_PUNCTUATION = {".", ",", "?", "!", ";", ":", "—", "–"}
+_PUNCTUATION = {".", ",", "?", "!", ";", ":", "—", "–", "…"}
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -316,7 +316,18 @@ def _reconstruct_text(
     if start >= end or start < 0 or end > len(segment_text):
         _LOGGER.warning("Invalid alignment span in segment text.")
         return _join_words(words)
-    reconstructed = segment_text[start:end].strip()
+    end_extended = end
+    while end_extended < len(segment_text):
+        char = segment_text[end_extended]
+        if char.isspace():
+            break
+        if char in _PUNCTUATION or char in _TRAILING_STRIP:
+            end_extended += 1
+            continue
+        if char.isalnum():
+            break
+        break
+    reconstructed = segment_text[start:end_extended].strip()
     return reconstructed or _join_words(words)
 
 
