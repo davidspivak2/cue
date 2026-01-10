@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import datetime
 import json
 import logging
+import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -18,11 +21,13 @@ from .ffmpeg_utils import (
     ensure_ffmpeg_available,
     escape_subtitles_filter_path,
     format_filter_style,
+    get_ffprobe_json,
     get_media_duration,
     get_runtime_mode,
     get_subprocess_kwargs,
+    resolve_ffmpeg_paths,
 )
-from .paths import get_models_dir
+from .paths import get_diagnostics_dir, get_models_dir
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
 
@@ -65,6 +70,13 @@ class BurnInSettings:
     margin_v: int
 
 
+@dataclass
+class DiagnosticsSettings:
+    enabled: bool
+    write_on_success: bool
+    categories: dict[str, bool]
+
+
 class WorkerSignals(QtCore.QObject):
     log = QtCore.Signal(str, bool)
     finished = QtCore.Signal(bool, str, dict)
@@ -86,6 +98,8 @@ class Worker(QtCore.QObject):
         srt_path: Optional[Path] = None,
         transcription_settings: Optional[TranscriptionSettings] = None,
         burnin_settings: Optional[BurnInSettings] = None,
+        diagnostics_settings: Optional[DiagnosticsSettings] = None,
+        session_log_path: Optional[Path] = None,
     ) -> None:
         super().__init__()
         self.signals = WorkerSignals()
@@ -95,6 +109,8 @@ class Worker(QtCore.QObject):
         self.srt_path = srt_path
         self.transcription_settings = transcription_settings
         self.burnin_settings = burnin_settings
+        self.diagnostics_settings = diagnostics_settings
+        self.session_log_path = session_log_path
         self._cancelled = threading.Event()
         self._process: Optional[subprocess.Popen[str]] = None
         self._progress_value = 0
@@ -107,6 +123,20 @@ class Worker(QtCore.QObject):
         self._transcribe_estimator_thread: Optional[threading.Thread] = None
         self._logger = logging.getLogger("hebrew_subtitle_gui")
         self._last_audio_extract_command: Optional[list[str]] = None
+        self._audio_path: Optional[Path] = None
+        self._srt_path: Optional[Path] = None
+        self._output_video_path: Optional[Path] = None
+        self._transcribe_command: Optional[str] = None
+        self._burn_in_command: Optional[str] = None
+        self._burn_in_audio_mode: Optional[str] = None
+        self._transcribe_parent_config: Optional[dict[str, object]] = None
+        self._transcribe_worker_config: Optional[dict[str, object]] = None
+        self._transcribe_worker_note: Optional[str] = None
+        self._audio_info: Optional[dict[str, object]] = None
+        self._prepare_audio_seconds: Optional[float] = None
+        self._transcribe_seconds: Optional[float] = None
+        self._burn_in_seconds: Optional[float] = None
+        self._total_seconds: Optional[float] = None
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -117,26 +147,35 @@ class Worker(QtCore.QObject):
 
     @QtCore.Slot()
     def run(self) -> None:
+        start_time = time.monotonic()
+        success = False
+        message = ""
+        result: dict[str, str] = {}
         try:
             ensure_ffmpeg_available()
             if self.task_type == TaskType.GENERATE_SRT:
                 self.signals.started.emit("Preparing audio")
                 result = self._run_generate_srt()
                 message = f"Subtitles created: {result['srt_path']}"
-                self.signals.finished.emit(True, message, result)
+                success = True
             elif self.task_type == TaskType.BURN_IN:
                 self.signals.started.emit("Exporting video")
                 result = self._run_burn_in()
-                self.signals.finished.emit(True, "Your video is ready.", result)
+                message = "Your video is ready."
+                success = True
             else:
                 raise ValueError(f"Unknown task type: {self.task_type}")
         except CancelledError:
-            self.signals.finished.emit(False, "Operation cancelled.", {})
+            message = "Operation cancelled."
         except Exception as exc:  # noqa: BLE001
             self._logger.exception("Unhandled worker exception")
             self.signals.log.emit("Exception occurred:", True)
             self.signals.log.emit(str(exc), True)
-            self.signals.finished.emit(False, str(exc), {})
+            message = str(exc)
+        finally:
+            self._total_seconds = time.monotonic() - start_time
+            self._maybe_write_diagnostics(success, message, result)
+            self.signals.finished.emit(success, message, result)
 
     def _run_generate_srt(self) -> dict:
         settings = self.transcription_settings
@@ -145,6 +184,8 @@ class Worker(QtCore.QObject):
 
         audio_path = self.output_dir / f"{self.video_path.stem}_audio_for_whisper.wav"
         srt_path = self.output_dir / f"{self.video_path.stem}.srt"
+        self._audio_path = audio_path
+        self._srt_path = srt_path
         self.signals.log.emit(f"Audio file: {audio_path}", True)
         self.signals.log.emit(f"Subtitles file: {srt_path}", True)
 
@@ -158,7 +199,9 @@ class Worker(QtCore.QObject):
             )
         self.signals.log.emit("Preparing audio...", True)
         self._emit_step_progress(ProgressStep.PREPARE_AUDIO, 0.0, "Extracting audio", force=True)
+        prepare_start = time.monotonic()
         self._extract_audio(audio_path, settings.apply_audio_filter, video_duration)
+        self._prepare_audio_seconds = time.monotonic() - prepare_start
 
         if self._cancelled.is_set():
             raise CancelledError()
@@ -176,6 +219,7 @@ class Worker(QtCore.QObject):
         if self._cancelled.is_set():
             raise CancelledError()
 
+        transcribe_start = time.monotonic()
         try:
             self._run_transcription_subprocess(
                 audio_path=audio_path,
@@ -227,11 +271,14 @@ class Worker(QtCore.QObject):
                 True,
             )
             raise
+        finally:
+            self._transcribe_seconds = time.monotonic() - transcribe_start
 
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             raise RuntimeError(f"Subtitles were not created: {srt_path}")
 
         try:
+            self._capture_audio_info_if_needed(audio_path)
             audio_path.unlink(missing_ok=True)
             self.signals.log.emit(f"Deleted audio file: {audio_path}", True)
         except Exception as exc:  # noqa: BLE001
@@ -282,10 +329,12 @@ class Worker(QtCore.QObject):
             raise ValueError("Missing burn-in settings")
 
         srt_path = self.srt_path or self.output_dir / f"{self.video_path.stem}.srt"
+        self._srt_path = srt_path
         if not srt_path.exists():
             raise FileNotFoundError(f"Subtitles file not found: {srt_path}")
 
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
+        self._output_video_path = output_path
         self.signals.log.emit(f"Subtitles file: {srt_path}", True)
         self.signals.log.emit(f"Video file: {output_path}", True)
         video_duration = self._probe_duration(self.video_path)
@@ -332,6 +381,9 @@ class Worker(QtCore.QObject):
         self.signals.log.emit("Adding subtitles to the video...", True)
         self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
         copy_command = base_command + ["-c:a", "copy", str(output_path)]
+        self._burn_in_command = subprocess.list2cmdline(copy_command)
+        self._burn_in_audio_mode = "copy"
+        burn_start = time.monotonic()
         try:
             self._run_ffmpeg_with_progress(
                 copy_command,
@@ -339,18 +391,22 @@ class Worker(QtCore.QObject):
                 ProgressStep.EXPORT,
                 "Encoding",
             )
+            self._burn_in_seconds = time.monotonic() - burn_start
             return {"output_path": str(output_path)}
         except RuntimeError as exc:
             self.signals.log.emit("Audio copy failed, trying another format...", True)
             self.signals.log.emit(str(exc), True)
 
         aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
+        self._burn_in_command = subprocess.list2cmdline(aac_command)
+        self._burn_in_audio_mode = "aac"
         self._run_ffmpeg_with_progress(
             aac_command,
             video_duration,
             ProgressStep.EXPORT,
             "Encoding",
         )
+        self._burn_in_seconds = time.monotonic() - burn_start
         return {"output_path": str(output_path)}
 
     def _run_ffmpeg(self, command: list[str]) -> None:
@@ -543,6 +599,8 @@ class Worker(QtCore.QObject):
             f"TRANSCRIBE_PARENT_CONFIG {json.dumps(parent_config, sort_keys=True)}",
             True,
         )
+        self._transcribe_parent_config = parent_config
+        self._transcribe_command = subprocess.list2cmdline(command)
         self.signals.log.emit(f"Subtitles command: {subprocess.list2cmdline(command)}", True)
         process = subprocess.Popen(
             command,
@@ -674,6 +732,20 @@ class Worker(QtCore.QObject):
             _mark_output()
             if text.startswith("TRANSCRIBE_CONFIG_JSON "):
                 transcribe_config_json = text
+                config_payload = text.split(" ", 1)[1] if " " in text else ""
+                if config_payload:
+                    try:
+                        self._transcribe_worker_config = json.loads(config_payload)
+                    except json.JSONDecodeError:
+                        self._transcribe_worker_config = None
+                        self._transcribe_worker_note = (
+                            "TRANSCRIBE_CONFIG_JSON was present but could not be parsed."
+                        )
+                else:
+                    self._transcribe_worker_config = None
+                    self._transcribe_worker_note = (
+                        "TRANSCRIBE_CONFIG_JSON was present but empty."
+                    )
             if text.startswith("PROGRESS_END"):
                 _emit_log(text, False)
                 if duration_seconds:
@@ -809,6 +881,221 @@ class Worker(QtCore.QObject):
             srt_exists=srt_exists,
             srt_size=srt_size,
         )
+
+    def _capture_audio_info_if_needed(self, audio_path: Path) -> None:
+        if not self._diagnostics_category_enabled("audio_info"):
+            return
+        self._audio_info = self._build_media_info(audio_path)
+
+    def _diagnostics_category_enabled(self, key: str) -> bool:
+        settings = self.diagnostics_settings
+        if not settings or not settings.enabled:
+            return False
+        return settings.categories.get(key, False)
+
+    def _maybe_write_diagnostics(
+        self,
+        success: bool,
+        message: str,
+        result: dict[str, str],
+    ) -> None:
+        if not self.diagnostics_settings or not self.diagnostics_settings.enabled:
+            return
+        if success and not self.diagnostics_settings.write_on_success:
+            return
+        try:
+            payload = self._build_diagnostics_payload(success, message, result)
+            diagnostics_dir = get_diagnostics_dir()
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            path = diagnostics_dir / f"diag_{self.task_type}_{timestamp}.json"
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self._logger.info("Diagnostics file written: %s", path)
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("Failed to write diagnostics file: %s", exc)
+
+    def _build_diagnostics_payload(
+        self,
+        success: bool,
+        message: str,
+        result: dict[str, str],
+    ) -> dict[str, object]:
+        created_at = datetime.datetime.now().astimezone().isoformat(timespec="milliseconds")
+        data: dict[str, object] = {
+            "schema_version": 1,
+            "created_at": created_at,
+            "task_type": self.task_type,
+            "success": success,
+            "session_log_path": str(self.session_log_path) if self.session_log_path else None,
+            "inputs_outputs": {
+                "video_path": str(self.video_path),
+                "output_dir": str(self.output_dir),
+                "audio_path": str(self._audio_path) if self._audio_path else None,
+                "srt_path": str(self._srt_path) if self._srt_path else None,
+                "output_video_path": str(self._output_video_path)
+                if self._output_video_path
+                else None,
+            },
+        }
+        if not success:
+            data["error"] = message
+
+        if self._diagnostics_category_enabled("app_system"):
+            ffmpeg_path, ffprobe_path, mode = resolve_ffmpeg_paths()
+            ffmpeg_mode = mode
+            app_version = getattr(sys.modules.get("__main__"), "__version__", "unknown")
+            data["app_system"] = {
+                "app_version": app_version,
+                "python_version": sys.version.split()[0],
+                "platform": platform.platform(),
+                "runtime_mode": get_runtime_mode(),
+                "ffmpeg": str(ffmpeg_path) if ffmpeg_path else "missing",
+                "ffprobe": str(ffprobe_path) if ffprobe_path else "missing",
+                "ffmpeg_mode": ffmpeg_mode,
+                "process_executable": sys.executable,
+            }
+
+        if self._diagnostics_category_enabled("video_info"):
+            data["video_info"] = self._build_media_info(self.video_path)
+
+        if self._diagnostics_category_enabled("audio_info"):
+            data["audio_info"] = self._audio_info or (
+                self._build_media_info(self._audio_path)
+                if self._audio_path
+                else None
+            )
+
+        if self._diagnostics_category_enabled("transcription_config"):
+            worker_config = self._transcribe_worker_config
+            note = self._transcribe_worker_note
+            if worker_config is None and note is None:
+                note = "TRANSCRIBE_CONFIG_JSON was not captured from the worker output."
+            data["transcription_config"] = {
+                "parent_config": self._transcribe_parent_config,
+                "worker_config": worker_config,
+                "worker_config_note": note,
+            }
+
+        if self._diagnostics_category_enabled("srt_stats"):
+            srt_path = self._srt_path
+            data["srt_stats"] = (
+                self._build_srt_stats(srt_path) if srt_path else None
+            )
+
+        if self._diagnostics_category_enabled("commands_timings"):
+            data["commands_timings"] = {
+                "commands": {
+                    "audio_extract_command": (
+                        subprocess.list2cmdline(self._last_audio_extract_command)
+                        if self._last_audio_extract_command
+                        else None
+                    ),
+                    "transcribe_command": self._transcribe_command,
+                    "burn_in_command_used": self._burn_in_command,
+                    "burn_in_audio_mode": self._burn_in_audio_mode,
+                },
+                "timings": {
+                    "prepare_audio_seconds": self._prepare_audio_seconds,
+                    "transcribe_seconds": self._transcribe_seconds,
+                    "burn_in_seconds": self._burn_in_seconds,
+                    "total_seconds": self._total_seconds,
+                },
+            }
+
+        return data
+
+    def _build_media_info(self, path: Optional[Path]) -> Optional[dict[str, object]]:
+        if not path:
+            return None
+        exists = path.exists()
+        info: dict[str, object] = {
+            "path": str(path),
+            "exists": exists,
+            "size_bytes": None,
+            "mtime": None,
+            "duration_seconds": None,
+            "ffprobe_json": None,
+        }
+        if not exists:
+            return info
+        try:
+            stat = path.stat()
+            info["size_bytes"] = stat.st_size
+            info["mtime"] = datetime.datetime.fromtimestamp(stat.st_mtime).isoformat()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            info["duration_seconds"] = get_media_duration(path)
+        except Exception:  # noqa: BLE001
+            info["duration_seconds"] = None
+        try:
+            info["ffprobe_json"] = get_ffprobe_json(path)
+        except Exception:  # noqa: BLE001
+            info["ffprobe_json"] = None
+        return info
+
+    def _build_srt_stats(self, path: Path) -> Optional[dict[str, object]]:
+        if not path.exists():
+            return None
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            return None
+
+        cue_count = 0
+        words_total = 0
+        words_per_cue: list[int] = []
+        punctuation = {".": 0, ",": 0, "?": 0, "!": 0, ";": 0, ":": 0}
+        current_lines: list[str] = []
+
+        def _flush_cue() -> None:
+            nonlocal words_total
+            if not current_lines:
+                return
+            cue_text = " ".join(current_lines)
+            for mark in punctuation:
+                punctuation[mark] += cue_text.count(mark)
+            word_count = len(re.findall(r"\w+", cue_text, flags=re.UNICODE))
+            words_total += word_count
+            words_per_cue.append(word_count)
+            current_lines.clear()
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if "-->" in stripped:
+                cue_count += 1
+                _flush_cue()
+                continue
+            if not stripped:
+                _flush_cue()
+                continue
+            if stripped.isdigit():
+                continue
+            current_lines.append(stripped)
+
+        _flush_cue()
+        avg_words = words_total / cue_count if cue_count else 0
+        max_words = max(words_per_cue) if words_per_cue else 0
+        try:
+            stat = path.stat()
+            mtime = datetime.datetime.fromtimestamp(stat.st_mtime).isoformat()
+            size_bytes = stat.st_size
+        except Exception:  # noqa: BLE001
+            mtime = None
+            size_bytes = None
+        return {
+            "path": str(path),
+            "exists": True,
+            "size_bytes": size_bytes,
+            "mtime": mtime,
+            "cue_count": cue_count,
+            "words_total": words_total,
+            "words_per_cue_avg": avg_words,
+            "words_per_cue_max": max_words,
+            "punctuation_counts": punctuation,
+        }
 
     def _emit_step_progress(
         self,
