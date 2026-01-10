@@ -295,3 +295,88 @@ class SaveToRow(QtWidgets.QWidget):
             max(0, self.path_label.width()),
         )
         self.path_label.setText(elided)
+
+
+class ElidedLabel(QtWidgets.QLabel):
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+
+    def set_full_text(self, text: str) -> None:
+        self._full_text = text
+        self.setToolTip(text)
+        self._update_elided_text()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self) -> None:
+        if not self._full_text:
+            self.setText("")
+            return
+        metrics = self.fontMetrics()
+        elided = metrics.elidedText(
+            self._full_text,
+            QtCore.Qt.ElideMiddle,
+            max(0, self.width()),
+        )
+        self.setText(elided)
+
+
+class ElidedLineEdit(QtWidgets.QLineEdit):
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+
+    def set_full_text(self, text: Optional[str], *, placeholder: str = "") -> None:
+        self._full_text = text or ""
+        if not self._full_text:
+            self.setText("")
+            if placeholder:
+                self.setPlaceholderText(placeholder)
+            self.setToolTip("")
+            return
+        self.setPlaceholderText("")
+        self.setToolTip(self._full_text)
+        self._update_elided_text()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self) -> None:
+        if not self._full_text:
+            return
+        metrics = self.fontMetrics()
+        available = max(0, self.width() - 10)
+        elided = metrics.elidedText(
+            self._full_text,
+            QtCore.Qt.ElideMiddle,
+            available,
+        )
+        self.setText(elided)
+
+
+class SavingToLine(QtWidgets.QWidget):
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self.prefix_label = QtWidgets.QLabel("Saving to:")
+        self.prefix_label.setObjectName("SavingToPrefix")
+
+        self.path_label = ElidedLabel()
+        self.path_label.setObjectName("SavingToPath")
+        self.path_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Preferred,
+        )
+
+        layout.addWidget(self.prefix_label)
+        layout.addWidget(self.path_label, stretch=1)
+
+    def set_path(self, path_text: str) -> None:
+        self.path_label.set_full_text(path_text)

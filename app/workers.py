@@ -51,6 +51,8 @@ class TranscriptionError(RuntimeError):
 @dataclass
 class TranscriptionSettings:
     apply_audio_filter: bool
+    device: str
+    compute_type: str
 
 
 @dataclass
@@ -469,6 +471,16 @@ class Worker(QtCore.QObject):
         duration_seconds: Optional[float],
         force_cpu: bool,
     ) -> None:
+        if not self.transcription_settings:
+            raise ValueError("Missing transcription settings")
+        device = self.transcription_settings.device
+        compute_type = self.transcription_settings.compute_type
+        if force_cpu and device != "cpu":
+            device = "cpu"
+            if compute_type == "float16":
+                compute_type = "int16"
+        prefer_gpu = device == "cuda" and not force_cpu
+        force_cpu_flag = force_cpu or device == "cpu"
         self.signals.started.emit("Creating subtitles")
         self.signals.log.emit("Starting subtitles worker...", True)
         self._emit_step_progress(
@@ -501,10 +513,11 @@ class Worker(QtCore.QObject):
             "--lang",
             "he",
         ]
-        if force_cpu:
+        if force_cpu_flag:
             command.append("--force-cpu")
         else:
             command.append("--prefer-gpu")
+        command += ["--device", device, "--compute-type", compute_type]
         if duration_seconds:
             command += ["--duration-seconds", f"{duration_seconds:.2f}"]
         if self._last_audio_extract_command:
@@ -516,8 +529,10 @@ class Worker(QtCore.QObject):
         parent_config = {
             "model_name": TRANSCRIBE_MODEL_NAME,
             "models_dir": str(get_models_dir()),
-            "prefer_gpu": not force_cpu,
-            "force_cpu": force_cpu,
+            "prefer_gpu": prefer_gpu,
+            "force_cpu": force_cpu_flag,
+            "device": device,
+            "compute_type": compute_type,
             "ffmpeg_args": self._last_audio_extract_command,
         }
         self.signals.log.emit(

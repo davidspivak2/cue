@@ -65,6 +65,47 @@ QLabel#VideoCardPlaceholder {{
   font-size: 12px;
 }}
 
+QLabel#SavingToPrefix,
+QLabel#SavingToPath {{
+  color: {MUTED_TEXT};
+  font-size: 12px;
+}}
+
+QToolButton#SettingsButton {{
+  background-color: transparent;
+  border: none;
+}}
+
+QToolButton#SettingsButton:hover {{
+  background-color: {SURFACE_2};
+  border-radius: 4px;
+}}
+
+QPushButton#SettingsBackButton {{
+  background-color: transparent;
+  border: none;
+  color: {ACCENT};
+  padding: 0;
+}}
+
+QPushButton#SettingsBackButton:hover {{
+  color: {TEXT};
+}}
+
+QLabel#SettingsTitle {{
+  font-size: 18px;
+  font-weight: bold;
+}}
+
+QLabel#SettingsHelperText {{
+  color: {MUTED_TEXT};
+  font-size: 12px;
+}}
+
+QLabel#SettingsRunSummary {{
+  color: {MUTED_TEXT};
+}}
+
 QToolButton#VideoCardClear {{
   background-color: rgba(0, 0, 0, 0.5);
   border: 1px solid {BORDER};
