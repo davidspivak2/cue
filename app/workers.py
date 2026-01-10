@@ -27,7 +27,7 @@ from .ffmpeg_utils import (
     get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
-from .paths import get_diagnostics_dir, get_models_dir
+from .paths import get_models_dir
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
 
@@ -903,18 +903,39 @@ class Worker(QtCore.QObject):
             return
         if success and not self.diagnostics_settings.write_on_success:
             return
+        payload = self._build_diagnostics_payload(success, message, result)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"diag_{self.task_type}_{timestamp}.json"
+        primary_path = self.output_dir / filename
         try:
-            payload = self._build_diagnostics_payload(success, message, result)
-            diagnostics_dir = get_diagnostics_dir()
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            path = diagnostics_dir / f"diag_{self.task_type}_{timestamp}.json"
-            path.write_text(
+            primary_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            self._logger.info("Diagnostics file written: %s", path)
+            self._logger.info("Diagnostics file written: %s", primary_path)
+            return
         except Exception as exc:  # noqa: BLE001
-            self._logger.warning("Failed to write diagnostics file: %s", exc)
+            self._logger.warning(
+                "Failed to write diagnostics file to output folder: %s",
+                exc,
+            )
+
+        fallback_dir = (
+            self.session_log_path.parent
+            if self.session_log_path and self.session_log_path.parent.exists()
+            else None
+        )
+        if not fallback_dir:
+            return
+        fallback_path = fallback_dir / filename
+        try:
+            fallback_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self._logger.info("Diagnostics file written: %s", fallback_path)
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("Failed to write diagnostics file fallback: %s", exc)
 
     def _build_diagnostics_payload(
         self,
