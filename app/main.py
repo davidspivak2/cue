@@ -24,6 +24,7 @@ from app.ffmpeg_utils import (
     get_runtime_mode,
     resolve_ffmpeg_paths,
 )
+from app.progress import ProgressController, ProgressStep
 from app.ui.state import AppState
 from app.ui.theme import apply_theme
 from app.ui.utils import generate_thumbnail, get_media_duration_seconds
@@ -53,6 +54,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ffmpeg_available = False
         self._ffprobe_available = False
         self._subtitles_reviewed = False
+        self._progress_controller: Optional[ProgressController] = None
         self._subtitle_edit_path = self._load_subtitle_edit_path()
         self._state = AppState.EMPTY
 
@@ -129,6 +131,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.status_label = QtWidgets.QLabel("Ready")
         self.status_label.setStyleSheet("font-weight: bold;")
+        self.substatus_label = QtWidgets.QLabel("")
+        self.substatus_label.setAlignment(QtCore.Qt.AlignCenter)
 
         self.log_box = QtWidgets.QPlainTextEdit()
         self.log_box.setReadOnly(True)
@@ -218,6 +222,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addStretch()
         self.status_label.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(self.status_label)
+        layout.addWidget(self.substatus_label)
         layout.addWidget(self.progress_bar)
         cancel_layout = QtWidgets.QHBoxLayout()
         cancel_layout.addStretch()
@@ -474,14 +479,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._worker.signals.progress.connect(self._on_worker_progress)
         self._worker.signals.started.connect(self._on_worker_started)
         self._worker.signals.finished.connect(self._on_worker_finished)
+        self._progress_controller = self._build_progress_controller(task_type)
         self._worker_thread.start()
-
         self._update_ui_state(idle=False)
 
     def _on_worker_started(self, status: str) -> None:
         self.status_label.setText(status)
+        self.substatus_label.setText("")
         self.progress_bar.setValue(0)
-        self.progress_bar.setFormat("")
+        self.progress_bar.setFormat("0%")
         self.set_state(AppState.WORKING)
 
     def _on_worker_finished(self, success: bool, message: str, payload: dict) -> None:
@@ -489,18 +495,22 @@ class MainWindow(QtWidgets.QMainWindow):
         if success:
             self.progress_bar.setValue(100)
             self.status_label.setText("Done")
+            self.substatus_label.setText("")
         elif message == "Operation cancelled.":
             self.progress_bar.setValue(0)
             self.status_label.setText("Cancelled")
+            self.substatus_label.setText("")
         else:
             self.progress_bar.setValue(0)
             self.status_label.setText("Ready")
+            self.substatus_label.setText("")
 
         if self._worker_thread:
             self._worker_thread.quit()
             self._worker_thread.wait()
             self._worker_thread = None
             self._worker = None
+            self._progress_controller = None
 
         if payload.get("srt_path"):
             candidate = Path(payload["srt_path"])
@@ -589,9 +599,20 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             scrollbar.setValue(old_value)
 
-    def _on_worker_progress(self, percent: int, status: str) -> None:
+    def _on_worker_progress(
+        self,
+        step_id: str,
+        step_progress: Optional[float],
+        status: str,
+    ) -> None:
+        if not self._progress_controller:
+            return
+        global_progress = self._progress_controller.update(step_id, step_progress)
+        percent = int(round(global_progress * 100))
+        percent = max(0, min(percent, 100))
         self.progress_bar.setValue(percent)
-        self.progress_bar.setFormat(status)
+        self.progress_bar.setFormat(f"{percent}%")
+        self.substatus_label.setText(status)
 
     def _refresh_ffmpeg_status(self) -> None:
         ffmpeg_path, ffprobe_path, _ = resolve_ffmpeg_paths()
@@ -708,6 +729,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.video_card.clear()
         self.progress_bar.setValue(0)
         self.status_label.setText("Ready")
+        self.substatus_label.setText("")
         self.set_state(AppState.EMPTY)
 
     def _reset_video_state(self) -> None:
@@ -715,6 +737,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_output_video = None
         self._subtitles_reviewed = False
         self._output_dir = None
+        self._progress_controller = None
 
     def _get_default_srt_path(self) -> Optional[Path]:
         if not self._video_path or not self._output_dir:
@@ -798,6 +821,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if not file_path:
             return None
         return Path(file_path)
+
+    def _build_progress_controller(self, task_type: str) -> ProgressController:
+        if task_type == TaskType.GENERATE_SRT:
+            steps = [ProgressStep.PREPARE_AUDIO, ProgressStep.TRANSCRIBE]
+        else:
+            steps = [ProgressStep.EXPORT]
+        return ProgressController(steps)
 
 
 def _configure_logging() -> tuple[logging.Logger, Path, Path, logging.FileHandler]:
