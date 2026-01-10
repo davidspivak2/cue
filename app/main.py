@@ -32,7 +32,14 @@ from app.ui.state import AppState
 from app.ui.theme import apply_theme
 from app.ui.utils import generate_thumbnail, get_media_duration_seconds
 from app.ui.widgets import DropZone, ElidedLineEdit, SavingToLine, VideoCard
-from app.workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
+from app.paths import get_app_data_dir, get_logs_dir
+from app.workers import (
+    BurnInSettings,
+    DiagnosticsSettings,
+    TaskType,
+    TranscriptionSettings,
+    Worker,
+)
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
 DEFAULT_SUBTITLE_EDIT_PATH = Path(r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe")
@@ -80,6 +87,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._save_policy = self._load_save_policy()
         self._fixed_output_dir = self._get_config_path("save_folder")
         self._transcription_quality = self._load_transcription_quality()
+        self._diagnostics_settings = self._load_diagnostics_settings()
         self._state = AppState.EMPTY
 
         self._build_ui()
@@ -256,6 +264,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
         self.save_policy_group.buttonToggled.connect(self._on_save_policy_toggled)
         self.browse_button.clicked.connect(self._browse_fixed_output_dir)
+        self.diagnostics_enabled_checkbox.toggled.connect(
+            self._on_diagnostics_enabled_toggled
+        )
+        self.diagnostics_success_checkbox.toggled.connect(
+            self._on_diagnostics_success_toggled
+        )
+        for key, checkbox in self.diagnostics_category_checkboxes.items():
+            checkbox.toggled.connect(
+                lambda checked, category_key=key: self._on_diagnostics_category_toggled(
+                    category_key, checked
+                )
+            )
 
     def _build_empty_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
@@ -465,6 +485,37 @@ class MainWindow(QtWidgets.QMainWindow):
         save_grid.addLayout(path_layout, 1, 1)
 
         layout.addLayout(save_grid)
+
+        diagnostics_title = QtWidgets.QLabel("Diagnostics")
+        diagnostics_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        layout.addWidget(diagnostics_title)
+
+        diagnostics_layout = QtWidgets.QVBoxLayout()
+        diagnostics_layout.setSpacing(8)
+
+        self.diagnostics_enabled_checkbox = QtWidgets.QCheckBox("Enable diagnostics logging")
+        self.diagnostics_success_checkbox = QtWidgets.QCheckBox(
+            "Write diagnostics on successful completion"
+        )
+
+        diagnostics_layout.addWidget(self.diagnostics_enabled_checkbox)
+        diagnostics_layout.addWidget(self.diagnostics_success_checkbox)
+
+        self.diagnostics_category_checkboxes: dict[str, QtWidgets.QCheckBox] = {}
+        category_labels = {
+            "app_system": "App + system info",
+            "video_info": "Video info",
+            "audio_info": "Audio (WAV) info",
+            "transcription_config": "Transcription config",
+            "srt_stats": "SRT stats",
+            "commands_timings": "Commands + timings",
+        }
+        for key, label in category_labels.items():
+            checkbox = QtWidgets.QCheckBox(label)
+            diagnostics_layout.addWidget(checkbox)
+            self.diagnostics_category_checkboxes[key] = checkbox
+
+        layout.addLayout(diagnostics_layout)
         layout.addStretch()
 
         self._apply_settings_to_ui()
@@ -663,6 +714,8 @@ class MainWindow(QtWidgets.QMainWindow):
             srt_path=srt_path,
             transcription_settings=transcription_settings,
             burnin_settings=burnin_settings,
+            diagnostics_settings=self._diagnostics_settings,
+            session_log_path=self._log_path,
         )
         self._worker.moveToThread(self._worker_thread)
         self._worker_thread.started.connect(self._worker.run)
@@ -885,10 +938,26 @@ class MainWindow(QtWidgets.QMainWindow):
             self.save_ask_radio.setChecked(True)
         self.save_policy_group.blockSignals(False)
 
+        self.diagnostics_enabled_checkbox.blockSignals(True)
+        self.diagnostics_enabled_checkbox.setChecked(self._diagnostics_settings.enabled)
+        self.diagnostics_enabled_checkbox.blockSignals(False)
+
+        self.diagnostics_success_checkbox.blockSignals(True)
+        self.diagnostics_success_checkbox.setChecked(
+            self._diagnostics_settings.write_on_success
+        )
+        self.diagnostics_success_checkbox.blockSignals(False)
+
+        for key, checkbox in self.diagnostics_category_checkboxes.items():
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self._diagnostics_settings.categories.get(key, True))
+            checkbox.blockSignals(False)
+
         self._update_fixed_path_field()
         self._update_save_policy_controls()
         self._update_quality_summary()
         self._update_saving_to_line()
+        self._update_diagnostics_controls()
 
     def _update_fixed_path_field(self) -> None:
         path_text = str(self._fixed_output_dir) if self._fixed_output_dir else None
@@ -898,6 +967,39 @@ class MainWindow(QtWidgets.QMainWindow):
         enable_fixed = self._save_policy == SaveLocationPolicy.FIXED_FOLDER
         self.save_path_field.setEnabled(enable_fixed)
         self.browse_button.setEnabled(enable_fixed)
+
+    def _update_diagnostics_controls(self) -> None:
+        enabled = self._diagnostics_settings.enabled
+        self.diagnostics_success_checkbox.setEnabled(enabled)
+        for checkbox in self.diagnostics_category_checkboxes.values():
+            checkbox.setEnabled(enabled)
+
+    def _store_diagnostics_settings(self) -> None:
+        self._config["diagnostics"] = {
+            "enabled": self._diagnostics_settings.enabled,
+            "write_on_success": self._diagnostics_settings.write_on_success,
+            "categories": dict(self._diagnostics_settings.categories),
+        }
+        self._save_config()
+
+    def _on_diagnostics_enabled_toggled(self, checked: bool) -> None:
+        if checked == self._diagnostics_settings.enabled:
+            return
+        self._diagnostics_settings.enabled = checked
+        self._store_diagnostics_settings()
+        self._update_diagnostics_controls()
+
+    def _on_diagnostics_success_toggled(self, checked: bool) -> None:
+        if checked == self._diagnostics_settings.write_on_success:
+            return
+        self._diagnostics_settings.write_on_success = checked
+        self._store_diagnostics_settings()
+
+    def _on_diagnostics_category_toggled(self, key: str, checked: bool) -> None:
+        if self._diagnostics_settings.categories.get(key) == checked:
+            return
+        self._diagnostics_settings.categories[key] = checked
+        self._store_diagnostics_settings()
 
     def _on_save_policy_toggled(
         self,
@@ -1128,10 +1230,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return srt_path.stat().st_size > 0
 
     def _get_app_data_dir(self) -> Path:
-        local_appdata = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-        path = local_appdata / "HebrewSubtitleGUI"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
+        return get_app_data_dir()
 
     def _load_config(self) -> dict:
         config_path = self._get_app_data_dir() / "config.json"
@@ -1169,6 +1268,40 @@ class MainWindow(QtWidgets.QMainWindow):
             return TranscriptionQuality(value)
         except ValueError:
             return TranscriptionQuality.AUTO
+
+    def _load_diagnostics_settings(self) -> DiagnosticsSettings:
+        default_categories = {
+            "app_system": True,
+            "video_info": True,
+            "audio_info": True,
+            "transcription_config": True,
+            "srt_stats": True,
+            "commands_timings": True,
+        }
+        raw = self._config.get("diagnostics")
+        if not isinstance(raw, dict):
+            return DiagnosticsSettings(
+                enabled=False,
+                write_on_success=False,
+                categories=default_categories.copy(),
+            )
+        enabled = raw.get("enabled") if isinstance(raw.get("enabled"), bool) else False
+        write_on_success = (
+            raw.get("write_on_success")
+            if isinstance(raw.get("write_on_success"), bool)
+            else False
+        )
+        categories = default_categories.copy()
+        raw_categories = raw.get("categories")
+        if isinstance(raw_categories, dict):
+            for key in categories:
+                if isinstance(raw_categories.get(key), bool):
+                    categories[key] = raw_categories[key]
+        return DiagnosticsSettings(
+            enabled=enabled,
+            write_on_success=write_on_success,
+            categories=categories,
+        )
 
     def _resolve_subtitle_edit_path(self) -> Optional[Path]:
         if self._subtitle_edit_path and self._subtitle_edit_path.exists():
@@ -1211,9 +1344,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def _configure_logging() -> tuple[logging.Logger, Path, Path, logging.FileHandler]:
-    local_appdata = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    log_dir = local_appdata / "HebrewSubtitleGUI" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = get_logs_dir()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = log_dir / f"hebrew_subtitle_gui_{timestamp}.log"
 
