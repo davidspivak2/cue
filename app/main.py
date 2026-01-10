@@ -13,6 +13,7 @@ import logging
 import os
 import platform
 import sys
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
@@ -25,14 +26,28 @@ from app.ffmpeg_utils import (
     resolve_ffmpeg_paths,
 )
 from app.progress import ProgressController, ProgressStep
+from app.transcription_device import gpu_available
 from app.ui.state import AppState
 from app.ui.theme import apply_theme
 from app.ui.utils import generate_thumbnail, get_media_duration_seconds
-from app.ui.widgets import DropZone, SaveToRow, VideoCard
+from app.ui.widgets import DropZone, ElidedLineEdit, SavingToLine, VideoCard
 from app.workers import BurnInSettings, TaskType, TranscriptionSettings, Worker
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
 DEFAULT_SUBTITLE_EDIT_PATH = Path(r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe")
+
+
+class SaveLocationPolicy(Enum):
+    SAME_FOLDER = "same_folder"
+    FIXED_FOLDER = "fixed_folder"
+    ASK_EVERY_TIME = "ask_every_time"
+
+
+class TranscriptionQuality(Enum):
+    AUTO = "auto"
+    FAST = "fast"
+    ACCURATE = "accurate"
+    ULTRA = "ultra"
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -55,7 +70,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ffprobe_available = False
         self._subtitles_reviewed = False
         self._progress_controller: Optional[ProgressController] = None
-        self._subtitle_edit_path = self._load_subtitle_edit_path()
+        self._config = self._load_config()
+        self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
+        self._save_policy = self._load_save_policy()
+        self._fixed_output_dir = self._get_config_path("save_folder")
+        self._transcription_quality = self._load_transcription_quality()
         self._state = AppState.EMPTY
 
         self._build_ui()
@@ -68,7 +87,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.drop_zone = DropZone()
         self.video_card = VideoCard()
-        self.save_to_row = SaveToRow()
 
         self.generate_button = QtWidgets.QPushButton("Create subtitles")
         self.review_button = QtWidgets.QPushButton("Edit in Subtitle Edit")
@@ -139,15 +157,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log_box.setMinimumHeight(220)
 
         self.stack = QtWidgets.QStackedWidget()
-        self._page_index = {
+        self._state_pages = {
             AppState.EMPTY: self.stack.addWidget(self._build_empty_page()),
             AppState.VIDEO_SELECTED: self.stack.addWidget(self._build_video_selected_page()),
             AppState.WORKING: self.stack.addWidget(self._build_working_page()),
             AppState.SUBTITLES_READY: self.stack.addWidget(self._build_subtitles_ready_page()),
             AppState.EXPORT_DONE: self.stack.addWidget(self._build_done_page()),
         }
-        layout.addWidget(self.save_to_row)
-        layout.addWidget(self.stack)
 
         self.details_toggle = QtWidgets.QToolButton()
         self.details_toggle.setText("Show details")
@@ -174,7 +190,41 @@ class MainWindow(QtWidgets.QMainWindow):
         details_layout.addStretch()
 
         self.details_panel.setVisible(False)
-        layout.addWidget(self.details_panel)
+
+        self.settings_button = QtWidgets.QToolButton()
+        self.settings_button.setObjectName("SettingsButton")
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.setAutoRaise(True)
+        self.settings_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.settings_button.setFixedSize(32, 32)
+        self.settings_button.setIconSize(QtCore.QSize(16, 16))
+        self.settings_button.setText("⚙")
+        font = self.settings_button.font()
+        font.setPointSize(14)
+        self.settings_button.setFont(font)
+
+        self.saving_to_line = SavingToLine()
+        self.saving_to_line.setVisible(False)
+
+        home_page = QtWidgets.QWidget()
+        home_layout = QtWidgets.QVBoxLayout(home_page)
+        header_layout = QtWidgets.QHBoxLayout()
+        header_layout.addStretch()
+        header_layout.addWidget(self.settings_button)
+        home_layout.addLayout(header_layout)
+        home_layout.addWidget(self.saving_to_line)
+        home_layout.addWidget(self.stack)
+        home_layout.addWidget(self.details_toggle)
+        home_layout.addWidget(self.details_panel)
+
+        settings_page = self._build_settings_page()
+
+        self.page_stack = QtWidgets.QStackedWidget()
+        self._page_index = {
+            "home": self.page_stack.addWidget(home_page),
+            "settings": self.page_stack.addWidget(settings_page),
+        }
+        layout.addWidget(self.page_stack)
 
         self.setCentralWidget(central)
 
@@ -182,7 +232,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.drop_zone.video_dropped.connect(self._handle_video_dropped)
         self.video_card.clear_clicked.connect(self._clear_video)
         self.video_card.video_dropped.connect(self._handle_video_dropped)
-        self.save_to_row.change_clicked.connect(self._change_output_dir)
         self.generate_button.clicked.connect(self._on_generate)
         self.review_button.clicked.connect(self._on_review)
         self.burn_button.clicked.connect(self._on_burn)
@@ -194,6 +243,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.done_edit_button.clicked.connect(self._edit_subtitles_again)
         self.open_log_button.clicked.connect(self._open_log_file)
         self.details_toggle.toggled.connect(self._toggle_details)
+        self.settings_button.clicked.connect(self._show_settings_page)
+        self.settings_back_button.clicked.connect(self._show_home_page)
+        self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
+        self.save_policy_group.buttonToggled.connect(self._on_save_policy_toggled)
+        self.browse_button.clicked.connect(self._browse_fixed_output_dir)
 
     def _build_empty_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
@@ -289,6 +343,124 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addStretch()
         return page
 
+    def _build_settings_page(self) -> QtWidgets.QWidget:
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(22)
+
+        header_layout = QtWidgets.QHBoxLayout()
+        self.settings_back_button = QtWidgets.QPushButton("← Back")
+        self.settings_back_button.setObjectName("SettingsBackButton")
+        self.settings_back_button.setFlat(True)
+        self.settings_back_button.setFixedSize(80, 32)
+        self.settings_back_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        title = QtWidgets.QLabel("Settings")
+        title.setObjectName("SettingsTitle")
+
+        header_layout.addWidget(self.settings_back_button)
+        header_layout.addSpacing(8)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+
+        performance_title = QtWidgets.QLabel("Performance")
+        performance_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        layout.addWidget(performance_title)
+
+        performance_grid = QtWidgets.QGridLayout()
+        performance_grid.setColumnMinimumWidth(0, 170)
+        performance_grid.setColumnMinimumWidth(1, 320)
+        performance_grid.setColumnStretch(1, 1)
+        performance_grid.setHorizontalSpacing(16)
+        performance_grid.setVerticalSpacing(8)
+
+        quality_label = QtWidgets.QLabel("Transcription quality")
+        quality_label.setFixedWidth(170)
+
+        self.quality_combo = QtWidgets.QComboBox()
+        self.quality_combo.addItems(
+            [
+                "Auto",
+                "Fast (int8)",
+                "Accurate (int16)",
+                "Ultra accurate (float32)",
+            ]
+        )
+        self.quality_combo.setFixedHeight(36)
+        self.quality_combo.setMinimumWidth(320)
+        self.quality_combo.setMaximumWidth(360)
+
+        self.quality_run_label = QtWidgets.QLabel("")
+        self.quality_run_label.setObjectName("SettingsRunSummary")
+
+        self.quality_helper_label = QtWidgets.QLabel("")
+        self.quality_helper_label.setObjectName("SettingsHelperText")
+        self.quality_helper_label.setWordWrap(True)
+
+        performance_grid.addWidget(quality_label, 0, 0)
+        performance_grid.addWidget(self.quality_combo, 0, 1)
+        performance_grid.addWidget(QtWidgets.QLabel(""), 1, 0)
+        performance_grid.addWidget(self.quality_run_label, 1, 1)
+        performance_grid.addWidget(QtWidgets.QLabel(""), 2, 0)
+        performance_grid.addWidget(self.quality_helper_label, 2, 1)
+        layout.addLayout(performance_grid)
+
+        save_title = QtWidgets.QLabel("Save location")
+        save_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        layout.addWidget(save_title)
+
+        save_grid = QtWidgets.QGridLayout()
+        save_grid.setColumnMinimumWidth(0, 170)
+        save_grid.setColumnMinimumWidth(1, 320)
+        save_grid.setColumnStretch(1, 1)
+        save_grid.setHorizontalSpacing(16)
+        save_grid.setVerticalSpacing(8)
+
+        self.save_policy_group = QtWidgets.QButtonGroup()
+        self.save_same_radio = QtWidgets.QRadioButton("Same folder as the video")
+        self.save_fixed_radio = QtWidgets.QRadioButton("Always save to this folder")
+        self.save_ask_radio = QtWidgets.QRadioButton("Ask every time")
+        for radio in (self.save_same_radio, self.save_fixed_radio, self.save_ask_radio):
+            radio.setFixedHeight(36)
+            self.save_policy_group.addButton(radio)
+
+        radio_layout = QtWidgets.QVBoxLayout()
+        radio_layout.setSpacing(8)
+        radio_layout.addWidget(self.save_same_radio)
+        radio_layout.addWidget(self.save_fixed_radio)
+        radio_layout.addWidget(self.save_ask_radio)
+
+        self.save_path_field = ElidedLineEdit()
+        self.save_path_field.setObjectName("SettingsPathField")
+        self.save_path_field.setReadOnly(True)
+        self.save_path_field.setFixedHeight(36)
+        self.save_path_field.setMinimumWidth(320)
+        self.save_path_field.setMaximumWidth(360)
+        palette = self.save_path_field.palette()
+        palette.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor("#9CA3AF"))
+        self.save_path_field.setPalette(palette)
+
+        self.browse_button = QtWidgets.QPushButton("Browse...")
+        self.browse_button.setFixedHeight(36)
+
+        path_layout = QtWidgets.QHBoxLayout()
+        path_layout.setSpacing(8)
+        path_layout.addWidget(self.save_path_field)
+        path_layout.addWidget(self.browse_button)
+
+        save_grid.addWidget(QtWidgets.QLabel(""), 0, 0)
+        save_grid.addLayout(radio_layout, 0, 1)
+        save_grid.addWidget(QtWidgets.QLabel(""), 1, 0)
+        save_grid.addLayout(path_layout, 1, 1)
+
+        layout.addLayout(save_grid)
+        layout.addStretch()
+
+        self._apply_settings_to_ui()
+        return page
+
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
         if self._state == AppState.WORKING:
             return
@@ -304,7 +476,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def set_state(self, state: AppState) -> None:
         self._state = state
-        page_index = self._page_index.get(state, 0)
+        page_index = self._state_pages.get(state, 0)
         self.stack.setCurrentIndex(page_index)
         self._update_ui_state(idle=state != AppState.WORKING)
 
@@ -322,12 +494,12 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._reset_video_state()
         self._video_path = path
-        self._set_output_dir(path.parent)
         self._log(f"Selected video: {path}")
         duration_seconds = get_media_duration_seconds(path)
         thumbnail_path = generate_thumbnail(path, duration_seconds, self._logger)
         self.video_card.set_video(path, duration_seconds, thumbnail_path)
         self._probe_video(path)
+        self._update_saving_to_line()
         self.set_state(AppState.VIDEO_SELECTED)
 
     def _handle_video_dropped(self, path: Path) -> None:
@@ -377,8 +549,17 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Video tools missing", str(exc))
             return
 
+        output_dir = self._resolve_output_dir_for_generate()
+        if output_dir is None:
+            return
+        self._set_output_dir(output_dir)
         self._subtitles_reviewed = False
-        settings = TranscriptionSettings(apply_audio_filter=self.filter_checkbox.isChecked())
+        device, compute_type = self._resolve_transcription_device()
+        settings = TranscriptionSettings(
+            apply_audio_filter=self.filter_checkbox.isChecked(),
+            device=device,
+            compute_type=compute_type,
+        )
         self._start_worker(TaskType.GENERATE_SRT, self._video_path, None, settings, None)
 
     def _on_review(self) -> None:
@@ -650,6 +831,168 @@ class MainWindow(QtWidgets.QMainWindow):
         self.details_toggle.setArrowType(arrow)
         self.details_toggle.setText("Hide details" if checked else "Show details")
 
+    def _show_settings_page(self) -> None:
+        self.page_stack.setCurrentIndex(self._page_index["settings"])
+
+    def _show_home_page(self) -> None:
+        self.page_stack.setCurrentIndex(self._page_index["home"])
+
+    def _apply_settings_to_ui(self) -> None:
+        quality_index = {
+            TranscriptionQuality.AUTO: 0,
+            TranscriptionQuality.FAST: 1,
+            TranscriptionQuality.ACCURATE: 2,
+            TranscriptionQuality.ULTRA: 3,
+        }
+        self.quality_combo.blockSignals(True)
+        self.quality_combo.setCurrentIndex(quality_index[self._transcription_quality])
+        self.quality_combo.blockSignals(False)
+
+        self.save_policy_group.blockSignals(True)
+        if self._save_policy == SaveLocationPolicy.SAME_FOLDER:
+            self.save_same_radio.setChecked(True)
+        elif self._save_policy == SaveLocationPolicy.FIXED_FOLDER:
+            self.save_fixed_radio.setChecked(True)
+        else:
+            self.save_ask_radio.setChecked(True)
+        self.save_policy_group.blockSignals(False)
+
+        self._update_fixed_path_field()
+        self._update_save_policy_controls()
+        self._update_quality_summary()
+        self._update_saving_to_line()
+
+    def _update_fixed_path_field(self) -> None:
+        path_text = str(self._fixed_output_dir) if self._fixed_output_dir else None
+        self.save_path_field.set_full_text(path_text, placeholder="No folder selected")
+
+    def _update_save_policy_controls(self) -> None:
+        enable_fixed = self._save_policy == SaveLocationPolicy.FIXED_FOLDER
+        self.save_path_field.setEnabled(enable_fixed)
+        self.browse_button.setEnabled(enable_fixed)
+
+    def _on_save_policy_toggled(
+        self,
+        button: QtWidgets.QAbstractButton,
+        checked: bool,
+    ) -> None:
+        if not checked:
+            return
+        if button is self.save_same_radio:
+            policy = SaveLocationPolicy.SAME_FOLDER
+        elif button is self.save_fixed_radio:
+            policy = SaveLocationPolicy.FIXED_FOLDER
+        else:
+            policy = SaveLocationPolicy.ASK_EVERY_TIME
+        if policy == self._save_policy:
+            return
+        self._save_policy = policy
+        self._config["save_policy"] = policy.value
+        self._save_config()
+        self._update_save_policy_controls()
+        self._update_saving_to_line()
+        self._update_ui_state(idle=self._state != AppState.WORKING)
+
+    def _browse_fixed_output_dir(self) -> None:
+        start_dir = str(self._fixed_output_dir) if self._fixed_output_dir else ""
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Choose folder…",
+            start_dir,
+        )
+        if not folder:
+            return
+        self._fixed_output_dir = Path(folder)
+        self._config["save_folder"] = str(self._fixed_output_dir)
+        self._save_config()
+        self._update_fixed_path_field()
+        self._update_saving_to_line()
+
+    def _on_quality_changed(self, index: int) -> None:
+        quality_map = {
+            0: TranscriptionQuality.AUTO,
+            1: TranscriptionQuality.FAST,
+            2: TranscriptionQuality.ACCURATE,
+            3: TranscriptionQuality.ULTRA,
+        }
+        quality = quality_map.get(index, TranscriptionQuality.AUTO)
+        if quality == self._transcription_quality:
+            return
+        self._transcription_quality = quality
+        self._config["transcription_quality"] = quality.value
+        self._save_config()
+        self._update_quality_summary()
+
+    def _resolve_transcription_device(self) -> tuple[str, str]:
+        if self._transcription_quality == TranscriptionQuality.AUTO:
+            if gpu_available():
+                return "cuda", "float16"
+            return "cpu", "int16"
+        if self._transcription_quality == TranscriptionQuality.FAST:
+            return "cpu", "int8"
+        if self._transcription_quality == TranscriptionQuality.ACCURATE:
+            return "cpu", "int16"
+        return "cpu", "float32"
+
+    def _update_quality_summary(self) -> None:
+        device, compute_type = self._resolve_transcription_device()
+        label = "GPU" if device == "cuda" else "CPU"
+        self.quality_run_label.setText(f"This will run on: {label} ({compute_type})")
+        helper_text = ""
+        if self._transcription_quality == TranscriptionQuality.ULTRA:
+            helper_text = (
+                "Very slow on most CPUs. Use only if you need maximum accuracy."
+            )
+        elif self._transcription_quality == TranscriptionQuality.FAST:
+            helper_text = "Faster, but may reduce accuracy on some machines."
+        self.quality_helper_label.setText(helper_text)
+        self.quality_helper_label.setVisible(bool(helper_text))
+
+    def _update_saving_to_line(self) -> None:
+        if not self._video_path:
+            self.saving_to_line.set_path("")
+            return
+        if self._save_policy == SaveLocationPolicy.ASK_EVERY_TIME:
+            self.saving_to_line.set_path("")
+            return
+        if self._save_policy == SaveLocationPolicy.SAME_FOLDER:
+            path_text = str(self._video_path.parent)
+        elif self._fixed_output_dir:
+            path_text = str(self._fixed_output_dir)
+        else:
+            path_text = "No folder selected"
+        self.saving_to_line.set_path(path_text)
+
+    def _resolve_output_dir_for_generate(self) -> Optional[Path]:
+        if not self._video_path:
+            return None
+        if self._save_policy == SaveLocationPolicy.SAME_FOLDER:
+            return self._video_path.parent
+        if self._save_policy == SaveLocationPolicy.FIXED_FOLDER:
+            if not self._fixed_output_dir:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Save folder missing",
+                    "Choose a folder in Settings to save your subtitles.",
+                )
+                return None
+            if not self._fixed_output_dir.exists():
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Save folder missing",
+                    "The selected save folder no longer exists. Choose another folder.",
+                )
+                return None
+            return self._fixed_output_dir
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Choose folder…",
+            str(self._video_path.parent),
+        )
+        if not folder:
+            return None
+        return Path(folder)
+
     def _update_details_visibility(self, *, idle: bool) -> None:
         show_toggle = idle and self._state == AppState.VIDEO_SELECTED
         if not show_toggle:
@@ -683,6 +1026,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_ui_state(self, *, idle: bool) -> None:
         self._refresh_ffmpeg_status()
         has_video = self._video_path is not None
+        self._update_saving_to_line()
         ffmpeg_ready = self._ffmpeg_available
         srt_ready = self._is_srt_ready(self._get_default_srt_path())
         can_generate = idle and has_video and ffmpeg_ready
@@ -695,8 +1039,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.drop_zone.setEnabled(idle and self._state == AppState.EMPTY)
         self.video_card.setEnabled(idle and self._state == AppState.VIDEO_SELECTED)
-        self.save_to_row.setVisible(has_video)
-        self.save_to_row.set_change_enabled(idle and has_video)
+        self.saving_to_line.setVisible(
+            idle and has_video and self._save_policy != SaveLocationPolicy.ASK_EVERY_TIME
+        )
         self.generate_button.setEnabled(
             can_generate and self._state == AppState.VIDEO_SELECTED
         )
@@ -711,6 +1056,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.done_open_video_button.setEnabled(done_state and can_open_video)
         self.done_open_folder_button.setEnabled(done_state and has_video)
         self.done_edit_button.setEnabled(done_state and can_open_srt)
+        self.settings_button.setEnabled(idle)
         self._update_details_visibility(idle=idle)
 
     def _apply_progress_bar_style(self) -> None:
@@ -725,7 +1071,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reset_video_state()
         self._video_path = None
         self._output_dir = None
-        self.save_to_row.set_path(None)
+        self._update_saving_to_line()
         self.video_card.clear()
         self.progress_bar.setValue(0)
         self.status_label.setText("Ready")
@@ -746,20 +1092,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _set_output_dir(self, path: Path) -> None:
         self._output_dir = path
-        self.save_to_row.set_path(path)
         self._log(f"Save folder: {path}")
-
-    def _change_output_dir(self) -> None:
-        if not self._output_dir:
-            return
-        folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self,
-            "Choose folder…",
-            str(self._output_dir),
-        )
-        if not folder:
-            return
-        self._set_output_dir(Path(folder))
 
     def _is_srt_ready(self, srt_path: Optional[Path]) -> bool:
         if not srt_path or not srt_path.exists():
@@ -772,23 +1105,42 @@ class MainWindow(QtWidgets.QMainWindow):
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def _load_subtitle_edit_path(self) -> Optional[Path]:
+    def _load_config(self) -> dict:
         config_path = self._get_app_data_dir() / "config.json"
         if not config_path.exists():
-            return None
+            return {}
         try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
+            return json.loads(config_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return None
-        value = data.get("subtitle_edit_path")
+            return {}
+
+    def _save_subtitle_edit_path(self, path: Path) -> None:
+        self._config["subtitle_edit_path"] = str(path)
+        self._save_config()
+
+    def _save_config(self) -> None:
+        config_path = self._get_app_data_dir() / "config.json"
+        config_path.write_text(json.dumps(self._config, indent=2), encoding="utf-8")
+
+    def _get_config_path(self, key: str) -> Optional[Path]:
+        value = self._config.get(key)
         if not value:
             return None
         return Path(value)
 
-    def _save_subtitle_edit_path(self, path: Path) -> None:
-        config_path = self._get_app_data_dir() / "config.json"
-        payload = {"subtitle_edit_path": str(path)}
-        config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    def _load_save_policy(self) -> SaveLocationPolicy:
+        value = self._config.get("save_policy")
+        try:
+            return SaveLocationPolicy(value)
+        except ValueError:
+            return SaveLocationPolicy.SAME_FOLDER
+
+    def _load_transcription_quality(self) -> TranscriptionQuality:
+        value = self._config.get("transcription_quality")
+        try:
+            return TranscriptionQuality(value)
+        except ValueError:
+            return TranscriptionQuality.AUTO
 
     def _resolve_subtitle_edit_path(self) -> Optional[Path]:
         if self._subtitle_edit_path and self._subtitle_edit_path.exists():
