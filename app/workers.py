@@ -474,7 +474,7 @@ class Worker(QtCore.QObject):
         self._emit_step_progress(
             ProgressStep.TRANSCRIBE,
             0.0,
-            "Listening",
+            "Listening to audio",
             force=True,
         )
         runtime_mode = get_runtime_mode()
@@ -575,7 +575,7 @@ class Worker(QtCore.QObject):
         watchdog_stop = threading.Event()
         no_output_timeout = 60.0
         if duration_seconds is None:
-            self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Listening")
+            self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Listening to audio")
 
         def _watchdog() -> None:
             nonlocal watchdog_triggered, watchdog_elapsed
@@ -620,7 +620,11 @@ class Worker(QtCore.QObject):
                     if end_value > max_end_seconds:
                         max_end_seconds = end_value
                         progress = min(0.99, max_end_seconds / duration_seconds)
-                        self._emit_step_progress(ProgressStep.TRANSCRIBE, progress, "Listening")
+                        self._emit_step_progress(
+                            ProgressStep.TRANSCRIBE,
+                            progress,
+                            "Listening to audio",
+                        )
                 now = time.monotonic()
                 if now - last_progress_log >= 2.0:
                     _emit_log("Listening progress update received.", True)
@@ -634,7 +638,7 @@ class Worker(QtCore.QObject):
                 self._emit_step_progress(
                     ProgressStep.TRANSCRIBE,
                     0.0,
-                    "Listening",
+                    "Listening to audio",
                     force=True,
                 )
                 continue
@@ -723,7 +727,7 @@ class Worker(QtCore.QObject):
             self._step_progress[step_id] = clamped
             percent_int = int(round(clamped * 100))
 
-        status = label if percent_int is None else f"{label} — {percent_int}%"
+        status = label
         now = time.monotonic()
         if not force and now - self._last_progress_emit < 0.1:
             return
