@@ -366,7 +366,19 @@ Rules:
   - Browse button is disabled unless policy = “Always save to this folder”.
   - Do not show a “folder” label; the field itself communicates what it is.
 
-### Section 3 — Diagnostics
+### Section 3 — Punctuation
+
+Controls:
+- Master checkbox: “Improve punctuation automatically (recommended)”
+
+Helper text (always visible, indented to align with checkbox text):
+- “If subtitles come out with little or no punctuation, the app will retry transcription in a compatibility mode and use that result. This can take longer.”
+
+Behavior:
+- Defaults ON for new users.
+- Preserve existing config values when present.
+
+### Section 4 — Diagnostics
 
 Diagnostics are for debugging and **must be OFF by default**.
 

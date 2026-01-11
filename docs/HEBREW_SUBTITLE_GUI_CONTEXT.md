@@ -182,6 +182,7 @@ Performance settings implemented:
 - “Quality” options map to device/compute-type selections.
 - **Auto on CPU-only → int16** (per requirement).
 - A **float32** option exists (slowest, potentially most accurate) for debugging/edge cases.
+- Punctuation rescue fallback is user-controllable in Settings and defaults to ON.
 
 ### 6.3 Diagnostics / logs (for debugging even when runs succeed)
 Goal:
@@ -289,4 +290,3 @@ If diagnostics are not enabled, capture:
 - **PyInstaller + native deps:** ctranslate2/tokenizers/Qt multimedia plugins can fail only in EXE.
 - **Path handling:** support OneDrive paths and spaces; always quote paths when calling tools.
 - **FFmpeg progress parsing:** keep it resilient (stderr format differences).
-

@@ -99,11 +99,28 @@ QLabel#SettingsTitle {{
 
 QLabel#SettingsHelperText {{
   color: {MUTED_TEXT};
-  font-size: 12px;
+  font-size: 13px;
 }}
 
 QLabel#SettingsRunSummary {{
   color: {MUTED_TEXT};
+}}
+
+QFrame#SettingsSectionCard {{
+  border: 1px solid {BORDER};
+  border-radius: {RADIUS}px;
+  background-color: {SURFACE};
+}}
+
+QLabel#SettingsSectionTitle {{
+  font-size: 13px;
+  font-weight: 600;
+}}
+
+QFrame#SettingsSectionCard QLabel,
+QFrame#SettingsSectionCard QCheckBox,
+QFrame#SettingsSectionCard QRadioButton {{
+  font-size: 13px;
 }}
 
 QToolButton#VideoCardClear {{

@@ -342,6 +342,13 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     parser.add_argument("--duration-seconds", type=float)
     parser.add_argument("--print-transcribe-config", action="store_true")
     parser.add_argument("--ffmpeg-args-json")
+    parser.add_argument("--punctuation-rescue", dest="punctuation_rescue", action="store_true")
+    parser.add_argument(
+        "--no-punctuation-rescue",
+        dest="punctuation_rescue",
+        action="store_false",
+    )
+    parser.set_defaults(punctuation_rescue=True)
     args = parser.parse_args(argv)
 
     if not args.print_transcribe_config and (not args.wav or not args.srt):
@@ -439,6 +446,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "download_root": str(models_dir),
             }
         punctuation_rescue = dict(PUNCTUATION_RESCUE_DEFAULTS)
+        punctuation_rescue["enabled"] = bool(args.punctuation_rescue)
         config = build_transcription_config(
             model_name=args.model,
             models_dir=models_dir,
