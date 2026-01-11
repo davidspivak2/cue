@@ -59,6 +59,7 @@ class TranscriptionSettings:
     device: str
     compute_type: str
     quality: str
+    punctuation_rescue_fallback_enabled: bool
 
 
 @dataclass
@@ -586,6 +587,10 @@ class Worker(QtCore.QObject):
                 "--ffmpeg-args-json",
                 json.dumps(self._last_audio_extract_command),
             ]
+        command += [
+            "--punctuation-rescue",
+            "on" if self.transcription_settings.punctuation_rescue_fallback_enabled else "off",
+        ]
 
         parent_config = {
             "model_name": TRANSCRIBE_MODEL_NAME,
@@ -595,6 +600,9 @@ class Worker(QtCore.QObject):
             "device": device,
             "compute_type": compute_type,
             "ffmpeg_args": self._last_audio_extract_command,
+            "punctuation_rescue_fallback_enabled": (
+                self.transcription_settings.punctuation_rescue_fallback_enabled
+            ),
         }
         self.signals.log.emit(
             f"TRANSCRIBE_PARENT_CONFIG {json.dumps(parent_config, sort_keys=True)}",

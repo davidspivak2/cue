@@ -342,6 +342,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     parser.add_argument("--duration-seconds", type=float)
     parser.add_argument("--print-transcribe-config", action="store_true")
     parser.add_argument("--ffmpeg-args-json")
+    parser.add_argument(
+        "--punctuation-rescue",
+        choices=["on", "off"],
+        default="on",
+    )
     args = parser.parse_args(argv)
 
     if not args.print_transcribe_config and (not args.wav or not args.srt):
@@ -439,6 +444,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "download_root": str(models_dir),
             }
         punctuation_rescue = dict(PUNCTUATION_RESCUE_DEFAULTS)
+        punctuation_rescue["enabled"] = args.punctuation_rescue == "on"
         config = build_transcription_config(
             model_name=args.model,
             models_dir=models_dir,
@@ -510,9 +516,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         )
 
         rescue_triggered = False
-        if punctuation_rescue.get("enabled", True) and density < float(
-            punctuation_rescue.get("min_density", 0.03)
-        ):
+        rescue_enabled = punctuation_rescue.get("enabled", True)
+        if rescue_enabled and density < float(punctuation_rescue.get("min_density", 0.03)):
             rescue_triggered = True
             if int(punctuation_rescue.get("max_attempts", 2)) >= 1:
                 attempt_vad = not args.vad_filter
@@ -618,15 +623,17 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             splitter_alignment_failures=chosen_attempt["splitter_stats"].alignment_failures,
             preview_limit=3,
         )
-        transcribe_stats["punctuation_density_attempts"] = [
-            {
-                "attempt": attempt["attempt"],
-                "model": attempt["model"],
-                "vad_filter": attempt["vad_filter"],
-                "density": attempt["density"],
-            }
-            for attempt in attempts
-        ]
+        if rescue_enabled:
+            transcribe_stats["punctuation_density_attempts"] = [
+                {
+                    "attempt": attempt["attempt"],
+                    "model": attempt["model"],
+                    "vad_filter": attempt["vad_filter"],
+                    "density": attempt["density"],
+                }
+                for attempt in attempts
+            ]
+        transcribe_stats["punctuation_rescue_mode"] = "on" if rescue_enabled else "off"
         transcribe_stats["punctuation_rescue_triggered"] = rescue_triggered
         transcribe_stats["punctuation_rescue_chosen_attempt"] = chosen_attempt["attempt"]
         _print(f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}")
