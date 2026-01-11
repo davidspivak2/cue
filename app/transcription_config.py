@@ -62,6 +62,9 @@ class TranscriptionConfig:
     whisper_model_fallback_kwargs: dict[str, Any] | None
     transcribe_kwargs: dict[str, Any]
     transcribe_defaults: list[str]
+    language_cli: str
+    language_auto: bool
+    initial_prompt: str | None
     srt_formatting: dict[str, Any]
     post_splitter: dict[str, Any]
     audio_extraction: dict[str, Any] | None
@@ -87,6 +90,9 @@ class TranscriptionConfig:
             "whisper_model_fallback_kwargs": self.whisper_model_fallback_kwargs,
             "transcribe_kwargs": self.transcribe_kwargs,
             "transcribe_defaults": self.transcribe_defaults,
+            "language_cli": self.language_cli,
+            "language_auto": self.language_auto,
+            "initial_prompt": self.initial_prompt,
             "srt_formatting": self.srt_formatting,
             "post_splitter": self.post_splitter,
             "audio_extraction": self.audio_extraction,
@@ -113,6 +119,9 @@ def build_transcription_config(
     whisper_model_fallback_kwargs: dict[str, Any] | None,
     transcribe_kwargs: dict[str, Any],
     transcribe_defaults: list[str],
+    language_cli: str,
+    language_auto: bool,
+    initial_prompt: str | None,
     srt_formatting: dict[str, Any],
     post_splitter: dict[str, Any],
     audio_extraction: dict[str, Any] | None = None,
@@ -142,6 +151,9 @@ def build_transcription_config(
         whisper_model_fallback_kwargs=whisper_model_fallback_kwargs,
         transcribe_kwargs=transcribe_kwargs,
         transcribe_defaults=transcribe_defaults,
+        language_cli=language_cli,
+        language_auto=language_auto,
+        initial_prompt=initial_prompt,
         srt_formatting=srt_formatting,
         post_splitter=post_splitter,
         audio_extraction=audio_extraction,
