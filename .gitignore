@@ -7,3 +7,5 @@ dist/
 HebrewSubtitleGUI.spec
 bin/ffmpeg.exe
 bin/ffprobe.exe
+debug_punct_matrix.py
+debug_raw_segments.py
