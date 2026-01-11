@@ -27,6 +27,11 @@ def _parse_args() -> argparse.Namespace:
     parser.set_defaults(vad_filter=True)
     parser.add_argument("--vad-min-silence-ms", type=int, default=400)
     parser.add_argument("--initial-prompt")
+    parser.add_argument(
+        "--punctuation-rescue",
+        choices=["on", "off"],
+        default="on",
+    )
     parser.add_argument("--prefer-gpu", action="store_true")
     parser.add_argument("--force-cpu", action="store_true")
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
@@ -64,6 +69,8 @@ def _run_worker(wav_path: Path, args: argparse.Namespace) -> dict[str, object]:
             args.model,
             "--vad-min-silence-ms",
             str(args.vad_min_silence_ms),
+            "--punctuation-rescue",
+            args.punctuation_rescue,
             "--device",
             args.device,
             "--compute-type",
