@@ -587,8 +587,10 @@ class Worker(QtCore.QObject):
                 "--ffmpeg-args-json",
                 json.dumps(self._last_audio_extract_command),
             ]
-        if not self.transcription_settings.punctuation_rescue_fallback_enabled:
-            command.append("--no-punctuation-rescue")
+        command += [
+            "--punctuation-rescue",
+            "on" if self.transcription_settings.punctuation_rescue_fallback_enabled else "off",
+        ]
 
         parent_config = {
             "model_name": TRANSCRIBE_MODEL_NAME,
