@@ -87,6 +87,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._save_policy = self._load_save_policy()
         self._fixed_output_dir = self._get_config_path("save_folder")
         self._transcription_quality = self._load_transcription_quality()
+        self._punctuation_rescue_fallback_enabled = (
+            self._load_punctuation_rescue_fallback_enabled()
+        )
         self._diagnostics_settings = self._load_diagnostics_settings()
         self._state = AppState.EMPTY
 
@@ -233,12 +236,12 @@ class MainWindow(QtWidgets.QMainWindow):
         home_layout.addWidget(self.details_toggle)
         home_layout.addWidget(self.details_panel)
 
-        settings_page = self._build_settings_page()
+        self.settings_page = self._build_settings_page()
 
         self.page_stack = QtWidgets.QStackedWidget()
         self._page_index = {
             "home": self.page_stack.addWidget(home_page),
-            "settings": self.page_stack.addWidget(settings_page),
+            "settings": self.page_stack.addWidget(self.settings_page),
         }
         layout.addWidget(self.page_stack)
 
@@ -264,6 +267,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
         self.save_policy_group.buttonToggled.connect(self._on_save_policy_toggled)
         self.browse_button.clicked.connect(self._browse_fixed_output_dir)
+        self.punctuation_rescue_checkbox.toggled.connect(
+            self._on_punctuation_rescue_toggled
+        )
         self.diagnostics_enabled_checkbox.toggled.connect(
             self._on_diagnostics_enabled_toggled
         )
@@ -372,11 +378,22 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addStretch()
         return page
 
+    def _build_settings_section(self, title: str) -> QtWidgets.QFrame:
+        card = QtWidgets.QFrame()
+        card.setObjectName("SettingsSectionCard")
+        card_layout = QtWidgets.QVBoxLayout(card)
+        card_layout.setContentsMargins(8, 8, 8, 8)
+        card_layout.setSpacing(8)
+        title_label = QtWidgets.QLabel(title)
+        title_label.setObjectName("SettingsSectionTitle")
+        card_layout.addWidget(title_label)
+        return card
+
     def _build_settings_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(22)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         header_layout = QtWidgets.QHBoxLayout()
         self.settings_back_button = QtWidgets.QPushButton("← Back")
@@ -394,9 +411,8 @@ class MainWindow(QtWidgets.QMainWindow):
         header_layout.addStretch()
         layout.addLayout(header_layout)
 
-        performance_title = QtWidgets.QLabel("Performance")
-        performance_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        layout.addWidget(performance_title)
+        performance_card = self._build_settings_section("Performance")
+        performance_layout = performance_card.layout()
 
         performance_grid = QtWidgets.QGridLayout()
         performance_grid.setColumnMinimumWidth(0, 170)
@@ -434,11 +450,11 @@ class MainWindow(QtWidgets.QMainWindow):
         performance_grid.addWidget(self.quality_run_label, 1, 1)
         performance_grid.addWidget(QtWidgets.QLabel(""), 2, 0)
         performance_grid.addWidget(self.quality_helper_label, 2, 1)
-        layout.addLayout(performance_grid)
+        performance_layout.addLayout(performance_grid)
+        layout.addWidget(performance_card)
 
-        save_title = QtWidgets.QLabel("Save location")
-        save_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        layout.addWidget(save_title)
+        save_card = self._build_settings_section("Save subtitles")
+        save_layout = save_card.layout()
 
         save_grid = QtWidgets.QGridLayout()
         save_grid.setColumnMinimumWidth(0, 170)
@@ -484,14 +500,28 @@ class MainWindow(QtWidgets.QMainWindow):
         save_grid.addWidget(QtWidgets.QLabel(""), 1, 0)
         save_grid.addLayout(path_layout, 1, 1)
 
-        layout.addLayout(save_grid)
+        save_layout.addLayout(save_grid)
+        layout.addWidget(save_card)
 
-        diagnostics_title = QtWidgets.QLabel("Diagnostics")
-        diagnostics_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        layout.addWidget(diagnostics_title)
+        punctuation_card = self._build_settings_section("Punctuation")
+        punctuation_layout = punctuation_card.layout()
+        self.punctuation_rescue_checkbox = QtWidgets.QCheckBox(
+            "Improve punctuation automatically (recommended)"
+        )
+        punctuation_help = QtWidgets.QLabel(
+            "If subtitles come out with little or no punctuation, the app will retry "
+            "transcription in a compatibility mode and use that result. This can take "
+            "longer."
+        )
+        punctuation_help.setObjectName("SettingsHelperText")
+        punctuation_help.setWordWrap(True)
+        punctuation_help.setIndent(24)
+        punctuation_layout.addWidget(self.punctuation_rescue_checkbox)
+        punctuation_layout.addWidget(punctuation_help)
+        layout.addWidget(punctuation_card)
 
-        diagnostics_layout = QtWidgets.QVBoxLayout()
-        diagnostics_layout.setSpacing(8)
+        diagnostics_card = self._build_settings_section("Diagnostics")
+        diagnostics_layout = diagnostics_card.layout()
 
         self.diagnostics_enabled_checkbox = QtWidgets.QCheckBox("Enable diagnostics logging")
         self.diagnostics_success_checkbox = QtWidgets.QCheckBox(
@@ -515,7 +545,7 @@ class MainWindow(QtWidgets.QMainWindow):
             diagnostics_layout.addWidget(checkbox)
             self.diagnostics_category_checkboxes[key] = checkbox
 
-        layout.addLayout(diagnostics_layout)
+        layout.addWidget(diagnostics_card)
         layout.addStretch()
 
         self._apply_settings_to_ui()
@@ -620,6 +650,7 @@ class MainWindow(QtWidgets.QMainWindow):
             device=device,
             compute_type=compute_type,
             quality=self._transcription_quality.value,
+            punctuation_rescue_fallback_enabled=self._punctuation_rescue_fallback_enabled,
         )
         self._start_worker(TaskType.GENERATE_SRT, self._video_path, None, settings, None)
 
@@ -953,6 +984,12 @@ class MainWindow(QtWidgets.QMainWindow):
             checkbox.setChecked(self._diagnostics_settings.categories.get(key, True))
             checkbox.blockSignals(False)
 
+        self.punctuation_rescue_checkbox.blockSignals(True)
+        self.punctuation_rescue_checkbox.setChecked(
+            self._punctuation_rescue_fallback_enabled
+        )
+        self.punctuation_rescue_checkbox.blockSignals(False)
+
         self._update_fixed_path_field()
         self._update_save_policy_controls()
         self._update_quality_summary()
@@ -1022,6 +1059,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_save_policy_controls()
         self._update_saving_to_line()
         self._update_ui_state(idle=self._state != AppState.WORKING)
+
+    def _on_punctuation_rescue_toggled(self, checked: bool) -> None:
+        if checked == self._punctuation_rescue_fallback_enabled:
+            return
+        self._punctuation_rescue_fallback_enabled = checked
+        self._config["punctuation_rescue_fallback_enabled"] = checked
+        self._save_config()
 
     def _browse_fixed_output_dir(self) -> None:
         start_dir = str(self._fixed_output_dir) if self._fixed_output_dir else ""
@@ -1187,6 +1231,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.done_open_folder_button.setEnabled(done_state and has_video)
         self.done_edit_button.setEnabled(done_state and can_open_srt)
         self.settings_button.setEnabled(idle)
+        self.settings_page.setEnabled(idle)
         self._update_details_visibility(idle=idle)
 
     def _apply_progress_bar_style(self) -> None:
@@ -1302,6 +1347,12 @@ class MainWindow(QtWidgets.QMainWindow):
             write_on_success=write_on_success,
             categories=categories,
         )
+
+    def _load_punctuation_rescue_fallback_enabled(self) -> bool:
+        value = self._config.get("punctuation_rescue_fallback_enabled")
+        if isinstance(value, bool):
+            return value
+        return True
 
     def _resolve_subtitle_edit_path(self) -> Optional[Path]:
         if self._subtitle_edit_path and self._subtitle_edit_path.exists():
