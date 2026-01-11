@@ -38,7 +38,12 @@ TRANSCRIBE_DEFAULTS = [
 
 
 def _print(message: str) -> None:
-    print(message, flush=True)
+    try:
+        print(message, flush=True)
+    except UnicodeEncodeError:
+        # Windows console / redirected output may be cp1252/cp437, which can't print Hebrew.
+        sys.stdout.buffer.write((message + "\n").encode("utf-8", errors="backslashreplace"))
+        sys.stdout.buffer.flush()
 
 
 def _log_transcribe_config(config_json: str, config_text: str) -> None:
@@ -427,7 +432,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 preview_limit=3,
             )
             _print(
-                f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=False)}"
+                f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}"
             )
             _write_srt(segments, srt_path)
         finally:
