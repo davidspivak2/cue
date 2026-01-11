@@ -24,7 +24,7 @@ from .paths import get_models_dir
 from .transcription_config import build_transcription_config
 from .transcription_device import get_cuda_device_count
 
-MODEL_NAME = "large-v3"
+DEFAULT_MODEL_NAME = "large-v3"
 TRANSCRIBE_DEFAULTS = [
     "best_of",
     "temperature",
@@ -142,6 +142,7 @@ def _cpu_threads_for_device(device: str) -> int:
 
 
 def _load_model(
+    model_name: str,
     device: str,
     compute_type: str,
     *,
@@ -157,7 +158,7 @@ def _load_model(
             _print("MODE gpu")
             _print("Loading model (GPU)...")
             model = WhisperModel(
-                MODEL_NAME,
+                model_name,
                 device="cuda",
                 compute_type=compute_type,
                 cpu_threads=2,
@@ -171,7 +172,7 @@ def _load_model(
             _print("Loading model (CPU)...")
             _print("MODEL_DEVICE cpu compute_type=int8")
             return WhisperModel(
-                MODEL_NAME,
+                model_name,
                 device="cpu",
                 compute_type="int8",
                 cpu_threads=cpu_threads_cpu,
@@ -181,7 +182,7 @@ def _load_model(
     _print("MODE cpu")
     _print("Loading model (CPU)...")
     return WhisperModel(
-        MODEL_NAME,
+        model_name,
         device="cpu",
         compute_type=compute_type,
         cpu_threads=cpu_threads_active,
@@ -232,6 +233,16 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     parser.add_argument("--wav")
     parser.add_argument("--srt")
     parser.add_argument("--lang", default="he")
+    parser.add_argument(
+        "--model",
+        choices=["large-v3", "large-v2"],
+        default=DEFAULT_MODEL_NAME,
+    )
+    parser.add_argument("--vad-filter", dest="vad_filter", action="store_true")
+    parser.add_argument("--no-vad-filter", dest="vad_filter", action="store_false")
+    parser.set_defaults(vad_filter=True)
+    parser.add_argument("--vad-min-silence-ms", type=int, default=400)
+    parser.add_argument("--initial-prompt")
     parser.add_argument("--prefer-gpu", action="store_true")
     parser.add_argument("--force-cpu", action="store_true")
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
@@ -270,8 +281,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 _print(f"ERROR importing whisper deps: {exc}")
         _print("READY")
         models_dir = get_models_dir()
-        model_dir = models_dir / MODEL_NAME
-        _print(f"MODEL_NAME {MODEL_NAME}")
+        model_dir = models_dir / args.model
+        _print(f"MODEL_NAME {args.model}")
         _print(f"MODELS_DIR {models_dir}")
         _print(f"MODEL_DIR {model_dir}")
         if model_dir.exists():
@@ -295,14 +306,20 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         force_cpu = device == "cpu"
         cpu_threads_cpu = _cpu_threads_for_device("cpu")
         cpu_threads_active = _cpu_threads_for_device(device)
+        language_auto = args.lang == "auto"
         transcribe_kwargs = {
-            "language": args.lang,
+            "language": None if language_auto else args.lang,
             "task": "transcribe",
             "beam_size": 5,
-            "vad_filter": True,
-            "vad_parameters": {"min_silence_duration_ms": 400},
+            "vad_filter": args.vad_filter,
             "word_timestamps": True,
         }
+        if args.vad_filter:
+            transcribe_kwargs["vad_parameters"] = {
+                "min_silence_duration_ms": args.vad_min_silence_ms
+            }
+        if args.initial_prompt:
+            transcribe_kwargs["initial_prompt"] = args.initial_prompt
         splitter_config = SplitterConfig(
             apply_if=SplitApplyThresholds(
                 duration_sec=12.0,
@@ -340,7 +357,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "download_root": str(models_dir),
             }
         config = build_transcription_config(
-            model_name=MODEL_NAME,
+            model_name=args.model,
             models_dir=models_dir,
             prefer_gpu=prefer_gpu,
             force_cpu=force_cpu,
@@ -351,6 +368,9 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             whisper_model_fallback_kwargs=whisper_model_fallback_kwargs,
             transcribe_kwargs=transcribe_kwargs,
             transcribe_defaults=TRANSCRIBE_DEFAULTS,
+            language_cli=args.lang,
+            language_auto=language_auto,
+            initial_prompt=args.initial_prompt,
             srt_formatting={
                 "timestamp_format": "HH:MM:SS,mmm",
                 "index_start": 1,
@@ -371,6 +391,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
         try:
             model = _load_model(
+                args.model,
                 device,
                 compute_type,
                 models_dir=models_dir,
@@ -423,11 +444,14 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             transcribe_stats = build_transcription_stats(
                 raw_segments=raw_segments,
                 cues=cues,
-                model_name=MODEL_NAME,
+                model_name=args.model,
                 device=device,
                 compute_type=compute_type,
                 transcribe_kwargs=transcribe_kwargs,
                 transcribe_defaults=TRANSCRIBE_DEFAULTS,
+                language_cli=args.lang,
+                language_auto=language_auto,
+                initial_prompt=args.initial_prompt,
                 splitter_alignment_failures=splitter_stats.alignment_failures,
                 preview_limit=3,
             )
