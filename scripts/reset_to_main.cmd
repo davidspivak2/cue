@@ -2,7 +2,9 @@
 setlocal EnableExtensions
 
 set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
+pushd "%SCRIPT_DIR%.." || (echo [error] Failed to locate repo root.& exit /b 1)
+set "REPO_ROOT=%CD%"
+popd
 
 echo [warning] ============================================================
 echo [warning] WARNING: This will discard ALL uncommitted changes and
