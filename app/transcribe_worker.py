@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from .srt_utils import SrtSegment, segments_to_srt
-from .punctuation_stats import build_transcription_stats
+from .punctuation_stats import DEFAULT_PUNCTUATION, build_transcription_stats
 from .srt_splitter import (
     SplitApplyThresholds,
     SplitMaxCue,
@@ -35,6 +35,11 @@ TRANSCRIBE_DEFAULTS = [
     "patience",
     "length_penalty",
 ]
+PUNCTUATION_RESCUE_DEFAULTS = {
+    "enabled": True,
+    "min_density": 0.03,
+    "max_attempts": 2,
+}
 
 
 def _print(message: str) -> None:
@@ -196,6 +201,89 @@ def _write_srt(segments: list[SrtSegment], srt_path: Path) -> None:
     srt_path.write_text(srt_content, encoding="utf-8")
 
 
+def _calculate_punctuation_density(cues: list[object]) -> float:
+    cue_texts = [str(getattr(cue, "text", "")) for cue in cues]
+    words = sum(len(text.split()) for text in cue_texts)
+    punctuation_count = 0
+    for text in cue_texts:
+        for mark in DEFAULT_PUNCTUATION:
+            punctuation_count += text.count(mark)
+    return punctuation_count / max(words, 1)
+
+
+def _build_transcribe_kwargs(
+    *,
+    language: str,
+    language_auto: bool,
+    vad_filter: bool,
+    vad_min_silence_ms: int,
+    initial_prompt: str | None,
+) -> dict[str, object]:
+    transcribe_kwargs: dict[str, object] = {
+        "language": None if language_auto else language,
+        "task": "transcribe",
+        "beam_size": 5,
+        "vad_filter": vad_filter,
+        "word_timestamps": True,
+    }
+    if vad_filter:
+        transcribe_kwargs["vad_parameters"] = {
+            "min_silence_duration_ms": vad_min_silence_ms
+        }
+    if initial_prompt:
+        transcribe_kwargs["initial_prompt"] = initial_prompt
+    return transcribe_kwargs
+
+
+def _run_transcription_attempt(
+    *,
+    model,
+    wav_path: Path,
+    transcribe_kwargs: dict[str, object],
+    splitter_config: SplitterConfig,
+    duration_seconds: float | None,
+) -> tuple[list[object], list[object], list[SrtSegment], SplitterStats]:
+    segments_iter, info = model.transcribe(str(wav_path), **transcribe_kwargs)
+    _print(f"Detected language: {info.language} (prob={info.language_probability:.2f})")
+
+    transcribe_heartbeat_stop = threading.Event()
+    transcribe_heartbeat_thread = _start_heartbeat("TRANSCRIBE", transcribe_heartbeat_stop)
+    try:
+        raw_segments = []
+        max_end = 0.0
+        last_reported_end = 0.0
+        last_reported_percent = 0.0
+        for segment in segments_iter:
+            raw_segments.append(segment)
+            if segment.end > max_end:
+                max_end = segment.end
+            should_report = max_end - last_reported_end >= 0.5
+            if duration_seconds:
+                current_percent = max_end / duration_seconds
+                if current_percent - last_reported_percent >= 0.01:
+                    should_report = True
+            if should_report and max_end > last_reported_end:
+                _print(f"PROGRESS_END {max_end:.3f}")
+                last_reported_end = max_end
+                if duration_seconds:
+                    last_reported_percent = max_end / duration_seconds
+        splitter_stats = SplitterStats()
+        cues = split_segments_into_cues(
+            raw_segments,
+            config=splitter_config,
+            stats=splitter_stats,
+        )
+        segments: list[SrtSegment] = []
+        for index, cue in enumerate(cues, start=1):
+            segments.append(
+                SrtSegment(index=index, start=cue.start, end=cue.end, text=cue.text)
+            )
+    finally:
+        transcribe_heartbeat_stop.set()
+        transcribe_heartbeat_thread.join(timeout=1)
+    return raw_segments, cues, segments, splitter_stats
+
+
 def _hard_exit(code: int) -> NoReturn:
     try:
         sys.stdout.flush()
@@ -307,19 +395,13 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         cpu_threads_cpu = _cpu_threads_for_device("cpu")
         cpu_threads_active = _cpu_threads_for_device(device)
         language_auto = args.lang == "auto"
-        transcribe_kwargs = {
-            "language": None if language_auto else args.lang,
-            "task": "transcribe",
-            "beam_size": 5,
-            "vad_filter": args.vad_filter,
-            "word_timestamps": True,
-        }
-        if args.vad_filter:
-            transcribe_kwargs["vad_parameters"] = {
-                "min_silence_duration_ms": args.vad_min_silence_ms
-            }
-        if args.initial_prompt:
-            transcribe_kwargs["initial_prompt"] = args.initial_prompt
+        transcribe_kwargs = _build_transcribe_kwargs(
+            language=args.lang,
+            language_auto=language_auto,
+            vad_filter=args.vad_filter,
+            vad_min_silence_ms=args.vad_min_silence_ms,
+            initial_prompt=args.initial_prompt,
+        )
         splitter_config = SplitterConfig(
             apply_if=SplitApplyThresholds(
                 duration_sec=12.0,
@@ -356,6 +438,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "num_workers": 1,
                 "download_root": str(models_dir),
             }
+        punctuation_rescue = dict(PUNCTUATION_RESCUE_DEFAULTS)
         config = build_transcription_config(
             model_name=args.model,
             models_dir=models_dir,
@@ -379,6 +462,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             },
             post_splitter=splitter_config.to_dict(),
             audio_extraction=audio_extraction,
+            punctuation_rescue=punctuation_rescue,
         )
         _log_transcribe_config(config.to_json(), config.to_pretty_text())
         if args.print_transcribe_config:
@@ -401,67 +485,152 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=1)
-        segments_iter, info = model.transcribe(str(wav_path), **transcribe_kwargs)
-        _print(
-            f"Detected language: {info.language} "
-            f"(prob={info.language_probability:.2f})"
+        duration_seconds = args.duration_seconds
+        attempts: list[dict[str, object]] = []
+        raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
+            model=model,
+            wav_path=wav_path,
+            transcribe_kwargs=transcribe_kwargs,
+            splitter_config=splitter_config,
+            duration_seconds=duration_seconds,
+        )
+        density = _calculate_punctuation_density(cues)
+        attempts.append(
+            {
+                "attempt": 0,
+                "model": args.model,
+                "vad_filter": transcribe_kwargs.get("vad_filter"),
+                "transcribe_kwargs": transcribe_kwargs,
+                "raw_segments": raw_segments,
+                "cues": cues,
+                "segments": segments,
+                "splitter_stats": splitter_stats,
+                "density": density,
+            }
         )
 
-        transcribe_heartbeat_stop = threading.Event()
-        transcribe_heartbeat_thread = _start_heartbeat("TRANSCRIBE", transcribe_heartbeat_stop)
-        try:
-            raw_segments = []
-            max_end = 0.0
-            last_reported_end = 0.0
-            last_reported_percent = 0.0
-            duration_seconds = args.duration_seconds
-            for segment in segments_iter:
-                raw_segments.append(segment)
-                if segment.end > max_end:
-                    max_end = segment.end
-                should_report = max_end - last_reported_end >= 0.5
-                if duration_seconds:
-                    current_percent = max_end / duration_seconds
-                    if current_percent - last_reported_percent >= 0.01:
-                        should_report = True
-                if should_report and max_end > last_reported_end:
-                    _print(f"PROGRESS_END {max_end:.3f}")
-                    last_reported_end = max_end
-                    if duration_seconds:
-                        last_reported_percent = max_end / duration_seconds
-            splitter_stats = SplitterStats()
-            cues = split_segments_into_cues(
-                raw_segments,
-                config=splitter_config,
-                stats=splitter_stats,
-            )
-            segments: list[SrtSegment] = []
-            for index, cue in enumerate(cues, start=1):
-                segments.append(
-                    SrtSegment(index=index, start=cue.start, end=cue.end, text=cue.text)
+        rescue_triggered = False
+        if punctuation_rescue.get("enabled", True) and density < float(
+            punctuation_rescue.get("min_density", 0.03)
+        ):
+            rescue_triggered = True
+            if int(punctuation_rescue.get("max_attempts", 2)) >= 1:
+                attempt_vad = not args.vad_filter
+                attempt_kwargs = _build_transcribe_kwargs(
+                    language=args.lang,
+                    language_auto=language_auto,
+                    vad_filter=attempt_vad,
+                    vad_min_silence_ms=args.vad_min_silence_ms,
+                    initial_prompt=args.initial_prompt,
+                )
+                raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
+                    model=model,
+                    wav_path=wav_path,
+                    transcribe_kwargs=attempt_kwargs,
+                    splitter_config=splitter_config,
+                    duration_seconds=duration_seconds,
+                )
+                attempts.append(
+                    {
+                        "attempt": 1,
+                        "model": args.model,
+                        "vad_filter": attempt_kwargs.get("vad_filter"),
+                        "transcribe_kwargs": attempt_kwargs,
+                        "raw_segments": raw_segments,
+                        "cues": cues,
+                        "segments": segments,
+                        "splitter_stats": splitter_stats,
+                        "density": _calculate_punctuation_density(cues),
+                    }
+                )
+            if int(punctuation_rescue.get("max_attempts", 2)) >= 2:
+                heartbeat_stop = threading.Event()
+                heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
+                try:
+                    rescue_model = _load_model(
+                        "large-v2",
+                        device,
+                        compute_type,
+                        models_dir=models_dir,
+                        cpu_threads_cpu=cpu_threads_cpu,
+                        cpu_threads_active=cpu_threads_active,
+                    )
+                finally:
+                    heartbeat_stop.set()
+                    heartbeat_thread.join(timeout=1)
+                attempt_kwargs = _build_transcribe_kwargs(
+                    language=args.lang,
+                    language_auto=language_auto,
+                    vad_filter=True,
+                    vad_min_silence_ms=400,
+                    initial_prompt=args.initial_prompt,
+                )
+                raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
+                    model=rescue_model,
+                    wav_path=wav_path,
+                    transcribe_kwargs=attempt_kwargs,
+                    splitter_config=splitter_config,
+                    duration_seconds=duration_seconds,
+                )
+                attempts.append(
+                    {
+                        "attempt": 2,
+                        "model": "large-v2",
+                        "vad_filter": attempt_kwargs.get("vad_filter"),
+                        "transcribe_kwargs": attempt_kwargs,
+                        "raw_segments": raw_segments,
+                        "cues": cues,
+                        "segments": segments,
+                        "splitter_stats": splitter_stats,
+                        "density": _calculate_punctuation_density(cues),
+                    }
                 )
 
-            transcribe_stats = build_transcription_stats(
-                raw_segments=raw_segments,
-                cues=cues,
-                model_name=args.model,
-                device=device,
-                compute_type=compute_type,
-                transcribe_kwargs=transcribe_kwargs,
-                transcribe_defaults=TRANSCRIBE_DEFAULTS,
-                language_cli=args.lang,
-                language_auto=language_auto,
-                initial_prompt=args.initial_prompt,
-                splitter_alignment_failures=splitter_stats.alignment_failures,
-                preview_limit=3,
-            )
+        max_density = max(attempt["density"] for attempt in attempts)
+        chosen_attempt = attempts[0]
+        if attempts[0]["density"] != max_density:
+            for attempt in attempts[1:]:
+                if attempt["density"] == max_density:
+                    chosen_attempt = attempt
+                    break
+
+        for attempt in attempts:
             _print(
-                f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}"
+                "PUNCT_RESCUE "
+                f"attempt={attempt['attempt']} "
+                f"model={attempt['model']} "
+                f"vad={attempt['vad_filter']} "
+                f"density={attempt['density']:.4f} "
+                f"chosen={attempt is chosen_attempt}"
             )
-            _write_srt(segments, srt_path)
-        finally:
-            transcribe_heartbeat_stop.set()
-            transcribe_heartbeat_thread.join(timeout=1)
+
+        transcribe_stats = build_transcription_stats(
+            raw_segments=chosen_attempt["raw_segments"],
+            cues=chosen_attempt["cues"],
+            model_name=str(chosen_attempt["model"]),
+            device=device,
+            compute_type=compute_type,
+            transcribe_kwargs=chosen_attempt["transcribe_kwargs"],
+            transcribe_defaults=TRANSCRIBE_DEFAULTS,
+            language_cli=args.lang,
+            language_auto=language_auto,
+            initial_prompt=args.initial_prompt,
+            splitter_alignment_failures=chosen_attempt["splitter_stats"].alignment_failures,
+            preview_limit=3,
+        )
+        transcribe_stats["punctuation_density_attempts"] = [
+            {
+                "attempt": attempt["attempt"],
+                "model": attempt["model"],
+                "vad_filter": attempt["vad_filter"],
+                "density": attempt["density"],
+            }
+            for attempt in attempts
+        ]
+        transcribe_stats["punctuation_rescue_triggered"] = rescue_triggered
+        transcribe_stats["punctuation_rescue_chosen_attempt"] = chosen_attempt["attempt"]
+        _print(f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}")
+        _write_srt(chosen_attempt["segments"], srt_path)
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             _print(f"ERROR SRT_WRITE_FAILED {srt_path}")
             if hard_exit:
