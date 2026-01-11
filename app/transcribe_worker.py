@@ -427,7 +427,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 preview_limit=3,
             )
             _print(
-                f\"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=False)}\"
+                f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=False)}"
             )
             _write_srt(segments, srt_path)
         finally:
