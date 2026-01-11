@@ -155,3 +155,33 @@ def test_reconstruct_text_stops_before_next_word() -> None:
     word_spans = _align_words_to_text(segment_text, words)
     reconstructed = _reconstruct_text(segment_text, words, word_spans)
     assert reconstructed == "עוד משפט"
+
+
+def test_split_preserves_commas_when_alignment_falls_back() -> None:
+    tokens = [
+        "Hello",
+        "planet",
+        "this",
+        "is",
+        "a",
+        "test",
+        "with",
+        "commas",
+        "everywhere",
+        "okay",
+    ]
+    words = _make_words(tokens)
+    segment_text = "Hello, world, this, is, a, test, with, commas, everywhere, okay,"
+    segment = FakeSegment(
+        start=words[0].start,
+        end=words[-1].end,
+        text=segment_text,
+        words=words,
+    )
+    config = SplitterConfig(
+        apply_if=SplitApplyThresholds(duration_sec=0.1, text_length_chars=1, word_count=1),
+        max_cue=SplitMaxCue(duration_sec=2.0, text_length_chars=80, word_count=3),
+    )
+    cues = split_segments_into_cues([segment], config=config)
+    assert len(cues) > 1
+    assert all("," in cue.text for cue in cues)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import re
+import string
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Iterable, Protocol
 
@@ -74,6 +77,7 @@ class _Word:
 
 _TRAILING_STRIP = "\"'“”‘’()[]{}״׳"
 _PUNCTUATION = {".", ",", "?", "!", ";", ":", "—", "–", "…"}
+_ALIGNMENT_STRIP = set(_TRAILING_STRIP) | _PUNCTUATION | set(string.punctuation)
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -270,23 +274,24 @@ def _align_words_to_text(
 ) -> list[tuple[int, int] | None] | None:
     if not segment_text or not words:
         return None
+    normalized_segment, mapping = _normalize_alignment_segment(segment_text)
+    if not normalized_segment:
+        return None
     spans: list[tuple[int, int] | None] = [None] * len(words)
     cursor = 0
     for word in words:
-        raw = word.text.strip()
-        if not raw:
+        normalized_word = _normalize_alignment_word(word.text)
+        if not normalized_word:
             return None
-        match_start = segment_text.find(raw, cursor)
-        match_token = raw
-        if match_start == -1:
-            cleaned = raw.strip(_TRAILING_STRIP)
-            if cleaned and cleaned != raw:
-                match_start = segment_text.find(cleaned, cursor)
-                match_token = cleaned
+        match_start = normalized_segment.find(normalized_word, cursor)
         if match_start == -1:
             return None
-        match_end = match_start + len(match_token)
-        spans[word.index] = (match_start, match_end)
+        match_end = match_start + len(normalized_word)
+        if match_end - 1 >= len(mapping):
+            return None
+        start_orig = mapping[match_start]
+        end_orig = mapping[match_end - 1] + 1
+        spans[word.index] = (start_orig, end_orig)
         cursor = match_end
     return spans
 
@@ -297,25 +302,30 @@ def _reconstruct_text(
     word_spans: list[tuple[int, int] | None] | None,
 ) -> str:
     if not word_spans:
-        _LOGGER.warning("Failed to align segment text; falling back to word join.")
-        return _join_words(words)
+        _log_alignment_failure("missing word spans", segment_text, words)
+        return _fallback_reconstruct_text(segment_text, words)
     first_span = None
     last_span = None
     for word in words:
         span = word_spans[word.index] if word.index < len(word_spans) else None
         if span is None:
-            _LOGGER.warning("Failed to align word index %s in segment text.", word.index)
-            return _join_words(words)
+            _log_alignment_failure(
+                f"missing span for word index {word.index}",
+                segment_text,
+                words,
+            )
+            return _fallback_reconstruct_text(segment_text, words)
         if first_span is None:
             first_span = span
         last_span = span
     if not first_span or not last_span:
-        return _join_words(words)
+        _log_alignment_failure("empty alignment spans", segment_text, words)
+        return _fallback_reconstruct_text(segment_text, words)
     start, _ = first_span
     _, end = last_span
     if start >= end or start < 0 or end > len(segment_text):
-        _LOGGER.warning("Invalid alignment span in segment text.")
-        return _join_words(words)
+        _log_alignment_failure("invalid alignment span", segment_text, words)
+        return _fallback_reconstruct_text(segment_text, words)
     end_extended = end
     while end_extended < len(segment_text):
         char = segment_text[end_extended]
@@ -328,7 +338,92 @@ def _reconstruct_text(
             break
         break
     reconstructed = segment_text[start:end_extended].strip()
-    return reconstructed or _join_words(words)
+    return reconstructed or _fallback_reconstruct_text(segment_text, words)
+
+
+def _fallback_reconstruct_text(segment_text: str, words: list[_Word]) -> str:
+    approximate = _approximate_text_slice(segment_text, words)
+    if approximate:
+        return approximate
+    return _join_words(words)
+
+
+def _approximate_text_slice(segment_text: str, words: list[_Word]) -> str | None:
+    if not segment_text or not words:
+        return None
+    tokens = list(re.finditer(r"\S+", segment_text))
+    if not tokens:
+        return None
+    start_index = words[0].index
+    end_index = words[-1].index
+    if start_index < 0 or end_index < start_index:
+        return None
+    if end_index >= len(tokens):
+        return None
+    start = tokens[start_index].start()
+    end = tokens[end_index].end()
+    if start >= end:
+        return None
+    sliced = segment_text[start:end].strip()
+    return sliced or None
+
+
+def _normalize_alignment_segment(segment_text: str) -> tuple[str, list[int]]:
+    normalized_chars: list[str] = []
+    mapping: list[int] = []
+    for token in re.finditer(r"\S+", segment_text):
+        token_text = token.group(0)
+        token_offset = token.start()
+        token_chars: list[str] = []
+        token_mapping: list[int] = []
+        for index, char in enumerate(token_text):
+            normalized = unicodedata.normalize("NFKC", char)
+            for normalized_char in normalized:
+                token_chars.append(normalized_char)
+                token_mapping.append(token_offset + index)
+        start = 0
+        end = len(token_chars)
+        while start < end and _is_alignment_strip(token_chars[start]):
+            start += 1
+        while end > start and _is_alignment_strip(token_chars[end - 1]):
+            end -= 1
+        token_chars = token_chars[start:end]
+        token_mapping = token_mapping[start:end]
+        if not token_chars:
+            continue
+        if normalized_chars:
+            normalized_chars.append(" ")
+            mapping.append(token_offset)
+        normalized_chars.extend(token_chars)
+        mapping.extend(token_mapping)
+    return "".join(normalized_chars), mapping
+
+
+def _normalize_alignment_word(word_text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", word_text)
+    collapsed = " ".join(normalized.split())
+    if not collapsed:
+        return ""
+    start = 0
+    end = len(collapsed)
+    while start < end and _is_alignment_strip(collapsed[start]):
+        start += 1
+    while end > start and _is_alignment_strip(collapsed[end - 1]):
+        end -= 1
+    return collapsed[start:end]
+
+
+def _is_alignment_strip(char: str) -> bool:
+    return char in _ALIGNMENT_STRIP
+
+
+def _log_alignment_failure(reason: str, segment_text: str, words: list[_Word]) -> None:
+    _LOGGER.warning(
+        "Alignment failed (%s). Segment text: %r. Words: %s",
+        reason,
+        segment_text,
+        [word.text for word in words],
+    )
 
 
 def _ends_with_punctuation(word_text: str) -> bool:
