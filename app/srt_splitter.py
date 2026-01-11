@@ -64,6 +64,11 @@ class Cue:
     text: str
 
 
+@dataclass
+class SplitterStats:
+    alignment_failures: int = 0
+
+
 @dataclass(frozen=True)
 class _Word:
     start: float
@@ -81,14 +86,19 @@ def split_segments_into_cues(
     segments: Iterable[SegmentLike],
     *,
     config: SplitterConfig = SplitterConfig(),
+    stats: SplitterStats | None = None,
 ) -> list[Cue]:
     cues: list[Cue] = []
     for segment in segments:
-        cues.extend(_split_segment(segment, config))
+        cues.extend(_split_segment(segment, config, stats))
     return cues
 
 
-def _split_segment(segment: SegmentLike, config: SplitterConfig) -> list[Cue]:
+def _split_segment(
+    segment: SegmentLike,
+    config: SplitterConfig,
+    stats: SplitterStats | None,
+) -> list[Cue]:
     raw_words = list(getattr(segment, "words", []) or [])
     if not _should_split(segment, config.apply_if, raw_words):
         return [
@@ -102,6 +112,8 @@ def _split_segment(segment: SegmentLike, config: SplitterConfig) -> list[Cue]:
     if not words:
         return _split_segment_by_time_and_text(segment, config.max_cue)
     word_spans = _align_words_to_text(str(segment.text), words)
+    if word_spans is None and stats is not None and str(segment.text).strip():
+        stats.alignment_failures += 1
     return _split_segment_by_words(segment, words, word_spans, config)
 
 

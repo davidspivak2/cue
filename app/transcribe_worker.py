@@ -12,10 +12,12 @@ from pathlib import Path
 from typing import NoReturn
 
 from .srt_utils import SrtSegment, segments_to_srt
+from .punctuation_stats import build_transcription_stats
 from .srt_splitter import (
     SplitApplyThresholds,
     SplitMaxCue,
     SplitterConfig,
+    SplitterStats,
     split_segments_into_cues,
 )
 from .paths import get_models_dir
@@ -36,7 +38,12 @@ TRANSCRIBE_DEFAULTS = [
 
 
 def _print(message: str) -> None:
-    print(message, flush=True)
+    try:
+        print(message, flush=True)
+    except UnicodeEncodeError:
+        # Windows console / redirected output may be cp1252/cp437, which can't print Hebrew.
+        sys.stdout.buffer.write((message + "\n").encode("utf-8", errors="backslashreplace"))
+        sys.stdout.buffer.flush()
 
 
 def _log_transcribe_config(config_json: str, config_text: str) -> None:
@@ -401,13 +408,32 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     last_reported_end = max_end
                     if duration_seconds:
                         last_reported_percent = max_end / duration_seconds
-            cues = split_segments_into_cues(raw_segments, config=splitter_config)
+            splitter_stats = SplitterStats()
+            cues = split_segments_into_cues(
+                raw_segments,
+                config=splitter_config,
+                stats=splitter_stats,
+            )
             segments: list[SrtSegment] = []
             for index, cue in enumerate(cues, start=1):
                 segments.append(
                     SrtSegment(index=index, start=cue.start, end=cue.end, text=cue.text)
                 )
 
+            transcribe_stats = build_transcription_stats(
+                raw_segments=raw_segments,
+                cues=cues,
+                model_name=MODEL_NAME,
+                device=device,
+                compute_type=compute_type,
+                transcribe_kwargs=transcribe_kwargs,
+                transcribe_defaults=TRANSCRIBE_DEFAULTS,
+                splitter_alignment_failures=splitter_stats.alignment_failures,
+                preview_limit=3,
+            )
+            _print(
+                f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}"
+            )
             _write_srt(segments, srt_path)
         finally:
             transcribe_heartbeat_stop.set()
