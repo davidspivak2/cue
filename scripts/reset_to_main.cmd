@@ -2,37 +2,79 @@
 setlocal EnableExtensions
 
 set "SCRIPT_DIR=%~dp0"
-pushd "%SCRIPT_DIR%.." || (echo [error] Failed to locate repo root.& exit /b 1)
-set "REPO_ROOT=%CD%"
-popd
-
-echo [warning] ============================================================
-echo [warning] WARNING: This will discard ALL uncommitted changes and
-echo [warning] delete ALL untracked files. This action is destructive.
-echo [warning] ============================================================
-
-choice /c YN /m "Reset repository to origin/main?"
-if errorlevel 2 (
-  echo Canceled.
-  exit /b 0
-)
+set "REPO_ROOT=%SCRIPT_DIR%.."
+for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
 
 echo [info] Using repo root: "%REPO_ROOT%"
-cd /d "%REPO_ROOT%" || (echo [error] Failed to change to repo root.& exit /b 1)
+cd /d "%REPO_ROOT%" || goto :die_cd
+
+where git >nul 2>nul
+if errorlevel 1 goto :die_git
+
+echo [info] Current status:
+git status
+
+echo [warning] ============================================================
+echo [warning] WARNING: This will discard ALL uncommitted changes.
+echo [warning] ============================================================
+set /p CONFIRM=Reset repository to origin/main? (Y/N): 
+if /i not "%CONFIRM%"=="Y" (
+  echo [info] Canceled.
+  goto :done_ok
+)
 
 echo [info] Fetching latest changes...
-git fetch || (echo [error] git fetch failed.& exit /b 1)
+git fetch origin
+if errorlevel 1 goto :die_fetch
 
 echo [info] Switching to main...
-git switch main || (echo [error] Failed to switch to main.& exit /b 1)
+git switch main
+if errorlevel 1 (
+  git checkout main
+  if errorlevel 1 goto :die_switch
+)
 
 echo [info] Resetting to origin/main...
-git reset --hard origin/main || (echo [error] git reset failed.& exit /b 1)
+git reset --hard origin/main
+if errorlevel 1 goto :die_reset
 
-echo [info] Removing untracked files...
-git clean -fd || (echo [error] git clean failed.& exit /b 1)
+set /p CLEAN=Remove untracked files with git clean -fd? (Y/N): 
+if /i "%CLEAN%"=="Y" (
+  echo [info] Removing untracked files...
+  git clean -fd
+  if errorlevel 1 goto :die_clean
+)
 
-call "%REPO_ROOT%\scripts\start_app.cmd" --no-pause
+call "%REPO_ROOT%\scripts\start_app.cmd"
 
+:done_ok
 pause
-endlocal
+exit /b 0
+
+:done_error
+pause
+exit /b 1
+
+:die_cd
+echo [error] Failed to change to repo root.
+exit /b 1
+
+:die_git
+echo [error] Git is required but was not found in PATH.
+exit /b 1
+
+:die_fetch
+echo [error] git fetch failed.
+goto :done_error
+
+:die_switch
+echo [error] Failed to switch to main.
+goto :done_error
+
+:die_reset
+echo [error] git reset failed.
+goto :done_error
+
+:die_clean
+echo [error] git clean failed.
+goto :done_error
