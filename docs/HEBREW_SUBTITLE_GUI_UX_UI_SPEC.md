@@ -369,7 +369,7 @@ Rules:
 ### Section 3 — Punctuation
 
 Controls:
-- Master checkbox: “Improve punctuation automatically (recommended)”
+- Checkbox label: “Improve punctuation automatically (recommended)”
 
 Helper text (always visible, indented to align with checkbox text):
 - “If subtitles come out with little or no punctuation, the app will retry transcription in a compatibility mode and use that result. This can take longer.”
