@@ -44,6 +44,7 @@ PUNCTUATION_RESCUE_DEFAULTS = {
     "enabled": True,
     "min_density": 0.03,
     "min_words": 80,
+    "min_comma_density": 0.01,
     "max_attempts": 2,
 }
 
@@ -551,16 +552,18 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         rescue_reason = "disabled"
         rescue_enabled = punctuation_rescue.get("enabled", True)
         min_words = int(punctuation_rescue.get("min_words", 80))
+        min_comma_density = float(punctuation_rescue.get("min_comma_density", 0.01))
         words_count_raw = int(attempts[0]["words_count_raw"])
         comma_count_raw = int(attempts[0]["comma_count_raw"])
+        comma_density_raw = comma_count_raw / max(words_count_raw, 1)
         if rescue_enabled:
             if words_count_raw < min_words:
                 rescue_reason = "skipped_short_clip"
-            elif comma_count_raw == 0:
-                rescue_triggered = True
-                rescue_reason = "comma_starvation"
+            elif comma_density_raw >= min_comma_density:
+                rescue_reason = "comma_density_ok"
             else:
-                rescue_reason = "has_commas"
+                rescue_triggered = True
+                rescue_reason = "comma_density_low"
         if rescue_triggered:
             if int(punctuation_rescue.get("max_attempts", 2)) >= 1:
                 attempt_vad = not args.vad_filter
@@ -674,7 +677,15 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         transcribe_stats["punctuation_rescue_triggered"] = rescue_triggered
         transcribe_stats["punctuation_rescue_reason"] = rescue_reason
         transcribe_stats["punctuation_rescue_min_words"] = min_words
+        transcribe_stats["punctuation_rescue_min_comma_density"] = min_comma_density
+        transcribe_stats["punctuation_rescue_comma_density_raw"] = comma_density_raw
+        transcribe_stats["punctuation_rescue_comma_count_raw"] = comma_count_raw
+        transcribe_stats["punctuation_rescue_words_count_raw"] = words_count_raw
         transcribe_stats["punctuation_rescue_attempts_ran"] = len(attempts)
+        transcribe_stats["punctuation_rescue_attempts_executed_total"] = len(attempts)
+        transcribe_stats["punctuation_rescue_retry_attempts_executed"] = max(
+            0, len(attempts) - 1
+        )
         transcribe_stats["punctuation_rescue_chosen_attempt"] = chosen_attempt["attempt"]
         transcribe_stats["punctuation_rescue_mode"] = "on" if rescue_enabled else "off"
         transcribe_stats["punctuation_rescue_attempts"] = [
