@@ -45,6 +45,20 @@ def _log_transcribe_config(config_json: str, config_text: str) -> None:
         _print(f"TRANSCRIBE_CONFIG_TEXT {line}")
 
 
+def _log_transcribe_snapshot(
+    transcribe_kwargs: dict[str, object],
+    transcribe_defaults: list[str],
+) -> None:
+    snapshot = {
+        "transcribe_kwargs": transcribe_kwargs,
+        "transcribe_defaults": transcribe_defaults,
+        "transcribe_defaults_missing": [
+            key for key in transcribe_defaults if key not in transcribe_kwargs
+        ],
+    }
+    _print(f"TRANSCRIBE_KWARGS_SNAPSHOT {json.dumps(snapshot, sort_keys=True)}")
+
+
 def _stabilize_runtime() -> None:
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -296,6 +310,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             "vad_parameters": {"min_silence_duration_ms": 400},
             "word_timestamps": True,
         }
+        _log_transcribe_snapshot(transcribe_kwargs, TRANSCRIBE_DEFAULTS)
         splitter_config = SplitterConfig(
             apply_if=SplitApplyThresholds(
                 duration_sec=12.0,
