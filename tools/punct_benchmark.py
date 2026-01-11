@@ -138,7 +138,7 @@ def main() -> int:
     stats["benchmark_vad_filter"] = args.vad_filter
     stats["benchmark_vad_min_silence_ms"] = args.vad_min_silence_ms
     stats["benchmark_initial_prompt"] = args.initial_prompt
-    print(json.dumps(stats, ensure_ascii=False, indent=2))
+    print(json.dumps(stats, ensure_ascii=True, indent=2))
 
     if density < args.min_punctuation_density:
         return 2
