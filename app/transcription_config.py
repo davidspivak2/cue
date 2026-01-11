@@ -68,6 +68,7 @@ class TranscriptionConfig:
     srt_formatting: dict[str, Any]
     post_splitter: dict[str, Any]
     audio_extraction: dict[str, Any] | None
+    punctuation_rescue: dict[str, Any]
     versions: dict[str, str]
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,6 +97,7 @@ class TranscriptionConfig:
             "srt_formatting": self.srt_formatting,
             "post_splitter": self.post_splitter,
             "audio_extraction": self.audio_extraction,
+            "punctuation_rescue": self.punctuation_rescue,
             "versions": self.versions,
         }
 
@@ -125,6 +127,7 @@ def build_transcription_config(
     srt_formatting: dict[str, Any],
     post_splitter: dict[str, Any],
     audio_extraction: dict[str, Any] | None = None,
+    punctuation_rescue: dict[str, Any] | None = None,
 ) -> TranscriptionConfig:
     app_version = getattr(sys.modules.get("__main__"), "__version__", "unknown")
     versions = {
@@ -157,5 +160,6 @@ def build_transcription_config(
         srt_formatting=srt_formatting,
         post_splitter=post_splitter,
         audio_extraction=audio_extraction,
+        punctuation_rescue=punctuation_rescue or {},
         versions=versions,
     )
