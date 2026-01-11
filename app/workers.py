@@ -132,6 +132,7 @@ class Worker(QtCore.QObject):
         self._transcribe_parent_config: Optional[dict[str, object]] = None
         self._transcribe_worker_config: Optional[dict[str, object]] = None
         self._transcribe_worker_note: Optional[str] = None
+        self._transcribe_stats: Optional[dict[str, object]] = None
         self._audio_info: Optional[dict[str, object]] = None
         self._prepare_audio_seconds: Optional[float] = None
         self._transcribe_seconds: Optional[float] = None
@@ -730,6 +731,7 @@ class Worker(QtCore.QObject):
                 continue
             stdout_tail.append(text)
             _mark_output()
+            show_in_ui = True
             if text.startswith("TRANSCRIBE_CONFIG_JSON "):
                 transcribe_config_json = text
                 config_payload = text.split(" ", 1)[1] if " " in text else ""
@@ -746,6 +748,14 @@ class Worker(QtCore.QObject):
                     self._transcribe_worker_note = (
                         "TRANSCRIBE_CONFIG_JSON was present but empty."
                     )
+            if text.startswith("TRANSCRIBE_STATS_JSON "):
+                show_in_ui = False
+                stats_payload = text.split(" ", 1)[1] if " " in text else ""
+                if stats_payload:
+                    try:
+                        self._transcribe_stats = json.loads(stats_payload)
+                    except json.JSONDecodeError:
+                        self._transcribe_stats = None
             if text.startswith("PROGRESS_END"):
                 _emit_log(text, False)
                 if duration_seconds:
@@ -780,7 +790,7 @@ class Worker(QtCore.QObject):
                     last_progress_log = now
                 continue
 
-            _emit_log(text, True)
+            _emit_log(text, show_in_ui)
             if text.startswith("MODE"):
                 continue
             if text.startswith("HEARTBEAT MODEL_LOAD") or text.startswith("Loading model"):
@@ -1001,9 +1011,13 @@ class Worker(QtCore.QObject):
 
         if self._diagnostics_category_enabled("srt_stats"):
             srt_path = self._srt_path
-            data["srt_stats"] = (
-                self._build_srt_stats(srt_path) if srt_path else None
-            )
+            srt_stats = self._build_srt_stats(srt_path) if srt_path else None
+            if self._transcribe_stats is not None:
+                if srt_stats is None:
+                    srt_stats = {"transcription_stats": self._transcribe_stats}
+                else:
+                    srt_stats["transcription_stats"] = self._transcribe_stats
+            data["srt_stats"] = srt_stats
 
         if self._diagnostics_category_enabled("commands_timings"):
             data["commands_timings"] = {
