@@ -17,6 +17,16 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--wav", type=Path, default=DEFAULT_WAV_PATH)
     parser.add_argument("--lang", default="he")
+    parser.add_argument(
+        "--model",
+        choices=["large-v3", "large-v2"],
+        default="large-v3",
+    )
+    parser.add_argument("--vad-filter", dest="vad_filter", action="store_true")
+    parser.add_argument("--no-vad-filter", dest="vad_filter", action="store_false")
+    parser.set_defaults(vad_filter=True)
+    parser.add_argument("--vad-min-silence-ms", type=int, default=400)
+    parser.add_argument("--initial-prompt")
     parser.add_argument("--prefer-gpu", action="store_true")
     parser.add_argument("--force-cpu", action="store_true")
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
@@ -50,11 +60,21 @@ def _run_worker(wav_path: Path, args: argparse.Namespace) -> dict[str, object]:
             str(srt_path),
             "--lang",
             args.lang,
+            "--model",
+            args.model,
+            "--vad-min-silence-ms",
+            str(args.vad_min_silence_ms),
             "--device",
             args.device,
             "--compute-type",
             args.compute_type,
         ]
+        if args.vad_filter:
+            command.append("--vad-filter")
+        else:
+            command.append("--no-vad-filter")
+        if args.initial_prompt:
+            command.extend(["--initial-prompt", args.initial_prompt])
         if args.force_cpu:
             command.append("--force-cpu")
         elif args.prefer_gpu:
@@ -113,7 +133,12 @@ def main() -> int:
     density = _compute_density(stats)
     stats["punctuation_density_final"] = density
     stats["min_punctuation_density"] = args.min_punctuation_density
-    print(json.dumps(stats, ensure_ascii=False, indent=2))
+    stats["benchmark_model"] = args.model
+    stats["benchmark_lang"] = args.lang
+    stats["benchmark_vad_filter"] = args.vad_filter
+    stats["benchmark_vad_min_silence_ms"] = args.vad_min_silence_ms
+    stats["benchmark_initial_prompt"] = args.initial_prompt
+    print(json.dumps(stats, ensure_ascii=True, indent=2))
 
     if density < args.min_punctuation_density:
         return 2
