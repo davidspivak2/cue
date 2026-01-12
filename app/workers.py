@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import platform
@@ -19,6 +20,7 @@ from PySide6 import QtCore
 from .progress import ProgressStep
 from .ffmpeg_utils import (
     ensure_ffmpeg_available,
+    extract_video_frame,
     escape_subtitles_filter_path,
     format_filter_style,
     get_ffprobe_json,
@@ -27,7 +29,8 @@ from .ffmpeg_utils import (
     get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
-from .paths import get_models_dir
+from .paths import get_models_dir, get_preview_frames_dir
+from .srt_utils import parse_srt_file, select_preview_moment
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
 
@@ -281,6 +284,22 @@ class Worker(QtCore.QObject):
             raise RuntimeError(f"Subtitles were not created: {srt_path}")
 
         self._capture_audio_info_if_needed(audio_path)
+
+        preview_frame_path: Optional[Path] = None
+        preview_subtitle_text: Optional[str] = None
+        preview_timestamp_seconds: Optional[float] = None
+        try:
+            cues = parse_srt_file(srt_path)
+            preview = select_preview_moment(cues, video_duration)
+            if preview:
+                preview_subtitle_text = preview.subtitle_text
+                preview_timestamp_seconds = preview.timestamp_seconds
+                preview_frame_path = self._ensure_preview_frame(
+                    srt_path=srt_path,
+                    timestamp_seconds=preview_timestamp_seconds,
+                )
+        except Exception as exc:  # noqa: BLE001
+            self.signals.log.emit(f"Preview generation failed: {exc}", False)
         if settings.keep_extracted_audio:
             self.signals.log.emit(
                 f"Keeping extracted audio file: {audio_path}",
@@ -299,6 +318,11 @@ class Worker(QtCore.QObject):
         return {
             "audio_path": str(audio_path),
             "srt_path": str(srt_path),
+            "preview_frame_path": (
+                str(preview_frame_path) if preview_frame_path is not None else None
+            ),
+            "preview_subtitle_text": preview_subtitle_text,
+            "preview_timestamp_seconds": preview_timestamp_seconds,
         }
 
     def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:
@@ -331,6 +355,30 @@ class Worker(QtCore.QObject):
             ProgressStep.PREPARE_AUDIO,
             "Extracting audio",
         )
+
+    def _ensure_preview_frame(
+        self,
+        *,
+        srt_path: Path,
+        timestamp_seconds: float,
+    ) -> Optional[Path]:
+        try:
+            srt_mtime = int(srt_path.stat().st_mtime)
+        except FileNotFoundError:
+            srt_mtime = 0
+        timestamp_ms = int(round(timestamp_seconds * 1000))
+        cache_key = f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}"
+        cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
+        output_path = get_preview_frames_dir() / cache_name
+        if output_path.exists() and output_path.stat().st_size > 0:
+            return output_path
+        success = extract_video_frame(
+            self.video_path,
+            timestamp_seconds,
+            output_path,
+            width=640,
+        )
+        return output_path if success else None
 
     def _run_burn_in(self) -> dict:
         settings = self.burnin_settings
