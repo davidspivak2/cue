@@ -9,32 +9,6 @@ This is intentionally opinionated. If an implementation choice conflicts with th
 
 ---
 
-## 0) Implementation status snapshot (post-PR6)
-
-Implemented (merged):
-- ✅ Dark-only theme foundation
-- ✅ Step/state-based single-window UI (stacked pages)
-- ✅ Video selection UX: drop zone + thumbnail card + replace-on-drop
-- ✅ Settings page is a **full page**, not a dialog (replaces the content area)
-- ✅ “Save subtitles to …” moved into Settings (supports *Ask every time* / *Same folder* / *Always save to this folder*)
-- ✅ Performance/Quality selector in Settings (includes `float32` option)
-- ✅ Burn-in (FFmpeg) progress is real and smooth (no jump-to-100)
-- ✅ Transcription progress is **weighted into global progress** and uses smoothing/heartbeat updates to reduce long “stuck” moments (may still be coarse on some files)
-- ✅ Optional **success diagnostics JSON** (opt-in) written next to outputs
-- ✅ Punctuation rescue hardening: chooser gate prevents selecting worse transcript; additional diagnostics fields
-- ✅ Audio extraction default behavior updated to improve transcription readability/punctuation
-
-Not implemented yet (still the target of PR7+):
-- ⬜ Subtitles-ready page: preview still frame with real subtitle line (derive from video frame + SRT cues; do **not** rely on extracted WAV staying on disk; cache under LocalAppData, not next to user outputs)
-- ⬜ Style presets + customize panel with instant preview
-- ⬜ In-app preview playback + karaoke-like highlighting
-- ⬜ “Delightful waiting” visuals (waveform strip, thumbnail strip during transcription; cache lightweight artifacts under app cache, throttle updates, avoid repo/output clutter)
-- ⬜ Error UX details drawer
-- ⬜ Packaging hardening pass
-- ⬜ PR15 — copy polish + CTA reduction sweep (final pass after features stabilize; PR5 remains partial until PR7–PR13 are done)
-
----
-
 ## A) Core principles
 
 1) **One obvious next step**
@@ -301,7 +275,6 @@ Rules:
 
 Inline errors:
 - Invalid file drop
-- Subtitle Edit executable missing
 
 Blocking errors (modal):
 - Title: “Couldn’t create subtitles” / “Couldn’t export video”
@@ -326,12 +299,12 @@ For operational workflow details (debugging, benchmarks, handover rules), see `/
 ### Section 1 — Performance
 
 Controls:
-- Label: “Quality”
+- Label: “Transcription quality”
 - Combo box options:
   - Auto
-  - Fast
-  - Accurate
-  - Ultra
+  - Fast (int8)
+  - Accurate (int16)
+  - Ultra accurate (float32)
 
 Behavior:
 - “Auto” chooses a sensible default based on hardware:
@@ -344,33 +317,49 @@ Helper text (always visible):
 
 Run summary line (always visible):
 - Shows resolved runtime choice, e.g.:
-  - “Will run on: GPU (CUDA) — float16”
-  - “Will run on: CPU — int16”
+  - “This will run on: GPU (float16)”
+  - “This will run on: CPU (int16)”
 
 ### Section 2 — Save subtitles
 
-Control 1: Save policy combo
-- Label: “Save subtitles”
+Control 1: Save policy radio group
+- Group title: “Save subtitles”
 - Options:
-  - Ask every time
   - Same folder as the video
   - Always save to this folder
+  - Ask every time
 
 Control 2: Path row
 - A single-line path field + button
-- Button text: “Browse…”
+- Button text: “Browse...”
 
 Rules:
-- If policy = **Ask every time**
-  - Hide the entire path row.
-- Else
-  - Show the path row.
-  - The path field is always visible.
-  - The path field is disabled unless policy = “Always save to this folder”.
-  - Browse button is disabled unless policy = “Always save to this folder”.
-  - Do not show a “folder” label; the field itself communicates what it is.
+- The path row is always visible.
+- The path field is disabled unless policy = “Always save to this folder”.
+- Browse button is disabled unless policy = “Always save to this folder”.
+- Do not show a “folder” label; the field itself communicates what it is.
+- Placeholder when unset: “No folder selected”.
 
-### Section 3 — Punctuation
+### Section 3 — Subtitle Edit
+
+Controls:
+- Label: “Choose Subtitle Edit…”
+- A single-line path field + “Browse...” button.
+
+Behavior:
+- The path field displays the configured `SubtitleEdit.exe` location (read-only).
+- Browse opens a file picker filtered to executables (`*.exe`) and saves the selected path.
+- If no path is configured, the app still attempts the default install location:
+  - `C:\Program Files\Subtitle Edit\SubtitleEdit.exe`
+- If the configured/default path does not exist when the user clicks **Edit in Subtitle Edit**:
+  - Show a modal titled “Subtitle Edit not found” with the message:
+    - “Subtitle Edit wasn't found. Please install it or choose SubtitleEdit.exe.”
+  - Actions: “Choose Subtitle Edit…” (opens the file picker) and “Cancel”.
+- If the app fails to launch Subtitle Edit after a path is selected:
+  - Show a modal titled “Couldn't open Subtitle Edit” with the message:
+    - “Subtitle Edit couldn't be opened. Please check the app path.”
+
+### Section 4 — Punctuation
 
 Controls:
 - Checkbox label: “Improve punctuation automatically (recommended)”
@@ -404,7 +393,7 @@ Behavior:
 - **When OFF:**
   - Baseline transcription only; no rescue attempts.
 
-### Section 4 — Audio
+### Section 5 — Audio
 
 Controls:
 - Checkbox label: “Clean up audio before transcription”
@@ -423,7 +412,7 @@ Note on WAV location:
 - The app-created WAV is written to the output folder dictated by Save Policy (often the same folder as the video).
 - If “Keep extracted WAV file” is OFF, the app may delete it after subtitles are created; if ON, it remains.
 
-### Section 5 — Diagnostics
+### Section 6 — Diagnostics
 
 Diagnostics are for debugging and **must be OFF by default**.
 

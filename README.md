@@ -4,11 +4,11 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 
 ## Features
 - Drag & drop or browse a single video (`.mp4`, `.mkv`, `.mov`, `.m4v`).
-- Extracts mono 16k WAV (`*_audio_for_whisper.wav`).
-- Generates UTF-8 SRT subtitles (`.srt`).
-- Hard-burns subtitles into `<basename>_subtitled.mp4` with configurable styling.
+- Extracts mono 16k WAV (`<video_stem>_audio_for_whisper.wav`).
+- Generates UTF-8 SRT subtitles (`<video_stem>.srt`).
+- Hard-burns subtitles into `<video_stem>_subtitled.mp4` (styling customization UI is planned).
 - Uses GPU (CUDA) when available, auto-falls back to CPU with clear logs.
-- Non-blocking UI with live logs and Cancel support.
+- Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`.
 
 ## Project structure
 ```
@@ -34,49 +34,9 @@ run_worker.py             # Convenience script to launch the worker
 requirements.txt
 ```
 
-## Developer setup (Windows 11 + Python 3.11)
-1. `python -m venv .venv`
-2. `.venv\Scripts\activate`
-3. `python -m pip install -r requirements.txt`
-   - This installs all Python dependencies (including `requests`).
-
-### Obtain FFmpeg binaries
-Option 1 (recommended): run `download_ffmpeg.bat` (invokes the bundled PowerShell script).
-
-Option 2: install FFmpeg via winget:
-```
-winget install -e --id Gyan.FFmpeg
-```
-
-## Run from source (developer testing)
-```
-.venv\Scripts\activate
-python -m app.main
-```
-The app will use `bin\ffmpeg.exe`/`bin\ffprobe.exe` if present, otherwise it will fall back to
-FFmpeg installed on PATH.
-
-## Testing / QA
-- Tests live in `tests/` and are executed with `pytest` (installed via `requirements-dev.txt`).
-  - Run: `.venv\Scripts\activate` then `pytest`.
-- Platform assumptions: Windows-only app; GPU usage is optional and falls back to CPU automatically.
-- Setup scripts may be required:
-  - `download_ffmpeg.bat` (or `download_ffmpeg.ps1`) to fetch FFmpeg binaries.
-  - `build_exe.bat` for packaging the Windows executable.
-- Known limitations: first run downloads the `large-v3` model from Hugging Face and needs network
-  access; FFmpeg must be available via `bin\` or PATH.
-
-## Build the Windows executable
-Double-click `build_exe.bat` or run:
-```
-.venv\Scripts\activate
-build_exe.bat
-```
-Output will be:
-```
-dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
-```
-Then double-click `dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe`.
+## Developer setup
+See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the canonical Windows setup, FFmpeg acquisition,
+run-from-source, testing, and packaging steps.
 
 ## Portable install
 1. Copy the `dist\HebrewSubtitleGUI\` folder to `C:\Program Files\HebrewSubtitleGUI` (or any folder).
