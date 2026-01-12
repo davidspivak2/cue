@@ -7,6 +7,7 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import datetime
+import hashlib
 import json
 import faulthandler
 import logging
@@ -22,6 +23,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.ffmpeg_utils import (
     ensure_ffmpeg_available,
+    extract_subtitled_frame,
     get_ffmpeg_missing_message,
     get_runtime_mode,
     resolve_ffmpeg_paths,
@@ -39,13 +41,22 @@ from app.ui.widgets import (
     SavingToLine,
     VideoCard,
 )
-from app.paths import get_app_data_dir, get_logs_dir
+from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.workers import (
-    BurnInSettings,
     DiagnosticsSettings,
     TaskType,
     TranscriptionSettings,
     Worker,
+)
+from app.subtitle_style import (
+    PRESET_CUSTOM,
+    PRESET_DEFAULT,
+    PRESET_NAMES,
+    SubtitleStyle,
+    get_box_alpha_byte,
+    preset_defaults,
+    to_ffmpeg_force_style,
+    to_preview_params,
 )
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
@@ -93,8 +104,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._elapsed_timer = QtCore.QTimer(self)
         self._elapsed_timer.setInterval(500)
         self._elapsed_timer.timeout.connect(self._update_elapsed_label)
+        self._preview_render_timer = QtCore.QTimer(self)
+        self._preview_render_timer.setSingleShot(True)
+        self._preview_render_timer.setInterval(150)
+        self._preview_render_timer.timeout.connect(self._refresh_preview_with_style)
         self._config = self._load_config()
         self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
+        self._subtitle_style_preset, self._subtitle_style_custom = (
+            self._load_subtitle_style()
+        )
+        self._subtitle_style_panel_open = False
         self._save_policy = self._load_save_policy()
         self._fixed_output_dir = self._get_config_path("save_folder")
         self._transcription_quality = self._load_transcription_quality()
@@ -143,34 +162,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.filter_checkbox.setChecked(False)
         self.keep_extracted_audio_checkbox = QtWidgets.QCheckBox("Keep extracted WAV file")
 
-        style_group = QtWidgets.QGroupBox("Subtitle style")
-        style_layout = QtWidgets.QGridLayout(style_group)
-        self.font_combo = QtWidgets.QComboBox()
-        self.font_combo.addItems(["Segoe UI", "Tahoma", "Arial"])
-        self.font_size_spin = QtWidgets.QSpinBox()
-        self.font_size_spin.setRange(10, 72)
-        self.font_size_spin.setValue(28)
-        self.outline_spin = QtWidgets.QSpinBox()
-        self.outline_spin.setRange(0, 10)
-        self.outline_spin.setValue(1)
-        self.shadow_spin = QtWidgets.QSpinBox()
-        self.shadow_spin.setRange(0, 10)
-        self.shadow_spin.setValue(0)
-        self.margin_spin = QtWidgets.QSpinBox()
-        self.margin_spin.setRange(0, 200)
-        self.margin_spin.setValue(30)
-
-        style_layout.addWidget(QtWidgets.QLabel("Font"), 0, 0)
-        style_layout.addWidget(self.font_combo, 0, 1)
-        style_layout.addWidget(QtWidgets.QLabel("Size"), 0, 2)
-        style_layout.addWidget(self.font_size_spin, 0, 3)
-        style_layout.addWidget(QtWidgets.QLabel("Outline"), 1, 0)
-        style_layout.addWidget(self.outline_spin, 1, 1)
-        style_layout.addWidget(QtWidgets.QLabel("Shadow"), 1, 2)
-        style_layout.addWidget(self.shadow_spin, 1, 3)
-        style_layout.addWidget(QtWidgets.QLabel("Bottom margin"), 2, 0)
-        style_layout.addWidget(self.margin_spin, 2, 1)
-
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -207,11 +198,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.details_panel = QtWidgets.QWidget()
         details_layout = QtWidgets.QVBoxLayout(self.details_panel)
-
-        advanced_group = QtWidgets.QGroupBox("Options")
-        advanced_layout = QtWidgets.QVBoxLayout(advanced_group)
-        advanced_layout.addWidget(style_group)
-        details_layout.addWidget(advanced_group)
 
         log_group = QtWidgets.QGroupBox("Details")
         log_layout = QtWidgets.QVBoxLayout(log_group)
@@ -373,39 +359,163 @@ class MainWindow(QtWidgets.QMainWindow):
         preview_layout.addWidget(preview_frame)
         preview_layout.addStretch()
 
-        actions_container = QtWidgets.QWidget()
-        actions_layout = QtWidgets.QVBoxLayout(actions_container)
+        right_column = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_column)
+        right_layout.setSpacing(12)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        actions_card = self._build_ready_actions_card()
+        style_card = self._build_subtitle_style_card()
+        right_layout.addWidget(actions_card)
+        right_layout.addWidget(style_card)
+        right_layout.addStretch()
+
+        layout.addWidget(preview_card, 3)
+        layout.addWidget(right_column, 2)
+        layout.setAlignment(preview_card, QtCore.Qt.AlignTop)
+        layout.setAlignment(right_column, QtCore.Qt.AlignTop)
+        self._update_preview_card()
+        return page
+
+
+    def _build_ready_actions_card(self) -> QtWidgets.QFrame:
+        card = QtWidgets.QFrame()
+        card.setObjectName("SettingsSectionCard")
+        card_layout = QtWidgets.QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 12, 12, 12)
+        card_layout.setSpacing(12)
+
         title = QtWidgets.QLabel("Subtitles are ready")
         title.setAlignment(QtCore.Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        actions_layout.addWidget(title)
+        card_layout.addWidget(title)
 
         primary_layout = QtWidgets.QHBoxLayout()
         primary_layout.addStretch()
         primary_layout.addWidget(self.review_button)
         primary_layout.addStretch()
-        actions_layout.addLayout(primary_layout)
+        card_layout.addLayout(primary_layout)
 
         secondary_layout = QtWidgets.QHBoxLayout()
         secondary_layout.addStretch()
         secondary_layout.addWidget(self.burn_button)
         secondary_layout.addStretch()
-        actions_layout.addLayout(secondary_layout)
+        card_layout.addLayout(secondary_layout)
 
         links_layout = QtWidgets.QHBoxLayout()
         links_layout.addStretch()
         links_layout.addWidget(self.ready_open_srt_button)
         links_layout.addWidget(self.ready_open_folder_button)
         links_layout.addStretch()
-        actions_layout.addLayout(links_layout)
-        actions_layout.addStretch()
+        card_layout.addLayout(links_layout)
+        card_layout.addStretch()
+        return card
 
-        layout.addWidget(preview_card, 3)
-        layout.addWidget(actions_container, 2)
-        layout.setAlignment(preview_card, QtCore.Qt.AlignTop)
-        layout.setAlignment(actions_container, QtCore.Qt.AlignTop)
-        self._update_preview_card()
-        return page
+    def _build_subtitle_style_card(self) -> QtWidgets.QFrame:
+        card = self._build_settings_section("Subtitle style")
+        card_layout = card.layout()
+
+        grid = QtWidgets.QGridLayout()
+        grid.setColumnMinimumWidth(0, 120)
+        grid.setColumnStretch(1, 1)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(10)
+
+        preset_label = QtWidgets.QLabel("Preset")
+        self.subtitle_style_preset_combo = QtWidgets.QComboBox()
+        self.subtitle_style_preset_combo.addItems(list(PRESET_NAMES))
+
+        grid.addWidget(preset_label, 0, 0)
+        grid.addWidget(self.subtitle_style_preset_combo, 0, 1)
+
+        self.subtitle_style_customize_button = QtWidgets.QPushButton("Customize...")
+        self.subtitle_style_customize_button.setCheckable(True)
+        self.subtitle_style_customize_button.setFlat(True)
+        self.subtitle_style_customize_button.setCursor(
+            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        )
+
+        customize_layout = QtWidgets.QHBoxLayout()
+        customize_layout.addWidget(self.subtitle_style_customize_button)
+        customize_layout.addStretch()
+        grid.addLayout(customize_layout, 1, 0, 1, 2)
+
+        card_layout.addLayout(grid)
+
+        self.subtitle_style_panel = QtWidgets.QWidget()
+        panel_layout = QtWidgets.QVBoxLayout(self.subtitle_style_panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(8)
+
+        controls_grid = QtWidgets.QGridLayout()
+        controls_grid.setColumnMinimumWidth(0, 120)
+        controls_grid.setColumnStretch(1, 1)
+        controls_grid.setHorizontalSpacing(12)
+        controls_grid.setVerticalSpacing(8)
+
+        self.font_size_slider, self.font_size_spinbox = self._build_style_control(18, 72)
+        self.outline_slider, self.outline_spinbox = self._build_style_control(0, 10)
+        self.shadow_slider, self.shadow_spinbox = self._build_style_control(0, 10)
+        self.margin_slider, self.margin_spinbox = self._build_style_control(0, 200)
+
+        controls_grid.addWidget(QtWidgets.QLabel("Font size"), 0, 0)
+        controls_grid.addWidget(self.font_size_slider, 0, 1)
+        controls_grid.addWidget(self.font_size_spinbox, 0, 2)
+
+        controls_grid.addWidget(QtWidgets.QLabel("Outline width"), 1, 0)
+        controls_grid.addWidget(self.outline_slider, 1, 1)
+        controls_grid.addWidget(self.outline_spinbox, 1, 2)
+
+        controls_grid.addWidget(QtWidgets.QLabel("Shadow"), 2, 0)
+        controls_grid.addWidget(self.shadow_slider, 2, 1)
+        controls_grid.addWidget(self.shadow_spinbox, 2, 2)
+
+        controls_grid.addWidget(QtWidgets.QLabel("Bottom margin"), 3, 0)
+        controls_grid.addWidget(self.margin_slider, 3, 1)
+        controls_grid.addWidget(self.margin_spinbox, 3, 2)
+
+        panel_layout.addLayout(controls_grid)
+
+        self.box_background_checkbox = QtWidgets.QCheckBox("Box background")
+        panel_layout.addWidget(self.box_background_checkbox)
+
+        self.box_options_container = QtWidgets.QWidget()
+        box_grid = QtWidgets.QGridLayout(self.box_options_container)
+        box_grid.setColumnMinimumWidth(0, 120)
+        box_grid.setColumnStretch(1, 1)
+        box_grid.setHorizontalSpacing(12)
+        box_grid.setVerticalSpacing(8)
+
+        self.box_opacity_slider, self.box_opacity_spinbox = self._build_style_control(0, 100)
+        self.box_padding_slider, self.box_padding_spinbox = self._build_style_control(0, 40)
+
+        box_grid.addWidget(QtWidgets.QLabel("Box opacity"), 0, 0)
+        box_grid.addWidget(self.box_opacity_slider, 0, 1)
+        box_grid.addWidget(self.box_opacity_spinbox, 0, 2)
+
+        box_grid.addWidget(QtWidgets.QLabel("Box padding"), 1, 0)
+        box_grid.addWidget(self.box_padding_slider, 1, 1)
+        box_grid.addWidget(self.box_padding_spinbox, 1, 2)
+
+        panel_layout.addWidget(self.box_options_container)
+
+        reset_layout = QtWidgets.QHBoxLayout()
+        reset_layout.addStretch()
+        self.subtitle_style_reset_button = QtWidgets.QPushButton("Reset to preset")
+        self.subtitle_style_reset_button.setFlat(True)
+        self.subtitle_style_reset_button.setCursor(
+            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        )
+        reset_layout.addWidget(self.subtitle_style_reset_button)
+        panel_layout.addLayout(reset_layout)
+
+        card_layout.addWidget(self.subtitle_style_panel)
+
+        self.subtitle_style_panel.setVisible(self._subtitle_style_panel_open)
+        self.subtitle_style_customize_button.setChecked(self._subtitle_style_panel_open)
+        self._connect_subtitle_style_controls()
+        self._apply_subtitle_style_to_controls()
+        return card
 
     def _build_done_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
@@ -445,6 +555,227 @@ class MainWindow(QtWidgets.QMainWindow):
         title_label.setObjectName("SettingsSectionTitle")
         card_layout.addWidget(title_label)
         return card
+
+
+    def _build_style_control(
+        self, minimum: int, maximum: int
+    ) -> tuple[QtWidgets.QSlider, QtWidgets.QSpinBox]:
+        slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        slider.setRange(minimum, maximum)
+        slider.setSingleStep(1)
+        slider.setPageStep(1)
+
+        spinbox = QtWidgets.QSpinBox()
+        spinbox.setRange(minimum, maximum)
+        spinbox.setSingleStep(1)
+        spinbox.setMinimumWidth(56)
+
+        def _sync_spinbox(value: int) -> None:
+            if spinbox.value() == value:
+                return
+            spinbox.blockSignals(True)
+            spinbox.setValue(value)
+            spinbox.blockSignals(False)
+
+        def _sync_slider(value: int) -> None:
+            if slider.value() == value:
+                return
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+
+        slider.valueChanged.connect(_sync_spinbox)
+        spinbox.valueChanged.connect(_sync_slider)
+        return slider, spinbox
+
+    def _connect_subtitle_style_controls(self) -> None:
+        self.subtitle_style_preset_combo.currentTextChanged.connect(
+            self._on_subtitle_style_preset_changed
+        )
+        self.subtitle_style_customize_button.toggled.connect(
+            self._toggle_subtitle_style_panel
+        )
+        self.subtitle_style_reset_button.clicked.connect(self._reset_subtitle_style_preset)
+
+        for slider in (
+            self.font_size_slider,
+            self.outline_slider,
+            self.shadow_slider,
+            self.margin_slider,
+            self.box_opacity_slider,
+            self.box_padding_slider,
+        ):
+            slider.valueChanged.connect(self._on_subtitle_style_custom_changed)
+
+        for spinbox in (
+            self.font_size_spinbox,
+            self.outline_spinbox,
+            self.shadow_spinbox,
+            self.margin_spinbox,
+            self.box_opacity_spinbox,
+            self.box_padding_spinbox,
+        ):
+            spinbox.valueChanged.connect(self._on_subtitle_style_custom_changed)
+
+        self.box_background_checkbox.toggled.connect(self._on_subtitle_style_custom_changed)
+
+    def _toggle_subtitle_style_panel(self, checked: bool) -> None:
+        self._subtitle_style_panel_open = checked
+        self.subtitle_style_panel.setVisible(checked)
+
+    def _reset_subtitle_style_preset(self) -> None:
+        self._subtitle_style_panel_open = False
+        self.subtitle_style_panel.setVisible(False)
+        self.subtitle_style_customize_button.blockSignals(True)
+        self.subtitle_style_customize_button.setChecked(False)
+        self.subtitle_style_customize_button.blockSignals(False)
+
+        self._subtitle_style_preset = PRESET_DEFAULT
+        self.subtitle_style_preset_combo.blockSignals(True)
+        self.subtitle_style_preset_combo.setCurrentText(PRESET_DEFAULT)
+        self.subtitle_style_preset_combo.blockSignals(False)
+
+        self._apply_subtitle_style_to_controls()
+        self._store_subtitle_style_config()
+        self._schedule_preview_refresh()
+
+    def _apply_subtitle_style_to_controls(self) -> None:
+        style = (
+            self._subtitle_style_custom
+            if self._subtitle_style_preset == PRESET_CUSTOM
+            else preset_defaults(self._subtitle_style_preset)
+        )
+        self.subtitle_style_preset_combo.blockSignals(True)
+        self.subtitle_style_preset_combo.setCurrentText(self._subtitle_style_preset)
+        self.subtitle_style_preset_combo.blockSignals(False)
+
+        controls = [
+            (self.font_size_slider, self.font_size_spinbox, style.font_size),
+            (self.outline_slider, self.outline_spinbox, style.outline),
+            (self.shadow_slider, self.shadow_spinbox, style.shadow),
+            (self.margin_slider, self.margin_spinbox, style.margin_v),
+            (self.box_opacity_slider, self.box_opacity_spinbox, style.box_opacity),
+            (self.box_padding_slider, self.box_padding_spinbox, style.box_padding),
+        ]
+        for slider, spinbox, value in controls:
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+            spinbox.blockSignals(True)
+            spinbox.setValue(value)
+            spinbox.blockSignals(False)
+
+        self.box_background_checkbox.blockSignals(True)
+        self.box_background_checkbox.setChecked(style.box_enabled)
+        self.box_background_checkbox.blockSignals(False)
+        self._update_box_options_visibility(style.box_enabled)
+
+    def _update_box_options_visibility(self, enabled: bool) -> None:
+        self.box_options_container.setVisible(enabled)
+
+    def _collect_custom_style_from_controls(self) -> SubtitleStyle:
+        return SubtitleStyle(
+            font_size=self.font_size_slider.value(),
+            outline=self.outline_slider.value(),
+            shadow=self.shadow_slider.value(),
+            margin_v=self.margin_slider.value(),
+            box_enabled=self.box_background_checkbox.isChecked(),
+            box_opacity=self.box_opacity_slider.value(),
+            box_padding=self.box_padding_slider.value(),
+        )
+
+    def _on_subtitle_style_preset_changed(self, preset: str) -> None:
+        if preset not in PRESET_NAMES:
+            return
+        if preset == self._subtitle_style_preset:
+            return
+        self._subtitle_style_preset = preset
+        self._apply_subtitle_style_to_controls()
+        self._store_subtitle_style_config()
+        self._schedule_preview_refresh()
+
+    def _on_subtitle_style_custom_changed(self) -> None:
+        box_enabled = self.box_background_checkbox.isChecked()
+        self._update_box_options_visibility(box_enabled)
+
+        if self._subtitle_style_preset != PRESET_CUSTOM:
+            self._subtitle_style_preset = PRESET_CUSTOM
+            self.subtitle_style_preset_combo.blockSignals(True)
+            self.subtitle_style_preset_combo.setCurrentText(PRESET_CUSTOM)
+            self.subtitle_style_preset_combo.blockSignals(False)
+
+        self._subtitle_style_custom = self._collect_custom_style_from_controls()
+        self._store_subtitle_style_config()
+        self._schedule_preview_refresh()
+
+    def _schedule_preview_refresh(self) -> None:
+        if self._preview_render_timer.isActive():
+            self._preview_render_timer.stop()
+        self._preview_render_timer.start()
+
+    def _resolve_effective_subtitle_style(self) -> SubtitleStyle:
+        if self._subtitle_style_preset == PRESET_CUSTOM:
+            return self._subtitle_style_custom
+        return preset_defaults(self._subtitle_style_preset)
+
+    def _resolve_preview_srt_path(self) -> Optional[Path]:
+        if self._last_srt_path and self._last_srt_path.exists():
+            return self._last_srt_path
+        candidate = self._get_default_srt_path()
+        if candidate and candidate.exists():
+            return candidate
+        return None
+
+    def _refresh_preview_with_style(self) -> None:
+        if not self._preview_timestamp_seconds or not self._video_path:
+            self._update_preview_card()
+            return
+        style = self._resolve_effective_subtitle_style()
+        preview_path = self._render_preview_frame(style)
+        if preview_path:
+            self._preview_frame_path = preview_path
+        self._update_preview_card()
+
+    def _render_preview_frame(self, style: SubtitleStyle) -> Optional[Path]:
+        srt_path = self._resolve_preview_srt_path()
+        if not srt_path or not self._preview_timestamp_seconds or not self._video_path:
+            return None
+        try:
+            srt_mtime = int(srt_path.stat().st_mtime)
+        except FileNotFoundError:
+            srt_mtime = 0
+        timestamp_ms = int(round(self._preview_timestamp_seconds * 1000))
+        preview_width = 1280
+        style_params = to_preview_params(style)
+        cache_key = (
+            f"{self._video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
+            f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
+            f"{style_params['shadow']}|{style_params['margin_v']}|{style_params['box_enabled']}|"
+            f"{style_params['box_opacity']}|{style_params['box_padding']}|{preview_width}"
+        )
+        cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
+        output_path = get_preview_frames_dir() / cache_name
+        if output_path.exists() and output_path.stat().st_size > 0:
+            return output_path
+        force_style = to_ffmpeg_force_style(style)
+        alpha_byte = get_box_alpha_byte(style)
+        self._log(
+            "Preview style: "
+            f"box_enabled={style.box_enabled} "
+            f"box_opacity={style.box_opacity} "
+            f"alpha={alpha_byte} "
+            f"force_style={force_style}",
+            True,
+        )
+        success = extract_subtitled_frame(
+            self._video_path,
+            srt_path,
+            self._preview_timestamp_seconds,
+            output_path,
+            width=preview_width,
+            force_style=force_style,
+        )
+        return output_path if success else None
 
     def _build_settings_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
@@ -647,7 +978,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.setCurrentIndex(page_index)
         self._update_ui_state(idle=state != AppState.WORKING)
         if state == AppState.SUBTITLES_READY:
-            self._update_preview_card()
+            self._refresh_preview_with_style()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -802,19 +1133,13 @@ class MainWindow(QtWidgets.QMainWindow):
             quality=self._transcription_quality.value,
             punctuation_rescue_fallback_enabled=self._punctuation_rescue_fallback_enabled,
         )
-        burnin_settings = BurnInSettings(
-            font_name=self.font_combo.currentText(),
-            font_size=self.font_size_spin.value(),
-            outline=self.outline_spin.value(),
-            shadow=self.shadow_spin.value(),
-            margin_v=self.margin_spin.value(),
-        )
+        style = self._resolve_effective_subtitle_style()
         self._start_worker(
             TaskType.GENERATE_SRT,
             self._video_path,
             None,
             settings,
-            burnin_settings,
+            style,
         )
 
     def _on_review(self) -> None:
@@ -876,14 +1201,8 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
-        settings = BurnInSettings(
-            font_name=self.font_combo.currentText(),
-            font_size=self.font_size_spin.value(),
-            outline=self.outline_spin.value(),
-            shadow=self.shadow_spin.value(),
-            margin_v=self.margin_spin.value(),
-        )
-        self._start_worker(TaskType.BURN_IN, self._video_path, srt_path, None, settings)
+        style = self._resolve_effective_subtitle_style()
+        self._start_worker(TaskType.BURN_IN, self._video_path, srt_path, None, style)
 
     def _start_worker(
         self,
@@ -891,7 +1210,7 @@ class MainWindow(QtWidgets.QMainWindow):
         video_path: Path,
         srt_path: Optional[Path],
         transcription_settings: Optional[TranscriptionSettings],
-        burnin_settings: Optional[BurnInSettings],
+        subtitle_style: Optional[SubtitleStyle],
     ) -> None:
         if self._worker_thread:
             QtWidgets.QMessageBox.warning(self, "Please wait", "Another task is running.")
@@ -907,7 +1226,7 @@ class MainWindow(QtWidgets.QMainWindow):
             output_dir=output_dir,
             srt_path=srt_path,
             transcription_settings=transcription_settings,
-            burnin_settings=burnin_settings,
+            subtitle_style=subtitle_style,
             diagnostics_settings=self._diagnostics_settings,
             session_log_path=self._log_path,
         )
@@ -1509,6 +1828,56 @@ class MainWindow(QtWidgets.QMainWindow):
             return TranscriptionQuality(value)
         except ValueError:
             return TranscriptionQuality.AUTO
+
+
+    def _load_subtitle_style(self) -> tuple[str, SubtitleStyle]:
+        preset = PRESET_DEFAULT
+        custom = preset_defaults(PRESET_DEFAULT)
+        raw = self._config.get("subtitle_style")
+        if not isinstance(raw, dict):
+            return preset, custom
+
+        preset_value = raw.get("preset")
+        if isinstance(preset_value, str) and preset_value in PRESET_NAMES:
+            preset = preset_value
+
+        custom_raw = raw.get("custom")
+        if isinstance(custom_raw, dict):
+            defaults = preset_defaults(PRESET_DEFAULT)
+
+            def _load_int(key: str, default: int) -> int:
+                value = custom_raw.get(key)
+                return value if isinstance(value, int) else default
+
+            def _load_bool(key: str, default: bool) -> bool:
+                value = custom_raw.get(key)
+                return value if isinstance(value, bool) else default
+
+            custom = SubtitleStyle(
+                font_size=_load_int("font_size", defaults.font_size),
+                outline=_load_int("outline", defaults.outline),
+                shadow=_load_int("shadow", defaults.shadow),
+                margin_v=_load_int("margin_v", defaults.margin_v),
+                box_enabled=_load_bool("box_enabled", defaults.box_enabled),
+                box_opacity=_load_int("box_opacity", defaults.box_opacity),
+                box_padding=_load_int("box_padding", defaults.box_padding),
+            )
+        return preset, custom
+
+    def _store_subtitle_style_config(self) -> None:
+        self._config["subtitle_style"] = {
+            "preset": self._subtitle_style_preset,
+            "custom": {
+                "font_size": self._subtitle_style_custom.font_size,
+                "outline": self._subtitle_style_custom.outline,
+                "shadow": self._subtitle_style_custom.shadow,
+                "margin_v": self._subtitle_style_custom.margin_v,
+                "box_enabled": self._subtitle_style_custom.box_enabled,
+                "box_opacity": self._subtitle_style_custom.box_opacity,
+                "box_padding": self._subtitle_style_custom.box_padding,
+            },
+        }
+        self._save_config()
 
     def _load_diagnostics_settings(self) -> DiagnosticsSettings:
         default_categories = {

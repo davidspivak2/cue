@@ -28,6 +28,12 @@ from .ffmpeg_utils import (
     get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
+from .subtitle_style import (
+    SubtitleStyle,
+    get_box_alpha_byte,
+    to_ffmpeg_force_style,
+    to_preview_params,
+)
 from .paths import get_models_dir, get_preview_frames_dir
 from .srt_utils import parse_srt_file, select_preview_moment
 
@@ -66,15 +72,6 @@ class TranscriptionSettings:
 
 
 @dataclass
-class BurnInSettings:
-    font_name: str
-    font_size: int
-    outline: int
-    shadow: int
-    margin_v: int
-
-
-@dataclass
 class DiagnosticsSettings:
     enabled: bool
     write_on_success: bool
@@ -101,7 +98,7 @@ class Worker(QtCore.QObject):
         output_dir: Path,
         srt_path: Optional[Path] = None,
         transcription_settings: Optional[TranscriptionSettings] = None,
-        burnin_settings: Optional[BurnInSettings] = None,
+        subtitle_style: Optional[SubtitleStyle] = None,
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
     ) -> None:
@@ -112,7 +109,7 @@ class Worker(QtCore.QObject):
         self.output_dir = output_dir
         self.srt_path = srt_path
         self.transcription_settings = transcription_settings
-        self.burnin_settings = burnin_settings
+        self.subtitle_style = subtitle_style
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
         self._cancelled = threading.Event()
@@ -287,7 +284,7 @@ class Worker(QtCore.QObject):
         preview_frame_path: Optional[Path] = None
         preview_subtitle_text: Optional[str] = None
         preview_timestamp_seconds: Optional[float] = None
-        preview_style = self.burnin_settings
+        preview_style = self.subtitle_style
         try:
             cues = parse_srt_file(srt_path)
             preview = select_preview_moment(cues, video_duration)
@@ -365,7 +362,7 @@ class Worker(QtCore.QObject):
         *,
         srt_path: Path,
         timestamp_seconds: float,
-        style: BurnInSettings,
+        style: SubtitleStyle,
     ) -> Optional[Path]:
         try:
             srt_mtime = int(srt_path.stat().st_mtime)
@@ -373,31 +370,39 @@ class Worker(QtCore.QObject):
             srt_mtime = 0
         timestamp_ms = int(round(timestamp_seconds * 1000))
         preview_width = 1280
+        style_params = to_preview_params(style)
         cache_key = (
             f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
-            f"{style.font_name}|{style.font_size}|{style.outline}|{style.shadow}|"
-            f"{style.margin_v}|{preview_width}"
+            f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
+            f"{style_params['shadow']}|{style_params['margin_v']}|{style_params['box_enabled']}|"
+            f"{style_params['box_opacity']}|{style_params['box_padding']}|{preview_width}"
         )
         cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
+        force_style = to_ffmpeg_force_style(style)
+        alpha_byte = get_box_alpha_byte(style)
+        self.signals.log.emit(
+            "Preview style: "
+            f"box_enabled={style.box_enabled} "
+            f"box_opacity={style.box_opacity} "
+            f"alpha={alpha_byte} "
+            f"force_style={force_style}",
+            True,
+        )
         success = extract_subtitled_frame(
             self.video_path,
             srt_path,
             timestamp_seconds,
             output_path,
             width=preview_width,
-            font_name=style.font_name,
-            font_size=style.font_size,
-            outline=style.outline,
-            shadow=style.shadow,
-            margin_v=style.margin_v,
+            force_style=force_style,
         )
         return output_path if success else None
 
     def _run_burn_in(self) -> dict:
-        settings = self.burnin_settings
+        settings = self.subtitle_style
         if settings is None:
             raise ValueError("Missing burn-in settings")
 
@@ -420,13 +425,19 @@ class Worker(QtCore.QObject):
             )
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
+        force_style = to_ffmpeg_force_style(settings)
+        alpha_byte = get_box_alpha_byte(settings)
+        self.signals.log.emit(
+            "Export style: "
+            f"box_enabled={settings.box_enabled} "
+            f"box_opacity={settings.box_opacity} "
+            f"alpha={alpha_byte} "
+            f"force_style={force_style}",
+            True,
+        )
         subtitles_filter = build_subtitles_filter(
             srt_path,
-            font_name=settings.font_name,
-            font_size=settings.font_size,
-            outline=settings.outline,
-            shadow=settings.shadow,
-            margin_v=settings.margin_v,
+            force_style=force_style,
         )
 
         base_command = [
