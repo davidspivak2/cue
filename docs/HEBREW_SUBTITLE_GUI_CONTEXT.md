@@ -106,6 +106,62 @@ Example:
 
 ---
 
+## 3.5) Handover essentials (operational addendum)
+
+### Where to change what (cheat-sheet)
+- Audio extraction output path & naming (`<video>_audio_for_whisper.wav`), FFmpeg args, audio filter toggle behavior → `app/workers.py`
+- Burn-in (subtitles filter, style string, audio copy → AAC retry) → `app/workers.py` (plus `app/ffmpeg_utils.py` for escaping/discovery)
+- Worker launching (python `-m app.transcribe_worker` vs exe), stdout token parsing, watchdog timeout → `app/workers.py`
+- Worker internals: faster-whisper args, device/compute-type logic, punctuation stats JSON, punctuation rescue attempts + chooser gate → `app/transcribe_worker.py`
+- SRT formatting primitives → `app/srt_utils.py`
+- Cue splitting/word alignment fallback behavior → `app/srt_splitter.py`
+- Progress weights/aggregation behavior → `app/progress.py`
+- UI state machine, settings wiring/persistence (`config.json`), toggle behaviors, enabling/disabling buttons → `app/main.py`
+
+### Working with Codex branches (project-critical workflow rule)
+- If a branch is actively being worked on by Codex, **do not push additional local commits to that same branch** if you expect Codex to keep pushing hotfixes (risk of conflicts / Codex push failures).
+- Preferred workflows:
+  - **A)** Let Codex make all commits on that branch (including hotfixes).
+  - **B)** If you already made local changes, either:
+    - Tell Codex to incorporate those changes itself (so it owns the commit), **or**
+    - Merge your local changes into `main` separately (new PR), keeping the Codex branch untouched.
+- **Last resort:** if a local emergency fix must be pushed to the active Codex branch, expect Codex to rebase/resolve conflicts afterward.
+
+### Progress model details (numbers)
+Progress is aggregated in `app/progress.py` with fixed step weights:
+- `PREPARE_AUDIO`: **10%**
+- `TRANSCRIBE`: **80%**
+- `EXPORT`: **10%**
+
+The UI aggregates progress without regression (percent should not go backwards). Retry-style operations should **not** reset or jump backward; they should continue forward from the current aggregate progress.
+
+### “Golden path” manual smoke test checklist (10–15 steps)
+1) Launch the app from source (`python -m app.main`).
+2) In Settings, set Save policy to **Same folder as the video**.
+3) Ensure **Improve punctuation automatically (recommended)** is ON.
+4) Ensure **Clean up audio before transcription** is OFF (baseline).
+5) Select a short MP4 (e.g., `Desktop\clip.mp4`).
+6) Click **Create subtitles**.
+7) Confirm `<video_stem>_audio_for_whisper.wav` is created during processing.
+8) Confirm `<video_stem>.srt` is created in the expected output folder.
+9) Open the SRT in Subtitle Edit (via the UI or file association).
+10) In the app, click **Export video with subtitles**.
+11) Confirm `<video_stem>_subtitled.mp4` is created.
+12) Play the exported MP4 and verify subtitles display and audio plays.
+13) Toggle **Clean up audio before transcription** ON, re-run on the same clip, confirm it still completes.
+14) Toggle **Improve punctuation automatically (recommended)** OFF, re-run on the same clip, confirm it still completes.
+15) (Optional) Enable diagnostics and verify a `diag_generate_srt_*.json` appears next to outputs.
+
+Success looks like: SRT created in the correct folder, no crashes, optional diagnostics generated when enabled, and the exported video plays with visible subtitles.
+
+### Known issues / gotchas (short, living list)
+- **Windows console Unicode:** printing Hebrew to cp1252 can crash; JSON printing is safest when redirected. Prefer `ensure_ascii=True` or safe-print helpers for stdout.
+- **Benchmark outputs location:** write to `C:\subtitles_extra\outputs`, not inside the repo, to avoid churn and accidental commits.
+- **Keep-extracted-WAV affects reproducibility:** the app may delete the extracted WAV unless “Keep extracted WAV file” is enabled.
+- **Benchmark vs app differences:** device/compute-type and audio filter chain differences can change results; compare `TRANSCRIBE_CONFIG_JSON` / `TRANSCRIBE_STATS_JSON` / diagnostics to align runs.
+
+---
+
 ## 4) Quick start (Windows, from source)
 
 > These steps assume you are running from a local clone (e.g., `C:\subtitles_repo`).

@@ -321,6 +321,7 @@ Details drawer:
 ## F) Settings page specification
 
 Settings is a **full page** that replaces Home (no dialog).
+For operational workflow details (debugging, benchmarks, handover rules), see `/docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`.
 
 ### Section 1 — Performance
 
