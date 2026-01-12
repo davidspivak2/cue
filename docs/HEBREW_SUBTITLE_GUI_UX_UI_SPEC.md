@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — UX/UI Specification (Design Contract)
 
-**Last updated:** 2026-01-11  
+**Last updated:** 2026-01-12  
 **Scope:** This document describes the intended **pixel-level UI behavior** for Hebrew Subtitle GUI, and the interaction rules the app should follow as it continues the PR1–PR13 overhaul.
 
 This is intentionally opinionated. If an implementation choice conflicts with this spec, update the spec (with rationale) or change the implementation.
@@ -21,14 +21,17 @@ Implemented (merged):
 - ✅ Burn-in (FFmpeg) progress is real and smooth (no jump-to-100)
 - ✅ Transcription progress is **weighted into global progress** and uses smoothing/heartbeat updates to reduce long “stuck” moments (may still be coarse on some files)
 - ✅ Optional **success diagnostics JSON** (opt-in) written next to outputs
+- ✅ Punctuation rescue hardening: chooser gate prevents selecting worse transcript; additional diagnostics fields
+- ✅ Audio extraction default behavior updated to improve transcription readability/punctuation
 
 Not implemented yet (still the target of PR7+):
-- ⬜ Subtitles-ready page: preview still frame with real subtitle line
+- ⬜ Subtitles-ready page: preview still frame with real subtitle line (derive from video frame + SRT cues; do **not** rely on extracted WAV staying on disk; cache under LocalAppData, not next to user outputs)
 - ⬜ Style presets + customize panel with instant preview
 - ⬜ In-app preview playback + karaoke-like highlighting
-- ⬜ “Delightful waiting” visuals (waveform strip, thumbnail strip during transcription)
+- ⬜ “Delightful waiting” visuals (waveform strip, thumbnail strip during transcription; cache lightweight artifacts under app cache, throttle updates, avoid repo/output clutter)
 - ⬜ Error UX details drawer
 - ⬜ Packaging hardening pass
+- ⬜ PR14 — copy polish + CTA reduction sweep (final pass after features stabilize; PR5 remains partial until PR7–PR13 are done)
 
 ---
 
@@ -372,7 +375,7 @@ Controls:
 - Checkbox label: “Improve punctuation automatically (recommended)”
 
 Helper text (always visible, indented to align with checkbox text):
-- “If subtitles come out with little or no punctuation, the app will retry transcription in a compatibility mode and use that result. This can take longer.”
+- “If subtitles come out with little punctuation, the app may retry in a compatibility mode and only switches when results are clearly better. This can take longer.”
 
 Behavior:
 - Defaults ON for new users.

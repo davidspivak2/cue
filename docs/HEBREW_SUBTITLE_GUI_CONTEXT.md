@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — Project Context (Read This First)
 
-**Last updated:** 2026-01-11
+**Last updated:** 2026-01-12
 
 This document is for:
 - new contributors
@@ -92,6 +92,7 @@ On failure, the app still writes/keeps error logs even if success diagnostics ar
 When running `tools\punct_benchmark.py` (and similar local diagnostics), save output logs outside the repo so they are never accidentally committed:
 
 - Folder: `C:\subtitles_extra\outputs`
+- Do not write benchmark logs into `C:\subtitles_repo` (repo) to avoid accidental commits.
 
 Example:
 - `C:\subtitles_extra\outputs\bench_rescue_test_audio_30s.txt`
@@ -124,7 +125,7 @@ Expected output:
 
 This repo started with a 13‑PR UX/architecture overhaul plan. The exact PR boundaries have shifted a bit (some items were combined or rescaled), but the sequence is still a good mental model.
 
-### Status snapshot (as of 2026-01-11)
+### Status snapshot (as of 2026-01-12)
 
 Done / merged:
 - **PR1** — dark theme foundation ✅
@@ -132,10 +133,17 @@ Done / merged:
 - **PR3** — video selection UX (DropZone + thumbnail card + replace on drop) ✅
 - **PR4 (rescoped)** — Settings page + save policy (Ask / Same folder / Always) ✅
 - **PR5 (partial)** — copy polish + CTA reduction (still needs another pass later) 🟡
+- **Plan decision:** PR5 stays partial; we will **not** try to finish it in-place while features are still moving.
 - **PR6 (expanded)** — progress work ✅
   - burn-in/export (FFmpeg) progress: smooth and correct
   - transcription progress: improved, but can still move in coarse jumps depending on Whisper segmentation
 - **Extra (not originally in the plan)** — opt-in success diagnostics JSON + “write next to outputs” hotfix ✅
+
+**PR14 — copy polish + CTA reduction sweep (final pass)**
+- one-primary-CTA-per-state audit
+- microcopy consistency audit
+- remove leftover technical terms in user-facing labels
+- align error/warning copy with UX/UI spec
 
 Not done yet (still in PR7+ territory):
 - **PR7** — Subtitles-ready page: auto-pick a subtitle moment and render a preview still frame
@@ -145,11 +153,12 @@ Not done yet (still in PR7+ territory):
 - **PR11** — “delightful waiting” visuals (waveform + thumbnail strip)
 - **PR12** — error UX with details drawer + copy diagnostics
 - **PR13** — packaging hardening / smoke tests
+- **PR14** — copy polish + CTA reduction sweep (later / after stabilization)
 
 ### Where a new contributor should pick up
 Priority work items:
-1) **Punctuation issue (quality blocker)** — see Section 7.
-2) Continue the UX roadmap at **PR7** (preview still frame) once punctuation is acceptable.
+1) If punctuation is acceptable: continue the UX roadmap at **PR7** (preview still frame).
+2) If punctuation regresses: use the benchmark + diagnostics to confirm whether loss happens in raw segments vs splitter; the new rescue diagnostics fields help choose.
 
 ---
 
@@ -193,13 +202,32 @@ Behavior:
 - When enabled, a diagnostics JSON file is written next to outputs.
 - Failure logs still exist by default even if success diagnostics are off.
 
+### 6.4 Punctuation work (unplanned, now merged)
+Why it was added:
+- We needed repeatable punctuation counts on **raw Whisper segments vs final cues**, not just intuition.
+- The rescue system needed to avoid making results worse while still salvaging bad punctuation runs.
+
+What changed:
+- Added **local benchmark tooling** (`tools/punct_benchmark.py`) to generate repeatable punctuation counts and compare raw segment output to final cues.
+- Hardened **punctuation rescue** with a chooser gate + diagnostics so we can prove the rescue **won’t choose a worse transcript**.
+- Adjusted **audio extraction default behavior** because it materially affected punctuation quality (extraction still happens in `app/workers.py`).
+
+Current reality:
+- We have a reliable way to measure punctuation density and compare raw vs final output.
+- Rescue now protects against regressions instead of blindly swapping outputs.
+
 ---
 
 ## 7) Punctuation problem (current investigation)
 
+### Status now
+- Punctuation is **significantly improved** on WAVs extracted by the app with the current baseline configuration.
+- Rescue often **does not trigger** because comma density is already OK.
+- When punctuation regresses, debugging must use the **WAV produced by the app extraction path** (not a hand-made WAV), plus the benchmark tool and diagnostics JSON.
+
 ### 7.1 What we see
-- Recent SRT output sometimes has **no commas at all**, and generally far less punctuation than older “good” output.
-- This is visible in side-by-side comparisons of SRT outputs.
+- Earlier SRT output sometimes had **no commas at all**, and generally far less punctuation than older “good” output.
+- This was visible in side-by-side comparisons of SRT outputs and triggered the investigation.
 
 ### 7.2 Why “fixing commas in our splitter” is usually the wrong first move
 The SRT splitter (`app/srt_splitter.py`) mostly preserves punctuation **if Whisper provides it**.
@@ -212,14 +240,17 @@ However, we verified cases where:
 ### 7.3 What we measured (key debugging results)
 We used small debug scripts (run locally) to count punctuation in **raw Whisper segments** before any splitting.
 
-Observed matrix on a 30s Hebrew WAV (representative):
+Earlier measurements (pre audio-extraction default change) on a 30s Hebrew WAV (representative):
 - `large-v3`, `int16`, VAD **on**, word timestamps **on** → **0 commas / 0 periods**
 - `large-v3`, `int16`, VAD **off** → sometimes **1 comma**
 - `large-v3`, `int8`, VAD **on** → sometimes **1 comma**
 - `large-v2`, `int16`, VAD **on** → **multiple periods** (punctuation output is noticeably better)
 
+Current measurements (post change):
+- Commas and periods are present at **healthy density** on app-extracted WAVs with the current baseline configuration.
+
 Conclusion (current best hypothesis):
-- The missing punctuation is **primarily a model/decoding behavior issue** (especially `large-v3` on Hebrew), not an SRT formatting bug.
+- The missing punctuation was **primarily a model/decoding + extraction-path interaction**, not an SRT formatting bug.
 
 ### 7.4 Things that were tried
 - Tweaking `srt_splitter` reconstruction/alignment logic:
@@ -233,23 +264,17 @@ Conclusion (current best hypothesis):
 - Keep timing behavior stable:
   - punctuation restoration should ideally modify text only, not timestamps.
 
-### 7.6 Recommended next steps (for the next PR focused on punctuation)
-Do these in order (cheapest signal first):
+### 7.6 Recommended next steps (current priority)
+Punctuation is no longer the active blocker. Move priority back to PR7+.
 
-1) **Make it easy to confirm where punctuation is lost**
-   - Add a diagnostics field that captures a short preview of raw `segment.text` output (first N segments) and punctuation counts.
-   - This must run in production builds (when diagnostics are enabled).
-
-2) **Try model/decoder configuration changes behind a setting**
-   Candidate experiments (keep them behind a “Punctuation” / “Advanced” toggle, off by default):
-   - Toggle VAD on/off (Hebrew punctuation seemed to improve slightly with VAD off).
-   - Try `large-v2` for Hebrew only (or provide a “Model: v3 / v2” override).
-   - Evaluate whether compute type (`int8` vs `int16`) affects punctuation/accuracy tradeoffs.
-
-3) **Only if Whisper still won’t emit punctuation: add post-processing punctuation restoration**
-   - Must not change timestamps or cue boundaries.
-   - Should run on the *final cue text* so it does not affect splitting logic.
-   - Must be optional (because it adds complexity and can introduce errors).
+If punctuation regresses, re-open investigation like this:
+1) **Confirm the loss location** (raw segments vs splitter output)
+   - Use the **benchmark tool** plus **diagnostics JSON** to compare raw `segment.text` counts vs final cues.
+   - Ensure the WAV is the one produced by the app extraction path.
+2) **Use rescue diagnostics fields to confirm chooser behavior**
+   - Verify rescue only switches when the alternate transcript is clearly better.
+3) **Only then consider model/decoder experiments**
+   - Keep experiments behind the punctuation toggle so defaults remain stable.
 
 ---
 
