@@ -28,7 +28,12 @@ from .ffmpeg_utils import (
     get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
-from .subtitle_style import SubtitleStyle, to_ffmpeg_force_style, to_preview_params
+from .subtitle_style import (
+    SubtitleStyle,
+    get_box_alpha_byte,
+    to_ffmpeg_force_style,
+    to_preview_params,
+)
 from .paths import get_models_dir, get_preview_frames_dir
 from .srt_utils import parse_srt_file, select_preview_moment
 
@@ -376,13 +381,23 @@ class Worker(QtCore.QObject):
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
+        force_style = to_ffmpeg_force_style(style)
+        alpha_byte = get_box_alpha_byte(style)
+        self.signals.log.emit(
+            "Preview style: "
+            f"box_enabled={style.box_enabled} "
+            f"box_opacity={style.box_opacity} "
+            f"alpha={alpha_byte} "
+            f"force_style={force_style}",
+            True,
+        )
         success = extract_subtitled_frame(
             self.video_path,
             srt_path,
             timestamp_seconds,
             output_path,
             width=preview_width,
-            force_style=to_ffmpeg_force_style(style),
+            force_style=force_style,
         )
         return output_path if success else None
 
@@ -410,9 +425,19 @@ class Worker(QtCore.QObject):
             )
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
+        force_style = to_ffmpeg_force_style(settings)
+        alpha_byte = get_box_alpha_byte(settings)
+        self.signals.log.emit(
+            "Export style: "
+            f"box_enabled={settings.box_enabled} "
+            f"box_opacity={settings.box_opacity} "
+            f"alpha={alpha_byte} "
+            f"force_style={force_style}",
+            True,
+        )
         subtitles_filter = build_subtitles_filter(
             srt_path,
-            force_style=to_ffmpeg_force_style(settings),
+            force_style=force_style,
         )
 
         base_command = [

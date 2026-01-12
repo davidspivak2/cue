@@ -61,7 +61,16 @@ def preset_defaults(name: str) -> SubtitleStyle:
 
 def _opacity_to_ass_alpha(opacity: int) -> int:
     clamped = max(0, min(opacity, 100))
-    return 255 - round(255 * (clamped / 100))
+    return round((100 - clamped) / 100 * 255)
+
+
+def get_box_alpha_byte(style: SubtitleStyle) -> int:
+    return _opacity_to_ass_alpha(style.box_opacity)
+
+
+def format_back_colour(style: SubtitleStyle) -> str:
+    alpha = get_box_alpha_byte(style)
+    return f"&H{alpha:02X}000000&"
 
 
 def to_ffmpeg_force_style(style: SubtitleStyle) -> str:
@@ -79,8 +88,7 @@ def to_ffmpeg_force_style(style: SubtitleStyle) -> str:
         f"BorderStyle={border_style}",
     ]
     if style.box_enabled:
-        alpha = _opacity_to_ass_alpha(style.box_opacity)
-        fields.append(f"BackColour=&H{alpha:02X}000000")
+        fields.append(f"BackColour={format_back_colour(style)}")
     return ",".join(fields)
 
 
