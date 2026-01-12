@@ -5,7 +5,7 @@
 
 This is intentionally opinionated. If an implementation choice conflicts with this spec, update the spec (with rationale) or change the implementation.
 
-> For current project status, roadmap progress, and known issues (including the Hebrew punctuation problem), see `HEBREW_SUBTITLE_GUI_CONTEXT.md`.
+> For current project status, roadmap progress, and known issues (including the Hebrew punctuation problem), see `/docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`.
 
 ---
 
@@ -31,7 +31,7 @@ Not implemented yet (still the target of PR7+):
 - ⬜ “Delightful waiting” visuals (waveform strip, thumbnail strip during transcription; cache lightweight artifacts under app cache, throttle updates, avoid repo/output clutter)
 - ⬜ Error UX details drawer
 - ⬜ Packaging hardening pass
-- ⬜ PR14 — copy polish + CTA reduction sweep (final pass after features stabilize; PR5 remains partial until PR7–PR13 are done)
+- ⬜ PR15 — copy polish + CTA reduction sweep (final pass after features stabilize; PR5 remains partial until PR7–PR13 are done)
 
 ---
 
@@ -375,13 +375,37 @@ Controls:
 - Checkbox label: “Improve punctuation automatically (recommended)”
 
 Helper text (always visible, indented to align with checkbox text):
-- “If subtitles come out with little punctuation, the app may retry in a compatibility mode and only switches when results are clearly better. This can take longer.”
+- “If subtitles come out with little punctuation, the app may run extra attempts and only switches when results are clearly better. This can take longer.”
 
 Behavior:
 - Defaults ON for new users.
 - Preserve existing config values when present.
+- This is a **conditional comma-rescue**, not an always-retry feature.
+- Trigger logic (conceptual):
+  - Only considers rescue if the transcript meets a minimum word count (`min_words`).
+  - If comma density is already healthy, rescue is skipped.
+- User experience:
+  - No new screens or prompts.
+  - Rescue happens (if triggered) during the same transcription run.
+  - Logs/diagnostics show whether rescue triggered (`punctuation_rescue_triggered`) and the reason.
+  - When it triggers, logs/diagnostics include which attempt was chosen; when it does not, the baseline is kept.
 
-### Section 4 — Diagnostics
+### Section 4 — Audio
+
+Controls:
+- Checkbox label: “Clean up audio before transcription”
+- Checkbox label: “Keep extracted WAV file”
+
+Behavior:
+- Audio filter chain default: **OFF** (recommended unless noisy audio).
+- When enabled, FFmpeg applies a highpass/lowpass/noise-reduction/loudness-normalization chain.
+- “Keep extracted WAV file” default: **OFF**; when ON, the extracted WAV is retained next to outputs.
+
+Helper text (always visible, indented to align with checkbox text):
+- Explain that cleaning can help noisy recordings but may reduce punctuation.
+- Explain that keeping the WAV is useful for debugging/benchmarking and increases disk usage.
+
+### Section 5 — Diagnostics
 
 Diagnostics are for debugging and **must be OFF by default**.
 
@@ -397,6 +421,9 @@ Controls:
 
 Output location:
 - Diagnostics JSON is written **next to the generated SRT / output video** (same folder).
+
+Note:
+- Benchmarks/diagnostics are for debugging only and should not be treated as a user-facing feature.
 
 ---
 
