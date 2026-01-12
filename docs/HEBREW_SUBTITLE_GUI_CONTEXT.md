@@ -130,7 +130,7 @@ Outputs include:
 - `<video_stem>_subtitled.mp4` (burned output)
 
 ### Diagnostics JSON (opt-in, **on success**)
-If enabled in Settings, diagnostics JSON is written **next to the created output** (hotfixed from the old LocalAppData location):
+If diagnostics logging is enabled and “Write diagnostics on successful completion” is ON, diagnostics JSON is written **next to the created output** (hotfixed from the old LocalAppData location):
 - `diag_generate_srt_YYYYMMDD_HHMMSS_micro.json`
 - `diag_burn_in_YYYYMMDD_HHMMSS_micro.json`
 
