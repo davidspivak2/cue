@@ -189,18 +189,53 @@ def format_filter_style(
     )
 
 
-def extract_video_frame(
+def build_subtitles_filter(
+    srt_path: Path,
+    *,
+    font_name: str,
+    font_size: int,
+    outline: int,
+    shadow: int,
+    margin_v: int,
+) -> str:
+    escaped_path = escape_subtitles_filter_path(srt_path)
+    style = format_filter_style(
+        font_name=font_name,
+        font_size=font_size,
+        outline=outline,
+        shadow=shadow,
+        margin_v=margin_v,
+    )
+    return f"subtitles='{escaped_path}':force_style='{style}'"
+
+
+def extract_subtitled_frame(
     video_path: Path,
+    srt_path: Path,
     timestamp_seconds: float,
     output_path: Path,
     *,
     width: int = 640,
+    font_name: str,
+    font_size: int,
+    outline: int,
+    shadow: int,
+    margin_v: int,
 ) -> bool:
     try:
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
     except FileNotFoundError:
         return False
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    subtitles_filter = build_subtitles_filter(
+        srt_path,
+        font_name=font_name,
+        font_size=font_size,
+        outline=outline,
+        shadow=shadow,
+        margin_v=margin_v,
+    )
+    filter_chain = f"{subtitles_filter},scale={width}:-1:force_original_aspect_ratio=decrease"
     command = [
         str(ffmpeg_path),
         "-y",
@@ -212,7 +247,7 @@ def extract_video_frame(
         "-frames:v",
         "1",
         "-vf",
-        f"scale={width}:-1:force_original_aspect_ratio=decrease",
+        filter_chain,
         str(output_path),
     ]
     try:

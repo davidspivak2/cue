@@ -19,10 +19,9 @@ from typing import Optional
 from PySide6 import QtCore
 from .progress import ProgressStep
 from .ffmpeg_utils import (
+    build_subtitles_filter,
     ensure_ffmpeg_available,
-    extract_video_frame,
-    escape_subtitles_filter_path,
-    format_filter_style,
+    extract_subtitled_frame,
     get_ffprobe_json,
     get_media_duration,
     get_runtime_mode,
@@ -288,16 +287,21 @@ class Worker(QtCore.QObject):
         preview_frame_path: Optional[Path] = None
         preview_subtitle_text: Optional[str] = None
         preview_timestamp_seconds: Optional[float] = None
+        preview_style = self.burnin_settings
         try:
             cues = parse_srt_file(srt_path)
             preview = select_preview_moment(cues, video_duration)
-            if preview:
+            if preview and preview_style:
                 preview_subtitle_text = preview.subtitle_text
                 preview_timestamp_seconds = preview.timestamp_seconds
                 preview_frame_path = self._ensure_preview_frame(
                     srt_path=srt_path,
                     timestamp_seconds=preview_timestamp_seconds,
+                    style=preview_style,
                 )
+            elif preview and not preview_style:
+                preview_subtitle_text = preview.subtitle_text
+                preview_timestamp_seconds = preview.timestamp_seconds
         except Exception as exc:  # noqa: BLE001
             self.signals.log.emit(f"Preview generation failed: {exc}", False)
         if settings.keep_extracted_audio:
@@ -361,22 +365,32 @@ class Worker(QtCore.QObject):
         *,
         srt_path: Path,
         timestamp_seconds: float,
+        style: BurnInSettings,
     ) -> Optional[Path]:
         try:
             srt_mtime = int(srt_path.stat().st_mtime)
         except FileNotFoundError:
             srt_mtime = 0
         timestamp_ms = int(round(timestamp_seconds * 1000))
-        cache_key = f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}"
+        cache_key = (
+            f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
+            f"{style.font_name}|{style.font_size}|{style.outline}|{style.shadow}|{style.margin_v}"
+        )
         cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
-        success = extract_video_frame(
+        success = extract_subtitled_frame(
             self.video_path,
+            srt_path,
             timestamp_seconds,
             output_path,
             width=640,
+            font_name=style.font_name,
+            font_size=style.font_size,
+            outline=style.outline,
+            shadow=style.shadow,
+            margin_v=style.margin_v,
         )
         return output_path if success else None
 
@@ -404,15 +418,14 @@ class Worker(QtCore.QObject):
             )
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
-        escaped_path = escape_subtitles_filter_path(srt_path)
-        style = format_filter_style(
-            settings.font_name,
-            settings.font_size,
-            settings.outline,
-            settings.shadow,
-            settings.margin_v,
+        subtitles_filter = build_subtitles_filter(
+            srt_path,
+            font_name=settings.font_name,
+            font_size=settings.font_size,
+            outline=settings.outline,
+            shadow=settings.shadow,
+            margin_v=settings.margin_v,
         )
-        subtitles_filter = f"subtitles='{escaped_path}':force_style='{style}'"
 
         base_command = [
             str(ffmpeg_path),

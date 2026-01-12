@@ -362,14 +362,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         preview_frame_layout.addWidget(self.preview_image_label, 0, 0, 1, 1)
 
-        self.preview_text_label = QtWidgets.QLabel()
-        self.preview_text_label.setWordWrap(True)
-        self.preview_text_label.setLayoutDirection(QtCore.Qt.RightToLeft)
-        self.preview_text_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignTop)
-        self.preview_text_label.setObjectName("PreviewCardSubtitle")
-
         preview_layout.addWidget(preview_frame)
-        preview_layout.addWidget(self.preview_text_label)
         preview_layout.addStretch()
 
         actions_container = QtWidgets.QWidget()
@@ -669,12 +662,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.preview_image_label.setAlignment(QtCore.Qt.AlignCenter)
             self._update_preview_image()
 
-        text = (self._preview_subtitle_text or "").strip()
-        if text:
-            self.preview_text_label.setText(text)
-        else:
-            self.preview_text_label.setText("Subtitle preview unavailable")
-
     def _update_preview_image(self) -> None:
         if not hasattr(self, "preview_image_label"):
             return
@@ -770,7 +757,20 @@ class MainWindow(QtWidgets.QMainWindow):
             quality=self._transcription_quality.value,
             punctuation_rescue_fallback_enabled=self._punctuation_rescue_fallback_enabled,
         )
-        self._start_worker(TaskType.GENERATE_SRT, self._video_path, None, settings, None)
+        burnin_settings = BurnInSettings(
+            font_name=self.font_combo.currentText(),
+            font_size=self.font_size_spin.value(),
+            outline=self.outline_spin.value(),
+            shadow=self.shadow_spin.value(),
+            margin_v=self.margin_spin.value(),
+        )
+        self._start_worker(
+            TaskType.GENERATE_SRT,
+            self._video_path,
+            None,
+            settings,
+            burnin_settings,
+        )
 
     def _on_review(self) -> None:
         if not self._video_path:
