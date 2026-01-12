@@ -428,7 +428,8 @@ Note on WAV location:
 Diagnostics are for debugging and **must be OFF by default**.
 
 Controls:
-- Master checkbox: “Write diagnostics after successful runs” (default OFF)
+- Master checkbox: “Enable diagnostics logging” (default OFF)
+- Secondary checkbox (enabled only when master is ON): “Write diagnostics on successful completion” (default OFF)
 - When enabled, show checkboxes for what to include:
   - Video file info (path/size/ffprobe)
   - Extracted audio info (wav stats)
