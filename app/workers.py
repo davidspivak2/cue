@@ -56,6 +56,7 @@ class TranscriptionError(RuntimeError):
 @dataclass
 class TranscriptionSettings:
     apply_audio_filter: bool
+    keep_extracted_audio: bool
     device: str
     compute_type: str
     quality: str
@@ -279,15 +280,21 @@ class Worker(QtCore.QObject):
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             raise RuntimeError(f"Subtitles were not created: {srt_path}")
 
-        try:
-            self._capture_audio_info_if_needed(audio_path)
-            audio_path.unlink(missing_ok=True)
-            self.signals.log.emit(f"Deleted audio file: {audio_path}", True)
-        except Exception as exc:  # noqa: BLE001
+        self._capture_audio_info_if_needed(audio_path)
+        if settings.keep_extracted_audio:
             self.signals.log.emit(
-                f"Warning: failed to delete audio file ({audio_path}): {exc}",
+                f"Keeping extracted audio file: {audio_path}",
                 True,
             )
+        else:
+            try:
+                audio_path.unlink(missing_ok=True)
+                self.signals.log.emit(f"Deleted audio file: {audio_path}", True)
+            except Exception as exc:  # noqa: BLE001
+                self.signals.log.emit(
+                    f"Warning: failed to delete audio file ({audio_path}): {exc}",
+                    True,
+                )
 
         return {
             "audio_path": str(audio_path),
@@ -977,6 +984,12 @@ class Worker(QtCore.QObject):
                 if self._output_video_path
                 else None,
             },
+            "audio_filter_enabled": bool(
+                self.transcription_settings and self.transcription_settings.apply_audio_filter
+            ),
+            "keep_extracted_audio_enabled": bool(
+                self.transcription_settings and self.transcription_settings.keep_extracted_audio
+            ),
         }
         if not success:
             data["error"] = message

@@ -90,6 +90,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._punctuation_rescue_fallback_enabled = (
             self._load_punctuation_rescue_fallback_enabled()
         )
+        self._apply_audio_filter_enabled = self._load_apply_audio_filter_enabled()
+        self._keep_extracted_audio_enabled = self._load_keep_extracted_audio_enabled()
         self._diagnostics_settings = self._load_diagnostics_settings()
         self._state = AppState.EMPTY
 
@@ -126,8 +128,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.done_edit_button.setFlat(True)
         self.done_edit_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
-        self.filter_checkbox = QtWidgets.QCheckBox("Improve voice clarity")
-        self.filter_checkbox.setChecked(True)
+        self.filter_checkbox = QtWidgets.QCheckBox("Clean up audio before transcription")
+        self.filter_checkbox.setChecked(False)
+        self.keep_extracted_audio_checkbox = QtWidgets.QCheckBox("Keep extracted WAV file")
 
         style_group = QtWidgets.QGroupBox("Subtitle style")
         style_layout = QtWidgets.QGridLayout(style_group)
@@ -196,7 +199,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         advanced_group = QtWidgets.QGroupBox("Options")
         advanced_layout = QtWidgets.QVBoxLayout(advanced_group)
-        advanced_layout.addWidget(self.filter_checkbox)
         advanced_layout.addWidget(style_group)
         details_layout.addWidget(advanced_group)
 
@@ -269,6 +271,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.browse_button.clicked.connect(self._browse_fixed_output_dir)
         self.punctuation_rescue_checkbox.toggled.connect(
             self._on_punctuation_rescue_toggled
+        )
+        self.filter_checkbox.toggled.connect(self._on_audio_filter_toggled)
+        self.keep_extracted_audio_checkbox.toggled.connect(
+            self._on_keep_extracted_audio_toggled
         )
         self.diagnostics_enabled_checkbox.toggled.connect(
             self._on_diagnostics_enabled_toggled
@@ -520,6 +526,26 @@ class MainWindow(QtWidgets.QMainWindow):
         punctuation_layout.addWidget(punctuation_help)
         layout.addWidget(punctuation_card)
 
+        audio_card = self._build_settings_section("Audio")
+        audio_layout = audio_card.layout()
+        audio_filter_help = QtWidgets.QLabel(
+            "May help noisy recordings, but can reduce punctuation. Recommended: OFF unless needed."
+        )
+        audio_filter_help.setObjectName("SettingsHelperText")
+        audio_filter_help.setWordWrap(True)
+        audio_filter_help.setIndent(24)
+        keep_audio_help = QtWidgets.QLabel(
+            "Keeps the *_audio_for_whisper.wav file after transcription completes."
+        )
+        keep_audio_help.setObjectName("SettingsHelperText")
+        keep_audio_help.setWordWrap(True)
+        keep_audio_help.setIndent(24)
+        audio_layout.addWidget(self.filter_checkbox)
+        audio_layout.addWidget(audio_filter_help)
+        audio_layout.addWidget(self.keep_extracted_audio_checkbox)
+        audio_layout.addWidget(keep_audio_help)
+        layout.addWidget(audio_card)
+
         diagnostics_card = self._build_settings_section("Diagnostics")
         diagnostics_layout = diagnostics_card.layout()
 
@@ -647,6 +673,7 @@ class MainWindow(QtWidgets.QMainWindow):
         device, compute_type = self._resolve_transcription_device()
         settings = TranscriptionSettings(
             apply_audio_filter=self.filter_checkbox.isChecked(),
+            keep_extracted_audio=self.keep_extracted_audio_checkbox.isChecked(),
             device=device,
             compute_type=compute_type,
             quality=self._transcription_quality.value,
@@ -990,6 +1017,14 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.punctuation_rescue_checkbox.blockSignals(False)
 
+        self.filter_checkbox.blockSignals(True)
+        self.filter_checkbox.setChecked(self._apply_audio_filter_enabled)
+        self.filter_checkbox.blockSignals(False)
+
+        self.keep_extracted_audio_checkbox.blockSignals(True)
+        self.keep_extracted_audio_checkbox.setChecked(self._keep_extracted_audio_enabled)
+        self.keep_extracted_audio_checkbox.blockSignals(False)
+
         self._update_fixed_path_field()
         self._update_save_policy_controls()
         self._update_quality_summary()
@@ -1065,6 +1100,20 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._punctuation_rescue_fallback_enabled = checked
         self._config["punctuation_rescue_fallback_enabled"] = checked
+        self._save_config()
+
+    def _on_audio_filter_toggled(self, checked: bool) -> None:
+        if checked == self._apply_audio_filter_enabled:
+            return
+        self._apply_audio_filter_enabled = checked
+        self._config["apply_audio_filter"] = checked
+        self._save_config()
+
+    def _on_keep_extracted_audio_toggled(self, checked: bool) -> None:
+        if checked == self._keep_extracted_audio_enabled:
+            return
+        self._keep_extracted_audio_enabled = checked
+        self._config["keep_extracted_audio"] = checked
         self._save_config()
 
     def _browse_fixed_output_dir(self) -> None:
@@ -1353,6 +1402,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(value, bool):
             return value
         return True
+
+    def _load_apply_audio_filter_enabled(self) -> bool:
+        value = self._config.get("apply_audio_filter")
+        if isinstance(value, bool):
+            return value
+        return False
+
+    def _load_keep_extracted_audio_enabled(self) -> bool:
+        value = self._config.get("keep_extracted_audio")
+        if isinstance(value, bool):
+            return value
+        return False
 
     def _resolve_subtitle_edit_path(self) -> Optional[Path]:
         if self._subtitle_edit_path and self._subtitle_edit_path.exists():
