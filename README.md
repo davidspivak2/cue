@@ -47,6 +47,16 @@ python -m app.main
 The app will use `bin\ffmpeg.exe`/`bin\ffprobe.exe` if present, otherwise it will fall back to
 FFmpeg installed on PATH.
 
+## Testing / QA
+- Tests live in `tests/` and are executed with `pytest` (installed via `requirements-dev.txt`).
+  - Run: `.venv\Scripts\activate` then `pytest`.
+- Platform assumptions: Windows-only app; GPU usage is optional and falls back to CPU automatically.
+- Setup scripts may be required:
+  - `download_ffmpeg.bat` (or `download_ffmpeg.ps1`) to fetch FFmpeg binaries.
+  - `build_exe.bat` for packaging the Windows executable.
+- Known limitations: first run downloads the `large-v3` model from Hugging Face and needs network
+  access; FFmpeg must be available via `bin\` or PATH.
+
 ## Build the Windows executable
 Double-click `build_exe.bat` or run:
 ```
