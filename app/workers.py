@@ -372,9 +372,11 @@ class Worker(QtCore.QObject):
         except FileNotFoundError:
             srt_mtime = 0
         timestamp_ms = int(round(timestamp_seconds * 1000))
+        preview_width = 1280
         cache_key = (
             f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
-            f"{style.font_name}|{style.font_size}|{style.outline}|{style.shadow}|{style.margin_v}"
+            f"{style.font_name}|{style.font_size}|{style.outline}|{style.shadow}|"
+            f"{style.margin_v}|{preview_width}"
         )
         cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
         output_path = get_preview_frames_dir() / cache_name
@@ -385,7 +387,7 @@ class Worker(QtCore.QObject):
             srt_path,
             timestamp_seconds,
             output_path,
-            width=640,
+            width=preview_width,
             font_name=style.font_name,
             font_size=style.font_size,
             outline=style.outline,
