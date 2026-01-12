@@ -105,6 +105,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_play_request_pending = False
         self._preview_loading = False
         self._preview_playback_controller = PreviewPlaybackController(self._log, self)
+        self.preview_media_player: Optional[QtMultimedia.QMediaPlayer] = None
+        self.preview_audio_output: Optional[QtMultimedia.QAudioOutput] = None
+        self.preview_video_widget: Optional[QtMultimediaWidgets.QVideoWidget] = None
+        self.preview_stack: Optional[QtWidgets.QStackedWidget] = None
+        self.preview_play_button: Optional[QtWidgets.QPushButton] = None
+        self.preview_stop_button: Optional[QtWidgets.QPushButton] = None
+        self.preview_scrub_slider: Optional[QtWidgets.QSlider] = None
+        self.preview_time_label: Optional[QtWidgets.QLabel] = None
+        self.preview_status_label: Optional[QtWidgets.QLabel] = None
         self._progress_controller: Optional[ProgressController] = None
         self._worker_start_time: Optional[float] = None
         self._elapsed_timer = QtCore.QTimer(self)
@@ -1089,21 +1098,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_playback_controller.clip_loading.connect(self._on_preview_clip_loading)
 
     def _update_preview_controls_availability(self) -> None:
+        if not self.preview_play_button:
+            return
         ready = bool(self._preview_timestamp_seconds and self._resolve_preview_srt_path())
         self.preview_play_button.setEnabled(ready and not self._preview_loading)
-        if not ready:
+        if not ready and self.preview_stop_button and self.preview_scrub_slider:
             self.preview_stop_button.setEnabled(False)
             self.preview_scrub_slider.setEnabled(False)
-            self.preview_time_label.setText("0:00 / 0:00")
+            if self.preview_time_label:
+                self.preview_time_label.setText("0:00 / 0:00")
 
     def _set_preview_controls_enabled(self, enabled: bool) -> None:
-        self.preview_stop_button.setEnabled(enabled)
-        self.preview_scrub_slider.setEnabled(enabled)
+        if self.preview_stop_button:
+            self.preview_stop_button.setEnabled(enabled)
+        if self.preview_scrub_slider:
+            self.preview_scrub_slider.setEnabled(enabled)
 
     def _set_preview_status_message(self, message: str) -> None:
-        self.preview_status_label.setText(message)
+        if self.preview_status_label:
+            self.preview_status_label.setText(message)
 
     def _on_preview_play_clicked(self) -> None:
+        if not self.preview_media_player:
+            return
         if (
             self.preview_media_player.playbackState()
             == QtMultimedia.QMediaPlayer.PlaybackState.PlayingState
@@ -1139,15 +1156,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stop_preview_playback(clear_media=False)
 
     def _stop_preview_playback(self, *, clear_media: bool) -> None:
-        if hasattr(self, "preview_media_player"):
+        if self.preview_media_player:
             self.preview_media_player.stop()
             if clear_media:
                 self.preview_media_player.setSource(QtCore.QUrl())
                 self._preview_clip_path = None
         self._switch_preview_mode(playback=False)
         self._preview_play_request_pending = False
-        self._preview_scrub_slider.setValue(0)
-        self._preview_time_label.setText("0:00 / 0:00")
+        if self.preview_scrub_slider:
+            self.preview_scrub_slider.blockSignals(True)
+            self.preview_scrub_slider.setValue(0)
+            self.preview_scrub_slider.blockSignals(False)
+        if self.preview_time_label:
+            self.preview_time_label.setText("0:00 / 0:00")
         self._set_preview_controls_enabled(False)
         self._update_preview_controls_availability()
 
@@ -1157,7 +1178,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_preview_status_message("")
 
     def _switch_preview_mode(self, *, playback: bool) -> None:
-        if not hasattr(self, "preview_stack"):
+        if not self.preview_stack:
             return
         self.preview_stack.setCurrentIndex(1 if playback else 0)
 
@@ -1167,6 +1188,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._preview_play_request_pending:
             return
         self._preview_play_request_pending = False
+        if not self.preview_media_player:
+            return
         self.preview_media_player.setSource(QtCore.QUrl.fromLocalFile(path))
         self._switch_preview_mode(playback=True)
         self.preview_media_player.play()
@@ -1180,15 +1203,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_preview_clip_loading(self, loading: bool) -> None:
         self._preview_loading = loading
-        self.preview_play_button.setEnabled(not loading)
-        if loading:
-            self.preview_play_button.setText("Loading…")
-        else:
-            self.preview_play_button.setText("Play")
+        if self.preview_play_button:
+            self.preview_play_button.setEnabled(not loading)
+            if loading:
+                self.preview_play_button.setText("Loading…")
+            else:
+                self.preview_play_button.setText("Play")
 
     def _on_preview_playback_state_changed(
         self, state: QtMultimedia.QMediaPlayer.PlaybackState
     ) -> None:
+        if not self.preview_play_button:
+            return
         if state == QtMultimedia.QMediaPlayer.PlaybackState.PlayingState:
             self.preview_play_button.setText("Pause")
             self._set_preview_controls_enabled(True)
@@ -1198,39 +1224,51 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_preview_media_status_changed(
         self, status: QtMultimedia.QMediaPlayer.MediaStatus
     ) -> None:
+        if not self.preview_media_player:
+            return
         if status == QtMultimedia.QMediaPlayer.MediaStatus.EndOfMedia:
             self._stop_preview_playback(clear_media=False)
 
     def _on_preview_player_error(self, error: QtMultimedia.QMediaPlayer.Error) -> None:
         if error == QtMultimedia.QMediaPlayer.Error.NoError:
             return
+        if not self.preview_media_player:
+            return
         self._log(f"Preview playback error: {self.preview_media_player.errorString()}", True)
         self._set_preview_status_message("Preview playback unavailable.")
         self._stop_preview_playback(clear_media=False)
 
     def _on_preview_position_changed(self, position: int) -> None:
-        if self._preview_slider_dragging:
+        if self._preview_slider_dragging or not self.preview_scrub_slider:
             return
         self.preview_scrub_slider.setValue(position)
-        self._update_preview_time_label(position, self.preview_media_player.duration())
+        if self.preview_media_player:
+            self._update_preview_time_label(position, self.preview_media_player.duration())
 
     def _on_preview_duration_changed(self, duration: int) -> None:
-        self.preview_scrub_slider.setRange(0, max(duration, 0))
-        self._update_preview_time_label(self.preview_media_player.position(), duration)
+        if self.preview_scrub_slider:
+            self.preview_scrub_slider.setRange(0, max(duration, 0))
+        if self.preview_media_player:
+            self._update_preview_time_label(self.preview_media_player.position(), duration)
 
     def _on_preview_slider_pressed(self) -> None:
+        if not self.preview_scrub_slider:
+            return
         self._preview_slider_dragging = True
 
     def _on_preview_slider_released(self) -> None:
         self._preview_slider_dragging = False
-        self.preview_media_player.setPosition(self.preview_scrub_slider.value())
+        if self.preview_media_player and self.preview_scrub_slider:
+            self.preview_media_player.setPosition(self.preview_scrub_slider.value())
 
     def _on_preview_slider_moved(self, value: int) -> None:
-        if self._preview_slider_dragging:
+        if self._preview_slider_dragging and self.preview_media_player:
             self.preview_media_player.setPosition(value)
             self._update_preview_time_label(value, self.preview_media_player.duration())
 
     def _update_preview_time_label(self, position_ms: int, duration_ms: int) -> None:
+        if not self.preview_time_label:
+            return
         current_seconds = max(0.0, position_ms / 1000.0)
         total_seconds = max(0.0, duration_ms / 1000.0)
         self.preview_time_label.setText(
