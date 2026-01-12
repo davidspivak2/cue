@@ -13,15 +13,24 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 ## Project structure
 ```
 app/
-  main.py
-  workers.py
-  ffmpeg_utils.py
-  srt_utils.py
+  main.py                 # Application entry point (Qt UI + orchestration)
+  transcribe_worker.py    # Background transcription worker logic
+  srt_splitter.py         # Subtitle chunking/splitting helpers
+  progress.py             # Progress tracking and reporting utilities
+  workers.py              # Worker queue/thread management
+  ffmpeg_utils.py         # FFmpeg invocation helpers
+  srt_utils.py            # SRT parsing/formatting helpers
+  ui/                     # UI components, theme, and widgets
 bin/
   ffmpeg.exe
   ffprobe.exe
+docs/                     # Project documentation
+tools/                    # Developer tooling/utilities
+tests/                    # Test suite
 build_exe.bat
 download_ffmpeg.bat
+run_app.py                # Convenience script to launch the app
+run_worker.py             # Convenience script to launch the worker
 requirements.txt
 ```
 
