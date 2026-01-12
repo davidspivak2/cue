@@ -33,6 +33,7 @@ from app.ui.theme import apply_theme
 from app.ui.utils import generate_thumbnail, get_media_duration_seconds
 from app.ui.widgets import (
     AspectRatioFrame,
+    ClickableLabel,
     DropZone,
     ElidedLineEdit,
     SavingToLine,
@@ -341,6 +342,7 @@ class MainWindow(QtWidgets.QMainWindow):
         page = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(page)
         layout.setSpacing(24)
+        layout.setAlignment(QtCore.Qt.AlignTop)
 
         preview_card = QtWidgets.QFrame()
         preview_layout = QtWidgets.QVBoxLayout(preview_card)
@@ -348,17 +350,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
         preview_frame = AspectRatioFrame()
         preview_frame.setObjectName("PreviewCardFrame")
-        preview_frame.setMinimumHeight(180)
+        preview_frame.setMinimumSize(720, 405)
         preview_frame.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
         preview_frame_layout = QtWidgets.QGridLayout(preview_frame)
         preview_frame_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.preview_image_label = QtWidgets.QLabel()
+        self.preview_image_label = ClickableLabel()
         self.preview_image_label.setAlignment(QtCore.Qt.AlignCenter)
         self.preview_image_label.setObjectName("PreviewCardImage")
-        self.preview_image_label.setMinimumHeight(180)
+        self.preview_image_label.setMinimumSize(720, 405)
+        self.preview_image_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Expanding,
+        )
+        self.preview_image_label.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.preview_image_label.clicked.connect(self._open_preview_dialog)
 
         preview_frame_layout.addWidget(self.preview_image_label, 0, 0, 1, 1)
 
@@ -392,8 +400,10 @@ class MainWindow(QtWidgets.QMainWindow):
         actions_layout.addLayout(links_layout)
         actions_layout.addStretch()
 
-        layout.addWidget(preview_card, 1)
-        layout.addWidget(actions_container, 1)
+        layout.addWidget(preview_card, 3)
+        layout.addWidget(actions_container, 2)
+        layout.setAlignment(preview_card, QtCore.Qt.AlignTop)
+        layout.setAlignment(actions_container, QtCore.Qt.AlignTop)
         self._update_preview_card()
         return page
 
@@ -669,10 +679,45 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         scaled = self._preview_pixmap.scaled(
             self.preview_image_label.size(),
-            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.KeepAspectRatio,
             QtCore.Qt.SmoothTransformation,
         )
         self.preview_image_label.setPixmap(scaled)
+
+    def _open_preview_dialog(self) -> None:
+        if not self._preview_pixmap or self._preview_pixmap.isNull():
+            return
+
+        class PreviewDialog(QtWidgets.QDialog):
+            def __init__(self, pixmap: QtGui.QPixmap, parent: QtWidgets.QWidget) -> None:
+                super().__init__(parent)
+                self._pixmap = pixmap
+                self.setWindowTitle("Preview")
+                self.setMinimumSize(720, 405)
+                layout = QtWidgets.QVBoxLayout(self)
+                self._label = QtWidgets.QLabel()
+                self._label.setAlignment(QtCore.Qt.AlignCenter)
+                self._label.setSizePolicy(
+                    QtWidgets.QSizePolicy.Expanding,
+                    QtWidgets.QSizePolicy.Expanding,
+                )
+                layout.addWidget(self._label)
+                self._update_pixmap()
+
+            def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
+                super().resizeEvent(event)
+                self._update_pixmap()
+
+            def _update_pixmap(self) -> None:
+                scaled = self._pixmap.scaled(
+                    self._label.size(),
+                    QtCore.Qt.KeepAspectRatio,
+                    QtCore.Qt.SmoothTransformation,
+                )
+                self._label.setPixmap(scaled)
+
+        dialog = PreviewDialog(self._preview_pixmap, self)
+        dialog.exec()
 
     def _browse_video(self) -> None:
         if self._state == AppState.WORKING:

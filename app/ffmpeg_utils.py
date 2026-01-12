@@ -215,7 +215,7 @@ def extract_subtitled_frame(
     timestamp_seconds: float,
     output_path: Path,
     *,
-    width: int = 640,
+    width: int = 1280,
     font_name: str,
     font_size: int,
     outline: int,
@@ -235,7 +235,9 @@ def extract_subtitled_frame(
         shadow=shadow,
         margin_v=margin_v,
     )
-    filter_chain = f"{subtitles_filter},scale={width}:-1:force_original_aspect_ratio=decrease"
+    filter_chain = (
+        f"{subtitles_filter},scale='min({width},iw)':-2:force_original_aspect_ratio=decrease"
+    )
     command = [
         str(ffmpeg_path),
         "-y",
