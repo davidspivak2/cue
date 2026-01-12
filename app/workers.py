@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import platform
@@ -18,16 +19,17 @@ from typing import Optional
 from PySide6 import QtCore
 from .progress import ProgressStep
 from .ffmpeg_utils import (
+    build_subtitles_filter,
     ensure_ffmpeg_available,
-    escape_subtitles_filter_path,
-    format_filter_style,
+    extract_subtitled_frame,
     get_ffprobe_json,
     get_media_duration,
     get_runtime_mode,
     get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
-from .paths import get_models_dir
+from .paths import get_models_dir, get_preview_frames_dir
+from .srt_utils import parse_srt_file, select_preview_moment
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
 
@@ -281,6 +283,27 @@ class Worker(QtCore.QObject):
             raise RuntimeError(f"Subtitles were not created: {srt_path}")
 
         self._capture_audio_info_if_needed(audio_path)
+
+        preview_frame_path: Optional[Path] = None
+        preview_subtitle_text: Optional[str] = None
+        preview_timestamp_seconds: Optional[float] = None
+        preview_style = self.burnin_settings
+        try:
+            cues = parse_srt_file(srt_path)
+            preview = select_preview_moment(cues, video_duration)
+            if preview and preview_style:
+                preview_subtitle_text = preview.subtitle_text
+                preview_timestamp_seconds = preview.timestamp_seconds
+                preview_frame_path = self._ensure_preview_frame(
+                    srt_path=srt_path,
+                    timestamp_seconds=preview_timestamp_seconds,
+                    style=preview_style,
+                )
+            elif preview and not preview_style:
+                preview_subtitle_text = preview.subtitle_text
+                preview_timestamp_seconds = preview.timestamp_seconds
+        except Exception as exc:  # noqa: BLE001
+            self.signals.log.emit(f"Preview generation failed: {exc}", False)
         if settings.keep_extracted_audio:
             self.signals.log.emit(
                 f"Keeping extracted audio file: {audio_path}",
@@ -299,6 +322,11 @@ class Worker(QtCore.QObject):
         return {
             "audio_path": str(audio_path),
             "srt_path": str(srt_path),
+            "preview_frame_path": (
+                str(preview_frame_path) if preview_frame_path is not None else None
+            ),
+            "preview_subtitle_text": preview_subtitle_text,
+            "preview_timestamp_seconds": preview_timestamp_seconds,
         }
 
     def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:
@@ -332,6 +360,42 @@ class Worker(QtCore.QObject):
             "Extracting audio",
         )
 
+    def _ensure_preview_frame(
+        self,
+        *,
+        srt_path: Path,
+        timestamp_seconds: float,
+        style: BurnInSettings,
+    ) -> Optional[Path]:
+        try:
+            srt_mtime = int(srt_path.stat().st_mtime)
+        except FileNotFoundError:
+            srt_mtime = 0
+        timestamp_ms = int(round(timestamp_seconds * 1000))
+        preview_width = 1280
+        cache_key = (
+            f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
+            f"{style.font_name}|{style.font_size}|{style.outline}|{style.shadow}|"
+            f"{style.margin_v}|{preview_width}"
+        )
+        cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
+        output_path = get_preview_frames_dir() / cache_name
+        if output_path.exists() and output_path.stat().st_size > 0:
+            return output_path
+        success = extract_subtitled_frame(
+            self.video_path,
+            srt_path,
+            timestamp_seconds,
+            output_path,
+            width=preview_width,
+            font_name=style.font_name,
+            font_size=style.font_size,
+            outline=style.outline,
+            shadow=style.shadow,
+            margin_v=style.margin_v,
+        )
+        return output_path if success else None
+
     def _run_burn_in(self) -> dict:
         settings = self.burnin_settings
         if settings is None:
@@ -356,15 +420,14 @@ class Worker(QtCore.QObject):
             )
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
-        escaped_path = escape_subtitles_filter_path(srt_path)
-        style = format_filter_style(
-            settings.font_name,
-            settings.font_size,
-            settings.outline,
-            settings.shadow,
-            settings.margin_v,
+        subtitles_filter = build_subtitles_filter(
+            srt_path,
+            font_name=settings.font_name,
+            font_size=settings.font_size,
+            outline=settings.outline,
+            shadow=settings.shadow,
+            margin_v=settings.margin_v,
         )
-        subtitles_filter = f"subtitles='{escaped_path}':force_style='{style}'"
 
         base_command = [
             str(ffmpeg_path),

@@ -358,6 +358,15 @@ class ElidedLineEdit(QtWidgets.QLineEdit):
         self.setText(elided)
 
 
+class ClickableLabel(QtWidgets.QLabel):
+    clicked = QtCore.Signal()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class SavingToLine(QtWidgets.QWidget):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)

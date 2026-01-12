@@ -187,3 +187,86 @@ def format_filter_style(
         f"Shadow={shadow},"
         f"MarginV={margin_v}"
     )
+
+
+def build_subtitles_filter(
+    srt_path: Path,
+    *,
+    font_name: str,
+    font_size: int,
+    outline: int,
+    shadow: int,
+    margin_v: int,
+) -> str:
+    escaped_path = escape_subtitles_filter_path(srt_path)
+    style = format_filter_style(
+        font_name=font_name,
+        font_size=font_size,
+        outline=outline,
+        shadow=shadow,
+        margin_v=margin_v,
+    )
+    return f"subtitles='{escaped_path}':force_style='{style}'"
+
+
+def extract_subtitled_frame(
+    video_path: Path,
+    srt_path: Path,
+    timestamp_seconds: float,
+    output_path: Path,
+    *,
+    width: int = 1280,
+    font_name: str,
+    font_size: int,
+    outline: int,
+    shadow: int,
+    margin_v: int,
+) -> bool:
+    try:
+        ffmpeg_path, _, _ = ensure_ffmpeg_available()
+    except FileNotFoundError:
+        return False
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    subtitles_filter = build_subtitles_filter(
+        srt_path,
+        font_name=font_name,
+        font_size=font_size,
+        outline=outline,
+        shadow=shadow,
+        margin_v=margin_v,
+    )
+    filter_chain = (
+        f"{subtitles_filter},scale='min({width},iw)':-2:force_original_aspect_ratio=decrease"
+    )
+    command = [
+        str(ffmpeg_path),
+        "-y",
+        "-hide_banner",
+        "-ss",
+        f"{timestamp_seconds:.3f}",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        "-vf",
+        filter_chain,
+        str(output_path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            **get_subprocess_kwargs(),
+        )
+    except Exception:
+        return False
+    if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+        return True
+    if output_path.exists():
+        try:
+            output_path.unlink()
+        except OSError:
+            pass
+    return False
