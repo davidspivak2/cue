@@ -379,6 +379,7 @@ Helper text (always visible, indented to align with checkbox text):
 - “If subtitles come out with little punctuation, the app may run extra attempts and only switches when results are clearly better. This can take longer.”
 
 Behavior:
+- **Do not add a second toggle. This toggle already exists; future PRs must modify its behavior/wiring rather than creating a new control.**
 - Defaults ON for new users.
 - Preserve existing config values when present.
 - This is a **conditional comma-rescue**, not an always-retry feature.
