@@ -30,9 +30,9 @@ UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`
 4) Optionally burn subtitles into an MP4 (FFmpeg)
 
 **Primary outputs (exact naming):**
-- `<video_basename>_audio_for_whisper.wav`
-- `<video_basename>.srt`
-- `<video_basename>_subtitled.mp4`
+- `<video_stem>_audio_for_whisper.wav`
+- `<video_stem>.srt`
+- `<video_stem>_subtitled.mp4`
 
 **Runtime modes:**
 - Runs from source (python `-m app.main`).
@@ -156,7 +156,7 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | Config key | UI label (exact) | Allowed values | Default | Pipeline impact |
 | --- | --- | --- | --- | --- |
 | `save_policy` | “Save subtitles” (radio group) | `same_folder`, `fixed_folder`, `ask_every_time` | `same_folder` | Output folder selection |
-| `save_folder` | “Always save to this folder” (path field + “Browse...”) | String path | unset | Output folder selection |
+| `save_folder` | Unlabeled path field under “Save subtitles” (paired with “Always save to this folder”) + “Browse...” button; placeholder: “No folder selected” | String path | unset | Output folder selection |
 | `transcription_quality` | “Transcription quality” | `auto`, `fast`, `accurate`, `ultra` | `auto` | Transcription device/compute type |
 | `punctuation_rescue_fallback_enabled` | “Improve punctuation automatically (recommended)” | `true` / `false` | `true` | Transcription (comma-rescue attempts) |
 | `apply_audio_filter` | “Clean up audio before transcription” | `true` / `false` | `false` | Audio extraction filter chain |
@@ -236,41 +236,15 @@ Success looks like: SRT created in the correct folder, no crashes, optional diag
 
 ## 4) Quick start (Windows, from source)
 
-> These steps assume you are running from a local clone (e.g., `C:\subtitles_repo`).
-
-1) Create and activate a virtual environment:
-```bat
-cd C:\subtitles_repo
-python -m venv .venv
-.venv\Scripts\activate
-```
-
-2) Install dependencies:
-```bat
-pip install -r requirements.txt
-```
-
-3) Run the GUI:
-```bat
-python -m app.main
-```
-
-### Build EXE (PyInstaller)
-```bat
-cd C:\subtitles_repo
-.venv\Scripts\activate
-build_exe.bat
-```
-
-Expected output:
-- `dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe`
+For the canonical developer setup, FFmpeg acquisition, testing, and packaging steps, see
+`docs/CONTRIBUTING.md`.
 
 ---
 
 ## 5) App-generated WAV lifecycle (critical for benchmarking)
 
 When creating subtitles, the app extracts audio to a WAV named:
-- `<video_basename>_audio_for_whisper.wav`
+- `<video_stem>_audio_for_whisper.wav`
 
 **Audio format (current behavior):**
 - 16 kHz, mono, PCM (`pcm_s16le`)
@@ -287,7 +261,7 @@ When creating subtitles, the app extracts audio to a WAV named:
 ---
 
 ### File lifecycle (where files are written and when they are deleted)
-- `<video_basename>_audio_for_whisper.wav` is written in the output folder dictated by Save policy (often the same folder as the video).
+- `<video_stem>_audio_for_whisper.wav` is written in the output folder dictated by Save policy (often the same folder as the video).
 - By default, the WAV is deleted after successful transcription; if **“Keep extracted WAV file”** is enabled, it is retained.
 - Diagnostics JSON files are written next to the outputs when possible; if that fails, the app falls back to the app log directory.
 - Benchmark outputs should be written outside the repo (e.g., `C:\subtitles_extra\outputs`).
@@ -376,7 +350,7 @@ This is especially important when comparing CLI benchmark runs vs in-app runs.
 **Use the app-created WAV for benchmarks:**
 1) In the GUI, enable **Settings → Audio → “Keep extracted WAV file”**.
 2) Run **Create subtitles** once.
-3) Use the resulting `<video_basename>_audio_for_whisper.wav` for benchmarking.
+3) Use the resulting `<video_stem>_audio_for_whisper.wav` for benchmarking.
 
 **Example benchmark commands (Windows cmd):**
 ```bat
@@ -394,7 +368,7 @@ python -u tools\punct_benchmark.py --wav "D:\videos\clip_audio_for_whisper.wav" 
 
 ## 8.5) Benchmarking (correct method: app-generated WAV)
 
-Benchmarks must use the **exact** `<video_basename>_audio_for_whisper.wav` produced by the app (not a manually-created WAV). The app’s audio extraction settings and optional filter chain can materially change punctuation results.
+Benchmarks must use the **exact** `<video_stem>_audio_for_whisper.wav` produced by the app (not a manually-created WAV). The app’s audio extraction settings and optional filter chain can materially change punctuation results.
 
 **Procedure (Windows cmd):**
 - In Settings, enable **“Keep extracted WAV file”**.
@@ -502,12 +476,11 @@ Key UX decisions implemented:
 - Save policy moved into Settings:
   - Ask every time
   - Same folder as the video
-  - Always save to this folder (+ Browse…)
-- If Save policy is not “Always…”, the path is still displayed but disabled.
-- If Save policy is “Ask every time”, **no path is shown**.
+  - Always save to this folder (+ Browse...)
+- The path row is always visible, but disabled unless “Always save to this folder” is selected.
 
 Performance settings implemented:
-- “Quality” options map to device/compute-type selections.
+- “Transcription quality” options map to device/compute-type selections.
 - **Auto on CPU-only → int16** (per requirement).
 - A **float32** option exists (slowest, potentially most accurate) for debugging/edge cases.
 - Punctuation rescue is user-controllable in Settings and defaults to ON, but only triggers when comma density is low.

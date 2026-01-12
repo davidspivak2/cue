@@ -34,6 +34,14 @@ For more context on the app and pipeline, see:
 * `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`
 * `docs/transcription_pipeline.md`
 
+## Run from source (developer testing)
+```bat
+.venv\Scripts\activate
+python -m app.main
+```
+The app will use `bin\ffmpeg.exe`/`bin\ffprobe.exe` if present, otherwise it will fall back to
+FFmpeg installed on PATH.
+
 ## Recommended dev workflow
 * **Branching:** create feature branches from `main`, e.g. `feature/short-description`.
 * **Commits:** there are no strict commit conventions enforced; prefer clear, imperative messages (e.g., `Add settings validation`).
