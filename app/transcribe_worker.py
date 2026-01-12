@@ -45,6 +45,8 @@ PUNCTUATION_RESCUE_DEFAULTS = {
     "min_density": 0.03,
     "min_words": 80,
     "min_comma_density": 0.01,
+    "min_comma_gain": 5,
+    "min_total_punct_ratio": 0.5,
     "max_attempts": 2,
 }
 
@@ -223,23 +225,33 @@ def _build_raw_punctuation_summary(raw_segments: list[object]) -> dict[str, floa
     }
 
 
-def _choose_best_attempt(attempts: list[dict[str, object]]) -> dict[str, object]:
-    chosen = attempts[0]
-    chosen_score = (
-        float(chosen["comma_count_raw"]),
-        float(chosen["total_punctuation_count_raw"]),
-        float(chosen["punctuation_density_raw"]),
-    )
-    for attempt in attempts[1:]:
-        attempt_score = (
+def _choose_best_attempt(
+    attempts: list[dict[str, object]],
+    *,
+    min_comma_gain: int,
+    min_total_punct_ratio: float,
+    baseline_commas: int,
+    best_total_punct: int,
+) -> tuple[dict[str, object], bool]:
+    allowed_attempts = [
+        attempt
+        for attempt in attempts[1:]
+        if int(attempt["comma_count_raw"]) >= baseline_commas + min_comma_gain
+        and int(attempt["total_punctuation_count_raw"])
+        >= best_total_punct * min_total_punct_ratio
+    ]
+    if not allowed_attempts:
+        return attempts[0], False
+    chosen = max(
+        allowed_attempts,
+        key=lambda attempt: (
             float(attempt["comma_count_raw"]),
             float(attempt["total_punctuation_count_raw"]),
             float(attempt["punctuation_density_raw"]),
-        )
-        if attempt_score > chosen_score:
-            chosen = attempt
-            chosen_score = attempt_score
-    return chosen
+            -int(attempt["attempt"]),
+        ),
+    )
+    return chosen, True
 
 
 def _build_transcribe_kwargs(
@@ -538,6 +550,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "model": args.model,
                 "device": device,
                 "compute_type": compute_type,
+                "force_cpu": args.force_cpu,
                 "vad_filter": transcribe_kwargs.get("vad_filter"),
                 "transcribe_kwargs": transcribe_kwargs,
                 "raw_segments": raw_segments,
@@ -553,6 +566,10 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         rescue_enabled = punctuation_rescue.get("enabled", True)
         min_words = int(punctuation_rescue.get("min_words", 80))
         min_comma_density = float(punctuation_rescue.get("min_comma_density", 0.01))
+        min_comma_gain = int(punctuation_rescue.get("min_comma_gain", 5))
+        min_total_punct_ratio = float(
+            punctuation_rescue.get("min_total_punct_ratio", 0.5)
+        )
         words_count_raw = int(attempts[0]["words_count_raw"])
         comma_count_raw = int(attempts[0]["comma_count_raw"])
         comma_density_raw = comma_count_raw / max(words_count_raw, 1)
@@ -588,6 +605,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                         "model": args.model,
                         "device": device,
                         "compute_type": compute_type,
+                        "force_cpu": args.force_cpu,
                         "vad_filter": attempt_kwargs.get("vad_filter"),
                         "transcribe_kwargs": attempt_kwargs,
                         "raw_segments": raw_segments,
@@ -635,6 +653,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                         "model": "large-v2",
                         "device": attempt_device,
                         "compute_type": attempt_compute_type,
+                        "force_cpu": True,
                         "vad_filter": attempt_kwargs.get("vad_filter"),
                         "transcribe_kwargs": attempt_kwargs,
                         "raw_segments": raw_segments,
@@ -645,7 +664,28 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     }
                 )
 
-        chosen_attempt = _choose_best_attempt(attempts)
+        baseline_commas = int(attempts[0]["comma_count_raw"])
+        baseline_total_punct = int(attempts[0]["total_punctuation_count_raw"])
+        best_total_punct = max(
+            int(attempt["total_punctuation_count_raw"]) for attempt in attempts
+        )
+        chosen_attempt, gate_passed = _choose_best_attempt(
+            attempts,
+            min_comma_gain=min_comma_gain,
+            min_total_punct_ratio=min_total_punct_ratio,
+            baseline_commas=baseline_commas,
+            best_total_punct=best_total_punct,
+        )
+        if not rescue_enabled:
+            gate_reason = "disabled"
+        elif not rescue_triggered:
+            gate_reason = "not_triggered"
+        elif len(attempts) == 1:
+            gate_reason = "baseline_kept_no_alternative"
+        elif gate_passed:
+            gate_reason = "non_baseline_chosen_gate_passed"
+        else:
+            gate_reason = "baseline_kept_gate_failed"
 
         for attempt in attempts:
             _print(
@@ -678,6 +718,21 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         transcribe_stats["punctuation_rescue_reason"] = rescue_reason
         transcribe_stats["punctuation_rescue_min_words"] = min_words
         transcribe_stats["punctuation_rescue_min_comma_density"] = min_comma_density
+        transcribe_stats["punctuation_rescue_min_comma_gain"] = min_comma_gain
+        transcribe_stats["punctuation_rescue_min_total_punct_ratio"] = (
+            min_total_punct_ratio
+        )
+        transcribe_stats["punctuation_rescue_gate_passed"] = gate_passed
+        transcribe_stats["punctuation_rescue_gate_reason"] = gate_reason
+        transcribe_stats["punctuation_rescue_baseline_comma_count_raw"] = (
+            baseline_commas
+        )
+        transcribe_stats["punctuation_rescue_baseline_total_punctuation_count_raw"] = (
+            baseline_total_punct
+        )
+        transcribe_stats["punctuation_rescue_best_total_punctuation_count_raw"] = (
+            best_total_punct
+        )
         transcribe_stats["punctuation_rescue_comma_density_raw"] = comma_density_raw
         transcribe_stats["punctuation_rescue_comma_count_raw"] = comma_count_raw
         transcribe_stats["punctuation_rescue_words_count_raw"] = words_count_raw
@@ -694,6 +749,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "model_name": attempt["model"],
                 "device": attempt["device"],
                 "compute_type": attempt["compute_type"],
+                "vad_filter": attempt["vad_filter"],
+                "force_cpu": attempt["force_cpu"],
                 "words_count_raw": attempt["words_count_raw"],
                 "comma_count_raw": attempt["comma_count_raw"],
                 "total_punctuation_count_raw": attempt["total_punctuation_count_raw"],
