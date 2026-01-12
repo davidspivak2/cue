@@ -198,10 +198,12 @@ Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - **Last resort:** if a local emergency fix must be pushed to the active Codex branch, expect Codex to rebase/resolve conflicts afterward.
 
 ### Progress model details (numbers)
-Progress is aggregated in `app/progress.py` with fixed step weights:
-- `PREPARE_AUDIO`: **10%**
-- `TRANSCRIBE`: **80%**
-- `EXPORT`: **10%**
+Progress weights are defined in `app/progress.py` and the docs must reflect the code. If the weights ever change, update both the code and this section together.
+
+Current weights:
+- `PREPARE_AUDIO`: **15%**
+- `TRANSCRIBE`: **60%**
+- `EXPORT`: **25%**
 
 The UI aggregates progress without regression (percent should not go backwards). Retry-style operations should **not** reset or jump backward; they should continue forward from the current aggregate progress.
 
@@ -284,6 +286,14 @@ When creating subtitles, the app extracts audio to a WAV named:
 
 ---
 
+### File lifecycle (where files are written and when they are deleted)
+- `<video_basename>_audio_for_whisper.wav` is written in the output folder dictated by Save policy (often the same folder as the video).
+- By default, the WAV is deleted after successful transcription; if **“Keep extracted WAV file”** is enabled, it is retained.
+- Diagnostics JSON files are written next to the outputs when possible; if that fails, the app falls back to the app log directory.
+- Benchmark outputs should be written outside the repo (e.g., `C:\subtitles_extra\outputs`).
+
+---
+
 ## 6) Audio extraction filter chain (current behavior)
 
 The app has an optional **audio cleaning filter chain** controlled by:
@@ -340,6 +350,23 @@ Chooser gate (plain language):
 
 ---
 
+### Punctuation rescue variability + diagnostics interpretation
+Punctuation counts can vary across runs due to:
+- device/compute-type differences (CPU int16 vs CUDA float16)
+- VAD on/off differences
+- model nondeterminism
+
+Interpret key diagnostics in `TRANSCRIBE_STATS_JSON` like this:
+- `punctuation_rescue_triggered` → whether extra attempts ran at all.
+- `punctuation_rescue_reason` → why it triggered or why it was skipped.
+- `punctuation_rescue_gate_passed` / `punctuation_rescue_gate_reason` → whether the chooser gate allowed a replacement and why.
+- `punctuation_rescue_chosen_attempt` → which attempt index was selected.
+- `punctuation_rescue_attempts` → per-attempt summaries (comma counts, totals, and metadata).
+
+This is especially important when comparing CLI benchmark runs vs in-app runs.
+
+---
+
 ## 8) Benchmarking (repeatable, and keep outputs out of the repo)
 
 **Recommended output folder (local only):**
@@ -362,6 +389,21 @@ python -u tools\punct_benchmark.py --wav "D:\videos\clip_audio_for_whisper.wav" 
 - Console Unicode issues can occur; redirect stdout+stderr to a file as shown.
 - Use `python -u` to reduce buffering in logs.
 - If text looks garbled, open the output file in a UTF‑8 capable editor.
+
+---
+
+## 8.5) Benchmarking (correct method: app-generated WAV)
+
+Benchmarks must use the **exact** `<video_basename>_audio_for_whisper.wav` produced by the app (not a manually-created WAV). The app’s audio extraction settings and optional filter chain can materially change punctuation results.
+
+**Procedure (Windows cmd):**
+- In Settings, enable **“Keep extracted WAV file”**.
+- Run **Create subtitles** once for a test video.
+- Locate the produced `*_audio_for_whisper.wav` in the output folder dictated by Save policy.
+- Run the benchmark against that exact WAV and redirect output outside the repo:
+  ```bat
+  python -u tools\punct_benchmark.py --wav "D:\videos\clip_audio_for_whisper.wav" > C:\subtitles_extra\outputs\bench_clip.txt 2>&1
+  ```
 
 ---
 
