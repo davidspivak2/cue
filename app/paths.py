@@ -27,3 +27,15 @@ def get_diagnostics_dir() -> Path:
     path = get_logs_dir() / "diagnostics"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_cache_dir() -> Path:
+    path = get_app_data_dir() / "cache"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_preview_frames_dir() -> Path:
+    path = get_cache_dir() / "preview_frames"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
