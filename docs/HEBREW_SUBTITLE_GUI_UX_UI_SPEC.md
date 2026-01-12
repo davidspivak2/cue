@@ -391,6 +391,18 @@ Behavior:
   - Logs/diagnostics show whether rescue triggered (`punctuation_rescue_triggered`) and the reason.
   - When it triggers, logs/diagnostics include which attempt was chosen; when it does not, the baseline is kept.
 
+**Behavior + UX during run (requirements):**
+- **When ON:**
+  - The app may run additional transcription attempts **only** when the comma-rescue trigger conditions are met.
+  - Progress must **not** regress/reset; the user remains in the same WORKING state.
+  - No second progress bar; percent should never jump backward.
+  - Status text:
+    - Baseline transcription → normal “Creating subtitles…”
+    - If rescue triggers → sub-status changes to “Improving punctuation…” while attempts run
+  - Cancel stays available and cancels the entire operation (including rescue attempts).
+- **When OFF:**
+  - Baseline transcription only; no rescue attempts.
+
 ### Section 4 — Audio
 
 Controls:
@@ -405,6 +417,10 @@ Behavior:
 Helper text (always visible, indented to align with checkbox text):
 - Explain that cleaning can help noisy recordings but may reduce punctuation.
 - Explain that keeping the WAV is useful for debugging/benchmarking and increases disk usage.
+
+Note on WAV location:
+- The app-created WAV is written to the output folder dictated by Save Policy (often the same folder as the video).
+- If “Keep extracted WAV file” is OFF, the app may delete it after subtitles are created; if ON, it remains.
 
 ### Section 5 — Diagnostics
 

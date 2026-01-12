@@ -19,6 +19,31 @@ UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`
 
 ---
 
+## 0) One-page overview (for new maintainers)
+
+**What this app is:** a Windows desktop GUI built with **PySide6** that generates Hebrew subtitles and (optionally) burns them into a new MP4.
+
+**Core workflow:**
+1) Select a video
+2) Extract audio (FFmpeg)
+3) Transcribe to Hebrew SRT (faster‑whisper)
+4) Optionally burn subtitles into an MP4 (FFmpeg)
+
+**Primary outputs (exact naming):**
+- `<video_basename>_audio_for_whisper.wav`
+- `<video_basename>.srt`
+- `<video_basename>_subtitled.mp4`
+
+**Runtime modes:**
+- Runs from source (python `-m app.main`).
+- Runs as a packaged EXE (PyInstaller).
+- Worker process launch differs by mode (python module vs worker EXE).
+
+**App data location (Windows):**
+`%LOCALAPPDATA%\HebrewSubtitleGUI\` — stores models, logs, config, and cache.
+
+---
+
 ## 1) What the app does (user-facing)
 
 Goal: turn a single video into:
@@ -64,6 +89,24 @@ Running it out-of-process:
 
 ---
 
+## 2.5) Repo layout / architecture map
+
+**What to look at first (core pipeline):**
+- `app/main.py` — main UI + settings wiring + state machine
+- `app/workers.py` — audio extraction, worker orchestration, burn-in, diagnostics
+- `app/transcribe_worker.py` — faster‑whisper transcription + punctuation rescue logic
+
+**Supporting areas:**
+- `app/ui/*` — widgets, state helpers, styling/theme
+- `app/ffmpeg_utils.py` — ffmpeg discovery + subprocess settings
+- `app/srt_utils.py` — SRT formatting primitives
+- `app/srt_splitter.py` — cue splitting and word alignment fallback
+- `app/progress.py` — progress aggregation and weights
+- `tools/*` — local benchmark tools
+- `docs/*` — handover + UX spec
+
+---
+
 ## 3) Where data goes
 
 ### App data root (Windows)
@@ -103,6 +146,33 @@ When running `tools\punct_benchmark.py` (and similar local diagnostics), save ou
 Example:
 - `C:\subtitles_extra\outputs\bench_rescue_test_audio_30s.txt`
 - `C:\subtitles_extra\outputs\bench_rescue_test_audio_full.txt`
+
+---
+
+## 3.25) Persisted settings (config.json) reference
+
+Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are loaded in `app/main.py`.
+
+| Config key | UI label (exact) | Allowed values | Default | Pipeline impact |
+| --- | --- | --- | --- | --- |
+| `save_policy` | “Save subtitles” (radio group) | `same_folder`, `fixed_folder`, `ask_every_time` | `same_folder` | Output folder selection |
+| `save_folder` | “Always save to this folder” (path field + “Browse...”) | String path | unset | Output folder selection |
+| `transcription_quality` | “Transcription quality” | `auto`, `fast`, `accurate`, `ultra` | `auto` | Transcription device/compute type |
+| `punctuation_rescue_fallback_enabled` | “Improve punctuation automatically (recommended)” | `true` / `false` | `true` | Transcription (comma-rescue attempts) |
+| `apply_audio_filter` | “Clean up audio before transcription” | `true` / `false` | `false` | Audio extraction filter chain |
+| `keep_extracted_audio` | “Keep extracted WAV file” | `true` / `false` | `false` | Audio extraction output retention |
+| `subtitle_edit_path` | “Choose Subtitle Edit…” (path picker) | String path | unset (falls back to default install path) | External tool integration |
+| `diagnostics.enabled` | “Enable diagnostics logging” | `true` / `false` | `false` | Diagnostics output |
+| `diagnostics.write_on_success` | “Write diagnostics on successful completion” | `true` / `false` | `false` | Diagnostics output |
+| `diagnostics.categories` | Category checkboxes (see below) | Object of booleans | all `true` | Diagnostics output |
+
+Diagnostics category keys (from `diagnostics.categories`), with UI labels:
+- `app_system` → “App + system info”
+- `video_info` → “Video info”
+- `audio_info` → “Audio (WAV) info”
+- `transcription_config` → “Transcription config”
+- `srt_stats` → “SRT stats”
+- `commands_timings` → “Commands + timings”
 
 ---
 
