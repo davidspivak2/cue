@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import NoReturn
 
 from .srt_utils import SrtSegment, segments_to_srt
-from .punctuation_stats import DEFAULT_PUNCTUATION, build_transcription_stats
+from .punctuation_stats import (
+    DEFAULT_PUNCTUATION,
+    build_transcription_stats,
+    count_punctuation,
+    count_words,
+)
 from .srt_splitter import (
     SplitApplyThresholds,
     SplitMaxCue,
@@ -38,6 +43,8 @@ TRANSCRIBE_DEFAULTS = [
 PUNCTUATION_RESCUE_DEFAULTS = {
     "enabled": True,
     "min_density": 0.03,
+    "min_words": 80,
+    "min_comma_density": 0.01,
     "max_attempts": 2,
 }
 
@@ -201,14 +208,38 @@ def _write_srt(segments: list[SrtSegment], srt_path: Path) -> None:
     srt_path.write_text(srt_content, encoding="utf-8")
 
 
-def _calculate_punctuation_density(cues: list[object]) -> float:
-    cue_texts = [str(getattr(cue, "text", "")) for cue in cues]
-    words = sum(len(text.split()) for text in cue_texts)
-    punctuation_count = 0
-    for text in cue_texts:
-        for mark in DEFAULT_PUNCTUATION:
-            punctuation_count += text.count(mark)
-    return punctuation_count / max(words, 1)
+def _build_raw_punctuation_summary(raw_segments: list[object]) -> dict[str, float | int]:
+    raw_texts = [str(getattr(segment, "text", "")) for segment in raw_segments]
+    punctuation_counts = count_punctuation(raw_texts, punctuation=DEFAULT_PUNCTUATION)
+    words_count = count_words(raw_texts)
+    total_punctuation = sum(punctuation_counts.values())
+    comma_count = punctuation_counts.get(",", 0)
+    density = total_punctuation / max(words_count, 1)
+    return {
+        "words_count_raw": words_count,
+        "comma_count_raw": comma_count,
+        "total_punctuation_count_raw": total_punctuation,
+        "punctuation_density_raw": density,
+    }
+
+
+def _choose_best_attempt(attempts: list[dict[str, object]]) -> dict[str, object]:
+    chosen = attempts[0]
+    chosen_score = (
+        float(chosen["comma_count_raw"]),
+        float(chosen["total_punctuation_count_raw"]),
+        float(chosen["punctuation_density_raw"]),
+    )
+    for attempt in attempts[1:]:
+        attempt_score = (
+            float(attempt["comma_count_raw"]),
+            float(attempt["total_punctuation_count_raw"]),
+            float(attempt["punctuation_density_raw"]),
+        )
+        if attempt_score > chosen_score:
+            chosen = attempt
+            chosen_score = attempt_score
+    return chosen
 
 
 def _build_transcribe_kwargs(
@@ -500,25 +531,40 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             splitter_config=splitter_config,
             duration_seconds=duration_seconds,
         )
-        density = _calculate_punctuation_density(cues)
+        raw_summary = _build_raw_punctuation_summary(raw_segments)
         attempts.append(
             {
                 "attempt": 0,
                 "model": args.model,
+                "device": device,
+                "compute_type": compute_type,
                 "vad_filter": transcribe_kwargs.get("vad_filter"),
                 "transcribe_kwargs": transcribe_kwargs,
                 "raw_segments": raw_segments,
                 "cues": cues,
                 "segments": segments,
                 "splitter_stats": splitter_stats,
-                "density": density,
+                **raw_summary,
             }
         )
 
         rescue_triggered = False
+        rescue_reason = "disabled"
         rescue_enabled = punctuation_rescue.get("enabled", True)
-        if rescue_enabled and density < float(punctuation_rescue.get("min_density", 0.03)):
-            rescue_triggered = True
+        min_words = int(punctuation_rescue.get("min_words", 80))
+        min_comma_density = float(punctuation_rescue.get("min_comma_density", 0.01))
+        words_count_raw = int(attempts[0]["words_count_raw"])
+        comma_count_raw = int(attempts[0]["comma_count_raw"])
+        comma_density_raw = comma_count_raw / max(words_count_raw, 1)
+        if rescue_enabled:
+            if words_count_raw < min_words:
+                rescue_reason = "skipped_short_clip"
+            elif comma_density_raw >= min_comma_density:
+                rescue_reason = "comma_density_ok"
+            else:
+                rescue_triggered = True
+                rescue_reason = "comma_density_low"
+        if rescue_triggered:
             if int(punctuation_rescue.get("max_attempts", 2)) >= 1:
                 attempt_vad = not args.vad_filter
                 attempt_kwargs = _build_transcribe_kwargs(
@@ -535,30 +581,35 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     splitter_config=splitter_config,
                     duration_seconds=duration_seconds,
                 )
+                raw_summary = _build_raw_punctuation_summary(raw_segments)
                 attempts.append(
                     {
                         "attempt": 1,
                         "model": args.model,
+                        "device": device,
+                        "compute_type": compute_type,
                         "vad_filter": attempt_kwargs.get("vad_filter"),
                         "transcribe_kwargs": attempt_kwargs,
                         "raw_segments": raw_segments,
                         "cues": cues,
                         "segments": segments,
                         "splitter_stats": splitter_stats,
-                        "density": _calculate_punctuation_density(cues),
+                        **raw_summary,
                     }
                 )
             if int(punctuation_rescue.get("max_attempts", 2)) >= 2:
+                attempt_device = "cpu"
+                attempt_compute_type = "float32"
                 heartbeat_stop = threading.Event()
                 heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
                 try:
                     rescue_model = _load_model(
                         "large-v2",
-                        device,
-                        compute_type,
+                        attempt_device,
+                        attempt_compute_type,
                         models_dir=models_dir,
                         cpu_threads_cpu=cpu_threads_cpu,
-                        cpu_threads_active=cpu_threads_active,
+                        cpu_threads_active=cpu_threads_cpu,
                     )
                 finally:
                     heartbeat_stop.set()
@@ -577,27 +628,24 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     splitter_config=splitter_config,
                     duration_seconds=duration_seconds,
                 )
+                raw_summary = _build_raw_punctuation_summary(raw_segments)
                 attempts.append(
                     {
                         "attempt": 2,
                         "model": "large-v2",
+                        "device": attempt_device,
+                        "compute_type": attempt_compute_type,
                         "vad_filter": attempt_kwargs.get("vad_filter"),
                         "transcribe_kwargs": attempt_kwargs,
                         "raw_segments": raw_segments,
                         "cues": cues,
                         "segments": segments,
                         "splitter_stats": splitter_stats,
-                        "density": _calculate_punctuation_density(cues),
+                        **raw_summary,
                     }
                 )
 
-        max_density = max(attempt["density"] for attempt in attempts)
-        chosen_attempt = attempts[0]
-        if attempts[0]["density"] != max_density:
-            for attempt in attempts[1:]:
-                if attempt["density"] == max_density:
-                    chosen_attempt = attempt
-                    break
+        chosen_attempt = _choose_best_attempt(attempts)
 
         for attempt in attempts:
             _print(
@@ -605,7 +653,9 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 f"attempt={attempt['attempt']} "
                 f"model={attempt['model']} "
                 f"vad={attempt['vad_filter']} "
-                f"density={attempt['density']:.4f} "
+                f"commas={attempt['comma_count_raw']} "
+                f"punct={attempt['total_punctuation_count_raw']} "
+                f"density={attempt['punctuation_density_raw']:.4f} "
                 f"chosen={attempt is chosen_attempt}"
             )
 
@@ -613,8 +663,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             raw_segments=chosen_attempt["raw_segments"],
             cues=chosen_attempt["cues"],
             model_name=str(chosen_attempt["model"]),
-            device=device,
-            compute_type=compute_type,
+            device=str(chosen_attempt["device"]),
+            compute_type=str(chosen_attempt["compute_type"]),
             transcribe_kwargs=chosen_attempt["transcribe_kwargs"],
             transcribe_defaults=TRANSCRIBE_DEFAULTS,
             language_cli=args.lang,
@@ -623,19 +673,34 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             splitter_alignment_failures=chosen_attempt["splitter_stats"].alignment_failures,
             preview_limit=3,
         )
-        if rescue_enabled:
-            transcribe_stats["punctuation_density_attempts"] = [
-                {
-                    "attempt": attempt["attempt"],
-                    "model": attempt["model"],
-                    "vad_filter": attempt["vad_filter"],
-                    "density": attempt["density"],
-                }
-                for attempt in attempts
-            ]
-        transcribe_stats["punctuation_rescue_mode"] = "on" if rescue_enabled else "off"
+        transcribe_stats["punctuation_rescue_enabled"] = rescue_enabled
         transcribe_stats["punctuation_rescue_triggered"] = rescue_triggered
+        transcribe_stats["punctuation_rescue_reason"] = rescue_reason
+        transcribe_stats["punctuation_rescue_min_words"] = min_words
+        transcribe_stats["punctuation_rescue_min_comma_density"] = min_comma_density
+        transcribe_stats["punctuation_rescue_comma_density_raw"] = comma_density_raw
+        transcribe_stats["punctuation_rescue_comma_count_raw"] = comma_count_raw
+        transcribe_stats["punctuation_rescue_words_count_raw"] = words_count_raw
+        transcribe_stats["punctuation_rescue_attempts_ran"] = len(attempts)
+        transcribe_stats["punctuation_rescue_attempts_executed_total"] = len(attempts)
+        transcribe_stats["punctuation_rescue_retry_attempts_executed"] = max(
+            0, len(attempts) - 1
+        )
         transcribe_stats["punctuation_rescue_chosen_attempt"] = chosen_attempt["attempt"]
+        transcribe_stats["punctuation_rescue_mode"] = "on" if rescue_enabled else "off"
+        transcribe_stats["punctuation_rescue_attempts"] = [
+            {
+                "attempt_index": attempt["attempt"],
+                "model_name": attempt["model"],
+                "device": attempt["device"],
+                "compute_type": attempt["compute_type"],
+                "words_count_raw": attempt["words_count_raw"],
+                "comma_count_raw": attempt["comma_count_raw"],
+                "total_punctuation_count_raw": attempt["total_punctuation_count_raw"],
+                "punctuation_density_raw": attempt["punctuation_density_raw"],
+            }
+            for attempt in attempts
+        ]
         _print(f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}")
         _write_srt(chosen_attempt["segments"], srt_path)
         if not srt_path.exists() or srt_path.stat().st_size == 0:
