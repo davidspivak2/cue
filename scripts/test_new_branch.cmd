@@ -20,12 +20,6 @@ if "%BRANCH%"=="" (
   goto :done_error
 )
 
-set /p CONFIRM=Switch to "%BRANCH%"? (Y/N): 
-if /i not "%CONFIRM%"=="Y" (
-  echo [info] Canceled.
-  goto :done_error
-)
-
 echo [info] Fetching latest branches...
 git fetch origin
 if errorlevel 1 goto :die_fetch
