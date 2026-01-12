@@ -47,7 +47,7 @@ PUNCTUATION_RESCUE_DEFAULTS = {
     "min_comma_density": 0.01,
     "min_comma_gain": 5,
     "min_total_punct_ratio": 0.5,
-    "max_attempts": 3,
+    "max_attempts": 2,
 }
 
 
@@ -230,12 +230,9 @@ def _choose_best_attempt(
     *,
     min_comma_gain: int,
     min_total_punct_ratio: float,
-) -> tuple[dict[str, object], bool, str]:
-    baseline = attempts[0]
-    baseline_commas = int(baseline["comma_count_raw"])
-    best_total_punct = max(
-        int(attempt["total_punctuation_count_raw"]) for attempt in attempts
-    )
+    baseline_commas: int,
+    best_total_punct: int,
+) -> tuple[dict[str, object], bool]:
     allowed_attempts = [
         attempt
         for attempt in attempts[1:]
@@ -243,26 +240,18 @@ def _choose_best_attempt(
         and int(attempt["total_punctuation_count_raw"])
         >= best_total_punct * min_total_punct_ratio
     ]
-    if allowed_attempts:
-        chosen = max(
-            allowed_attempts,
-            key=lambda attempt: (
-                float(attempt["comma_count_raw"]),
-                float(attempt["total_punctuation_count_raw"]),
-                float(attempt["punctuation_density_raw"]),
-                -int(attempt["attempt"]),
-            ),
-        )
-        return chosen, True, "non_baseline_selected"
-    improved_commas = any(
-        int(attempt["comma_count_raw"]) >= baseline_commas + min_comma_gain
-        for attempt in attempts[1:]
+    if not allowed_attempts:
+        return attempts[0], False
+    chosen = max(
+        allowed_attempts,
+        key=lambda attempt: (
+            float(attempt["comma_count_raw"]),
+            float(attempt["total_punctuation_count_raw"]),
+            float(attempt["punctuation_density_raw"]),
+            -int(attempt["attempt"]),
+        ),
     )
-    if attempts[1:] and not improved_commas:
-        return baseline, False, "no_attempt_improved_commas_enough"
-    if improved_commas:
-        return baseline, False, "attempts_lost_too_much_punct"
-    return baseline, False, "baseline_kept"
+    return chosen, True
 
 
 def _build_transcribe_kwargs(
@@ -626,55 +615,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                         **raw_summary,
                     }
                 )
-            if int(punctuation_rescue.get("max_attempts", 3)) >= 2:
-                attempt_device = "cpu"
-                attempt_compute_type = "int16"
-                heartbeat_stop = threading.Event()
-                heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
-                try:
-                    rescue_model = _load_model(
-                        "large-v3",
-                        attempt_device,
-                        attempt_compute_type,
-                        models_dir=models_dir,
-                        cpu_threads_cpu=cpu_threads_cpu,
-                        cpu_threads_active=cpu_threads_cpu,
-                    )
-                finally:
-                    heartbeat_stop.set()
-                    heartbeat_thread.join(timeout=1)
-                attempt_kwargs = _build_transcribe_kwargs(
-                    language=args.lang,
-                    language_auto=language_auto,
-                    vad_filter=args.vad_filter,
-                    vad_min_silence_ms=args.vad_min_silence_ms,
-                    initial_prompt=args.initial_prompt,
-                )
-                raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
-                    model=rescue_model,
-                    wav_path=wav_path,
-                    transcribe_kwargs=attempt_kwargs,
-                    splitter_config=splitter_config,
-                    duration_seconds=duration_seconds,
-                )
-                raw_summary = _build_raw_punctuation_summary(raw_segments)
-                attempts.append(
-                    {
-                        "attempt": 2,
-                        "model": "large-v3",
-                        "device": attempt_device,
-                        "compute_type": attempt_compute_type,
-                        "force_cpu": True,
-                        "vad_filter": attempt_kwargs.get("vad_filter"),
-                        "transcribe_kwargs": attempt_kwargs,
-                        "raw_segments": raw_segments,
-                        "cues": cues,
-                        "segments": segments,
-                        "splitter_stats": splitter_stats,
-                        **raw_summary,
-                    }
-                )
-            if int(punctuation_rescue.get("max_attempts", 3)) >= 3:
+            if int(punctuation_rescue.get("max_attempts", 2)) >= 2:
                 attempt_device = "cpu"
                 attempt_compute_type = "float32"
                 heartbeat_stop = threading.Event()
@@ -694,8 +635,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 attempt_kwargs = _build_transcribe_kwargs(
                     language=args.lang,
                     language_auto=language_auto,
-                    vad_filter=args.vad_filter,
-                    vad_min_silence_ms=args.vad_min_silence_ms,
+                    vad_filter=True,
+                    vad_min_silence_ms=400,
                     initial_prompt=args.initial_prompt,
                 )
                 raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
@@ -708,7 +649,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 raw_summary = _build_raw_punctuation_summary(raw_segments)
                 attempts.append(
                     {
-                        "attempt": 3,
+                        "attempt": 2,
                         "model": "large-v2",
                         "device": attempt_device,
                         "compute_type": attempt_compute_type,
@@ -723,11 +664,28 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     }
                 )
 
-        chosen_attempt, gate_passed, gate_reason = _choose_best_attempt(
+        baseline_commas = int(attempts[0]["comma_count_raw"])
+        baseline_total_punct = int(attempts[0]["total_punctuation_count_raw"])
+        best_total_punct = max(
+            int(attempt["total_punctuation_count_raw"]) for attempt in attempts
+        )
+        chosen_attempt, gate_passed = _choose_best_attempt(
             attempts,
             min_comma_gain=min_comma_gain,
             min_total_punct_ratio=min_total_punct_ratio,
+            baseline_commas=baseline_commas,
+            best_total_punct=best_total_punct,
         )
+        if not rescue_enabled:
+            gate_reason = "disabled"
+        elif not rescue_triggered:
+            gate_reason = "not_triggered"
+        elif len(attempts) == 1:
+            gate_reason = "baseline_kept_no_alternative"
+        elif gate_passed:
+            gate_reason = "non_baseline_chosen_gate_passed"
+        else:
+            gate_reason = "baseline_kept_gate_failed"
 
         for attempt in attempts:
             _print(
@@ -766,6 +724,15 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         )
         transcribe_stats["punctuation_rescue_gate_passed"] = gate_passed
         transcribe_stats["punctuation_rescue_gate_reason"] = gate_reason
+        transcribe_stats["punctuation_rescue_baseline_comma_count_raw"] = (
+            baseline_commas
+        )
+        transcribe_stats["punctuation_rescue_baseline_total_punctuation_count_raw"] = (
+            baseline_total_punct
+        )
+        transcribe_stats["punctuation_rescue_best_total_punctuation_count_raw"] = (
+            best_total_punct
+        )
         transcribe_stats["punctuation_rescue_comma_density_raw"] = comma_density_raw
         transcribe_stats["punctuation_rescue_comma_count_raw"] = comma_count_raw
         transcribe_stats["punctuation_rescue_words_count_raw"] = words_count_raw
