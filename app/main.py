@@ -53,6 +53,7 @@ from app.subtitle_style import (
     PRESET_DEFAULT,
     PRESET_NAMES,
     SubtitleStyle,
+    get_box_alpha_byte,
     preset_defaults,
     to_ffmpeg_force_style,
     to_preview_params,
@@ -103,6 +104,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._elapsed_timer = QtCore.QTimer(self)
         self._elapsed_timer.setInterval(500)
         self._elapsed_timer.timeout.connect(self._update_elapsed_label)
+        self._preview_render_timer = QtCore.QTimer(self)
+        self._preview_render_timer.setSingleShot(True)
+        self._preview_render_timer.setInterval(150)
+        self._preview_render_timer.timeout.connect(self._refresh_preview_with_style)
         self._config = self._load_config()
         self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
         self._subtitle_style_preset, self._subtitle_style_custom = (
@@ -448,26 +453,26 @@ class MainWindow(QtWidgets.QMainWindow):
         controls_grid.setHorizontalSpacing(12)
         controls_grid.setVerticalSpacing(8)
 
-        self.font_size_slider, self.font_size_value = self._build_style_slider(18, 72)
-        self.outline_slider, self.outline_value = self._build_style_slider(0, 10)
-        self.shadow_slider, self.shadow_value = self._build_style_slider(0, 10)
-        self.margin_slider, self.margin_value = self._build_style_slider(0, 200)
+        self.font_size_slider, self.font_size_spinbox = self._build_style_control(18, 72)
+        self.outline_slider, self.outline_spinbox = self._build_style_control(0, 10)
+        self.shadow_slider, self.shadow_spinbox = self._build_style_control(0, 10)
+        self.margin_slider, self.margin_spinbox = self._build_style_control(0, 200)
 
         controls_grid.addWidget(QtWidgets.QLabel("Font size"), 0, 0)
         controls_grid.addWidget(self.font_size_slider, 0, 1)
-        controls_grid.addWidget(self.font_size_value, 0, 2)
+        controls_grid.addWidget(self.font_size_spinbox, 0, 2)
 
         controls_grid.addWidget(QtWidgets.QLabel("Outline width"), 1, 0)
         controls_grid.addWidget(self.outline_slider, 1, 1)
-        controls_grid.addWidget(self.outline_value, 1, 2)
+        controls_grid.addWidget(self.outline_spinbox, 1, 2)
 
         controls_grid.addWidget(QtWidgets.QLabel("Shadow"), 2, 0)
         controls_grid.addWidget(self.shadow_slider, 2, 1)
-        controls_grid.addWidget(self.shadow_value, 2, 2)
+        controls_grid.addWidget(self.shadow_spinbox, 2, 2)
 
         controls_grid.addWidget(QtWidgets.QLabel("Bottom margin"), 3, 0)
         controls_grid.addWidget(self.margin_slider, 3, 1)
-        controls_grid.addWidget(self.margin_value, 3, 2)
+        controls_grid.addWidget(self.margin_spinbox, 3, 2)
 
         panel_layout.addLayout(controls_grid)
 
@@ -481,16 +486,16 @@ class MainWindow(QtWidgets.QMainWindow):
         box_grid.setHorizontalSpacing(12)
         box_grid.setVerticalSpacing(8)
 
-        self.box_opacity_slider, self.box_opacity_value = self._build_style_slider(0, 100)
-        self.box_padding_slider, self.box_padding_value = self._build_style_slider(0, 40)
+        self.box_opacity_slider, self.box_opacity_spinbox = self._build_style_control(0, 100)
+        self.box_padding_slider, self.box_padding_spinbox = self._build_style_control(0, 40)
 
         box_grid.addWidget(QtWidgets.QLabel("Box opacity"), 0, 0)
         box_grid.addWidget(self.box_opacity_slider, 0, 1)
-        box_grid.addWidget(self.box_opacity_value, 0, 2)
+        box_grid.addWidget(self.box_opacity_spinbox, 0, 2)
 
         box_grid.addWidget(QtWidgets.QLabel("Box padding"), 1, 0)
         box_grid.addWidget(self.box_padding_slider, 1, 1)
-        box_grid.addWidget(self.box_padding_value, 1, 2)
+        box_grid.addWidget(self.box_padding_spinbox, 1, 2)
 
         panel_layout.addWidget(self.box_options_container)
 
@@ -552,20 +557,36 @@ class MainWindow(QtWidgets.QMainWindow):
         return card
 
 
-    def _build_style_slider(self, minimum: int, maximum: int) -> tuple[QtWidgets.QSlider, QtWidgets.QLabel]:
+    def _build_style_control(
+        self, minimum: int, maximum: int
+    ) -> tuple[QtWidgets.QSlider, QtWidgets.QSpinBox]:
         slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setSingleStep(1)
         slider.setPageStep(1)
-        value_label = QtWidgets.QLabel(str(minimum))
-        value_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        value_label.setMinimumWidth(32)
 
-        def _sync_label(value: int, label: QtWidgets.QLabel = value_label) -> None:
-            label.setText(str(value))
+        spinbox = QtWidgets.QSpinBox()
+        spinbox.setRange(minimum, maximum)
+        spinbox.setSingleStep(1)
+        spinbox.setMinimumWidth(56)
 
-        slider.valueChanged.connect(_sync_label)
-        return slider, value_label
+        def _sync_spinbox(value: int) -> None:
+            if spinbox.value() == value:
+                return
+            spinbox.blockSignals(True)
+            spinbox.setValue(value)
+            spinbox.blockSignals(False)
+
+        def _sync_slider(value: int) -> None:
+            if slider.value() == value:
+                return
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+
+        slider.valueChanged.connect(_sync_spinbox)
+        spinbox.valueChanged.connect(_sync_slider)
+        return slider, spinbox
 
     def _connect_subtitle_style_controls(self) -> None:
         self.subtitle_style_preset_combo.currentTextChanged.connect(
@@ -585,6 +606,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.box_padding_slider,
         ):
             slider.valueChanged.connect(self._on_subtitle_style_custom_changed)
+
+        for spinbox in (
+            self.font_size_spinbox,
+            self.outline_spinbox,
+            self.shadow_spinbox,
+            self.margin_spinbox,
+            self.box_opacity_spinbox,
+            self.box_padding_spinbox,
+        ):
+            spinbox.valueChanged.connect(self._on_subtitle_style_custom_changed)
 
         self.box_background_checkbox.toggled.connect(self._on_subtitle_style_custom_changed)
 
@@ -606,7 +637,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._apply_subtitle_style_to_controls()
         self._store_subtitle_style_config()
-        self._refresh_preview_with_style()
+        self._schedule_preview_refresh()
 
     def _apply_subtitle_style_to_controls(self) -> None:
         style = (
@@ -619,18 +650,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.subtitle_style_preset_combo.blockSignals(False)
 
         controls = [
-            (self.font_size_slider, self.font_size_value, style.font_size),
-            (self.outline_slider, self.outline_value, style.outline),
-            (self.shadow_slider, self.shadow_value, style.shadow),
-            (self.margin_slider, self.margin_value, style.margin_v),
-            (self.box_opacity_slider, self.box_opacity_value, style.box_opacity),
-            (self.box_padding_slider, self.box_padding_value, style.box_padding),
+            (self.font_size_slider, self.font_size_spinbox, style.font_size),
+            (self.outline_slider, self.outline_spinbox, style.outline),
+            (self.shadow_slider, self.shadow_spinbox, style.shadow),
+            (self.margin_slider, self.margin_spinbox, style.margin_v),
+            (self.box_opacity_slider, self.box_opacity_spinbox, style.box_opacity),
+            (self.box_padding_slider, self.box_padding_spinbox, style.box_padding),
         ]
-        for slider, label, value in controls:
+        for slider, spinbox, value in controls:
             slider.blockSignals(True)
             slider.setValue(value)
             slider.blockSignals(False)
-            label.setText(str(value))
+            spinbox.blockSignals(True)
+            spinbox.setValue(value)
+            spinbox.blockSignals(False)
 
         self.box_background_checkbox.blockSignals(True)
         self.box_background_checkbox.setChecked(style.box_enabled)
@@ -659,7 +692,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._subtitle_style_preset = preset
         self._apply_subtitle_style_to_controls()
         self._store_subtitle_style_config()
-        self._refresh_preview_with_style()
+        self._schedule_preview_refresh()
 
     def _on_subtitle_style_custom_changed(self) -> None:
         box_enabled = self.box_background_checkbox.isChecked()
@@ -673,7 +706,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._subtitle_style_custom = self._collect_custom_style_from_controls()
         self._store_subtitle_style_config()
-        self._refresh_preview_with_style()
+        self._schedule_preview_refresh()
+
+    def _schedule_preview_refresh(self) -> None:
+        if self._preview_render_timer.isActive():
+            self._preview_render_timer.stop()
+        self._preview_render_timer.start()
 
     def _resolve_effective_subtitle_style(self) -> SubtitleStyle:
         if self._subtitle_style_preset == PRESET_CUSTOM:
@@ -719,13 +757,23 @@ class MainWindow(QtWidgets.QMainWindow):
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
+        force_style = to_ffmpeg_force_style(style)
+        alpha_byte = get_box_alpha_byte(style)
+        self._log(
+            "Preview style: "
+            f"box_enabled={style.box_enabled} "
+            f"box_opacity={style.box_opacity} "
+            f"alpha={alpha_byte} "
+            f"force_style={force_style}",
+            True,
+        )
         success = extract_subtitled_frame(
             self._video_path,
             srt_path,
             self._preview_timestamp_seconds,
             output_path,
             width=preview_width,
-            force_style=to_ffmpeg_force_style(style),
+            force_style=force_style,
         )
         return output_path if success else None
 
