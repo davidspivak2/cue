@@ -187,3 +187,49 @@ def format_filter_style(
         f"Shadow={shadow},"
         f"MarginV={margin_v}"
     )
+
+
+def extract_video_frame(
+    video_path: Path,
+    timestamp_seconds: float,
+    output_path: Path,
+    *,
+    width: int = 640,
+) -> bool:
+    try:
+        ffmpeg_path, _, _ = ensure_ffmpeg_available()
+    except FileNotFoundError:
+        return False
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        str(ffmpeg_path),
+        "-y",
+        "-hide_banner",
+        "-ss",
+        f"{timestamp_seconds:.3f}",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        "-vf",
+        f"scale={width}:-1:force_original_aspect_ratio=decrease",
+        str(output_path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            **get_subprocess_kwargs(),
+        )
+    except Exception:
+        return False
+    if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+        return True
+    if output_path.exists():
+        try:
+            output_path.unlink()
+        except OSError:
+            pass
+    return False

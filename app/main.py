@@ -31,7 +31,13 @@ from app.transcription_device import gpu_available
 from app.ui.state import AppState
 from app.ui.theme import apply_theme
 from app.ui.utils import generate_thumbnail, get_media_duration_seconds
-from app.ui.widgets import DropZone, ElidedLineEdit, SavingToLine, VideoCard
+from app.ui.widgets import (
+    AspectRatioFrame,
+    DropZone,
+    ElidedLineEdit,
+    SavingToLine,
+    VideoCard,
+)
 from app.paths import get_app_data_dir, get_logs_dir
 from app.workers import (
     BurnInSettings,
@@ -77,6 +83,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ffmpeg_available = False
         self._ffprobe_available = False
         self._subtitles_reviewed = False
+        self._preview_frame_path: Optional[Path] = None
+        self._preview_subtitle_text: Optional[str] = None
+        self._preview_timestamp_seconds: Optional[float] = None
+        self._preview_pixmap: Optional[QtGui.QPixmap] = None
         self._progress_controller: Optional[ProgressController] = None
         self._worker_start_time: Optional[float] = None
         self._elapsed_timer = QtCore.QTimer(self)
@@ -329,31 +339,69 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_subtitles_ready_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(page)
+        layout = QtWidgets.QHBoxLayout(page)
+        layout.setSpacing(24)
+
+        preview_card = QtWidgets.QFrame()
+        preview_layout = QtWidgets.QVBoxLayout(preview_card)
+        preview_layout.setSpacing(12)
+
+        preview_frame = AspectRatioFrame()
+        preview_frame.setObjectName("PreviewCardFrame")
+        preview_frame.setMinimumHeight(180)
+        preview_frame.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+        )
+        preview_frame_layout = QtWidgets.QGridLayout(preview_frame)
+        preview_frame_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.preview_image_label = QtWidgets.QLabel()
+        self.preview_image_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.preview_image_label.setObjectName("PreviewCardImage")
+        self.preview_image_label.setMinimumHeight(180)
+
+        preview_frame_layout.addWidget(self.preview_image_label, 0, 0, 1, 1)
+
+        self.preview_text_label = QtWidgets.QLabel()
+        self.preview_text_label.setWordWrap(True)
+        self.preview_text_label.setLayoutDirection(QtCore.Qt.RightToLeft)
+        self.preview_text_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignTop)
+        self.preview_text_label.setObjectName("PreviewCardSubtitle")
+
+        preview_layout.addWidget(preview_frame)
+        preview_layout.addWidget(self.preview_text_label)
+        preview_layout.addStretch()
+
+        actions_container = QtWidgets.QWidget()
+        actions_layout = QtWidgets.QVBoxLayout(actions_container)
         title = QtWidgets.QLabel("Subtitles are ready")
         title.setAlignment(QtCore.Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        layout.addWidget(title)
+        actions_layout.addWidget(title)
 
         primary_layout = QtWidgets.QHBoxLayout()
         primary_layout.addStretch()
         primary_layout.addWidget(self.review_button)
         primary_layout.addStretch()
-        layout.addLayout(primary_layout)
+        actions_layout.addLayout(primary_layout)
 
         secondary_layout = QtWidgets.QHBoxLayout()
         secondary_layout.addStretch()
         secondary_layout.addWidget(self.burn_button)
         secondary_layout.addStretch()
-        layout.addLayout(secondary_layout)
+        actions_layout.addLayout(secondary_layout)
 
         links_layout = QtWidgets.QHBoxLayout()
         links_layout.addStretch()
         links_layout.addWidget(self.ready_open_srt_button)
         links_layout.addWidget(self.ready_open_folder_button)
         links_layout.addStretch()
-        layout.addLayout(links_layout)
-        layout.addStretch()
+        actions_layout.addLayout(links_layout)
+        actions_layout.addStretch()
+
+        layout.addWidget(preview_card, 1)
+        layout.addWidget(actions_container, 1)
+        self._update_preview_card()
         return page
 
     def _build_done_page(self) -> QtWidgets.QWidget:
@@ -595,6 +643,49 @@ class MainWindow(QtWidgets.QMainWindow):
         page_index = self._state_pages.get(state, 0)
         self.stack.setCurrentIndex(page_index)
         self._update_ui_state(idle=state != AppState.WORKING)
+        if state == AppState.SUBTITLES_READY:
+            self._update_preview_card()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_preview_image()
+
+    def _update_preview_card(self) -> None:
+        if not hasattr(self, "preview_image_label"):
+            return
+        if self._preview_frame_path and self._preview_frame_path.exists():
+            pixmap = QtGui.QPixmap(str(self._preview_frame_path))
+        else:
+            pixmap = QtGui.QPixmap()
+
+        if pixmap.isNull():
+            self._preview_pixmap = None
+            self.preview_image_label.setPixmap(QtGui.QPixmap())
+            self.preview_image_label.setText("Preview unavailable")
+            self.preview_image_label.setAlignment(QtCore.Qt.AlignCenter)
+        else:
+            self._preview_pixmap = pixmap
+            self.preview_image_label.setText("")
+            self.preview_image_label.setAlignment(QtCore.Qt.AlignCenter)
+            self._update_preview_image()
+
+        text = (self._preview_subtitle_text or "").strip()
+        if text:
+            self.preview_text_label.setText(text)
+        else:
+            self.preview_text_label.setText("Subtitle preview unavailable")
+
+    def _update_preview_image(self) -> None:
+        if not hasattr(self, "preview_image_label"):
+            return
+        if not self._preview_pixmap or self._preview_pixmap.isNull():
+            return
+        scaled = self._preview_pixmap.scaled(
+            self.preview_image_label.size(),
+            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.SmoothTransformation,
+        )
+        self.preview_image_label.setPixmap(scaled)
 
     def _browse_video(self) -> None:
         if self._state == AppState.WORKING:
@@ -829,6 +920,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if payload.get("output_path"):
             candidate = Path(payload["output_path"])
             self._last_output_video = candidate if candidate.exists() else None
+        if task_type == TaskType.GENERATE_SRT:
+            frame_value = payload.get("preview_frame_path")
+            self._preview_frame_path = Path(frame_value) if frame_value else None
+            self._preview_subtitle_text = payload.get("preview_subtitle_text")
+            self._preview_timestamp_seconds = payload.get("preview_timestamp_seconds")
 
         if success:
             if task_type == TaskType.GENERATE_SRT:
@@ -839,6 +935,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     "Subtitles are ready. Next: edit them in Subtitle Edit, then export the video.",
                 )
                 self.set_state(AppState.SUBTITLES_READY)
+                self._update_preview_card()
             else:
                 QtWidgets.QMessageBox.information(self, "Your video is ready", message)
                 self.set_state(AppState.EXPORT_DONE)
@@ -1308,6 +1405,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._subtitles_reviewed = False
         self._output_dir = None
         self._progress_controller = None
+        self._preview_frame_path = None
+        self._preview_subtitle_text = None
+        self._preview_timestamp_seconds = None
+        self._preview_pixmap = None
+        self._update_preview_card()
 
     def _get_default_srt_path(self) -> Optional[Path]:
         if not self._video_path or not self._output_dir:
