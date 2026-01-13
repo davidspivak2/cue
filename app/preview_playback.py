@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -12,6 +14,7 @@ from PySide6 import QtCore
 from .ffmpeg_utils import (
     build_subtitles_filter,
     ensure_ffmpeg_available,
+    get_ffprobe_json,
     get_media_duration,
     get_subprocess_kwargs,
 )
@@ -53,30 +56,54 @@ class PreviewClipWorker(QtCore.QObject):
             return
 
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        subtitles_filter = build_subtitles_filter(
+        shifted_srt_path = self._output_path.with_suffix(".srt")
+        shift_result = _shift_srt_file(
             self._settings.srt_path,
+            shifted_srt_path,
+            self._settings.start_seconds,
+        )
+        self.signals.log.emit(
+            "Preview clip timing: "
+            f"start={self._settings.start_seconds:.3f}s "
+            f"duration={self._settings.duration_seconds:.3f}s "
+            f"output={self._output_path}"
+        )
+        self.signals.log.emit(
+            "Preview clip cues: "
+            f"count={shift_result.cues_written} "
+            f"first_start={shift_result.first_start} "
+            f"first_end={shift_result.first_end}"
+        )
+        subtitles_filter = build_subtitles_filter(
+            shifted_srt_path,
             force_style=self._settings.force_style,
         )
-        filter_chain = (
-            f"{subtitles_filter},scale='min({self._settings.scale_width},iw)':-2:"
-            "force_original_aspect_ratio=decrease"
+        video_chain = (
+            f"trim=start={self._settings.start_seconds:.3f}:duration={self._settings.duration_seconds:.3f},"
+            "setpts=PTS-STARTPTS,"
+            f"{subtitles_filter},"
+            f"scale='min({self._settings.scale_width},iw)':-2:force_original_aspect_ratio=decrease"
+        )
+        filter_complex, audio_label = _build_filter_complex(
+            video_chain,
+            self._settings.start_seconds,
+            self._settings.duration_seconds,
+            self._settings.video_path,
         )
         command = [
             str(ffmpeg_path),
             "-y",
             "-hide_banner",
-            "-ss",
-            f"{self._settings.start_seconds:.3f}",
             "-i",
             str(self._settings.video_path),
-            "-t",
-            f"{self._settings.duration_seconds:.3f}",
-            "-vf",
-            filter_chain,
+            "-filter_complex",
+            filter_complex,
             "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0?",
+            "[v]",
+        ]
+        if audio_label:
+            command += ["-map", audio_label]
+        command += [
             "-c:v",
             "libx264",
             "-preset",
@@ -92,10 +119,10 @@ class PreviewClipWorker(QtCore.QObject):
             "-shortest",
             str(self._output_path),
         ]
+        command_text = subprocess.list2cmdline(command)
         self.signals.log.emit(
             "Preview clip ffmpeg: "
-            f"-vf {filter_chain} "
-            f"force_style={self._settings.force_style}"
+            f"{command_text}"
         )
         try:
             result = subprocess.run(
@@ -220,6 +247,7 @@ class PreviewPlaybackController(QtCore.QObject):
             "crf": settings.crf,
             "preset": settings.preset,
             "audio_bitrate": settings.audio_bitrate,
+            "shifted_subtitles": True,
         }
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(serialized.encode("utf-8")).hexdigest()
@@ -238,3 +266,111 @@ class PreviewPlaybackController(QtCore.QObject):
             "size": size,
             "mtime": mtime,
         }
+
+
+@dataclass(frozen=True)
+class ShiftedSrtResult:
+    cues_written: int
+    first_start: Optional[str]
+    first_end: Optional[str]
+
+
+_SRT_TIMESTAMP_RE = re.compile(
+    r"(?P<start>\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(?P<end>\d{2}:\d{2}:\d{2},\d{3})"
+)
+
+
+def _shift_srt_file(source_path: Path, output_path: Path, offset_seconds: float) -> ShiftedSrtResult:
+    text = source_path.read_text(encoding="utf-8", errors="replace")
+    shifted_text, result = _shift_srt_text(text, offset_seconds)
+    output_path.write_text(shifted_text, encoding="utf-8")
+    return result
+
+
+def _shift_srt_text(srt_text: str, offset_seconds: float) -> tuple[str, ShiftedSrtResult]:
+    normalized = srt_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return "", ShiftedSrtResult(0, None, None)
+    blocks = re.split(r"\n\s*\n", normalized)
+    output_blocks: list[str] = []
+    cues_written = 0
+    first_start: Optional[str] = None
+    first_end: Optional[str] = None
+    for block in blocks:
+        lines = block.split("\n")
+        timestamp_index = None
+        match = None
+        for idx, line in enumerate(lines):
+            match = _SRT_TIMESTAMP_RE.search(line)
+            if match:
+                timestamp_index = idx
+                break
+        if timestamp_index is None or not match:
+            continue
+        start_seconds = _parse_srt_timestamp(match.group("start"))
+        end_seconds = _parse_srt_timestamp(match.group("end"))
+        if start_seconds is None or end_seconds is None:
+            continue
+        new_start = max(0.0, start_seconds - offset_seconds)
+        new_end = max(0.0, end_seconds - offset_seconds)
+        if new_end <= 0:
+            continue
+        lines[timestamp_index] = (
+            f"{_format_srt_timestamp(new_start)} --> {_format_srt_timestamp(new_end)}"
+        )
+        output_blocks.append("\n".join(lines))
+        cues_written += 1
+        if first_start is None:
+            first_start = _format_srt_timestamp(new_start)
+            first_end = _format_srt_timestamp(new_end)
+    shifted = "\n\n".join(output_blocks)
+    if shifted:
+        shifted = shifted.strip() + "\n"
+    return shifted, ShiftedSrtResult(cues_written, first_start, first_end)
+
+
+def _parse_srt_timestamp(value: str) -> Optional[float]:
+    parts = value.replace(",", ".").split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = float(parts[2])
+    except ValueError:
+        return None
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _format_srt_timestamp(seconds: float) -> str:
+    delta = timedelta(seconds=max(seconds, 0))
+    total_seconds = int(delta.total_seconds())
+    millis = int(delta.microseconds / 1000)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
+
+def _build_filter_complex(
+    video_chain: str,
+    start_seconds: float,
+    duration_seconds: float,
+    video_path: Path,
+) -> tuple[str, Optional[str]]:
+    has_audio = False
+    ffprobe_json = get_ffprobe_json(video_path)
+    if ffprobe_json:
+        streams = ffprobe_json.get("streams", [])
+        has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
+    audio_label = None
+    if has_audio:
+        audio_chain = (
+            f"atrim=start={start_seconds:.3f}:duration={duration_seconds:.3f},"
+            "asetpts=PTS-STARTPTS"
+        )
+        filter_complex = f"[0:v]{video_chain}[v];[0:a]{audio_chain}[a]"
+        audio_label = "[a]"
+    else:
+        filter_complex = f"[0:v]{video_chain}[v]"
+    return filter_complex, audio_label
