@@ -111,10 +111,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_loading = False
         self._preview_karaoke_enabled = True
         self._preview_karaoke_color = DEFAULT_HIGHLIGHT_COLOR_HEX
+        self._preview_karaoke_mode = "text"
+        self._preview_karaoke_bg_opacity = 40
         self._preview_overlay_log_last = 0.0
         self._karaoke_color_options: dict[str, str] = {}
         self.preview_karaoke_checkbox: Optional[QtWidgets.QCheckBox] = None
         self.preview_karaoke_color_combo: Optional[QtWidgets.QComboBox] = None
+        self.preview_karaoke_mode_combo: Optional[QtWidgets.QComboBox] = None
+        self.preview_karaoke_bg_slider: Optional[QtWidgets.QSlider] = None
+        self.preview_karaoke_bg_spinbox: Optional[QtWidgets.QSpinBox] = None
+        self.preview_karaoke_bg_label: Optional[QtWidgets.QLabel] = None
         self.preview_subtitle_overlay: Optional[PreviewSubtitleItem] = None
         self._preview_overlay_timer = QtCore.QTimer(self)
         self._preview_overlay_timer.setInterval(50)
@@ -143,6 +149,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config = self._load_config()
         self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
         self._preview_karaoke_color = self._load_preview_karaoke_color()
+        self._preview_karaoke_mode, self._preview_karaoke_bg_opacity = (
+            self._load_preview_karaoke_mode()
+        )
         self._preview_karaoke_enabled = self._load_preview_karaoke_enabled()
         self._subtitle_style_preset, self._subtitle_style_custom = (
             self._load_subtitle_style()
@@ -451,7 +460,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_karaoke_checkbox = QtWidgets.QCheckBox("Karaoke highlight")
         self.preview_karaoke_checkbox.setChecked(self._preview_karaoke_enabled)
         self.preview_karaoke_color_combo = QtWidgets.QComboBox()
+        self.preview_karaoke_mode_combo = QtWidgets.QComboBox()
+        self.preview_karaoke_bg_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.preview_karaoke_bg_spinbox = QtWidgets.QSpinBox()
+        self.preview_karaoke_bg_label = QtWidgets.QLabel("Highlight bg opacity")
         self._populate_karaoke_color_combo()
+        self._populate_karaoke_mode_combo()
+        self._configure_karaoke_bg_controls()
 
         self.preview_play_button.clicked.connect(self._on_preview_play_clicked)
         self.preview_stop_button.clicked.connect(self._on_preview_stop_clicked)
@@ -463,6 +478,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self.preview_karaoke_color_combo.currentIndexChanged.connect(
                 self._on_preview_karaoke_color_changed
             )
+        if self.preview_karaoke_mode_combo:
+            self.preview_karaoke_mode_combo.currentIndexChanged.connect(
+                self._on_preview_karaoke_mode_changed
+            )
+        if self.preview_karaoke_bg_slider and self.preview_karaoke_bg_spinbox:
+            self.preview_karaoke_bg_slider.valueChanged.connect(
+                self.preview_karaoke_bg_spinbox.setValue
+            )
+            self.preview_karaoke_bg_spinbox.valueChanged.connect(
+                self.preview_karaoke_bg_slider.setValue
+            )
+            self.preview_karaoke_bg_slider.valueChanged.connect(
+                self._on_preview_karaoke_bg_opacity_changed
+            )
 
         controls_layout.addWidget(self.preview_play_button)
         controls_layout.addWidget(self.preview_stop_button)
@@ -471,6 +500,11 @@ class MainWindow(QtWidgets.QMainWindow):
         controls_layout.addWidget(self.preview_karaoke_checkbox)
         controls_layout.addWidget(QtWidgets.QLabel("Highlight color"))
         controls_layout.addWidget(self.preview_karaoke_color_combo)
+        controls_layout.addWidget(QtWidgets.QLabel("Highlight mode"))
+        controls_layout.addWidget(self.preview_karaoke_mode_combo)
+        controls_layout.addWidget(self.preview_karaoke_bg_label)
+        controls_layout.addWidget(self.preview_karaoke_bg_slider)
+        controls_layout.addWidget(self.preview_karaoke_bg_spinbox)
         preview_layout.addLayout(controls_layout)
 
         self.preview_status_label = QtWidgets.QLabel("")
@@ -848,6 +882,8 @@ class MainWindow(QtWidgets.QMainWindow):
         style = self._resolve_effective_subtitle_style()
         self.preview_subtitle_overlay.set_style(style)
         self.preview_subtitle_overlay.set_highlight_color(self._preview_karaoke_color)
+        self.preview_subtitle_overlay.set_highlight_mode(self._preview_karaoke_mode)
+        self.preview_subtitle_overlay.set_highlight_bg_opacity(self._preview_karaoke_bg_opacity)
 
     def _populate_karaoke_color_combo(self) -> None:
         if not self.preview_karaoke_color_combo:
@@ -872,6 +908,36 @@ class MainWindow(QtWidgets.QMainWindow):
             self.preview_karaoke_color_combo.addItem("Custom")
             self.preview_karaoke_color_combo.setCurrentText("Custom")
         self.preview_karaoke_color_combo.blockSignals(False)
+
+    def _populate_karaoke_mode_combo(self) -> None:
+        if not self.preview_karaoke_mode_combo:
+            return
+        self.preview_karaoke_mode_combo.blockSignals(True)
+        self.preview_karaoke_mode_combo.clear()
+        self.preview_karaoke_mode_combo.addItem("Text only", "text")
+        self.preview_karaoke_mode_combo.addItem("Text + background", "text+bg")
+        mode = self._preview_karaoke_mode
+        index = 0 if mode == "text" else 1
+        self.preview_karaoke_mode_combo.setCurrentIndex(index)
+        self.preview_karaoke_mode_combo.blockSignals(False)
+
+    def _configure_karaoke_bg_controls(self) -> None:
+        if not self.preview_karaoke_bg_slider or not self.preview_karaoke_bg_spinbox:
+            return
+        self.preview_karaoke_bg_slider.setRange(0, 100)
+        self.preview_karaoke_bg_spinbox.setRange(0, 100)
+        self.preview_karaoke_bg_slider.setValue(self._preview_karaoke_bg_opacity)
+        self.preview_karaoke_bg_spinbox.setValue(self._preview_karaoke_bg_opacity)
+        self._update_karaoke_bg_visibility()
+
+    def _update_karaoke_bg_visibility(self) -> None:
+        visible = self._preview_karaoke_mode == "text+bg"
+        if self.preview_karaoke_bg_label:
+            self.preview_karaoke_bg_label.setVisible(visible)
+        if self.preview_karaoke_bg_slider:
+            self.preview_karaoke_bg_slider.setVisible(visible)
+        if self.preview_karaoke_bg_spinbox:
+            self.preview_karaoke_bg_spinbox.setVisible(visible)
 
     def _load_preview_overlay_cues(self) -> None:
         if not self.preview_subtitle_overlay or not self._preview_timestamp_seconds:
@@ -921,6 +987,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._load_preview_overlay_cues()
         self.preview_subtitle_overlay.set_karaoke_enabled(self._preview_karaoke_enabled)
         self.preview_subtitle_overlay.set_highlight_color(self._preview_karaoke_color)
+        self.preview_subtitle_overlay.set_highlight_mode(self._preview_karaoke_mode)
+        self.preview_subtitle_overlay.set_highlight_bg_opacity(self._preview_karaoke_bg_opacity)
         if self.preview_media_player:
             self.preview_subtitle_overlay.update_position(
                 self.preview_media_player.position() / 1000.0
@@ -1283,6 +1351,34 @@ class MainWindow(QtWidgets.QMainWindow):
             preview_config = {}
             self._config["preview"] = preview_config
         preview_config["karaoke_highlight_color"] = color
+        self._save_config()
+
+    def _on_preview_karaoke_mode_changed(self) -> None:
+        if not self.preview_karaoke_mode_combo:
+            return
+        mode = self.preview_karaoke_mode_combo.currentData()
+        if mode not in {"text", "text+bg"}:
+            mode = "text"
+        self._preview_karaoke_mode = mode
+        if self.preview_subtitle_overlay:
+            self.preview_subtitle_overlay.set_highlight_mode(mode)
+        preview_config = self._config.get("preview")
+        if not isinstance(preview_config, dict):
+            preview_config = {}
+            self._config["preview"] = preview_config
+        preview_config["karaoke_highlight_mode"] = mode
+        self._save_config()
+        self._update_karaoke_bg_visibility()
+
+    def _on_preview_karaoke_bg_opacity_changed(self, value: int) -> None:
+        self._preview_karaoke_bg_opacity = value
+        if self.preview_subtitle_overlay:
+            self.preview_subtitle_overlay.set_highlight_bg_opacity(value)
+        preview_config = self._config.get("preview")
+        if not isinstance(preview_config, dict):
+            preview_config = {}
+            self._config["preview"] = preview_config
+        preview_config["karaoke_highlight_bg_opacity"] = value
         self._save_config()
 
     def _log_preview_play_request(self) -> None:
@@ -2463,6 +2559,19 @@ class MainWindow(QtWidgets.QMainWindow):
             if isinstance(value, str) and value:
                 return value
         return DEFAULT_HIGHLIGHT_COLOR_HEX
+
+    def _load_preview_karaoke_mode(self) -> tuple[str, int]:
+        preview = self._config.get("preview")
+        mode = "text"
+        opacity = 40
+        if isinstance(preview, dict):
+            raw_mode = preview.get("karaoke_highlight_mode")
+            if isinstance(raw_mode, str) and raw_mode in {"text", "text+bg"}:
+                mode = raw_mode
+            raw_opacity = preview.get("karaoke_highlight_bg_opacity")
+            if isinstance(raw_opacity, int):
+                opacity = max(0, min(100, raw_opacity))
+        return mode, opacity
 
     def _resolve_subtitle_edit_path(self) -> Optional[Path]:
         if self._subtitle_edit_path and self._subtitle_edit_path.exists():

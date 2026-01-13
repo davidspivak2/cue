@@ -5,7 +5,12 @@ from typing import Callable, Optional, Sequence
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from app.karaoke_utils import DEFAULT_HIGHLIGHT_COLOR_HEX, build_highlight_spans, highlight_rgb_from_hex, is_rtl_text
+from app.karaoke_utils import (
+    DEFAULT_HIGHLIGHT_COLOR_HEX,
+    highlight_rgb_from_hex,
+    is_rtl_text,
+    iter_token_spans,
+)
 from app.subtitle_style import DEFAULT_FONT_NAME, SubtitleStyle
 from app.srt_utils import SrtCue
 
@@ -29,6 +34,8 @@ class PreviewSubtitleItem(QtWidgets.QGraphicsObject):
         self._position_seconds = 0.0
         self._karaoke_enabled = True
         self._highlight_color = QtGui.QColor(*highlight_rgb_from_hex(DEFAULT_HIGHLIGHT_COLOR_HEX))
+        self._highlight_mode = "text"
+        self._highlight_bg_opacity = 40
         self._logger: Optional[Callable[[str], None]] = None
         self._karaoke_fallback_logged = False
         self._viewport_rect = QtCore.QRectF()
@@ -50,6 +57,16 @@ class PreviewSubtitleItem(QtWidgets.QGraphicsObject):
     def set_highlight_color(self, hex_color: str) -> None:
         rgb = highlight_rgb_from_hex(hex_color)
         self._highlight_color = QtGui.QColor(*rgb)
+        self.update()
+
+    def set_highlight_mode(self, mode: str) -> None:
+        if mode not in {"text", "text+bg"}:
+            mode = "text"
+        self._highlight_mode = mode
+        self.update()
+
+    def set_highlight_bg_opacity(self, opacity: int) -> None:
+        self._highlight_bg_opacity = max(0, min(100, opacity))
         self.update()
 
     def set_logger(self, logger: Callable[[str], None]) -> None:
@@ -138,18 +155,30 @@ class PreviewSubtitleItem(QtWidgets.QGraphicsObject):
                 self._log_karaoke_fallback("Karaoke highlight skipped: non-positive duration")
                 return
             progress = (self._position_seconds - self._active_cue.start_seconds) / duration
-            highlight_spans = build_highlight_spans(text, progress)
-            if not highlight_spans:
-                self._log_karaoke_fallback("Karaoke highlight skipped: no highlight spans")
+            highlight_width = self._measure_highlight_width(text, font, progress, text_rect.width())
+            if highlight_width <= 0:
+                self._log_karaoke_fallback("Karaoke highlight skipped: no highlight width")
                 return
-            highlight_layout = self._build_highlight_layout(text, font, layout, highlight_spans)
-            if not highlight_layout:
-                self._log_karaoke_fallback("Karaoke highlight skipped: failed to build layout")
-                return
+            if is_rtl_text(text):
+                clip_x = text_rect.right() - highlight_width
+            else:
+                clip_x = text_rect.left()
+            clip_rect = QtCore.QRectF(clip_x, text_rect.top(), highlight_width, text_rect.height())
             painter.save()
-            painter.setPen(QtCore.Qt.NoPen)
-            painter.setBrush(self._highlight_color)
-            highlight_layout.draw(painter, origin)
+            painter.setClipRect(clip_rect)
+            if self._highlight_mode == "text+bg":
+                alpha = max(0, min(255, round(255 * (self._highlight_bg_opacity / 100))))
+                painter.setPen(QtCore.Qt.NoPen)
+                painter.setBrush(QtGui.QColor(0, 0, 0, alpha))
+                painter.drawRect(clip_rect)
+            self._draw_text_with_outline(
+                painter,
+                font,
+                text,
+                lines,
+                origin,
+                override_brush=self._highlight_color,
+            )
             painter.restore()
         except Exception as exc:  # noqa: BLE001
             self._log_karaoke_fallback(f"Karaoke highlight fallback: {exc}")
@@ -212,6 +241,8 @@ class PreviewSubtitleItem(QtWidgets.QGraphicsObject):
         text: str,
         lines: list[QtGui.QTextLine],
         origin: QtCore.QPointF,
+        *,
+        override_brush: Optional[QtGui.QBrush] = None,
     ) -> None:
         if not lines:
             return
@@ -232,50 +263,29 @@ class PreviewSubtitleItem(QtWidgets.QGraphicsObject):
             if self._style.outline > 0:
                 outline_width = max(1.0, self._style.outline * 2.0)
                 painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0), outline_width))
-                painter.setBrush(QtGui.QColor(255, 255, 255))
+                painter.setBrush(override_brush or QtGui.QColor(255, 255, 255))
                 painter.drawPath(path)
             else:
                 painter.setPen(QtCore.Qt.NoPen)
-                painter.setBrush(QtGui.QColor(255, 255, 255))
+                painter.setBrush(override_brush or QtGui.QColor(255, 255, 255))
                 painter.drawPath(path)
 
-    def _build_highlight_layout(
+    def _measure_highlight_width(
         self,
         text: str,
         font: QtGui.QFont,
-        base_layout: QtGui.QTextLayout,
-        highlight_spans: list[tuple[int, int]],
-    ) -> Optional[QtGui.QTextLayout]:
-        if not highlight_spans:
-            return None
-        option = base_layout.textOption()
-        layout = QtGui.QTextLayout(text, font)
-        layout.setTextOption(option)
-        format_ranges: list[QtGui.QTextLayout.FormatRange] = []
-        for start, end in highlight_spans:
-            if end <= start:
-                continue
-            fmt = QtGui.QTextCharFormat()
-            fmt.setForeground(self._highlight_color)
-            fmt_range = QtGui.QTextLayout.FormatRange()
-            fmt_range.start = start
-            fmt_range.length = end - start
-            fmt_range.format = fmt
-            format_ranges.append(fmt_range)
-        if not format_ranges:
-            return None
-        layout.setFormats(format_ranges)
-        layout.beginLayout()
-        height = 0.0
-        max_width = max(0.0, self._viewport_rect.width() * 0.9)
-        while True:
-            line = layout.createLine()
-            if not line.isValid():
-                break
-            line.setLineWidth(max_width)
-            line_width = line.naturalTextWidth()
-            line_x = (max_width - line_width) / 2 if max_width > 0 else 0.0
-            line.setPosition(QtCore.QPointF(line_x, height))
-            height += line.height()
-        layout.endLayout()
-        return layout
+        progress: float,
+        max_width: float,
+    ) -> float:
+        spans = list(iter_token_spans(text))
+        if not spans:
+            return 0.0
+        clamped = max(0.0, min(progress, 1.0))
+        completed = int(clamped * len(spans))
+        if completed <= 0:
+            return 0.0
+        end_index = spans[completed - 1][1]
+        substring = text[:end_index]
+        metrics = QtGui.QFontMetricsF(font)
+        width = metrics.horizontalAdvance(substring.replace("\n", " "))
+        return min(width, max_width)

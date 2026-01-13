@@ -57,8 +57,8 @@ def _build_ass_header(
         f"{outline},"
         f"{style.shadow},"
         "2,"
-        "0,"
-        "0,"
+        "20,"
+        "20,"
         f"{style.margin_v},"
         "1"
     )
@@ -128,9 +128,7 @@ def build_karaoke_ass_text(
         karaoke_text = _build_karaoke_text(text, duration)
         if is_rtl_text(text):
             karaoke_text = f"\u202B{karaoke_text}\u202C"
-        lines.append(
-            f"Dialogue: 0,{start},{end},Default,,0,0,{style.margin_v},,{karaoke_text}"
-        )
+        lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{karaoke_text}")
         dialogue_count += 1
     return "\n".join(lines) + "\n", dialogue_count
 
