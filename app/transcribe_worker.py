@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import faulthandler
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -331,41 +332,29 @@ def _run_whisperx_alignment(
     vad_method: str,
 ) -> Optional[dict[str, object]]:
     try:
+        import faster_whisper
         import whisperx
     except Exception as exc:  # noqa: BLE001
         _print(f"WHISPERX_ERROR import failed: {exc}")
         return None
 
+    asr_options = _build_whisperx_asr_options(faster_whisper)
     version = getattr(whisperx, "__version__", "n/a")
     _print(f"WHISPERX version={version}")
     _print(f"WHISPERX model={model_name} device={device} compute_type={compute_type}")
     _print(f"WHISPERX vad_method={vad_method}")
     try:
-        _print("WHISPERX load_model with vad_method")
+        _print("WHISPERX load_model with asr_options")
         model = whisperx.load_model(
             model_name,
             device,
             compute_type=compute_type,
             language=None if language == "auto" else language,
-            vad_method=vad_method,
+            asr_options=asr_options,
         )
     except TypeError as exc:
-        message = str(exc)
-        if "vad_method" in message and "unexpected keyword argument" in message:
-            _print("WHISPERX load_model without vad_method (fallback)")
-            try:
-                model = whisperx.load_model(
-                    model_name,
-                    device,
-                    compute_type=compute_type,
-                    language=None if language == "auto" else language,
-                )
-            except Exception as inner_exc:  # noqa: BLE001
-                _print(f"WHISPERX_ERROR load_model failed: {inner_exc}")
-                return None
-        else:
-            _print(f"WHISPERX_ERROR load_model failed: {exc}")
-            return None
+        _print(f"WHISPERX_ERROR load_model failed: {exc}")
+        return None
     except Exception as exc:  # noqa: BLE001
         _print(f"WHISPERX_ERROR load_model failed: {exc}")
         return None
@@ -391,6 +380,44 @@ def _run_whisperx_alignment(
     }
 
 
+def _build_whisperx_asr_options(faster_whisper_module) -> dict[str, object]:
+    try:
+        signature = inspect.signature(faster_whisper_module.WhisperModel.transcribe)
+    except (AttributeError, ValueError):
+        signature = None
+    allowed_keys = set(signature.parameters.keys()) if signature else set()
+    base_options = {
+        "beam_size": 5,
+        "best_of": 5,
+        "patience": 1.0,
+        "length_penalty": 1.0,
+        "repetition_penalty": 1.0,
+        "no_repeat_ngram_size": 0,
+        "temperature": 0.0,
+        "compression_ratio_threshold": 2.4,
+        "log_prob_threshold": -1.0,
+        "no_speech_threshold": 0.6,
+        "condition_on_previous_text": True,
+        "prompt_reset_on_temperature": 0.5,
+        "initial_prompt": None,
+        "prefix": None,
+        "suppress_blank": True,
+        "suppress_tokens": "-1",
+        "without_timestamps": False,
+        "max_initial_timestamp": 1.0,
+        "word_timestamps": True,
+        "prepend_punctuations": "\"'“¿([{-",
+        "append_punctuations": "\"'.。,，!！?？:：”)]}、",
+        "max_new_tokens": None,
+        "clip_timestamps": "0",
+        "hallucination_silence_threshold": None,
+        "hotwords": None,
+    }
+    if not allowed_keys:
+        return base_options
+    return {key: value for key, value in base_options.items() if key in allowed_keys}
+
+
 def _segments_to_srt_segments(segments: list[dict]) -> list[SrtSegment]:
     srt_segments: list[SrtSegment] = []
     for index, segment in enumerate(segments, start=1):
@@ -401,6 +428,77 @@ def _segments_to_srt_segments(segments: list[dict]) -> list[SrtSegment]:
             continue
         text = str(segment.get("text") or "").strip()
         srt_segments.append(SrtSegment(index=index, start=start, end=end, text=text))
+    return srt_segments
+
+
+def _build_word_highlight_fallback_segments(
+    raw_segments: list[object],
+    *,
+    min_duration: float = 0.08,
+) -> list[SrtSegment]:
+    srt_segments: list[SrtSegment] = []
+    index = 1
+    for segment in raw_segments:
+        words = list(getattr(segment, "words", []) or [])
+        text = str(getattr(segment, "text", "") or "")
+        if not words:
+            start = float(getattr(segment, "start", 0.0))
+            end = float(getattr(segment, "end", start + min_duration))
+            if end <= start:
+                end = start + min_duration
+            srt_segments.append(SrtSegment(index=index, start=start, end=end, text=text.strip()))
+            index += 1
+            continue
+        word_entries: list[dict[str, object]] = []
+        for word in words:
+            token = str(getattr(word, "word", "") or "")
+            start = getattr(word, "start", None)
+            end = getattr(word, "end", None)
+            if start is None:
+                continue
+            word_entries.append(
+                {
+                    "token": token,
+                    "start": float(start),
+                    "end": float(end) if end is not None else None,
+                }
+            )
+        for idx, entry in enumerate(word_entries):
+            start = float(entry["start"])
+            end = entry["end"]
+            next_start = (
+                float(word_entries[idx + 1]["start"])
+                if idx + 1 < len(word_entries)
+                else None
+            )
+            if end is None:
+                end = next_start if next_start is not None else start + min_duration
+            end = float(end)
+            if next_start is not None and end > next_start:
+                end = next_start
+            if end <= start:
+                end = start + min_duration
+            if next_start is not None and end > next_start:
+                end = next_start
+            token = str(entry["token"])
+            leading = token[: len(token) - len(token.lstrip())]
+            core = token.lstrip()
+            underlined = f"{leading}<u>{core}</u>" if core else token
+            tokens = [
+                (
+                    underlined
+                    if word_idx == idx
+                    else str(word_entries[word_idx]["token"])
+                )
+                for word_idx in range(len(word_entries))
+            ]
+            cue_text = "".join(tokens).strip()
+            if not cue_text:
+                cue_text = text.strip()
+            srt_segments.append(
+                SrtSegment(index=index, start=start, end=end, text=cue_text)
+            )
+            index += 1
     return srt_segments
 
 
@@ -652,9 +750,12 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             return 0
         if wav_path is None or srt_path is None:
             raise ValueError("Missing WAV or SRT path.")
-        if args.subtitle_mode == "word_highlight" and not args.video:
-            _print("WHISPERX_ERROR missing video path; falling back to static.")
-        if args.subtitle_mode == "word_highlight" and args.video:
+        word_highlight_requested = args.subtitle_mode == "word_highlight"
+        word_highlight_fallback = False
+        if word_highlight_requested and not args.video:
+            _print("WHISPERX_ERROR missing video path; falling back to word highlight fallback.")
+            word_highlight_fallback = True
+        if word_highlight_requested and args.video:
             video_path = Path(args.video)
             vad_method = "silero"
             device_name, compute_type_name = _resolve_whisperx_device(args.device)
@@ -708,7 +809,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 if hard_exit:
                     _hard_exit(0)
                 return 0
-            _print("WHISPERX_FALLBACK static")
+            _print("WHISPERX_FALLBACK word_highlight_fallback")
+            word_highlight_fallback = True
         heartbeat_stop = threading.Event()
         heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
         try:
@@ -948,8 +1050,19 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             for attempt in attempts
         ]
         _print(f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}")
-        _print("SUBTITLE_MODE_USED static")
-        _write_srt(chosen_attempt["segments"], srt_path)
+        if word_highlight_requested and word_highlight_fallback:
+            fallback_segments = _build_word_highlight_fallback_segments(
+                chosen_attempt["raw_segments"],
+            )
+            if fallback_segments:
+                _print("SUBTITLE_MODE_USED word_highlight_fallback")
+                _write_srt(fallback_segments, srt_path)
+            else:
+                _print("SUBTITLE_MODE_USED static")
+                _write_srt(chosen_attempt["segments"], srt_path)
+        else:
+            _print("SUBTITLE_MODE_USED static")
+            _write_srt(chosen_attempt["segments"], srt_path)
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             _print(f"ERROR SRT_WRITE_FAILED {srt_path}")
             if hard_exit:

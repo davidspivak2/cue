@@ -145,6 +145,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._save_ass_next_to_video = self._load_save_ass_next_to_video()
         self._last_alignment_path: Optional[Path] = None
         self._last_subtitle_mode_used: SubtitleMode = self._subtitle_mode
+        self._last_word_highlight_fallback = False
         self._save_policy = self._load_save_policy()
         self._fixed_output_dir = self._get_config_path("save_folder")
         self._transcription_quality = self._load_transcription_quality()
@@ -1289,8 +1290,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._last_subtitle_mode_used == SubtitleMode.WORD_HIGHLIGHT:
             ready = bool(
                 self._preview_timestamp_seconds
-                and self._last_alignment_path
-                and self._last_alignment_path.exists()
+                and (
+                    (self._last_alignment_path and self._last_alignment_path.exists())
+                    or self._resolve_preview_srt_path()
+                )
             )
         else:
             ready = bool(self._preview_timestamp_seconds and self._resolve_preview_srt_path())
@@ -1695,11 +1698,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._last_alignment_path if subtitle_mode == SubtitleMode.WORD_HIGHLIGHT else None
         )
         if subtitle_mode == SubtitleMode.WORD_HIGHLIGHT and not alignment_path:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Word highlight unavailable",
-                "Word highlight data is missing. Exporting static subtitles instead.",
-            )
+            if not self._last_word_highlight_fallback:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Word highlight unavailable",
+                    "Word highlight data is missing. Exporting static subtitles instead.",
+                )
             subtitle_mode = SubtitleMode.STATIC
         self._start_worker(
             TaskType.BURN_IN,
@@ -1806,10 +1810,15 @@ class MainWindow(QtWidgets.QMainWindow):
             candidate = Path(payload["alignment_path"])
             self._last_alignment_path = candidate if candidate.exists() else None
         if payload.get("subtitle_mode_used"):
+            mode_value = str(payload["subtitle_mode_used"])
+            self._last_word_highlight_fallback = mode_value == "word_highlight_fallback"
             try:
-                self._last_subtitle_mode_used = SubtitleMode(payload["subtitle_mode_used"])
+                self._last_subtitle_mode_used = SubtitleMode(mode_value)
             except ValueError:
-                self._last_subtitle_mode_used = self._subtitle_mode
+                if mode_value == "word_highlight_fallback":
+                    self._last_subtitle_mode_used = SubtitleMode.WORD_HIGHLIGHT
+                else:
+                    self._last_subtitle_mode_used = self._subtitle_mode
         if task_type == TaskType.GENERATE_SRT:
             frame_value = payload.get("preview_frame_path")
             self._preview_frame_path = Path(frame_value) if frame_value else None
@@ -1818,7 +1827,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._preview_clip_start_seconds = payload.get("preview_clip_start_seconds")
             self._preview_clip_duration_seconds = payload.get("preview_clip_duration_seconds")
             self._invalidate_preview_playback()
-            if payload.get("word_highlight_error"):
+            if payload.get("word_highlight_error") and not self._last_word_highlight_fallback:
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Word highlight unavailable",
@@ -2361,6 +2370,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_output_video = None
         self._last_alignment_path = None
         self._last_subtitle_mode_used = self._subtitle_mode
+        self._last_word_highlight_fallback = False
         self._subtitles_reviewed = False
         self._output_dir = None
         self._progress_controller = None
