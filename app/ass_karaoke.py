@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from app.karaoke_utils import HIGHLIGHT_COLOR_RGB, build_token_durations_cs, iter_token_spans
+from app.karaoke_utils import build_token_durations_cs, highlight_rgb_from_hex, is_rtl_text, iter_token_spans
 from app.srt_utils import SrtCue
 from app.subtitle_style import DEFAULT_FONT_NAME, SubtitleStyle, get_box_alpha_byte
 
@@ -30,12 +30,18 @@ def _format_ass_color(rgb: tuple[int, int, int], alpha: int = 0) -> str:
     return f"&H{alpha:02X}{b:02X}{g:02X}{r:02X}&"
 
 
-def _build_ass_header(style: SubtitleStyle) -> str:
-    outline = style.outline + style.box_padding if style.box_enabled else style.outline
+def _build_ass_header(
+    style: SubtitleStyle,
+    *,
+    highlight_rgb: tuple[int, int, int],
+    play_res_x: int,
+    play_res_y: int,
+) -> str:
+    outline = style.outline
     border_style = 3 if style.box_enabled else 1
     back_alpha = get_box_alpha_byte(style) if style.box_enabled else 255
     primary = _format_ass_color((255, 255, 255))
-    secondary = _format_ass_color(HIGHLIGHT_COLOR_RGB)
+    secondary = _format_ass_color(highlight_rgb)
     outline_color = _format_ass_color((0, 0, 0))
     back_color = _format_ass_color((0, 0, 0), back_alpha)
     style_line = (
@@ -61,8 +67,9 @@ def _build_ass_header(style: SubtitleStyle) -> str:
             "[Script Info]",
             "ScriptType: v4.00+",
             "Collisions: Normal",
-            "PlayResX: 1920",
-            "PlayResY: 1080",
+            f"PlayResX: {play_res_x}",
+            f"PlayResY: {play_res_y}",
+            "ScaledBorderAndShadow: yes",
             "Timer: 100.0000",
             "",
             "[V4+ Styles]",
@@ -93,8 +100,23 @@ def _build_karaoke_text(text: str, duration_seconds: float) -> str:
     return "".join(chunks)
 
 
-def build_karaoke_ass_text(cues: Iterable[SrtCue], style: SubtitleStyle) -> tuple[str, int]:
-    lines = [_build_ass_header(style)]
+def build_karaoke_ass_text(
+    cues: Iterable[SrtCue],
+    style: SubtitleStyle,
+    *,
+    highlight_color: str,
+    play_res_x: int,
+    play_res_y: int,
+) -> tuple[str, int]:
+    highlight_rgb = highlight_rgb_from_hex(highlight_color)
+    lines = [
+        _build_ass_header(
+            style,
+            highlight_rgb=highlight_rgb,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y,
+        )
+    ]
     dialogue_count = 0
     for cue in cues:
         text = cue.text.strip()
@@ -104,6 +126,8 @@ def build_karaoke_ass_text(cues: Iterable[SrtCue], style: SubtitleStyle) -> tupl
         start = _format_ass_timestamp(cue.start_seconds)
         end = _format_ass_timestamp(cue.end_seconds)
         karaoke_text = _build_karaoke_text(text, duration)
+        if is_rtl_text(text):
+            karaoke_text = f"\u202B{karaoke_text}\u202C"
         lines.append(
             f"Dialogue: 0,{start},{end},Default,,0,0,{style.margin_v},,{karaoke_text}"
         )
@@ -111,7 +135,21 @@ def build_karaoke_ass_text(cues: Iterable[SrtCue], style: SubtitleStyle) -> tupl
     return "\n".join(lines) + "\n", dialogue_count
 
 
-def write_karaoke_ass(path: Path, cues: Iterable[SrtCue], style: SubtitleStyle) -> KaraokeAssResult:
-    content, count = build_karaoke_ass_text(cues, style)
+def write_karaoke_ass(
+    path: Path,
+    cues: Iterable[SrtCue],
+    style: SubtitleStyle,
+    *,
+    highlight_color: str,
+    play_res_x: int,
+    play_res_y: int,
+) -> KaraokeAssResult:
+    content, count = build_karaoke_ass_text(
+        cues,
+        style,
+        highlight_color=highlight_color,
+        play_res_x=play_res_x,
+        play_res_y=play_res_y,
+    )
     path.write_text(content, encoding="utf-8")
     return KaraokeAssResult(ass_path=path, dialogue_count=count)

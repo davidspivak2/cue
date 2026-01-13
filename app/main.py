@@ -42,7 +42,8 @@ from app.ui.widgets import (
     VideoCard,
 )
 from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
-from app.preview_overlay import PreviewSubtitleOverlay
+from app.karaoke_utils import DEFAULT_HIGHLIGHT_COLOR_HEX
+from app.preview_overlay import PreviewGraphicsView, PreviewSubtitleItem
 from app.preview_playback import PreviewPlaybackController
 from app.workers import (
     DiagnosticsSettings,
@@ -109,16 +110,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_play_request_pending = False
         self._preview_loading = False
         self._preview_karaoke_enabled = True
+        self._preview_karaoke_color = DEFAULT_HIGHLIGHT_COLOR_HEX
         self._preview_overlay_log_last = 0.0
+        self._karaoke_color_options: dict[str, str] = {}
         self.preview_karaoke_checkbox: Optional[QtWidgets.QCheckBox] = None
-        self.preview_subtitle_overlay: Optional[PreviewSubtitleOverlay] = None
+        self.preview_karaoke_color_combo: Optional[QtWidgets.QComboBox] = None
+        self.preview_subtitle_overlay: Optional[PreviewSubtitleItem] = None
         self._preview_overlay_timer = QtCore.QTimer(self)
         self._preview_overlay_timer.setInterval(50)
         self._preview_overlay_timer.timeout.connect(self._tick_preview_overlay)
         self._preview_playback_controller = PreviewPlaybackController(self._log, self)
         self.preview_media_player: Optional[QtMultimedia.QMediaPlayer] = None
         self.preview_audio_output: Optional[QtMultimedia.QAudioOutput] = None
-        self.preview_video_widget: Optional[QtMultimediaWidgets.QVideoWidget] = None
+        self.preview_graphics_view: Optional[PreviewGraphicsView] = None
+        self.preview_video_item: Optional[QtMultimediaWidgets.QGraphicsVideoItem] = None
+        self.preview_scene: Optional[QtWidgets.QGraphicsScene] = None
         self.preview_stack: Optional[QtWidgets.QStackedWidget] = None
         self.preview_play_button: Optional[QtWidgets.QPushButton] = None
         self.preview_stop_button: Optional[QtWidgets.QPushButton] = None
@@ -136,6 +142,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_render_timer.timeout.connect(self._refresh_preview_with_style)
         self._config = self._load_config()
         self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
+        self._preview_karaoke_color = self._load_preview_karaoke_color()
         self._preview_karaoke_enabled = self._load_preview_karaoke_enabled()
         self._subtitle_style_preset, self._subtitle_style_custom = (
             self._load_subtitle_style()
@@ -387,20 +394,31 @@ class MainWindow(QtWidgets.QMainWindow):
         still_layout.setContentsMargins(0, 0, 0, 0)
         still_layout.addWidget(self.preview_image_label)
 
-        self.preview_video_widget = QtMultimediaWidgets.QVideoWidget()
-        self.preview_subtitle_overlay = PreviewSubtitleOverlay()
+        self.preview_graphics_view = PreviewGraphicsView()
+        self.preview_scene = QtWidgets.QGraphicsScene()
+        self.preview_video_item = QtMultimediaWidgets.QGraphicsVideoItem()
+        self.preview_subtitle_overlay = PreviewSubtitleItem()
         video_page = QtWidgets.QWidget()
         video_layout = QtWidgets.QVBoxLayout(video_page)
         video_layout.setContentsMargins(0, 0, 0, 0)
-        video_container = QtWidgets.QWidget()
-        video_container_layout = QtWidgets.QGridLayout(video_container)
-        video_container_layout.setContentsMargins(0, 0, 0, 0)
-        video_container_layout.addWidget(self.preview_video_widget, 0, 0)
-        if self.preview_subtitle_overlay:
+        if self.preview_graphics_view and self.preview_scene:
+            self.preview_graphics_view.setScene(self.preview_scene)
+            self.preview_graphics_view.setFrameShape(QtWidgets.QFrame.NoFrame)
+            self.preview_graphics_view.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            self.preview_graphics_view.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            self.preview_graphics_view.setAlignment(QtCore.Qt.AlignCenter)
+            self.preview_graphics_view.setStyleSheet("background: black;")
+            self.preview_graphics_view.setRenderHint(QtGui.QPainter.Antialiasing)
+            self.preview_graphics_view.setRenderHint(QtGui.QPainter.TextAntialiasing)
+            self.preview_graphics_view.resized.connect(self._on_preview_graphics_resized)
+            video_layout.addWidget(self.preview_graphics_view)
+        if self.preview_scene and self.preview_video_item:
+            self.preview_scene.addItem(self.preview_video_item)
+        if self.preview_scene and self.preview_subtitle_overlay:
             self.preview_subtitle_overlay.setVisible(False)
             self.preview_subtitle_overlay.set_logger(self._log)
-            video_container_layout.addWidget(self.preview_subtitle_overlay, 0, 0)
-        video_layout.addWidget(video_container)
+            self.preview_subtitle_overlay.setZValue(1)
+            self.preview_scene.addItem(self.preview_subtitle_overlay)
 
         self.preview_stack.addWidget(still_page)
         self.preview_stack.addWidget(video_page)
@@ -409,7 +427,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_media_player = QtMultimedia.QMediaPlayer(self)
         self.preview_audio_output = QtMultimedia.QAudioOutput(self)
         self.preview_media_player.setAudioOutput(self.preview_audio_output)
-        self.preview_media_player.setVideoOutput(self.preview_video_widget)
+        if self.preview_video_item:
+            self.preview_media_player.setVideoOutput(self.preview_video_item)
         self.preview_media_player.playbackStateChanged.connect(
             self._on_preview_playback_state_changed
         )
@@ -431,6 +450,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_time_label.setObjectName("PreviewTimeLabel")
         self.preview_karaoke_checkbox = QtWidgets.QCheckBox("Karaoke highlight")
         self.preview_karaoke_checkbox.setChecked(self._preview_karaoke_enabled)
+        self.preview_karaoke_color_combo = QtWidgets.QComboBox()
+        self._populate_karaoke_color_combo()
 
         self.preview_play_button.clicked.connect(self._on_preview_play_clicked)
         self.preview_stop_button.clicked.connect(self._on_preview_stop_clicked)
@@ -438,12 +459,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_scrub_slider.sliderReleased.connect(self._on_preview_slider_released)
         self.preview_scrub_slider.sliderMoved.connect(self._on_preview_slider_moved)
         self.preview_karaoke_checkbox.toggled.connect(self._on_preview_karaoke_toggled)
+        if self.preview_karaoke_color_combo:
+            self.preview_karaoke_color_combo.currentIndexChanged.connect(
+                self._on_preview_karaoke_color_changed
+            )
 
         controls_layout.addWidget(self.preview_play_button)
         controls_layout.addWidget(self.preview_stop_button)
         controls_layout.addWidget(self.preview_scrub_slider, 1)
         controls_layout.addWidget(self.preview_time_label)
         controls_layout.addWidget(self.preview_karaoke_checkbox)
+        controls_layout.addWidget(QtWidgets.QLabel("Highlight color"))
+        controls_layout.addWidget(self.preview_karaoke_color_combo)
         preview_layout.addLayout(controls_layout)
 
         self.preview_status_label = QtWidgets.QLabel("")
@@ -472,6 +499,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_preview_controls_enabled(False)
         self._connect_preview_playback_controller()
         self._update_preview_overlay_style()
+        if self.preview_graphics_view:
+            self._on_preview_graphics_resized(self.preview_graphics_view.viewport().size())
         return page
 
 
@@ -818,6 +847,31 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         style = self._resolve_effective_subtitle_style()
         self.preview_subtitle_overlay.set_style(style)
+        self.preview_subtitle_overlay.set_highlight_color(self._preview_karaoke_color)
+
+    def _populate_karaoke_color_combo(self) -> None:
+        if not self.preview_karaoke_color_combo:
+            return
+        self.preview_karaoke_color_combo.blockSignals(True)
+        self.preview_karaoke_color_combo.clear()
+        self._karaoke_color_options = {
+            "Yellow": "#FFD666",
+            "Green": "#7CFF6B",
+            "Cyan": "#6BE3FF",
+            "Pink": "#FF8AD8",
+            "Orange": "#FFB347",
+            "Purple": "#B28DFF",
+        }
+        for name in self._karaoke_color_options:
+            self.preview_karaoke_color_combo.addItem(name)
+        for name, value in self._karaoke_color_options.items():
+            if value.lower() == self._preview_karaoke_color.lower():
+                self.preview_karaoke_color_combo.setCurrentText(name)
+                break
+        else:
+            self.preview_karaoke_color_combo.addItem("Custom")
+            self.preview_karaoke_color_combo.setCurrentText("Custom")
+        self.preview_karaoke_color_combo.blockSignals(False)
 
     def _load_preview_overlay_cues(self) -> None:
         if not self.preview_subtitle_overlay or not self._preview_timestamp_seconds:
@@ -849,6 +903,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
             )
         self.preview_subtitle_overlay.set_cues(shifted)
+        if shifted:
+            first = shifted[0]
+            self._log(
+                "Preview overlay cues: "
+                f"count={len(shifted)} first_start={first.start_seconds:.3f} "
+                f"first_end={first.end_seconds:.3f}"
+            )
+        else:
+            self._log("Preview overlay cues: count=0")
 
     def _prepare_preview_overlay(self) -> None:
         if not self.preview_subtitle_overlay:
@@ -857,6 +920,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_preview_overlay_style()
         self._load_preview_overlay_cues()
         self.preview_subtitle_overlay.set_karaoke_enabled(self._preview_karaoke_enabled)
+        self.preview_subtitle_overlay.set_highlight_color(self._preview_karaoke_color)
         if self.preview_media_player:
             self.preview_subtitle_overlay.update_position(
                 self.preview_media_player.position() / 1000.0
@@ -1204,6 +1268,23 @@ class MainWindow(QtWidgets.QMainWindow):
         preview_config["karaoke_highlight_enabled"] = checked
         self._save_config()
 
+    def _on_preview_karaoke_color_changed(self) -> None:
+        if not self.preview_karaoke_color_combo:
+            return
+        selection = self.preview_karaoke_color_combo.currentText()
+        color = self._karaoke_color_options.get(selection)
+        if not color:
+            return
+        self._preview_karaoke_color = color
+        if self.preview_subtitle_overlay:
+            self.preview_subtitle_overlay.set_highlight_color(color)
+        preview_config = self._config.get("preview")
+        if not isinstance(preview_config, dict):
+            preview_config = {}
+            self._config["preview"] = preview_config
+        preview_config["karaoke_highlight_color"] = color
+        self._save_config()
+
     def _log_preview_play_request(self) -> None:
         if not self._preview_timestamp_seconds:
             return
@@ -1213,9 +1294,15 @@ class MainWindow(QtWidgets.QMainWindow):
             else max(0.0, self._preview_timestamp_seconds - 1.0)
         )
         clip_duration = self._preview_clip_duration_seconds or 15.0
+        media_path = (
+            str(self._preview_clip_path)
+            if self._preview_clip_path is not None
+            else str(self._video_path) if self._video_path else "unknown"
+        )
         self._log(
             "Preview play request: "
-            f"start={clip_start:.3f}s duration={clip_duration:.3f}s"
+            f"start={clip_start:.3f}s duration={clip_duration:.3f}s "
+            f"media={media_path}"
         )
         self._log(
             "Preview karaoke highlight: "
@@ -1240,6 +1327,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.preview_media_player:
             return
         self._update_preview_overlay_position(self.preview_media_player.position())
+
+    def _on_preview_graphics_resized(self, size: QtCore.QSize) -> None:
+        if not self.preview_scene or not self.preview_video_item or not self.preview_subtitle_overlay:
+            return
+        rect = QtCore.QRectF(0, 0, size.width(), size.height())
+        self.preview_scene.setSceneRect(rect)
+        self.preview_video_item.setSize(QtCore.QSizeF(rect.size()))
+        self.preview_subtitle_overlay.set_viewport_rect(rect)
 
     def _on_preview_play_clicked(self) -> None:
         if not self.preview_media_player:
@@ -1312,6 +1407,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.preview_subtitle_overlay.setVisible(playback)
             if not playback:
                 self.preview_subtitle_overlay.clear()
+        if playback and self.preview_graphics_view:
+            self._on_preview_graphics_resized(self.preview_graphics_view.viewport().size())
 
     def _on_preview_clip_ready(self, path: str) -> None:
         self._preview_clip_path = Path(path)
@@ -1609,6 +1706,7 @@ class MainWindow(QtWidgets.QMainWindow):
             None,
             style,
             karaoke_highlight_enabled=self._preview_karaoke_enabled,
+            karaoke_highlight_color=self._preview_karaoke_color,
         )
 
     def _start_worker(
@@ -1620,6 +1718,7 @@ class MainWindow(QtWidgets.QMainWindow):
         subtitle_style: Optional[SubtitleStyle],
         *,
         karaoke_highlight_enabled: bool = False,
+        karaoke_highlight_color: str = "",
     ) -> None:
         if self._worker_thread:
             QtWidgets.QMessageBox.warning(self, "Please wait", "Another task is running.")
@@ -1637,6 +1736,7 @@ class MainWindow(QtWidgets.QMainWindow):
             transcription_settings=transcription_settings,
             subtitle_style=subtitle_style,
             karaoke_highlight_enabled=karaoke_highlight_enabled,
+            karaoke_highlight_color=karaoke_highlight_color,
             diagnostics_settings=self._diagnostics_settings,
             session_log_path=self._log_path,
         )
@@ -2355,6 +2455,14 @@ class MainWindow(QtWidgets.QMainWindow):
             if isinstance(value, bool):
                 return value
         return True
+
+    def _load_preview_karaoke_color(self) -> str:
+        preview = self._config.get("preview")
+        if isinstance(preview, dict):
+            value = preview.get("karaoke_highlight_color")
+            if isinstance(value, str) and value:
+                return value
+        return DEFAULT_HIGHLIGHT_COLOR_HEX
 
     def _resolve_subtitle_edit_path(self) -> Optional[Path]:
         if self._subtitle_edit_path and self._subtitle_edit_path.exists():

@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-import re
 from typing import Callable, Optional, Sequence
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from app.karaoke_utils import HIGHLIGHT_COLOR_RGB, build_highlight_spans
+from app.karaoke_utils import DEFAULT_HIGHLIGHT_COLOR_HEX, build_highlight_spans, highlight_rgb_from_hex, is_rtl_text
 from app.subtitle_style import DEFAULT_FONT_NAME, SubtitleStyle
 from app.srt_utils import SrtCue
 
-_RTL_RE = re.compile(r"[\u0590-\u08FF]")
+
+class PreviewGraphicsView(QtWidgets.QGraphicsView):
+    resized = QtCore.Signal(QtCore.QSize)
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.resized.emit(event.size())
 
 
-def _is_rtl_text(text: str) -> bool:
-    return bool(_RTL_RE.search(text))
-
-
-class PreviewSubtitleOverlay(QtWidgets.QWidget):
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
-        super().__init__(parent)
+class PreviewSubtitleItem(QtWidgets.QGraphicsObject):
+    def __init__(self) -> None:
+        super().__init__()
         self._style: Optional[SubtitleStyle] = None
         self._cues: list[SrtCue] = []
         self._cue_starts: list[float] = []
@@ -27,15 +28,28 @@ class PreviewSubtitleOverlay(QtWidgets.QWidget):
         self._active_cue_index: Optional[int] = None
         self._position_seconds = 0.0
         self._karaoke_enabled = True
-        self._highlight_color = QtGui.QColor(*HIGHLIGHT_COLOR_RGB)
+        self._highlight_color = QtGui.QColor(*highlight_rgb_from_hex(DEFAULT_HIGHLIGHT_COLOR_HEX))
         self._logger: Optional[Callable[[str], None]] = None
         self._karaoke_fallback_logged = False
-        self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
-        self.setAttribute(QtCore.Qt.WA_NoSystemBackground, True)
-        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        self._viewport_rect = QtCore.QRectF()
+
+    def boundingRect(self) -> QtCore.QRectF:  # noqa: N802
+        return self._viewport_rect
+
+    def set_viewport_rect(self, rect: QtCore.QRectF) -> None:
+        if rect == self._viewport_rect:
+            return
+        self.prepareGeometryChange()
+        self._viewport_rect = rect
+        self.update()
 
     def set_style(self, style: SubtitleStyle) -> None:
         self._style = style
+        self.update()
+
+    def set_highlight_color(self, hex_color: str) -> None:
+        rgb = highlight_rgb_from_hex(hex_color)
+        self._highlight_color = QtGui.QColor(*rgb)
         self.update()
 
     def set_logger(self, logger: Callable[[str], None]) -> None:
@@ -84,15 +98,15 @@ class PreviewSubtitleOverlay(QtWidgets.QWidget):
             self._logger(message)
         self._karaoke_fallback_logged = True
 
-    def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # noqa: N802
-        del event
+    def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionGraphicsItem, widget: Optional[QtWidgets.QWidget] = None) -> None:  # noqa: N802
+        del option
+        del widget
         if not self._active_cue or not self._style:
             return
         text = self._active_cue.text.strip()
         if not text:
             return
 
-        painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
 
@@ -121,13 +135,16 @@ class PreviewSubtitleOverlay(QtWidgets.QWidget):
         try:
             duration = max(self._active_cue.end_seconds - self._active_cue.start_seconds, 0.0)
             if duration <= 0:
+                self._log_karaoke_fallback("Karaoke highlight skipped: non-positive duration")
                 return
             progress = (self._position_seconds - self._active_cue.start_seconds) / duration
             highlight_spans = build_highlight_spans(text, progress)
             if not highlight_spans:
+                self._log_karaoke_fallback("Karaoke highlight skipped: no highlight spans")
                 return
             highlight_layout = self._build_highlight_layout(text, font, layout, highlight_spans)
             if not highlight_layout:
+                self._log_karaoke_fallback("Karaoke highlight skipped: failed to build layout")
                 return
             painter.save()
             painter.setPen(QtCore.Qt.NoPen)
@@ -156,9 +173,9 @@ class PreviewSubtitleOverlay(QtWidgets.QWidget):
         option.setAlignment(QtCore.Qt.AlignHCenter)
         option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
         option.setTextDirection(
-            QtCore.Qt.RightToLeft if _is_rtl_text(text) else QtCore.Qt.LeftToRight
+            QtCore.Qt.RightToLeft if is_rtl_text(text) else QtCore.Qt.LeftToRight
         )
-        max_width = max(0.0, self.width() * 0.9)
+        max_width = max(0.0, self._viewport_rect.width() * 0.9)
         layout = QtGui.QTextLayout(text, font)
         layout.setTextOption(option)
         layout.beginLayout()
@@ -181,8 +198,8 @@ class PreviewSubtitleOverlay(QtWidgets.QWidget):
         layout.endLayout()
         if not lines:
             return None
-        origin_x = (self.width() - max_width) / 2 if max_width > 0 else 0.0
-        origin_y = self.height() - self._style.margin_v - height
+        origin_x = self._viewport_rect.x() + (self._viewport_rect.width() - max_width) / 2
+        origin_y = self._viewport_rect.y() + self._viewport_rect.height() - self._style.margin_v - height
         origin = QtCore.QPointF(origin_x, origin_y)
         left = origin_x + (min_x or 0.0)
         text_rect = QtCore.QRectF(left, origin_y, max_line_width, height)
@@ -250,7 +267,7 @@ class PreviewSubtitleOverlay(QtWidgets.QWidget):
         layout.setFormats(format_ranges)
         layout.beginLayout()
         height = 0.0
-        max_width = max(0.0, self.width() * 0.9)
+        max_width = max(0.0, self._viewport_rect.width() * 0.9)
         while True:
             line = layout.createLine()
             if not line.isValid():

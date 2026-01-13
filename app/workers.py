@@ -35,8 +35,9 @@ from .subtitle_style import (
     to_ffmpeg_force_style,
     to_preview_params,
 )
-from .paths import get_models_dir, get_preview_frames_dir
+from .paths import get_ass_dir, get_models_dir, get_preview_frames_dir
 from .srt_utils import parse_srt_file, select_preview_moment
+from .karaoke_utils import DEFAULT_HIGHLIGHT_COLOR_HEX
 from .ass_karaoke import write_karaoke_ass
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
@@ -102,6 +103,7 @@ class Worker(QtCore.QObject):
         transcription_settings: Optional[TranscriptionSettings] = None,
         subtitle_style: Optional[SubtitleStyle] = None,
         karaoke_highlight_enabled: bool = False,
+        karaoke_highlight_color: str = "",
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
     ) -> None:
@@ -114,6 +116,7 @@ class Worker(QtCore.QObject):
         self.transcription_settings = transcription_settings
         self.subtitle_style = subtitle_style
         self.karaoke_highlight_enabled = karaoke_highlight_enabled
+        self.karaoke_highlight_color = karaoke_highlight_color
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
         self._cancelled = threading.Event()
@@ -489,78 +492,97 @@ class Worker(QtCore.QObject):
         )
         use_karaoke = self.karaoke_highlight_enabled
         filter_chain = None
-        if use_karaoke:
-            cues = parse_srt_file(srt_path)
-            if cues:
-                ass_path = self.output_dir / f"{self.video_path.stem}_karaoke.ass"
-                result = write_karaoke_ass(ass_path, cues, settings)
-                self.signals.log.emit("Export karaoke highlight: on", True)
-                self.signals.log.emit(f"Karaoke ASS file: {result.ass_path}", True)
-                filter_chain = build_ass_filter(ass_path)
-            else:
-                self.signals.log.emit(
-                    "Warning: karaoke export enabled but no cues found; falling back.",
-                    True,
-                )
-                use_karaoke = False
-        if not use_karaoke:
-            self.signals.log.emit("Export karaoke highlight: off", True)
-            filter_chain = build_subtitles_filter(
-                srt_path,
-                force_style=force_style,
-            )
-
-        base_command = [
-            str(ffmpeg_path),
-            "-y",
-            "-hide_banner",
-            "-i",
-            str(self.video_path),
-            "-progress",
-            "pipe:1",
-            "-nostats",
-            "-vf",
-            filter_chain,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "18",
-            "-movflags",
-            "+faststart",
-        ]
-
-        self.signals.log.emit("Adding subtitles to the video...", True)
-        self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
-        copy_command = base_command + ["-c:a", "copy", str(output_path)]
-        self._burn_in_command = subprocess.list2cmdline(copy_command)
-        self._burn_in_audio_mode = "copy"
-        burn_start = time.monotonic()
+        ass_path: Optional[Path] = None
         try:
+            if use_karaoke:
+                cues = parse_srt_file(srt_path)
+                if cues:
+                    ass_dir = get_ass_dir()
+                    ass_path = ass_dir / f"{self.video_path.stem}_{int(time.time())}.ass"
+                    resolution = self._probe_video_resolution(self.video_path)
+                    highlight_color = self.karaoke_highlight_color or DEFAULT_HIGHLIGHT_COLOR_HEX
+                    result = write_karaoke_ass(
+                        ass_path,
+                        cues,
+                        settings,
+                        highlight_color=highlight_color,
+                        play_res_x=resolution[0],
+                        play_res_y=resolution[1],
+                    )
+                    self.signals.log.emit("Export karaoke highlight: on", True)
+                    self.signals.log.emit(f"Karaoke ASS file: {result.ass_path}", True)
+                    filter_chain = build_ass_filter(ass_path)
+                else:
+                    self.signals.log.emit(
+                        "Warning: karaoke export enabled but no cues found; falling back.",
+                        True,
+                    )
+                    use_karaoke = False
+            if not use_karaoke:
+                self.signals.log.emit("Export karaoke highlight: off", True)
+                filter_chain = build_subtitles_filter(
+                    srt_path,
+                    force_style=force_style,
+                )
+
+            base_command = [
+                str(ffmpeg_path),
+                "-y",
+                "-hide_banner",
+                "-i",
+                str(self.video_path),
+                "-progress",
+                "pipe:1",
+                "-nostats",
+                "-vf",
+                filter_chain,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "18",
+                "-movflags",
+                "+faststart",
+            ]
+
+            self.signals.log.emit("Adding subtitles to the video...", True)
+            self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
+            copy_command = base_command + ["-c:a", "copy", str(output_path)]
+            self._burn_in_command = subprocess.list2cmdline(copy_command)
+            self._burn_in_audio_mode = "copy"
+            burn_start = time.monotonic()
+            try:
+                self._run_ffmpeg_with_progress(
+                    copy_command,
+                    video_duration,
+                    ProgressStep.EXPORT,
+                    "Encoding",
+                )
+                self._burn_in_seconds = time.monotonic() - burn_start
+                return {"output_path": str(output_path)}
+            except RuntimeError as exc:
+                self.signals.log.emit("Audio copy failed, trying another format...", True)
+                self.signals.log.emit(str(exc), True)
+
+            aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
+            self._burn_in_command = subprocess.list2cmdline(aac_command)
+            self._burn_in_audio_mode = "aac"
             self._run_ffmpeg_with_progress(
-                copy_command,
+                aac_command,
                 video_duration,
                 ProgressStep.EXPORT,
                 "Encoding",
             )
             self._burn_in_seconds = time.monotonic() - burn_start
             return {"output_path": str(output_path)}
-        except RuntimeError as exc:
-            self.signals.log.emit("Audio copy failed, trying another format...", True)
-            self.signals.log.emit(str(exc), True)
-
-        aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
-        self._burn_in_command = subprocess.list2cmdline(aac_command)
-        self._burn_in_audio_mode = "aac"
-        self._run_ffmpeg_with_progress(
-            aac_command,
-            video_duration,
-            ProgressStep.EXPORT,
-            "Encoding",
-        )
-        self._burn_in_seconds = time.monotonic() - burn_start
-        return {"output_path": str(output_path)}
+        finally:
+            if ass_path and ass_path.exists():
+                try:
+                    ass_path.unlink()
+                    self.signals.log.emit(f"Deleted temp ASS: {ass_path}", True)
+                except OSError as exc:
+                    self.signals.log.emit(f"Warning: failed to delete ASS ({ass_path}): {exc}", True)
 
     def _run_ffmpeg(self, command: list[str]) -> None:
         if self._cancelled.is_set():
@@ -1380,6 +1402,17 @@ class Worker(QtCore.QObject):
             self._transcribe_estimator_thread.join(timeout=1)
         self._transcribe_estimator_stop = None
         self._transcribe_estimator_thread = None
+
+    def _probe_video_resolution(self, path: Path) -> tuple[int, int]:
+        ffprobe_json = get_ffprobe_json(path)
+        if ffprobe_json:
+            for stream in ffprobe_json.get("streams", []):
+                if stream.get("codec_type") == "video":
+                    width = stream.get("width")
+                    height = stream.get("height")
+                    if isinstance(width, int) and isinstance(height, int):
+                        return width, height
+        return 1920, 1080
 
     def _probe_duration(self, path: Path) -> Optional[float]:
         try:

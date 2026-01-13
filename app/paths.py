@@ -45,3 +45,9 @@ def get_preview_clips_dir() -> Path:
     path = get_cache_dir() / "previews"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_ass_dir() -> Path:
+    path = get_cache_dir() / "ass"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
