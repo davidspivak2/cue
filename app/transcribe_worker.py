@@ -329,28 +329,62 @@ def _run_whisperx_alignment(
     device: str,
     compute_type: str,
     vad_method: str,
-) -> dict[str, object]:
-    import whisperx
+) -> Optional[dict[str, object]]:
+    try:
+        import whisperx
+    except Exception as exc:  # noqa: BLE001
+        _print(f"WHISPERX_ERROR import failed: {exc}")
+        return None
 
+    version = getattr(whisperx, "__version__", "n/a")
+    _print(f"WHISPERX version={version}")
     _print(f"WHISPERX model={model_name} device={device} compute_type={compute_type}")
     _print(f"WHISPERX vad_method={vad_method}")
-    model = whisperx.load_model(
-        model_name,
-        device,
-        compute_type=compute_type,
-        language=None if language == "auto" else language,
-        vad_method=vad_method,
-    )
-    result = model.transcribe(str(wav_path))
-    language_code = result.get("language", language if language != "auto" else "en")
-    align_model, metadata = whisperx.load_align_model(language_code=language_code, device=device)
-    aligned = whisperx.align(
-        result.get("segments", []),
-        align_model,
-        metadata,
-        str(wav_path),
-        device,
-    )
+    try:
+        _print("WHISPERX load_model with vad_method")
+        model = whisperx.load_model(
+            model_name,
+            device,
+            compute_type=compute_type,
+            language=None if language == "auto" else language,
+            vad_method=vad_method,
+        )
+    except TypeError as exc:
+        message = str(exc)
+        if "vad_method" in message and "unexpected keyword argument" in message:
+            _print("WHISPERX load_model without vad_method (fallback)")
+            try:
+                model = whisperx.load_model(
+                    model_name,
+                    device,
+                    compute_type=compute_type,
+                    language=None if language == "auto" else language,
+                )
+            except Exception as inner_exc:  # noqa: BLE001
+                _print(f"WHISPERX_ERROR load_model failed: {inner_exc}")
+                return None
+        else:
+            _print(f"WHISPERX_ERROR load_model failed: {exc}")
+            return None
+    except Exception as exc:  # noqa: BLE001
+        _print(f"WHISPERX_ERROR load_model failed: {exc}")
+        return None
+    try:
+        result = model.transcribe(str(wav_path))
+        language_code = result.get("language", language if language != "auto" else "en")
+        align_model, metadata = whisperx.load_align_model(
+            language_code=language_code, device=device
+        )
+        aligned = whisperx.align(
+            result.get("segments", []),
+            align_model,
+            metadata,
+            str(wav_path),
+            device,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _print(f"WHISPERX_ERROR alignment failed: {exc}")
+        return None
     return {
         "segments": aligned.get("segments", []),
         "language": language_code,
@@ -653,11 +687,14 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     compute_type=compute_type_name,
                     vad_method=vad_method,
                 )
-                segments = alignment_payload.get("segments", [])
-                alignment_path.write_text(
-                    json.dumps({"segments": segments}, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                if alignment_payload:
+                    segments = alignment_payload.get("segments", [])
+                    alignment_path.write_text(
+                        json.dumps({"segments": segments}, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                else:
+                    segments = []
             if segments:
                 _print(f"ALIGNMENT_JSON {alignment_path}")
                 _print("SUBTITLE_MODE_USED word_highlight")
