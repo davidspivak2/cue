@@ -13,6 +13,7 @@ import faulthandler
 import logging
 import os
 import platform
+import subprocess
 import sys
 import time
 from enum import Enum
@@ -25,7 +26,9 @@ from app.ffmpeg_utils import (
     ensure_ffmpeg_available,
     extract_subtitled_frame,
     get_ffmpeg_missing_message,
+    get_video_resolution,
     get_runtime_mode,
+    get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
 from app.progress import ProgressController, ProgressStep
@@ -43,6 +46,7 @@ from app.ui.widgets import (
 )
 from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.preview_playback import PreviewPlaybackController
+from app.word_highlight_ass import build_ass_text
 from app.workers import (
     DiagnosticsSettings,
     TaskType,
@@ -75,6 +79,11 @@ class TranscriptionQuality(Enum):
     FAST = "fast"
     ACCURATE = "accurate"
     ULTRA = "ultra"
+
+
+class SubtitleMode(Enum):
+    STATIC = "static"
+    WORD_HIGHLIGHT = "word_highlight"
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -131,6 +140,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_subtitle_style()
         )
         self._subtitle_style_panel_open = False
+        self._subtitle_mode = self._load_subtitle_mode()
+        self._highlight_color = self._load_highlight_color()
+        self._save_ass_next_to_video = self._load_save_ass_next_to_video()
+        self._last_alignment_path: Optional[Path] = None
+        self._last_subtitle_mode_used: SubtitleMode = self._subtitle_mode
         self._save_policy = self._load_save_policy()
         self._fixed_output_dir = self._get_config_path("save_folder")
         self._transcription_quality = self._load_transcription_quality()
@@ -281,6 +295,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings_button.clicked.connect(self._show_settings_page)
         self.settings_back_button.clicked.connect(self._show_home_page)
         self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
+        self.subtitle_mode_group.buttonToggled.connect(self._on_subtitle_mode_toggled)
+        self.highlight_color_combo.currentIndexChanged.connect(
+            self._on_highlight_color_changed
+        )
+        self.save_ass_checkbox.toggled.connect(self._on_save_ass_toggled)
         self.save_policy_group.buttonToggled.connect(self._on_save_policy_toggled)
         self.browse_button.clicked.connect(self._browse_fixed_output_dir)
         self.punctuation_rescue_checkbox.toggled.connect(
@@ -816,6 +835,11 @@ class MainWindow(QtWidgets.QMainWindow):
         srt_path = self._resolve_preview_srt_path()
         if not srt_path or not self._preview_timestamp_seconds or not self._video_path:
             return None
+        if (
+            self._last_subtitle_mode_used == SubtitleMode.WORD_HIGHLIGHT
+            and self._last_alignment_path
+        ):
+            return self._render_preview_frame_ass(style)
         try:
             srt_mtime = int(srt_path.stat().st_mtime)
         except FileNotFoundError:
@@ -853,6 +877,112 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         return output_path if success else None
 
+    def _render_preview_frame_ass(self, style: SubtitleStyle) -> Optional[Path]:
+        if not self._preview_timestamp_seconds or not self._video_path:
+            return None
+        if not self._last_alignment_path or not self._last_alignment_path.exists():
+            return None
+        resolution = get_video_resolution(self._video_path)
+        if not resolution:
+            self._log("Warning: unable to read video resolution for ASS preview.", True)
+            return None
+        play_res_x, play_res_y = resolution
+        ass_text = self._build_word_highlight_ass_text(style, play_res_x, play_res_y)
+        if not ass_text:
+            return None
+        timestamp_ms = int(round(self._preview_timestamp_seconds * 1000))
+        preview_width = 1280
+        style_params = to_preview_params(style)
+        ass_hash = hashlib.sha1(ass_text.encode("utf-8")).hexdigest()
+        cache_key = (
+            f"{self._video_path.resolve()}|{timestamp_ms}|"
+            f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
+            f"{style_params['shadow']}|{style_params['margin_v']}|{style_params['box_enabled']}|"
+            f"{style_params['box_opacity']}|{style_params['box_padding']}|{preview_width}|"
+            f"{self._highlight_color}|{ass_hash}"
+        )
+        cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
+        output_path = get_preview_frames_dir() / cache_name
+        if output_path.exists() and output_path.stat().st_size > 0:
+            return output_path
+        try:
+            ffmpeg_path, _, _ = ensure_ffmpeg_available()
+        except FileNotFoundError:
+            return None
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        ass_path = output_path.with_suffix(".ass")
+        ass_path.write_text(ass_text, encoding="utf-8-sig")
+        filter_chain = (
+            f"ass={ass_path.name},"
+            f"scale='min({preview_width},iw)':-2:force_original_aspect_ratio=decrease"
+        )
+        self._log(f"Preview ASS filter: -vf \"{filter_chain}\"")
+        command = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-ss",
+            f"{self._preview_timestamp_seconds:.3f}",
+            "-i",
+            str(self._video_path),
+            "-frames:v",
+            "1",
+            "-vf",
+            filter_chain,
+            str(output_path),
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=str(output_path.parent),
+                **get_subprocess_kwargs(),
+            )
+        finally:
+            if ass_path.exists():
+                try:
+                    ass_path.unlink()
+                    self._log(f"Deleted preview ASS: {ass_path}")
+                except OSError:
+                    self._log(f"Warning: failed to delete preview ASS: {ass_path}")
+        if result.returncode != 0:
+            return None
+        return output_path if output_path.exists() else None
+
+    def _build_word_highlight_ass_text(
+        self,
+        style: SubtitleStyle,
+        play_res_x: int,
+        play_res_y: int,
+    ) -> Optional[str]:
+        if not self._last_alignment_path:
+            return None
+        try:
+            payload = json.loads(self._last_alignment_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            self._log(f"Alignment cache unreadable: {self._last_alignment_path}", True)
+            return None
+        segments = payload.get("segments") if isinstance(payload, dict) else None
+        if not isinstance(segments, list):
+            self._log(f"Alignment cache missing segments: {self._last_alignment_path}", True)
+            return None
+        word_count = sum(
+            len(segment.get("words", []) or []) for segment in segments if isinstance(segment, dict)
+        )
+        self._log(
+            f"Generating ASS (segments={len(segments)} words={word_count})",
+            True,
+        )
+        return build_ass_text(
+            segments,
+            style,
+            highlight_color=self._highlight_color,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y,
+        )
+
     def _build_settings_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
@@ -874,6 +1004,50 @@ class MainWindow(QtWidgets.QMainWindow):
         header_layout.addWidget(title)
         header_layout.addStretch()
         layout.addLayout(header_layout)
+
+        subtitle_mode_card = self._build_settings_section("Subtitle mode")
+        subtitle_mode_layout = subtitle_mode_card.layout()
+
+        subtitle_mode_grid = QtWidgets.QGridLayout()
+        subtitle_mode_grid.setColumnMinimumWidth(0, 170)
+        subtitle_mode_grid.setColumnMinimumWidth(1, 320)
+        subtitle_mode_grid.setColumnStretch(1, 1)
+        subtitle_mode_grid.setHorizontalSpacing(16)
+        subtitle_mode_grid.setVerticalSpacing(8)
+
+        self.subtitle_mode_group = QtWidgets.QButtonGroup()
+        self.subtitle_mode_static_radio = QtWidgets.QRadioButton("Static (SRT)")
+        self.subtitle_mode_word_radio = QtWidgets.QRadioButton("Word highlight (recommended)")
+        for radio in (self.subtitle_mode_static_radio, self.subtitle_mode_word_radio):
+            radio.setFixedHeight(36)
+            self.subtitle_mode_group.addButton(radio)
+
+        mode_layout = QtWidgets.QVBoxLayout()
+        mode_layout.setSpacing(8)
+        mode_layout.addWidget(self.subtitle_mode_static_radio)
+        mode_layout.addWidget(self.subtitle_mode_word_radio)
+
+        highlight_label = QtWidgets.QLabel("Highlight color")
+        self.highlight_color_combo = QtWidgets.QComboBox()
+        self.highlight_color_combo.setFixedHeight(36)
+        self.highlight_color_combo.setMinimumWidth(220)
+        self.highlight_color_combo.setMaximumWidth(260)
+        highlight_options = [
+            ("Yellow", "#FFFF00"),
+            ("Cyan", "#00FFFF"),
+            ("Green", "#00FF00"),
+            ("Orange", "#FFA500"),
+            ("Pink", "#FF69B4"),
+        ]
+        for label, hex_value in highlight_options:
+            self.highlight_color_combo.addItem(label, hex_value)
+
+        subtitle_mode_grid.addWidget(QtWidgets.QLabel(""), 0, 0)
+        subtitle_mode_grid.addLayout(mode_layout, 0, 1)
+        subtitle_mode_grid.addWidget(highlight_label, 1, 0)
+        subtitle_mode_grid.addWidget(self.highlight_color_combo, 1, 1)
+        subtitle_mode_layout.addLayout(subtitle_mode_grid)
+        layout.addWidget(subtitle_mode_card)
 
         performance_card = self._build_settings_section("Performance")
         performance_layout = performance_card.layout()
@@ -966,6 +1140,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         save_layout.addLayout(save_grid)
         layout.addWidget(save_card)
+
+        export_card = self._build_settings_section("Export")
+        export_layout = export_card.layout()
+        self.save_ass_checkbox = QtWidgets.QCheckBox(
+            "Also save .ass next to exported video"
+        )
+        export_layout.addWidget(self.save_ass_checkbox)
+        layout.addWidget(export_card)
 
         punctuation_card = self._build_settings_section("Punctuation")
         punctuation_layout = punctuation_card.layout()
@@ -1102,7 +1284,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_preview_controls_availability(self) -> None:
         if not self.preview_play_button:
             return
-        ready = bool(self._preview_timestamp_seconds and self._resolve_preview_srt_path())
+        if not self._preview_loading:
+            self.preview_play_button.setText(self._preview_play_label())
+        if self._last_subtitle_mode_used == SubtitleMode.WORD_HIGHLIGHT:
+            ready = bool(
+                self._preview_timestamp_seconds
+                and self._last_alignment_path
+                and self._last_alignment_path.exists()
+            )
+        else:
+            ready = bool(self._preview_timestamp_seconds and self._resolve_preview_srt_path())
         self.preview_play_button.setEnabled(ready and not self._preview_loading)
         if not ready and self.preview_stop_button and self.preview_scrub_slider:
             self.preview_stop_button.setEnabled(False)
@@ -1119,6 +1310,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_preview_status_message(self, message: str) -> None:
         if self.preview_status_label:
             self.preview_status_label.setText(message)
+
+    def _preview_play_label(self) -> str:
+        if self._last_subtitle_mode_used == SubtitleMode.WORD_HIGHLIGHT:
+            return "Play preview"
+        return "Play"
 
     def _on_preview_play_clicked(self) -> None:
         if not self.preview_media_player:
@@ -1140,19 +1336,43 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if not self._preview_timestamp_seconds or not self._video_path:
             return
+        style = self._resolve_effective_subtitle_style()
+        self._preview_play_request_pending = True
+        self._set_preview_status_message("")
+        if (
+            self._last_subtitle_mode_used == SubtitleMode.WORD_HIGHLIGHT
+            and self._last_alignment_path
+            and self._last_alignment_path.exists()
+        ):
+            resolution = get_video_resolution(self._video_path)
+            if not resolution:
+                self._set_preview_status_message("Preview unavailable.")
+                return
+            play_res_x, play_res_y = resolution
+            ass_text = self._build_word_highlight_ass_text(style, play_res_x, play_res_y)
+            if not ass_text:
+                self._set_preview_status_message("Preview unavailable.")
+                return
+            ass_hash = hashlib.sha1(ass_text.encode("utf-8")).hexdigest()
+            self._preview_playback_controller.request_clip(
+                video_path=self._video_path,
+                anchor_seconds=self._preview_timestamp_seconds,
+                clip_start_seconds=self._preview_clip_start_seconds,
+                clip_duration_seconds=self._preview_clip_duration_seconds,
+                ass_text=ass_text,
+                ass_hash=ass_hash,
+            )
+            return
         srt_path = self._resolve_preview_srt_path()
         if not srt_path:
             return
-        style = self._resolve_effective_subtitle_style()
         force_style = to_ffmpeg_force_style(style)
-        self._preview_play_request_pending = True
-        self._set_preview_status_message("")
         self._preview_playback_controller.request_clip(
             video_path=self._video_path,
-            srt_path=srt_path,
             anchor_seconds=self._preview_timestamp_seconds,
             clip_start_seconds=self._preview_clip_start_seconds,
             clip_duration_seconds=self._preview_clip_duration_seconds,
+            srt_path=srt_path,
             force_style=force_style,
         )
 
@@ -1212,7 +1432,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if loading:
                 self.preview_play_button.setText("Loading…")
             else:
-                self.preview_play_button.setText("Play")
+                self.preview_play_button.setText(self._preview_play_label())
 
     def _on_preview_playback_state_changed(
         self, state: QtMultimedia.QMediaPlayer.PlaybackState
@@ -1223,7 +1443,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.preview_play_button.setText("Pause")
             self._set_preview_controls_enabled(True)
         else:
-            self.preview_play_button.setText("Play")
+            self.preview_play_button.setText(self._preview_play_label())
 
     def _on_preview_media_status_changed(
         self, status: QtMultimedia.QMediaPlayer.MediaStatus
@@ -1404,6 +1624,10 @@ class MainWindow(QtWidgets.QMainWindow):
             None,
             settings,
             style,
+            subtitle_mode=self._subtitle_mode,
+            highlight_color=self._highlight_color,
+            save_ass_next_to_video=self._save_ass_next_to_video,
+            alignment_cache_path=None,
         )
 
     def _on_review(self) -> None:
@@ -1466,7 +1690,28 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         style = self._resolve_effective_subtitle_style()
-        self._start_worker(TaskType.BURN_IN, self._video_path, srt_path, None, style)
+        subtitle_mode = self._last_subtitle_mode_used
+        alignment_path = (
+            self._last_alignment_path if subtitle_mode == SubtitleMode.WORD_HIGHLIGHT else None
+        )
+        if subtitle_mode == SubtitleMode.WORD_HIGHLIGHT and not alignment_path:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Word highlight unavailable",
+                "Word highlight data is missing. Exporting static subtitles instead.",
+            )
+            subtitle_mode = SubtitleMode.STATIC
+        self._start_worker(
+            TaskType.BURN_IN,
+            self._video_path,
+            srt_path,
+            None,
+            style,
+            subtitle_mode=subtitle_mode,
+            highlight_color=self._highlight_color,
+            save_ass_next_to_video=self._save_ass_next_to_video,
+            alignment_cache_path=alignment_path,
+        )
 
     def _start_worker(
         self,
@@ -1475,6 +1720,11 @@ class MainWindow(QtWidgets.QMainWindow):
         srt_path: Optional[Path],
         transcription_settings: Optional[TranscriptionSettings],
         subtitle_style: Optional[SubtitleStyle],
+        *,
+        subtitle_mode: SubtitleMode,
+        highlight_color: str,
+        save_ass_next_to_video: bool,
+        alignment_cache_path: Optional[Path],
     ) -> None:
         if self._worker_thread:
             QtWidgets.QMessageBox.warning(self, "Please wait", "Another task is running.")
@@ -1491,6 +1741,10 @@ class MainWindow(QtWidgets.QMainWindow):
             srt_path=srt_path,
             transcription_settings=transcription_settings,
             subtitle_style=subtitle_style,
+            subtitle_mode=subtitle_mode.value,
+            highlight_color=highlight_color,
+            save_ass_next_to_video=save_ass_next_to_video,
+            alignment_cache_path=alignment_cache_path,
             diagnostics_settings=self._diagnostics_settings,
             session_log_path=self._log_path,
         )
@@ -1548,6 +1802,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if payload.get("output_path"):
             candidate = Path(payload["output_path"])
             self._last_output_video = candidate if candidate.exists() else None
+        if payload.get("alignment_path"):
+            candidate = Path(payload["alignment_path"])
+            self._last_alignment_path = candidate if candidate.exists() else None
+        if payload.get("subtitle_mode_used"):
+            try:
+                self._last_subtitle_mode_used = SubtitleMode(payload["subtitle_mode_used"])
+            except ValueError:
+                self._last_subtitle_mode_used = self._subtitle_mode
         if task_type == TaskType.GENERATE_SRT:
             frame_value = payload.get("preview_frame_path")
             self._preview_frame_path = Path(frame_value) if frame_value else None
@@ -1556,6 +1818,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._preview_clip_start_seconds = payload.get("preview_clip_start_seconds")
             self._preview_clip_duration_seconds = payload.get("preview_clip_duration_seconds")
             self._invalidate_preview_playback()
+            if payload.get("word_highlight_error"):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Word highlight unavailable",
+                    str(payload["word_highlight_error"]),
+                )
 
         if success:
             if task_type == TaskType.GENERATE_SRT:
@@ -1714,6 +1982,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.quality_combo.blockSignals(True)
         self.quality_combo.setCurrentIndex(quality_index[self._transcription_quality])
         self.quality_combo.blockSignals(False)
+
+        self.subtitle_mode_group.blockSignals(True)
+        if self._subtitle_mode == SubtitleMode.WORD_HIGHLIGHT:
+            self.subtitle_mode_word_radio.setChecked(True)
+        else:
+            self.subtitle_mode_static_radio.setChecked(True)
+        self.subtitle_mode_group.blockSignals(False)
+
+        highlight_index = 0
+        for idx in range(self.highlight_color_combo.count()):
+            if self.highlight_color_combo.itemData(idx) == self._highlight_color:
+                highlight_index = idx
+                break
+        self.highlight_color_combo.blockSignals(True)
+        self.highlight_color_combo.setCurrentIndex(highlight_index)
+        self.highlight_color_combo.blockSignals(False)
+        self.highlight_color_combo.setEnabled(self._subtitle_mode == SubtitleMode.WORD_HIGHLIGHT)
+
+        self.save_ass_checkbox.blockSignals(True)
+        self.save_ass_checkbox.setChecked(self._save_ass_next_to_video)
+        self.save_ass_checkbox.blockSignals(False)
 
         self.save_policy_group.blockSignals(True)
         if self._save_policy == SaveLocationPolicy.SAME_FOLDER:
@@ -1874,6 +2163,43 @@ class MainWindow(QtWidgets.QMainWindow):
         self._save_config()
         self._update_quality_summary()
 
+    def _on_subtitle_mode_toggled(
+        self,
+        button: QtWidgets.QAbstractButton,
+        checked: bool,
+    ) -> None:
+        if not checked:
+            return
+        if button is self.subtitle_mode_word_radio:
+            mode = SubtitleMode.WORD_HIGHLIGHT
+        else:
+            mode = SubtitleMode.STATIC
+        if mode == self._subtitle_mode:
+            return
+        self._subtitle_mode = mode
+        self._config.setdefault("subtitles", {})["mode"] = mode.value
+        self._save_config()
+        self.highlight_color_combo.setEnabled(mode == SubtitleMode.WORD_HIGHLIGHT)
+        self._invalidate_preview_playback()
+        self._schedule_preview_refresh()
+
+    def _on_highlight_color_changed(self, index: int) -> None:
+        color = self.highlight_color_combo.itemData(index)
+        if not isinstance(color, str) or color == self._highlight_color:
+            return
+        self._highlight_color = color
+        self._config.setdefault("word_highlight", {})["highlight_color"] = color
+        self._save_config()
+        self._invalidate_preview_playback()
+        self._schedule_preview_refresh()
+
+    def _on_save_ass_toggled(self, checked: bool) -> None:
+        if checked == self._save_ass_next_to_video:
+            return
+        self._save_ass_next_to_video = checked
+        self._config.setdefault("export", {})["save_ass_next_to_video"] = checked
+        self._save_config()
+
     def _resolve_transcription_device(self) -> tuple[str, str]:
         if self._transcription_quality == TranscriptionQuality.AUTO:
             if gpu_available():
@@ -2033,6 +2359,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reset_video_state(self) -> None:
         self._last_srt_path = None
         self._last_output_video = None
+        self._last_alignment_path = None
+        self._last_subtitle_mode_used = self._subtitle_mode
         self._subtitles_reviewed = False
         self._output_dir = None
         self._progress_controller = None
@@ -2099,6 +2427,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return TranscriptionQuality(value)
         except ValueError:
             return TranscriptionQuality.AUTO
+
+    def _load_subtitle_mode(self) -> SubtitleMode:
+        raw = self._config.get("subtitles", {}).get("mode")
+        if raw == SubtitleMode.WORD_HIGHLIGHT.value:
+            return SubtitleMode.WORD_HIGHLIGHT
+        return SubtitleMode.STATIC
+
+    def _load_highlight_color(self) -> str:
+        return self._config.get("word_highlight", {}).get("highlight_color", "#FFFF00")
+
+    def _load_save_ass_next_to_video(self) -> bool:
+        return bool(self._config.get("export", {}).get("save_ass_next_to_video", False))
 
 
     def _load_subtitle_style(self) -> tuple[str, SubtitleStyle]:

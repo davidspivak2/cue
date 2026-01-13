@@ -26,6 +26,7 @@ from .ffmpeg_utils import (
     get_media_duration,
     get_runtime_mode,
     get_subprocess_kwargs,
+    get_video_resolution,
     resolve_ffmpeg_paths,
 )
 from .subtitle_style import (
@@ -35,6 +36,7 @@ from .subtitle_style import (
     to_preview_params,
 )
 from .paths import get_models_dir, get_preview_frames_dir
+from .word_highlight_ass import build_ass_text
 from .srt_utils import parse_srt_file, select_preview_moment
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
@@ -99,6 +101,10 @@ class Worker(QtCore.QObject):
         srt_path: Optional[Path] = None,
         transcription_settings: Optional[TranscriptionSettings] = None,
         subtitle_style: Optional[SubtitleStyle] = None,
+        subtitle_mode: str = "static",
+        highlight_color: str = "#FFFF00",
+        save_ass_next_to_video: bool = False,
+        alignment_cache_path: Optional[Path] = None,
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
     ) -> None:
@@ -110,6 +116,10 @@ class Worker(QtCore.QObject):
         self.srt_path = srt_path
         self.transcription_settings = transcription_settings
         self.subtitle_style = subtitle_style
+        self.subtitle_mode = subtitle_mode
+        self.highlight_color = highlight_color
+        self.save_ass_next_to_video = save_ass_next_to_video
+        self.alignment_cache_path = alignment_cache_path
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
         self._cancelled = threading.Event()
@@ -135,6 +145,9 @@ class Worker(QtCore.QObject):
         self._transcribe_worker_note: Optional[str] = None
         self._transcribe_stats: Optional[dict[str, object]] = None
         self._audio_info: Optional[dict[str, object]] = None
+        self._alignment_cache_path: Optional[Path] = None
+        self._subtitle_mode_used: Optional[str] = None
+        self._word_highlight_error: Optional[str] = None
         self._prepare_audio_seconds: Optional[float] = None
         self._transcribe_seconds: Optional[float] = None
         self._burn_in_seconds: Optional[float] = None
@@ -222,6 +235,9 @@ class Worker(QtCore.QObject):
             raise CancelledError()
 
         transcribe_start = time.monotonic()
+        self._subtitle_mode_used = None
+        self._alignment_cache_path = None
+        self._word_highlight_error = None
         try:
             self._run_transcription_subprocess(
                 audio_path=audio_path,
@@ -281,6 +297,9 @@ class Worker(QtCore.QObject):
 
         self._capture_audio_info_if_needed(audio_path)
 
+        mode_used = self._subtitle_mode_used or self.subtitle_mode
+        alignment_path = self._alignment_cache_path or self.alignment_cache_path
+
         preview_frame_path: Optional[Path] = None
         preview_subtitle_text: Optional[str] = None
         preview_timestamp_seconds: Optional[float] = None
@@ -315,11 +334,19 @@ class Worker(QtCore.QObject):
                     f"clip_duration={clip_duration:.3f}",
                     True,
                 )
-                preview_frame_path = self._ensure_preview_frame(
-                    srt_path=srt_path,
-                    timestamp_seconds=preview_timestamp_seconds,
-                    style=preview_style,
-                )
+                if mode_used == "word_highlight" and alignment_path:
+                    preview_frame_path = self._ensure_preview_frame_ass(
+                        alignment_path=alignment_path,
+                        timestamp_seconds=preview_timestamp_seconds,
+                        style=preview_style,
+                        highlight_color=self.highlight_color,
+                    )
+                else:
+                    preview_frame_path = self._ensure_preview_frame(
+                        srt_path=srt_path,
+                        timestamp_seconds=preview_timestamp_seconds,
+                        style=preview_style,
+                    )
             elif preview and not preview_style:
                 clip_start = max(0.0, preview.cue_start_seconds - 1.0)
                 clip_duration = 15.0
@@ -372,6 +399,9 @@ class Worker(QtCore.QObject):
             "preview_timestamp_seconds": preview_timestamp_seconds,
             "preview_clip_start_seconds": preview_clip_start_seconds,
             "preview_clip_duration_seconds": preview_clip_duration_seconds,
+            "alignment_path": str(alignment_path) if alignment_path else None,
+            "subtitle_mode_used": mode_used,
+            "word_highlight_error": self._word_highlight_error,
         }
 
     def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:
@@ -449,19 +479,146 @@ class Worker(QtCore.QObject):
         )
         return output_path if success else None
 
+    def _ensure_preview_frame_ass(
+        self,
+        *,
+        alignment_path: Path,
+        timestamp_seconds: float,
+        style: SubtitleStyle,
+        highlight_color: str,
+    ) -> Optional[Path]:
+        resolution = get_video_resolution(self.video_path)
+        if not resolution:
+            self.signals.log.emit(
+                "Warning: unable to read video resolution for ASS preview.",
+                True,
+            )
+            return None
+        play_res_x, play_res_y = resolution
+        ass_text = self._build_word_highlight_ass(
+            alignment_path=alignment_path,
+            style=style,
+            highlight_color=highlight_color,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y,
+        )
+        if not ass_text:
+            return None
+        timestamp_ms = int(round(timestamp_seconds * 1000))
+        preview_width = 1280
+        style_params = to_preview_params(style)
+        cache_key = (
+            f"{self.video_path.resolve()}|{timestamp_ms}|"
+            f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
+            f"{style_params['shadow']}|{style_params['margin_v']}|{style_params['box_enabled']}|"
+            f"{style_params['box_opacity']}|{style_params['box_padding']}|{preview_width}|"
+            f"{highlight_color}|{hashlib.sha1(ass_text.encode('utf-8')).hexdigest()}"
+        )
+        cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
+        output_path = get_preview_frames_dir() / cache_name
+        if output_path.exists() and output_path.stat().st_size > 0:
+            return output_path
+        ffmpeg_path, _, _ = ensure_ffmpeg_available()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        ass_path = output_path.with_suffix(".ass")
+        ass_path.write_text(ass_text, encoding="utf-8-sig")
+        filter_chain = (
+            f"ass={ass_path.name},"
+            f"scale='min({preview_width},iw)':-2:force_original_aspect_ratio=decrease"
+        )
+        command = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-ss",
+            f"{timestamp_seconds:.3f}",
+            "-i",
+            str(self.video_path),
+            "-frames:v",
+            "1",
+            "-vf",
+            filter_chain,
+            str(output_path),
+        ]
+        self.signals.log.emit(
+            f"Preview ASS frame filter: -vf \"{filter_chain}\"",
+            True,
+        )
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=str(output_path.parent),
+                **get_subprocess_kwargs(),
+            )
+        finally:
+            if ass_path.exists():
+                try:
+                    ass_path.unlink()
+                    self.signals.log.emit(f"Deleted preview ASS: {ass_path}", True)
+                except OSError:
+                    self.signals.log.emit(
+                        f"Warning: failed to delete preview ASS: {ass_path}",
+                        True,
+                    )
+        if result.returncode != 0:
+            return None
+        return output_path if output_path.exists() else None
+
+    def _build_word_highlight_ass(
+        self,
+        *,
+        alignment_path: Path,
+        style: SubtitleStyle,
+        highlight_color: str,
+        play_res_x: int,
+        play_res_y: int,
+    ) -> Optional[str]:
+        if not alignment_path.exists():
+            self.signals.log.emit(
+                f"Alignment cache missing: {alignment_path}",
+                True,
+            )
+            return None
+        try:
+            payload = json.loads(alignment_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            self.signals.log.emit(
+                f"Alignment cache unreadable: {alignment_path}",
+                True,
+            )
+            return None
+        segments = payload.get("segments") if isinstance(payload, dict) else None
+        if not isinstance(segments, list):
+            self.signals.log.emit(
+                f"Alignment cache missing segments: {alignment_path}",
+                True,
+            )
+            return None
+        word_count = sum(
+            len(segment.get("words", []) or []) for segment in segments if isinstance(segment, dict)
+        )
+        self.signals.log.emit(
+            f"Generating ASS (segments={len(segments)} words={word_count})",
+            True,
+        )
+        return build_ass_text(
+            segments,
+            style,
+            highlight_color=highlight_color,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y,
+        )
+
     def _run_burn_in(self) -> dict:
         settings = self.subtitle_style
         if settings is None:
             raise ValueError("Missing burn-in settings")
 
-        srt_path = self.srt_path or self.output_dir / f"{self.video_path.stem}.srt"
-        self._srt_path = srt_path
-        if not srt_path.exists():
-            raise FileNotFoundError(f"Subtitles file not found: {srt_path}")
-
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
         self._output_video_path = output_path
-        self.signals.log.emit(f"Subtitles file: {srt_path}", True)
         self.signals.log.emit(f"Video file: {output_path}", True)
         video_duration = self._probe_duration(self.video_path)
         if video_duration:
@@ -473,6 +630,20 @@ class Worker(QtCore.QObject):
             )
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
+        if self.subtitle_mode == "word_highlight":
+            return self._run_burn_in_word_highlight(
+                ffmpeg_path,
+                output_path,
+                video_duration,
+                settings,
+            )
+
+        srt_path = self.srt_path or self.output_dir / f"{self.video_path.stem}.srt"
+        self._srt_path = srt_path
+        if not srt_path.exists():
+            raise FileNotFoundError(f"Subtitles file not found: {srt_path}")
+
+        self.signals.log.emit(f"Subtitles file: {srt_path}", True)
         force_style = to_ffmpeg_force_style(settings)
         alpha_byte = get_box_alpha_byte(settings)
         self.signals.log.emit(
@@ -540,6 +711,109 @@ class Worker(QtCore.QObject):
         self._burn_in_seconds = time.monotonic() - burn_start
         return {"output_path": str(output_path)}
 
+    def _run_burn_in_word_highlight(
+        self,
+        ffmpeg_path: Path,
+        output_path: Path,
+        video_duration: Optional[float],
+        settings: SubtitleStyle,
+    ) -> dict:
+        alignment_path = self.alignment_cache_path or self._alignment_cache_path
+        if not alignment_path:
+            raise FileNotFoundError("Word highlight alignment data missing.")
+        resolution = get_video_resolution(self.video_path)
+        if not resolution:
+            raise RuntimeError("Unable to read video resolution for word highlight export.")
+        play_res_x, play_res_y = resolution
+        ass_text = self._build_word_highlight_ass(
+            alignment_path=alignment_path,
+            style=settings,
+            highlight_color=self.highlight_color,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y,
+        )
+        if not ass_text:
+            raise RuntimeError("Failed to generate word highlight ASS.")
+        temp_dir = output_path.parent / "ass_export_temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        ass_path = temp_dir / f"{self.video_path.stem}_word_highlight.ass"
+        ass_path.write_text(ass_text, encoding="utf-8-sig")
+        subtitles_filter = f"ass={ass_path.name}"
+        self.signals.log.emit(f"Export ASS filter: -vf \"{subtitles_filter}\"", True)
+        base_command = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-i",
+            str(self.video_path),
+            "-progress",
+            "pipe:1",
+            "-nostats",
+            "-vf",
+            subtitles_filter,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-movflags",
+            "+faststart",
+        ]
+        self.signals.log.emit("Adding word highlight subtitles to the video...", True)
+        self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
+        copy_command = base_command + ["-c:a", "copy", str(output_path)]
+        self._burn_in_command = subprocess.list2cmdline(copy_command)
+        self._burn_in_audio_mode = "copy"
+        burn_start = time.monotonic()
+        try:
+            self._run_ffmpeg_with_progress(
+                copy_command,
+                video_duration,
+                ProgressStep.EXPORT,
+                "Encoding",
+                cwd=temp_dir,
+            )
+            self._burn_in_seconds = time.monotonic() - burn_start
+        except RuntimeError as exc:
+            self.signals.log.emit("Audio copy failed, trying another format...", True)
+            self.signals.log.emit(str(exc), True)
+            aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
+            self._burn_in_command = subprocess.list2cmdline(aac_command)
+            self._burn_in_audio_mode = "aac"
+            self._run_ffmpeg_with_progress(
+                aac_command,
+                video_duration,
+                ProgressStep.EXPORT,
+                "Encoding",
+                cwd=temp_dir,
+            )
+            self._burn_in_seconds = time.monotonic() - burn_start
+        finally:
+            if self.save_ass_next_to_video:
+                final_ass_path = output_path.with_suffix(".ass")
+                try:
+                    shutil.copy2(ass_path, final_ass_path)
+                    self.signals.log.emit(
+                        f"Saved ASS alongside export: {final_ass_path}",
+                        True,
+                    )
+                except OSError as exc:
+                    self.signals.log.emit(
+                        f"Warning: failed to save ASS next to export: {exc}",
+                        True,
+                    )
+            if ass_path.exists():
+                try:
+                    ass_path.unlink()
+                    self.signals.log.emit(f"Deleted temp ASS: {ass_path}", True)
+                except OSError:
+                    self.signals.log.emit(
+                        f"Warning: failed to delete temp ASS: {ass_path}",
+                        True,
+                    )
+        return {"output_path": str(output_path)}
+
     def _run_ffmpeg(self, command: list[str]) -> None:
         if self._cancelled.is_set():
             raise CancelledError()
@@ -578,6 +852,8 @@ class Worker(QtCore.QObject):
         duration_seconds: Optional[float],
         step_id: str,
         status_label: str,
+        *,
+        cwd: Optional[Path] = None,
     ) -> None:
         if self._cancelled.is_set():
             raise CancelledError()
@@ -590,6 +866,7 @@ class Worker(QtCore.QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
+            cwd=str(cwd) if cwd else None,
             **get_subprocess_kwargs(),
         )
         self._process = process
@@ -703,6 +980,12 @@ class Worker(QtCore.QObject):
             str(srt_path),
             "--lang",
             "he",
+            "--video",
+            str(self.video_path),
+            "--subtitle-mode",
+            self.subtitle_mode,
+            "--model",
+            self._resolve_whisper_model_name(),
         ]
         if force_cpu_flag:
             command.append("--force-cpu")
@@ -728,6 +1011,7 @@ class Worker(QtCore.QObject):
             "force_cpu": force_cpu_flag,
             "device": device,
             "compute_type": compute_type,
+            "subtitle_mode": self.subtitle_mode,
             "ffmpeg_args": self._last_audio_extract_command,
             "punctuation_rescue_fallback_enabled": (
                 self.transcription_settings.punctuation_rescue_fallback_enabled
@@ -893,6 +1177,25 @@ class Worker(QtCore.QObject):
                         self._transcribe_stats = json.loads(stats_payload)
                     except json.JSONDecodeError:
                         self._transcribe_stats = None
+            if text.startswith("ALIGNMENT_JSON "):
+                path_value = text.split(" ", 1)[1] if " " in text else ""
+                if path_value:
+                    self._alignment_cache_path = Path(path_value.strip())
+                    self.signals.log.emit(
+                        f"WhisperX alignment cache: {self._alignment_cache_path}",
+                        True,
+                    )
+            if text.startswith("SUBTITLE_MODE_USED "):
+                mode_value = text.split(" ", 1)[1] if " " in text else ""
+                if mode_value:
+                    self._subtitle_mode_used = mode_value.strip()
+            if text.startswith("WHISPERX_ERROR "):
+                self._word_highlight_error = text.split(" ", 1)[1] if " " in text else text
+            if text.startswith("WHISPERX_FALLBACK"):
+                if not self._word_highlight_error:
+                    self._word_highlight_error = (
+                        "Word highlight failed; falling back to static subtitles."
+                    )
             if text.startswith("PROGRESS_END"):
                 _emit_log(text, False)
                 if duration_seconds:
@@ -1350,6 +1653,9 @@ class Worker(QtCore.QObject):
         if device == "cuda" and compute_type == "float16":
             return 1.5
         return 6.0
+
+    def _resolve_whisper_model_name(self) -> str:
+        return TRANSCRIBE_MODEL_NAME
 
     def _stop_transcribe_estimator(self) -> None:
         if self._transcribe_estimator_stop:

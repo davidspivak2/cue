@@ -24,14 +24,16 @@ from .paths import get_preview_clips_dir
 @dataclass(frozen=True)
 class PreviewClipSettings:
     video_path: Path
-    srt_path: Path
     start_seconds: float
     duration_seconds: float
-    force_style: str
     scale_width: int = 1280
     crf: int = 23
     preset: str = "veryfast"
     audio_bitrate: str = "128k"
+    srt_path: Optional[Path] = None
+    force_style: Optional[str] = None
+    ass_text: Optional[str] = None
+    ass_hash: Optional[str] = None
 
 
 class PreviewClipSignals(QtCore.QObject):
@@ -56,28 +58,51 @@ class PreviewClipWorker(QtCore.QObject):
             return
 
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        shifted_srt_path = self._output_path.with_suffix(".srt")
-        shift_result = _shift_srt_file(
-            self._settings.srt_path,
-            shifted_srt_path,
-            self._settings.start_seconds,
-        )
-        self.signals.log.emit(
-            "Preview clip timing: "
-            f"start={self._settings.start_seconds:.3f}s "
-            f"duration={self._settings.duration_seconds:.3f}s "
-            f"output={self._output_path}"
-        )
-        self.signals.log.emit(
-            "Preview clip cues: "
-            f"count={shift_result.cues_written} "
-            f"first_start={shift_result.first_start} "
-            f"first_end={shift_result.first_end}"
-        )
-        subtitles_filter = build_subtitles_filter(
-            shifted_srt_path,
-            force_style=self._settings.force_style,
-        )
+        shifted_srt_path = None
+        shifted_ass_path = None
+        if self._settings.ass_text:
+            shifted_ass_path = self._output_path.with_suffix(".ass")
+            shifted_text = _shift_ass_text(
+                self._settings.ass_text,
+                self._settings.start_seconds,
+            )
+            shifted_ass_path.write_text(shifted_text, encoding="utf-8-sig")
+            self.signals.log.emit(
+                "Preview clip timing (ASS): "
+                f"start={self._settings.start_seconds:.3f}s "
+                f"duration={self._settings.duration_seconds:.3f}s "
+                f"output={self._output_path}"
+            )
+        else:
+            if not self._settings.srt_path or not self._settings.force_style:
+                self.signals.finished.emit(False, "", "Missing subtitles for preview.", self._request_id)
+                return
+            shifted_srt_path = self._output_path.with_suffix(".srt")
+            shift_result = _shift_srt_file(
+                self._settings.srt_path,
+                shifted_srt_path,
+                self._settings.start_seconds,
+            )
+            self.signals.log.emit(
+                "Preview clip timing: "
+                f"start={self._settings.start_seconds:.3f}s "
+                f"duration={self._settings.duration_seconds:.3f}s "
+                f"output={self._output_path}"
+            )
+            self.signals.log.emit(
+                "Preview clip cues: "
+                f"count={shift_result.cues_written} "
+                f"first_start={shift_result.first_start} "
+                f"first_end={shift_result.first_end}"
+            )
+        if shifted_ass_path:
+            subtitles_filter = f"ass={shifted_ass_path.name}"
+            self.signals.log.emit(f"Preview clip filter: -vf \"{subtitles_filter}\"")
+        else:
+            subtitles_filter = build_subtitles_filter(
+                shifted_srt_path,
+                force_style=self._settings.force_style or "",
+            )
         video_chain = (
             f"trim=start={self._settings.start_seconds:.3f}:duration={self._settings.duration_seconds:.3f},"
             "setpts=PTS-STARTPTS,"
@@ -130,11 +155,19 @@ class PreviewClipWorker(QtCore.QObject):
                 capture_output=True,
                 text=True,
                 check=False,
+                cwd=str(self._output_path.parent),
                 **get_subprocess_kwargs(),
             )
         except Exception as exc:  # noqa: BLE001
             self.signals.finished.emit(False, "", f"ffmpeg failed to start: {exc}", self._request_id)
             return
+        finally:
+            if shifted_ass_path and shifted_ass_path.exists():
+                try:
+                    shifted_ass_path.unlink()
+                    self.signals.log.emit(f"Deleted preview ASS: {shifted_ass_path}")
+                except OSError:
+                    self.signals.log.emit(f"Warning: failed to delete preview ASS: {shifted_ass_path}")
 
         if result.returncode == 0 and self._output_path.exists() and self._output_path.stat().st_size > 0:
             self.signals.finished.emit(True, str(self._output_path), "", self._request_id)
@@ -172,12 +205,14 @@ class PreviewPlaybackController(QtCore.QObject):
         self,
         *,
         video_path: Path,
-        srt_path: Path,
         anchor_seconds: float,
         clip_start_seconds: Optional[float],
         clip_duration_seconds: Optional[float],
-        force_style: str,
         scale_width: int = 1280,
+        srt_path: Optional[Path] = None,
+        force_style: Optional[str] = None,
+        ass_text: Optional[str] = None,
+        ass_hash: Optional[str] = None,
     ) -> None:
         if self._thread is not None:
             return
@@ -197,11 +232,13 @@ class PreviewPlaybackController(QtCore.QObject):
 
         settings = PreviewClipSettings(
             video_path=video_path,
-            srt_path=srt_path,
             start_seconds=start_seconds,
             duration_seconds=clip_duration,
-            force_style=force_style,
             scale_width=scale_width,
+            srt_path=srt_path,
+            force_style=force_style,
+            ass_text=ass_text,
+            ass_hash=ass_hash,
         )
         cache_key = self._build_cache_key(settings)
         output_path = get_preview_clips_dir() / f"{cache_key}.mp4"
@@ -243,7 +280,7 @@ class PreviewPlaybackController(QtCore.QObject):
         payload = {
             "version": 1,
             "video": self._stat_payload(settings.video_path),
-            "srt": self._stat_payload(settings.srt_path),
+            "srt": self._stat_payload(settings.srt_path) if settings.srt_path else None,
             "start_seconds": round(settings.start_seconds, 3),
             "duration_seconds": round(settings.duration_seconds, 3),
             "force_style": settings.force_style,
@@ -252,6 +289,7 @@ class PreviewPlaybackController(QtCore.QObject):
             "preset": settings.preset,
             "audio_bitrate": settings.audio_bitrate,
             "shifted_subtitles": True,
+            "ass_hash": settings.ass_hash,
         }
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(serialized.encode("utf-8")).hexdigest()
@@ -333,6 +371,37 @@ def _shift_srt_text(srt_text: str, offset_seconds: float) -> tuple[str, ShiftedS
     return shifted, ShiftedSrtResult(cues_written, first_start, first_end)
 
 
+def _shift_ass_text(ass_text: str, offset_seconds: float) -> str:
+    normalized = ass_text.replace("\r\n", "\n").replace("\r", "\n")
+    output_lines: list[str] = []
+    in_events = False
+    for line in normalized.split("\n"):
+        if line.strip().startswith("[Events]"):
+            in_events = True
+            output_lines.append(line)
+            continue
+        if not in_events or not line.startswith("Dialogue:"):
+            output_lines.append(line)
+            continue
+        parts = line.split(",", 9)
+        if len(parts) < 10:
+            output_lines.append(line)
+            continue
+        start = _parse_ass_timestamp(parts[1].strip())
+        end = _parse_ass_timestamp(parts[2].strip())
+        if start is None or end is None:
+            output_lines.append(line)
+            continue
+        new_start = max(0.0, start - offset_seconds)
+        new_end = max(0.0, end - offset_seconds)
+        if new_end <= 0:
+            continue
+        parts[1] = _format_ass_timestamp(new_start)
+        parts[2] = _format_ass_timestamp(new_end)
+        output_lines.append(",".join(parts))
+    return "\n".join(output_lines)
+
+
 def _parse_srt_timestamp(value: str) -> Optional[float]:
     parts = value.replace(",", ".").split(":")
     if len(parts) != 3:
@@ -354,6 +423,32 @@ def _format_srt_timestamp(seconds: float) -> str:
     minutes = (total_seconds % 3600) // 60
     secs = total_seconds % 60
     return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
+
+def _parse_ass_timestamp(value: str) -> Optional[float]:
+    parts = value.split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds_parts = parts[2].split(".")
+        secs = int(seconds_parts[0])
+        cs = int(seconds_parts[1]) if len(seconds_parts) > 1 else 0
+    except ValueError:
+        return None
+    return hours * 3600 + minutes * 60 + secs + (cs / 100)
+
+
+def _format_ass_timestamp(seconds: float) -> str:
+    total_cs = max(0, int(round(seconds * 100)))
+    hours = total_cs // (3600 * 100)
+    remainder = total_cs % (3600 * 100)
+    minutes = remainder // (60 * 100)
+    remainder %= 60 * 100
+    secs = remainder // 100
+    cs = remainder % 100
+    return f"{hours:d}:{minutes:02}:{secs:02}.{cs:02}"
 
 
 def _build_filter_complex(

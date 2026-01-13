@@ -45,3 +45,9 @@ def get_preview_clips_dir() -> Path:
     path = get_cache_dir() / "previews"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_whisperx_cache_dir() -> Path:
+    path = get_cache_dir() / "whisperx"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

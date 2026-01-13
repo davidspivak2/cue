@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
+import hashlib
 import json
 import os
 import shutil
@@ -25,7 +26,7 @@ from .srt_splitter import (
     SplitterStats,
     split_segments_into_cues,
 )
-from .paths import get_models_dir
+from .paths import get_models_dir, get_whisperx_cache_dir
 from .transcription_config import build_transcription_config
 from .transcription_device import get_cuda_device_count
 
@@ -136,6 +137,35 @@ def _resolve_compute_type(requested_type: str, device: str) -> str:
 
 def _validate_model_dir(model_dir: Path) -> bool:
     return (model_dir / "model.bin").exists() and (model_dir / "config.json").exists()
+
+
+def _build_alignment_cache_path(
+    *,
+    video_path: Path,
+    model_name: str,
+    language: str,
+    vad_method: str,
+) -> Path:
+    try:
+        stat = video_path.stat()
+        size = stat.st_size
+        mtime = stat.st_mtime
+    except FileNotFoundError:
+        size = 0
+        mtime = 0.0
+    payload = {
+        "video": {
+            "path": str(video_path.resolve()),
+            "size": size,
+            "mtime": mtime,
+        },
+        "model_name": model_name,
+        "language": language,
+        "vad_method": vad_method,
+    }
+    cache_key = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".json"
+    return get_whisperx_cache_dir() / cache_name
 
 
 def _start_heartbeat(label: str, stop_event: threading.Event) -> threading.Thread:
@@ -278,6 +308,68 @@ def _build_transcribe_kwargs(
     return transcribe_kwargs
 
 
+def _resolve_whisperx_device(requested_device: str) -> tuple[str, str]:
+    import torch
+
+    has_cuda = torch.cuda.is_available()
+    if requested_device == "cpu":
+        return "cpu", "float32"
+    if requested_device == "cuda":
+        return ("cuda", "float16") if has_cuda else ("cpu", "float32")
+    if has_cuda:
+        return "cuda", "float16"
+    return "cpu", "float32"
+
+
+def _run_whisperx_alignment(
+    *,
+    wav_path: Path,
+    model_name: str,
+    language: str,
+    device: str,
+    compute_type: str,
+    vad_method: str,
+) -> dict[str, object]:
+    import whisperx
+
+    _print(f"WHISPERX model={model_name} device={device} compute_type={compute_type}")
+    _print(f"WHISPERX vad_method={vad_method}")
+    model = whisperx.load_model(
+        model_name,
+        device,
+        compute_type=compute_type,
+        language=None if language == "auto" else language,
+        vad_method=vad_method,
+    )
+    result = model.transcribe(str(wav_path))
+    language_code = result.get("language", language if language != "auto" else "en")
+    align_model, metadata = whisperx.load_align_model(language_code=language_code, device=device)
+    aligned = whisperx.align(
+        result.get("segments", []),
+        align_model,
+        metadata,
+        str(wav_path),
+        device,
+    )
+    return {
+        "segments": aligned.get("segments", []),
+        "language": language_code,
+    }
+
+
+def _segments_to_srt_segments(segments: list[dict]) -> list[SrtSegment]:
+    srt_segments: list[SrtSegment] = []
+    for index, segment in enumerate(segments, start=1):
+        try:
+            start = float(segment.get("start", 0.0))
+            end = float(segment.get("end", 0.0))
+        except (TypeError, ValueError):
+            continue
+        text = str(segment.get("text") or "").strip()
+        srt_segments.append(SrtSegment(index=index, start=start, end=end, text=text))
+    return srt_segments
+
+
 def _run_transcription_attempt(
     *,
     model,
@@ -363,6 +455,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     parser = argparse.ArgumentParser(description="Whisper transcription worker")
     parser.add_argument("--wav")
     parser.add_argument("--srt")
+    parser.add_argument("--video")
     parser.add_argument("--lang", default="he")
     parser.add_argument(
         "--model",
@@ -389,6 +482,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         "--punctuation-rescue",
         choices=["on", "off"],
         default="on",
+    )
+    parser.add_argument(
+        "--subtitle-mode",
+        choices=["static", "word_highlight"],
+        default="static",
     )
     args = parser.parse_args(argv)
 
@@ -520,6 +618,60 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             return 0
         if wav_path is None or srt_path is None:
             raise ValueError("Missing WAV or SRT path.")
+        if args.subtitle_mode == "word_highlight" and not args.video:
+            _print("WHISPERX_ERROR missing video path; falling back to static.")
+        if args.subtitle_mode == "word_highlight" and args.video:
+            video_path = Path(args.video)
+            vad_method = "silero"
+            device_name, compute_type_name = _resolve_whisperx_device(args.device)
+            _print(
+                f"WHISPERX_DEVICE device={device_name} compute_type={compute_type_name}"
+            )
+            alignment_path = _build_alignment_cache_path(
+                video_path=video_path,
+                model_name=args.model,
+                language=args.lang,
+                vad_method=vad_method,
+            )
+            if alignment_path.exists():
+                _print(f"WHISPERX_CACHE_HIT {alignment_path}")
+                try:
+                    alignment_payload = json.loads(alignment_path.read_text(encoding="utf-8"))
+                    segments = alignment_payload.get("segments", [])
+                    if not isinstance(segments, list):
+                        raise ValueError("Alignment cache missing segments")
+                except Exception as exc:  # noqa: BLE001
+                    _print(f"WHISPERX_CACHE_INVALID {exc}")
+                    segments = []
+            else:
+                _print(f"WHISPERX_CACHE_MISS {alignment_path}")
+                alignment_payload = _run_whisperx_alignment(
+                    wav_path=wav_path,
+                    model_name=args.model,
+                    language=args.lang,
+                    device=device_name,
+                    compute_type=compute_type_name,
+                    vad_method=vad_method,
+                )
+                segments = alignment_payload.get("segments", [])
+                alignment_path.write_text(
+                    json.dumps({"segments": segments}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            if segments:
+                _print(f"ALIGNMENT_JSON {alignment_path}")
+                _print("SUBTITLE_MODE_USED word_highlight")
+                _write_srt(_segments_to_srt_segments(segments), srt_path)
+                if not srt_path.exists() or srt_path.stat().st_size == 0:
+                    _print(f"ERROR SRT_WRITE_FAILED {srt_path}")
+                    if hard_exit:
+                        _hard_exit(2)
+                    return 2
+                _print(f"DONE {srt_path}")
+                if hard_exit:
+                    _hard_exit(0)
+                return 0
+            _print("WHISPERX_FALLBACK static")
         heartbeat_stop = threading.Event()
         heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
         try:
@@ -759,6 +911,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             for attempt in attempts
         ]
         _print(f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}")
+        _print("SUBTITLE_MODE_USED static")
         _write_srt(chosen_attempt["segments"], srt_path)
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             _print(f"ERROR SRT_WRITE_FAILED {srt_path}")

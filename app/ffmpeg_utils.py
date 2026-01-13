@@ -160,6 +160,19 @@ def get_ffprobe_json(path: Path) -> Optional[dict[str, Any]]:
         return None
 
 
+def get_video_resolution(path: Path) -> Optional[tuple[int, int]]:
+    ffprobe_json = get_ffprobe_json(path)
+    if not ffprobe_json:
+        return None
+    for stream in ffprobe_json.get("streams", []):
+        if stream.get("codec_type") == "video":
+            width = stream.get("width")
+            height = stream.get("height")
+            if isinstance(width, int) and isinstance(height, int):
+                return width, height
+    return None
+
+
 def escape_subtitles_filter_path(path: os.PathLike | str) -> str:
     """
     Escape a Windows path for FFmpeg subtitles filter.
