@@ -9,6 +9,7 @@ from typing import get_origin, get_args
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import traceback
@@ -345,21 +346,25 @@ def _run_whisperx_alignment(
     _print(f"WHISPERX version={version}")
     _print(f"WHISPERX model={model_name} device={device} compute_type={compute_type}")
     _print(f"WHISPERX vad_method={vad_method}")
-    try:
-        _print("WHISPERX load_model with asr_options")
-        model = whisperx.load_model(
-            model_name,
-            device,
-            compute_type=compute_type,
-            language=None if language == "auto" else language,
-            asr_options=asr_options,
-        )
-    except TypeError as exc:
-        _print(f"WHISPERX_ERROR load_model failed: {exc}")
-        return None
-    except Exception as exc:  # noqa: BLE001
-        _print(f"WHISPERX_ERROR load_model failed: {exc}")
-        return None
+        try:
+            _print("WHISPERX load_model with asr_options")
+            model = whisperx.load_model(
+                model_name,
+                device,
+                compute_type=compute_type,
+                language=None if language == "auto" else language,
+                asr_options=asr_options,
+            )
+        except TypeError as exc:
+            _print(
+                f"WHISPERX_ERROR load_model failed; using fallback highlight: {exc}"
+            )
+            return None
+        except Exception as exc:  # noqa: BLE001
+            _print(
+                f"WHISPERX_ERROR load_model failed; using fallback highlight: {exc}"
+            )
+            return None
     try:
         result = model.transcribe(str(wav_path))
         language_code = result.get("language", language if language != "auto" else "en")
@@ -384,6 +389,7 @@ def _run_whisperx_alignment(
 
 def _build_whisperx_asr_options(faster_whisper_module) -> dict[str, object]:
     allowed_keys = set()
+    required_fields: dict[str, object] = {}
     options_cls = None
     try:
         transcribe_module = __import__(
@@ -394,13 +400,23 @@ def _build_whisperx_asr_options(faster_whisper_module) -> dict[str, object]:
     except Exception:  # noqa: BLE001
         options_cls = None
     if options_cls and dataclasses.is_dataclass(options_cls):
-        allowed_keys = {field.name for field in dataclasses.fields(options_cls)}
+        for field in dataclasses.fields(options_cls):
+            allowed_keys.add(field.name)
+            if field.default is not dataclasses.MISSING:
+                required_fields[field.name] = field.default
+            elif field.default_factory is not dataclasses.MISSING:  # type: ignore[comparison-overlap]
+                required_fields[field.name] = field.default_factory()  # type: ignore[misc]
+            else:
+                required_fields[field.name] = _safe_default_for_type(field.type)
     else:
         try:
             signature = inspect.signature(faster_whisper_module.WhisperModel.transcribe)
         except (AttributeError, ValueError):
             signature = None
         allowed_keys = set(signature.parameters.keys()) if signature else set()
+        for name, param in (signature.parameters.items() if signature else []):
+            if param.default is inspect.Parameter.empty:
+                required_fields[name] = _safe_default_for_type(param.annotation)
     base_options = {
         "beam_size": 5,
         "best_of": 5,
@@ -431,17 +447,9 @@ def _build_whisperx_asr_options(faster_whisper_module) -> dict[str, object]:
     if not allowed_keys:
         return base_options
     options = {key: value for key, value in base_options.items() if key in allowed_keys}
-    if options_cls and dataclasses.is_dataclass(options_cls):
-        for field in dataclasses.fields(options_cls):
-            if field.name in options:
-                continue
-            if field.default is not dataclasses.MISSING:
-                options[field.name] = field.default
-                continue
-            if field.default_factory is not dataclasses.MISSING:  # type: ignore[comparison-overlap]
-                options[field.name] = field.default_factory()  # type: ignore[misc]
-                continue
-            options[field.name] = _safe_default_for_type(field.type)
+    for name, default_value in required_fields.items():
+        if name in allowed_keys and name not in options:
+            options[name] = default_value
     return options
 
 
@@ -806,6 +814,32 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             return 0
         if wav_path is None or srt_path is None:
             raise ValueError("Missing WAV or SRT path.")
+        if wav_path and not wav_path.exists():
+            if args.ffmpeg_args_json:
+                try:
+                    ffmpeg_args = json.loads(args.ffmpeg_args_json)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(
+                        "Audio extraction failed: invalid ffmpeg args JSON."
+                    ) from exc
+                try:
+                    _print("FFMPEG_EXTRACT start")
+                    result = subprocess.run(
+                        ffmpeg_args,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError(
+                        "Audio extraction failed while preparing audio."
+                    ) from exc
+                if result.returncode != 0 or not wav_path.exists():
+                    raise RuntimeError(
+                        "Audio extraction failed. Please try again."
+                    )
+            else:
+                raise RuntimeError("Audio file missing and no extraction args provided.")
         word_highlight_requested = args.subtitle_mode == "word_highlight"
         word_highlight_fallback = False
         if word_highlight_requested and not args.video:
