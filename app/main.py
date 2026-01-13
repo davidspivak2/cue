@@ -42,6 +42,7 @@ from app.ui.widgets import (
     VideoCard,
 )
 from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
+from app.preview_overlay import PreviewSubtitleOverlay
 from app.preview_playback import PreviewPlaybackController
 from app.workers import (
     DiagnosticsSettings,
@@ -59,6 +60,7 @@ from app.subtitle_style import (
     to_ffmpeg_force_style,
     to_preview_params,
 )
+from app.srt_utils import SrtCue, parse_srt_file
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
 DEFAULT_SUBTITLE_EDIT_PATH = Path(r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe")
@@ -106,6 +108,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_slider_dragging = False
         self._preview_play_request_pending = False
         self._preview_loading = False
+        self._preview_karaoke_enabled = True
+        self.preview_karaoke_checkbox: Optional[QtWidgets.QCheckBox] = None
+        self.preview_subtitle_overlay: Optional[PreviewSubtitleOverlay] = None
+        self._preview_overlay_timer = QtCore.QTimer(self)
+        self._preview_overlay_timer.setInterval(50)
+        self._preview_overlay_timer.timeout.connect(self._tick_preview_overlay)
         self._preview_playback_controller = PreviewPlaybackController(self._log, self)
         self.preview_media_player: Optional[QtMultimedia.QMediaPlayer] = None
         self.preview_audio_output: Optional[QtMultimedia.QAudioOutput] = None
@@ -127,6 +135,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_render_timer.timeout.connect(self._refresh_preview_with_style)
         self._config = self._load_config()
         self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
+        self._preview_karaoke_enabled = self._load_preview_karaoke_enabled()
         self._subtitle_style_preset, self._subtitle_style_custom = (
             self._load_subtitle_style()
         )
@@ -378,10 +387,18 @@ class MainWindow(QtWidgets.QMainWindow):
         still_layout.addWidget(self.preview_image_label)
 
         self.preview_video_widget = QtMultimediaWidgets.QVideoWidget()
+        self.preview_subtitle_overlay = PreviewSubtitleOverlay()
         video_page = QtWidgets.QWidget()
         video_layout = QtWidgets.QVBoxLayout(video_page)
         video_layout.setContentsMargins(0, 0, 0, 0)
-        video_layout.addWidget(self.preview_video_widget)
+        video_container = QtWidgets.QWidget()
+        video_container_layout = QtWidgets.QGridLayout(video_container)
+        video_container_layout.setContentsMargins(0, 0, 0, 0)
+        video_container_layout.addWidget(self.preview_video_widget, 0, 0)
+        if self.preview_subtitle_overlay:
+            self.preview_subtitle_overlay.setVisible(False)
+            video_container_layout.addWidget(self.preview_subtitle_overlay, 0, 0)
+        video_layout.addWidget(video_container)
 
         self.preview_stack.addWidget(still_page)
         self.preview_stack.addWidget(video_page)
@@ -410,17 +427,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_scrub_slider.setEnabled(False)
         self.preview_time_label = QtWidgets.QLabel("0:00 / 0:00")
         self.preview_time_label.setObjectName("PreviewTimeLabel")
+        self.preview_karaoke_checkbox = QtWidgets.QCheckBox("Karaoke highlight")
+        self.preview_karaoke_checkbox.setChecked(self._preview_karaoke_enabled)
 
         self.preview_play_button.clicked.connect(self._on_preview_play_clicked)
         self.preview_stop_button.clicked.connect(self._on_preview_stop_clicked)
         self.preview_scrub_slider.sliderPressed.connect(self._on_preview_slider_pressed)
         self.preview_scrub_slider.sliderReleased.connect(self._on_preview_slider_released)
         self.preview_scrub_slider.sliderMoved.connect(self._on_preview_slider_moved)
+        self.preview_karaoke_checkbox.toggled.connect(self._on_preview_karaoke_toggled)
 
         controls_layout.addWidget(self.preview_play_button)
         controls_layout.addWidget(self.preview_stop_button)
         controls_layout.addWidget(self.preview_scrub_slider, 1)
         controls_layout.addWidget(self.preview_time_label)
+        controls_layout.addWidget(self.preview_karaoke_checkbox)
         preview_layout.addLayout(controls_layout)
 
         self.preview_status_label = QtWidgets.QLabel("")
@@ -448,6 +469,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_preview_card()
         self._set_preview_controls_enabled(False)
         self._connect_preview_playback_controller()
+        self._update_preview_overlay_style()
         return page
 
 
@@ -766,7 +788,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._subtitle_style_preset = preset
         self._apply_subtitle_style_to_controls()
         self._store_subtitle_style_config()
-        self._invalidate_preview_playback()
+        self._update_preview_overlay_style()
         self._schedule_preview_refresh()
 
     def _on_subtitle_style_custom_changed(self) -> None:
@@ -781,13 +803,57 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._subtitle_style_custom = self._collect_custom_style_from_controls()
         self._store_subtitle_style_config()
-        self._invalidate_preview_playback()
+        self._update_preview_overlay_style()
         self._schedule_preview_refresh()
 
     def _schedule_preview_refresh(self) -> None:
         if self._preview_render_timer.isActive():
             self._preview_render_timer.stop()
         self._preview_render_timer.start()
+
+    def _update_preview_overlay_style(self) -> None:
+        if not self.preview_subtitle_overlay:
+            return
+        style = self._resolve_effective_subtitle_style()
+        self.preview_subtitle_overlay.set_style(style)
+
+    def _load_preview_overlay_cues(self) -> None:
+        if not self.preview_subtitle_overlay or not self._preview_timestamp_seconds:
+            return
+        srt_path = self._resolve_preview_srt_path()
+        if not srt_path:
+            self.preview_subtitle_overlay.set_cues([])
+            return
+        clip_start = (
+            self._preview_clip_start_seconds
+            if self._preview_clip_start_seconds is not None
+            else max(0.0, self._preview_timestamp_seconds - 1.0)
+        )
+        cues = parse_srt_file(srt_path)
+        shifted: list[SrtCue] = []
+        for cue in cues:
+            text = cue.text.strip()
+            if not text:
+                continue
+            start = cue.start_seconds - clip_start
+            end = cue.end_seconds - clip_start
+            if end <= 0:
+                continue
+            shifted.append(
+                SrtCue(
+                    start_seconds=max(0.0, start),
+                    end_seconds=max(0.0, end),
+                    text=text,
+                )
+            )
+        self.preview_subtitle_overlay.set_cues(shifted)
+
+    def _prepare_preview_overlay(self) -> None:
+        if not self.preview_subtitle_overlay:
+            return
+        self._update_preview_overlay_style()
+        self._load_preview_overlay_cues()
+        self.preview_subtitle_overlay.set_karaoke_enabled(self._preview_karaoke_enabled)
 
     def _resolve_effective_subtitle_style(self) -> SubtitleStyle:
         if self._subtitle_style_preset == PRESET_CUSTOM:
@@ -1120,6 +1186,45 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.preview_status_label:
             self.preview_status_label.setText(message)
 
+    def _on_preview_karaoke_toggled(self, checked: bool) -> None:
+        self._preview_karaoke_enabled = checked
+        if self.preview_subtitle_overlay:
+            self.preview_subtitle_overlay.set_karaoke_enabled(checked)
+        preview_config = self._config.get("preview")
+        if not isinstance(preview_config, dict):
+            preview_config = {}
+            self._config["preview"] = preview_config
+        preview_config["karaoke_highlight_enabled"] = checked
+        self._save_config()
+
+    def _log_preview_play_request(self) -> None:
+        if not self._preview_timestamp_seconds:
+            return
+        clip_start = (
+            self._preview_clip_start_seconds
+            if self._preview_clip_start_seconds is not None
+            else max(0.0, self._preview_timestamp_seconds - 1.0)
+        )
+        clip_duration = self._preview_clip_duration_seconds or 15.0
+        self._log(
+            "Preview play request: "
+            f"start={clip_start:.3f}s duration={clip_duration:.3f}s"
+        )
+        self._log(
+            "Preview karaoke highlight: "
+            f"{'on' if self._preview_karaoke_enabled else 'off'}"
+        )
+
+    def _update_preview_overlay_position(self, position_ms: int) -> None:
+        if not self.preview_subtitle_overlay:
+            return
+        self.preview_subtitle_overlay.update_position(position_ms / 1000.0)
+
+    def _tick_preview_overlay(self) -> None:
+        if not self.preview_media_player:
+            return
+        self._update_preview_overlay_position(self.preview_media_player.position())
+
     def _on_preview_play_clicked(self) -> None:
         if not self.preview_media_player:
             return
@@ -1134,6 +1239,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.preview_media_player.mediaStatus()
             != QtMultimedia.QMediaPlayer.MediaStatus.NoMedia
         ):
+            self._prepare_preview_overlay()
+            self._log_preview_play_request()
             self._switch_preview_mode(playback=True)
             self.preview_media_player.play()
             return
@@ -1143,17 +1250,15 @@ class MainWindow(QtWidgets.QMainWindow):
         srt_path = self._resolve_preview_srt_path()
         if not srt_path:
             return
-        style = self._resolve_effective_subtitle_style()
-        force_style = to_ffmpeg_force_style(style)
+        self._prepare_preview_overlay()
+        self._log_preview_play_request()
         self._preview_play_request_pending = True
         self._set_preview_status_message("")
         self._preview_playback_controller.request_clip(
             video_path=self._video_path,
-            srt_path=srt_path,
             anchor_seconds=self._preview_timestamp_seconds,
             clip_start_seconds=self._preview_clip_start_seconds,
             clip_duration_seconds=self._preview_clip_duration_seconds,
-            force_style=force_style,
         )
 
     def _on_preview_stop_clicked(self) -> None:
@@ -1165,6 +1270,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if clear_media:
                 self.preview_media_player.setSource(QtCore.QUrl())
                 self._preview_clip_path = None
+        if self._preview_overlay_timer.isActive():
+            self._preview_overlay_timer.stop()
         self._switch_preview_mode(playback=False)
         self._preview_play_request_pending = False
         if self.preview_scrub_slider:
@@ -1185,6 +1292,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.preview_stack:
             return
         self.preview_stack.setCurrentIndex(1 if playback else 0)
+        if self.preview_subtitle_overlay:
+            self.preview_subtitle_overlay.setVisible(playback)
+            if not playback:
+                self.preview_subtitle_overlay.clear()
 
     def _on_preview_clip_ready(self, path: str) -> None:
         self._preview_clip_path = Path(path)
@@ -1194,6 +1305,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_play_request_pending = False
         if not self.preview_media_player:
             return
+        self._prepare_preview_overlay()
         self.preview_media_player.setSource(QtCore.QUrl.fromLocalFile(path))
         self._switch_preview_mode(playback=True)
         self.preview_media_player.play()
@@ -1222,8 +1334,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if state == QtMultimedia.QMediaPlayer.PlaybackState.PlayingState:
             self.preview_play_button.setText("Pause")
             self._set_preview_controls_enabled(True)
+            if not self._preview_overlay_timer.isActive():
+                self._preview_overlay_timer.start()
         else:
             self.preview_play_button.setText("Play")
+            if self._preview_overlay_timer.isActive():
+                self._preview_overlay_timer.stop()
+            if self.preview_media_player:
+                self._update_preview_overlay_position(self.preview_media_player.position())
 
     def _on_preview_media_status_changed(
         self, status: QtMultimedia.QMediaPlayer.MediaStatus
@@ -1248,6 +1366,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_scrub_slider.setValue(position)
         if self.preview_media_player:
             self._update_preview_time_label(position, self.preview_media_player.duration())
+        self._update_preview_overlay_position(position)
 
     def _on_preview_duration_changed(self, duration: int) -> None:
         if self.preview_scrub_slider:
@@ -1269,6 +1388,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._preview_slider_dragging and self.preview_media_player:
             self.preview_media_player.setPosition(value)
             self._update_preview_time_label(value, self.preview_media_player.duration())
+            self._update_preview_overlay_position(value)
 
     def _update_preview_time_label(self, position_ms: int, duration_ms: int) -> None:
         if not self.preview_time_label:
@@ -2201,6 +2321,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(value, bool):
             return value
         return False
+
+    def _load_preview_karaoke_enabled(self) -> bool:
+        preview = self._config.get("preview")
+        if isinstance(preview, dict):
+            value = preview.get("karaoke_highlight_enabled")
+            if isinstance(value, bool):
+                return value
+        return True
 
     def _resolve_subtitle_edit_path(self) -> Optional[Path]:
         if self._subtitle_edit_path and self._subtitle_edit_path.exists():
