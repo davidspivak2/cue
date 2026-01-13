@@ -346,25 +346,25 @@ def _run_whisperx_alignment(
     _print(f"WHISPERX version={version}")
     _print(f"WHISPERX model={model_name} device={device} compute_type={compute_type}")
     _print(f"WHISPERX vad_method={vad_method}")
-        try:
-            _print("WHISPERX load_model with asr_options")
-            model = whisperx.load_model(
-                model_name,
-                device,
-                compute_type=compute_type,
-                language=None if language == "auto" else language,
-                asr_options=asr_options,
-            )
-        except TypeError as exc:
-            _print(
-                f"WHISPERX_ERROR load_model failed; using fallback highlight: {exc}"
-            )
-            return None
-        except Exception as exc:  # noqa: BLE001
-            _print(
-                f"WHISPERX_ERROR load_model failed; using fallback highlight: {exc}"
-            )
-            return None
+    try:
+        _print("WHISPERX load_model with asr_options")
+        model = whisperx.load_model(
+            model_name,
+            device,
+            compute_type=compute_type,
+            language=None if language == "auto" else language,
+            asr_options=asr_options,
+        )
+    except TypeError as exc:
+        _print(
+            f"WHISPERX_ERROR load_model failed; using fallback highlight: {exc}"
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001
+        _print(
+            f"WHISPERX_ERROR load_model failed; using fallback highlight: {exc}"
+        )
+        return None
     try:
         result = model.transcribe(str(wav_path))
         language_code = result.get("language", language if language != "auto" else "en")
