@@ -188,10 +188,10 @@ class PreviewPlaybackController(QtCore.QObject):
         start_seconds = (
             clip_start_seconds if clip_start_seconds is not None else max(0.0, anchor_seconds - 1.0)
         )
-        clip_duration = clip_duration_seconds if clip_duration_seconds is not None else 8.0
+        clip_duration = clip_duration_seconds if clip_duration_seconds is not None else 15.0
         if duration:
             clip_duration = max(0.0, min(clip_duration, duration - start_seconds))
-        if clip_duration <= 0.05:
+        if clip_duration <= 0.2:
             self.clip_failed.emit("Preview playback unavailable.")
             return
 
