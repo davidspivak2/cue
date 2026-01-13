@@ -292,13 +292,19 @@ class Worker(QtCore.QObject):
             preview = select_preview_moment(cues, video_duration)
             if preview and preview_style:
                 clip_start = max(0.0, preview.cue_start_seconds - 1.0)
-                clip_duration = 8.0
+                clip_duration = 15.0
                 if video_duration:
                     clip_duration = max(0.0, min(clip_duration, video_duration - clip_start))
+                if clip_duration <= 0.2:
+                    self.signals.log.emit(
+                        "Preview clip duration too short; skipping preview clip.",
+                        True,
+                    )
+                    clip_duration = 0.0
                 preview_subtitle_text = preview.subtitle_text
                 preview_timestamp_seconds = preview.timestamp_seconds
                 preview_clip_start_seconds = clip_start
-                preview_clip_duration_seconds = clip_duration
+                preview_clip_duration_seconds = clip_duration or None
                 self.signals.log.emit(
                     "Preview anchor: "
                     f"cue_index={preview.cue_index} "
@@ -316,13 +322,19 @@ class Worker(QtCore.QObject):
                 )
             elif preview and not preview_style:
                 clip_start = max(0.0, preview.cue_start_seconds - 1.0)
-                clip_duration = 8.0
+                clip_duration = 15.0
                 if video_duration:
                     clip_duration = max(0.0, min(clip_duration, video_duration - clip_start))
+                if clip_duration <= 0.2:
+                    self.signals.log.emit(
+                        "Preview clip duration too short; skipping preview clip.",
+                        True,
+                    )
+                    clip_duration = 0.0
                 preview_subtitle_text = preview.subtitle_text
                 preview_timestamp_seconds = preview.timestamp_seconds
                 preview_clip_start_seconds = clip_start
-                preview_clip_duration_seconds = clip_duration
+                preview_clip_duration_seconds = clip_duration or None
                 self.signals.log.emit(
                     "Preview anchor: "
                     f"cue_index={preview.cue_index} "
