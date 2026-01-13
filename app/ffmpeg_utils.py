@@ -182,6 +182,11 @@ def build_subtitles_filter(
     return f"subtitles='{escaped_path}':force_style='{force_style}'"
 
 
+def build_ass_filter(ass_path: Path) -> str:
+    escaped_path = escape_subtitles_filter_path(ass_path)
+    return f"ass='{escaped_path}'"
+
+
 def extract_subtitled_frame(
     video_path: Path,
     srt_path: Path,

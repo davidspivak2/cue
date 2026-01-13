@@ -19,6 +19,7 @@ from typing import Optional
 from PySide6 import QtCore
 from .progress import ProgressStep
 from .ffmpeg_utils import (
+    build_ass_filter,
     build_subtitles_filter,
     ensure_ffmpeg_available,
     extract_subtitled_frame,
@@ -36,6 +37,7 @@ from .subtitle_style import (
 )
 from .paths import get_models_dir, get_preview_frames_dir
 from .srt_utils import parse_srt_file, select_preview_moment
+from .ass_karaoke import write_karaoke_ass
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
 
@@ -99,6 +101,7 @@ class Worker(QtCore.QObject):
         srt_path: Optional[Path] = None,
         transcription_settings: Optional[TranscriptionSettings] = None,
         subtitle_style: Optional[SubtitleStyle] = None,
+        karaoke_highlight_enabled: bool = False,
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
     ) -> None:
@@ -110,6 +113,7 @@ class Worker(QtCore.QObject):
         self.srt_path = srt_path
         self.transcription_settings = transcription_settings
         self.subtitle_style = subtitle_style
+        self.karaoke_highlight_enabled = karaoke_highlight_enabled
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
         self._cancelled = threading.Event()
@@ -483,10 +487,28 @@ class Worker(QtCore.QObject):
             f"force_style={force_style}",
             True,
         )
-        subtitles_filter = build_subtitles_filter(
-            srt_path,
-            force_style=force_style,
-        )
+        use_karaoke = self.karaoke_highlight_enabled
+        filter_chain = None
+        if use_karaoke:
+            cues = parse_srt_file(srt_path)
+            if cues:
+                ass_path = self.output_dir / f"{self.video_path.stem}_karaoke.ass"
+                result = write_karaoke_ass(ass_path, cues, settings)
+                self.signals.log.emit("Export karaoke highlight: on", True)
+                self.signals.log.emit(f"Karaoke ASS file: {result.ass_path}", True)
+                filter_chain = build_ass_filter(ass_path)
+            else:
+                self.signals.log.emit(
+                    "Warning: karaoke export enabled but no cues found; falling back.",
+                    True,
+                )
+                use_karaoke = False
+        if not use_karaoke:
+            self.signals.log.emit("Export karaoke highlight: off", True)
+            filter_chain = build_subtitles_filter(
+                srt_path,
+                force_style=force_style,
+            )
 
         base_command = [
             str(ffmpeg_path),
@@ -498,7 +520,7 @@ class Worker(QtCore.QObject):
             "pipe:1",
             "-nostats",
             "-vf",
-            subtitles_filter,
+            filter_chain,
             "-c:v",
             "libx264",
             "-preset",

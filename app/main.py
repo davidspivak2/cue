@@ -109,6 +109,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_play_request_pending = False
         self._preview_loading = False
         self._preview_karaoke_enabled = True
+        self._preview_overlay_log_last = 0.0
         self.preview_karaoke_checkbox: Optional[QtWidgets.QCheckBox] = None
         self.preview_subtitle_overlay: Optional[PreviewSubtitleOverlay] = None
         self._preview_overlay_timer = QtCore.QTimer(self)
@@ -397,6 +398,7 @@ class MainWindow(QtWidgets.QMainWindow):
         video_container_layout.addWidget(self.preview_video_widget, 0, 0)
         if self.preview_subtitle_overlay:
             self.preview_subtitle_overlay.setVisible(False)
+            self.preview_subtitle_overlay.set_logger(self._log)
             video_container_layout.addWidget(self.preview_subtitle_overlay, 0, 0)
         video_layout.addWidget(video_container)
 
@@ -851,9 +853,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _prepare_preview_overlay(self) -> None:
         if not self.preview_subtitle_overlay:
             return
+        self._preview_overlay_log_last = 0.0
         self._update_preview_overlay_style()
         self._load_preview_overlay_cues()
         self.preview_subtitle_overlay.set_karaoke_enabled(self._preview_karaoke_enabled)
+        if self.preview_media_player:
+            self.preview_subtitle_overlay.update_position(
+                self.preview_media_player.position() / 1000.0
+            )
 
     def _resolve_effective_subtitle_style(self) -> SubtitleStyle:
         if self._subtitle_style_preset == PRESET_CUSTOM:
@@ -1218,7 +1225,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_preview_overlay_position(self, position_ms: int) -> None:
         if not self.preview_subtitle_overlay:
             return
-        self.preview_subtitle_overlay.update_position(position_ms / 1000.0)
+        seconds = position_ms / 1000.0
+        self.preview_subtitle_overlay.update_position(seconds)
+        now = time.monotonic()
+        if now - self._preview_overlay_log_last >= 0.1:
+            cue_index = self.preview_subtitle_overlay.active_cue_index()
+            self._log(
+                "Preview subtitle update: "
+                f"t={seconds:.3f}s cue_index={cue_index if cue_index is not None else 'none'}"
+            )
+            self._preview_overlay_log_last = now
 
     def _tick_preview_overlay(self) -> None:
         if not self.preview_media_player:
@@ -1586,7 +1602,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         style = self._resolve_effective_subtitle_style()
-        self._start_worker(TaskType.BURN_IN, self._video_path, srt_path, None, style)
+        self._start_worker(
+            TaskType.BURN_IN,
+            self._video_path,
+            srt_path,
+            None,
+            style,
+            karaoke_highlight_enabled=self._preview_karaoke_enabled,
+        )
 
     def _start_worker(
         self,
@@ -1595,6 +1618,8 @@ class MainWindow(QtWidgets.QMainWindow):
         srt_path: Optional[Path],
         transcription_settings: Optional[TranscriptionSettings],
         subtitle_style: Optional[SubtitleStyle],
+        *,
+        karaoke_highlight_enabled: bool = False,
     ) -> None:
         if self._worker_thread:
             QtWidgets.QMessageBox.warning(self, "Please wait", "Another task is running.")
@@ -1611,6 +1636,7 @@ class MainWindow(QtWidgets.QMainWindow):
             srt_path=srt_path,
             transcription_settings=transcription_settings,
             subtitle_style=subtitle_style,
+            karaoke_highlight_enabled=karaoke_highlight_enabled,
             diagnostics_settings=self._diagnostics_settings,
             session_log_path=self._log_path,
         )

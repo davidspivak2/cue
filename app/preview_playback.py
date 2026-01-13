@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -260,3 +262,80 @@ def _build_filter_complex(
     else:
         filter_complex = f"[0:v]{video_chain}[v]"
     return filter_complex, audio_label
+
+
+@dataclass(frozen=True)
+class ShiftedSrtResult:
+    cues_written: int
+    first_start: Optional[str]
+    first_end: Optional[str]
+
+
+_SRT_TIMESTAMP_RE = re.compile(
+    r"(?P<start>\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(?P<end>\d{2}:\d{2}:\d{2},\d{3})"
+)
+
+
+def _shift_srt_text(srt_text: str, offset_seconds: float) -> tuple[str, ShiftedSrtResult]:
+    normalized = srt_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return "", ShiftedSrtResult(0, None, None)
+    blocks = re.split(r"\n\s*\n", normalized)
+    output_blocks: list[str] = []
+    cues_written = 0
+    first_start: Optional[str] = None
+    first_end: Optional[str] = None
+    for block in blocks:
+        lines = block.split("\n")
+        timestamp_index = None
+        match = None
+        for idx, line in enumerate(lines):
+            match = _SRT_TIMESTAMP_RE.search(line)
+            if match:
+                timestamp_index = idx
+                break
+        if timestamp_index is None or not match:
+            continue
+        start_seconds = _parse_srt_timestamp(match.group("start"))
+        end_seconds = _parse_srt_timestamp(match.group("end"))
+        if start_seconds is None or end_seconds is None:
+            continue
+        new_start = max(0.0, start_seconds - offset_seconds)
+        new_end = max(0.0, end_seconds - offset_seconds)
+        if new_end <= 0:
+            continue
+        lines[timestamp_index] = (
+            f"{_format_srt_timestamp(new_start)} --> {_format_srt_timestamp(new_end)}"
+        )
+        output_blocks.append("\n".join(lines))
+        cues_written += 1
+        if first_start is None:
+            first_start = _format_srt_timestamp(new_start)
+            first_end = _format_srt_timestamp(new_end)
+    shifted = "\n\n".join(output_blocks)
+    if shifted:
+        shifted = shifted.strip() + "\n"
+    return shifted, ShiftedSrtResult(cues_written, first_start, first_end)
+
+
+def _parse_srt_timestamp(value: str) -> Optional[float]:
+    parts = value.replace(",", ".").split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = float(parts[2])
+    except ValueError:
+        return None
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _format_srt_timestamp(seconds: float) -> str:
+    delta = timedelta(seconds=max(seconds, 0))
+    total_seconds = int(delta.total_seconds())
+    millis = int(delta.microseconds / 1000)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
