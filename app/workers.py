@@ -35,6 +35,7 @@ from .subtitle_style import (
     to_ffmpeg_force_style,
     to_preview_params,
 )
+from .srt_ass_burnin import build_ass_from_srt_cues
 from .paths import get_models_dir, get_preview_frames_dir
 from .word_highlight_ass import build_ass_text
 from .srt_utils import parse_srt_file, select_preview_moment
@@ -104,6 +105,7 @@ class Worker(QtCore.QObject):
         subtitle_mode: str = "static",
         highlight_color: str = "#FFFF00",
         save_ass_next_to_video: bool = False,
+        word_highlight_fallback: bool = False,
         alignment_cache_path: Optional[Path] = None,
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
@@ -119,6 +121,7 @@ class Worker(QtCore.QObject):
         self.subtitle_mode = subtitle_mode
         self.highlight_color = highlight_color
         self.save_ass_next_to_video = save_ass_next_to_video
+        self.word_highlight_fallback = word_highlight_fallback
         self.alignment_cache_path = alignment_cache_path
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
@@ -630,7 +633,14 @@ class Worker(QtCore.QObject):
             )
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
-        if self.subtitle_mode == "word_highlight":
+        if self.subtitle_mode in ("word_highlight", "word_highlight_fallback"):
+            if self.word_highlight_fallback:
+                return self._run_burn_in_word_highlight_fallback(
+                    ffmpeg_path,
+                    output_path,
+                    video_duration,
+                    settings,
+                )
             return self._run_burn_in_word_highlight(
                 ffmpeg_path,
                 output_path,
@@ -737,6 +747,107 @@ class Worker(QtCore.QObject):
         temp_dir = output_path.parent / "ass_export_temp"
         temp_dir.mkdir(parents=True, exist_ok=True)
         ass_path = temp_dir / f"{self.video_path.stem}_word_highlight.ass"
+        ass_path.write_text(ass_text, encoding="utf-8-sig")
+        subtitles_filter = f"ass={ass_path.name}"
+        self.signals.log.emit(f"Export ASS filter: -vf \"{subtitles_filter}\"", True)
+        base_command = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-i",
+            str(self.video_path),
+            "-progress",
+            "pipe:1",
+            "-nostats",
+            "-vf",
+            subtitles_filter,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-movflags",
+            "+faststart",
+        ]
+        self.signals.log.emit("Adding word highlight subtitles to the video...", True)
+        self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
+        copy_command = base_command + ["-c:a", "copy", str(output_path)]
+        self._burn_in_command = subprocess.list2cmdline(copy_command)
+        self._burn_in_audio_mode = "copy"
+        burn_start = time.monotonic()
+        try:
+            self._run_ffmpeg_with_progress(
+                copy_command,
+                video_duration,
+                ProgressStep.EXPORT,
+                "Encoding",
+                cwd=temp_dir,
+            )
+            self._burn_in_seconds = time.monotonic() - burn_start
+        except RuntimeError as exc:
+            self.signals.log.emit("Audio copy failed, trying another format...", True)
+            self.signals.log.emit(str(exc), True)
+            aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
+            self._burn_in_command = subprocess.list2cmdline(aac_command)
+            self._burn_in_audio_mode = "aac"
+            self._run_ffmpeg_with_progress(
+                aac_command,
+                video_duration,
+                ProgressStep.EXPORT,
+                "Encoding",
+                cwd=temp_dir,
+            )
+            self._burn_in_seconds = time.monotonic() - burn_start
+        finally:
+            if self.save_ass_next_to_video:
+                final_ass_path = output_path.with_suffix(".ass")
+                try:
+                    shutil.copy2(ass_path, final_ass_path)
+                    self.signals.log.emit(
+                        f"Saved ASS alongside export: {final_ass_path}",
+                        True,
+                    )
+                except OSError as exc:
+                    self.signals.log.emit(
+                        f"Warning: failed to save ASS next to export: {exc}",
+                        True,
+                    )
+            if ass_path.exists():
+                try:
+                    ass_path.unlink()
+                    self.signals.log.emit(f"Deleted temp ASS: {ass_path}", True)
+                except OSError:
+                    self.signals.log.emit(
+                        f"Warning: failed to delete temp ASS: {ass_path}",
+                        True,
+                    )
+        return {"output_path": str(output_path)}
+
+    def _run_burn_in_word_highlight_fallback(
+        self,
+        ffmpeg_path: Path,
+        output_path: Path,
+        video_duration: Optional[float],
+        settings: SubtitleStyle,
+    ) -> dict:
+        srt_path = self.srt_path or self.output_dir / f"{self.video_path.stem}.srt"
+        if not srt_path.exists():
+            raise FileNotFoundError(f"Subtitles file not found: {srt_path}")
+        resolution = get_video_resolution(self.video_path)
+        if not resolution:
+            raise RuntimeError("Unable to read video resolution for ASS export.")
+        play_res_x, play_res_y = resolution
+        cues = parse_srt_file(srt_path)
+        ass_text = build_ass_from_srt_cues(
+            cues,
+            settings,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y,
+        )
+        temp_dir = output_path.parent / "ass_export_temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        ass_path = temp_dir / f"{self.video_path.stem}_word_highlight_fallback.ass"
         ass_path.write_text(ass_text, encoding="utf-8-sig")
         subtitles_filter = f"ass={ass_path.name}"
         self.signals.log.emit(f"Export ASS filter: -vf \"{subtitles_filter}\"", True)

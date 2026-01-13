@@ -4,6 +4,8 @@ import argparse
 import faulthandler
 import hashlib
 import inspect
+import dataclasses
+from typing import get_origin, get_args
 import json
 import os
 import shutil
@@ -381,11 +383,24 @@ def _run_whisperx_alignment(
 
 
 def _build_whisperx_asr_options(faster_whisper_module) -> dict[str, object]:
+    allowed_keys = set()
+    options_cls = None
     try:
-        signature = inspect.signature(faster_whisper_module.WhisperModel.transcribe)
-    except (AttributeError, ValueError):
-        signature = None
-    allowed_keys = set(signature.parameters.keys()) if signature else set()
+        transcribe_module = __import__(
+            "faster_whisper.transcribe",
+            fromlist=["TranscriptionOptions"],
+        )
+        options_cls = getattr(transcribe_module, "TranscriptionOptions", None)
+    except Exception:  # noqa: BLE001
+        options_cls = None
+    if options_cls and dataclasses.is_dataclass(options_cls):
+        allowed_keys = {field.name for field in dataclasses.fields(options_cls)}
+    else:
+        try:
+            signature = inspect.signature(faster_whisper_module.WhisperModel.transcribe)
+        except (AttributeError, ValueError):
+            signature = None
+        allowed_keys = set(signature.parameters.keys()) if signature else set()
     base_options = {
         "beam_size": 5,
         "best_of": 5,
@@ -415,7 +430,48 @@ def _build_whisperx_asr_options(faster_whisper_module) -> dict[str, object]:
     }
     if not allowed_keys:
         return base_options
-    return {key: value for key, value in base_options.items() if key in allowed_keys}
+    options = {key: value for key, value in base_options.items() if key in allowed_keys}
+    if options_cls and dataclasses.is_dataclass(options_cls):
+        for field in dataclasses.fields(options_cls):
+            if field.name in options:
+                continue
+            if field.default is not dataclasses.MISSING:
+                options[field.name] = field.default
+                continue
+            if field.default_factory is not dataclasses.MISSING:  # type: ignore[comparison-overlap]
+                options[field.name] = field.default_factory()  # type: ignore[misc]
+                continue
+            options[field.name] = _safe_default_for_type(field.type)
+    return options
+
+
+def _safe_default_for_type(field_type) -> object:
+    origin = get_origin(field_type)
+    if origin is not None:
+        if origin is list:
+            return []
+        if origin is dict:
+            return {}
+        if origin is tuple:
+            return ()
+        if origin is set:
+            return set()
+        if origin is None:
+            return None
+        if origin is type(None):
+            return None
+        args = get_args(field_type)
+        if type(None) in args:
+            return None
+    if field_type is bool:
+        return False
+    if field_type is int:
+        return 0
+    if field_type is float:
+        return 0.0
+    if field_type is str:
+        return ""
+    return None
 
 
 def _segments_to_srt_segments(segments: list[dict]) -> list[SrtSegment]:

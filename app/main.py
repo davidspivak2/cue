@@ -1630,6 +1630,7 @@ class MainWindow(QtWidgets.QMainWindow):
             subtitle_mode=self._subtitle_mode,
             highlight_color=self._highlight_color,
             save_ass_next_to_video=self._save_ass_next_to_video,
+            word_highlight_fallback=False,
             alignment_cache_path=None,
         )
 
@@ -1714,6 +1715,7 @@ class MainWindow(QtWidgets.QMainWindow):
             subtitle_mode=subtitle_mode,
             highlight_color=self._highlight_color,
             save_ass_next_to_video=self._save_ass_next_to_video,
+            word_highlight_fallback=self._last_word_highlight_fallback,
             alignment_cache_path=alignment_path,
         )
 
@@ -1728,6 +1730,7 @@ class MainWindow(QtWidgets.QMainWindow):
         subtitle_mode: SubtitleMode,
         highlight_color: str,
         save_ass_next_to_video: bool,
+        word_highlight_fallback: bool,
         alignment_cache_path: Optional[Path],
     ) -> None:
         if self._worker_thread:
@@ -1748,6 +1751,7 @@ class MainWindow(QtWidgets.QMainWindow):
             subtitle_mode=subtitle_mode.value,
             highlight_color=highlight_color,
             save_ass_next_to_video=save_ass_next_to_video,
+            word_highlight_fallback=word_highlight_fallback,
             alignment_cache_path=alignment_cache_path,
             diagnostics_settings=self._diagnostics_settings,
             session_log_path=self._log_path,
