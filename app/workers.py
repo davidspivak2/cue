@@ -284,21 +284,55 @@ class Worker(QtCore.QObject):
         preview_frame_path: Optional[Path] = None
         preview_subtitle_text: Optional[str] = None
         preview_timestamp_seconds: Optional[float] = None
+        preview_clip_start_seconds: Optional[float] = None
+        preview_clip_duration_seconds: Optional[float] = None
         preview_style = self.subtitle_style
         try:
             cues = parse_srt_file(srt_path)
             preview = select_preview_moment(cues, video_duration)
             if preview and preview_style:
+                clip_start = max(0.0, preview.cue_start_seconds - 1.0)
+                clip_duration = 8.0
+                if video_duration:
+                    clip_duration = max(0.0, min(clip_duration, video_duration - clip_start))
                 preview_subtitle_text = preview.subtitle_text
                 preview_timestamp_seconds = preview.timestamp_seconds
+                preview_clip_start_seconds = clip_start
+                preview_clip_duration_seconds = clip_duration
+                self.signals.log.emit(
+                    "Preview anchor: "
+                    f"cue_index={preview.cue_index} "
+                    f"cue_start={preview.cue_start_seconds:.3f} "
+                    f"cue_end={preview.cue_end_seconds:.3f} "
+                    f"anchor={preview.timestamp_seconds:.3f} "
+                    f"clip_start={clip_start:.3f} "
+                    f"clip_duration={clip_duration:.3f}",
+                    True,
+                )
                 preview_frame_path = self._ensure_preview_frame(
                     srt_path=srt_path,
                     timestamp_seconds=preview_timestamp_seconds,
                     style=preview_style,
                 )
             elif preview and not preview_style:
+                clip_start = max(0.0, preview.cue_start_seconds - 1.0)
+                clip_duration = 8.0
+                if video_duration:
+                    clip_duration = max(0.0, min(clip_duration, video_duration - clip_start))
                 preview_subtitle_text = preview.subtitle_text
                 preview_timestamp_seconds = preview.timestamp_seconds
+                preview_clip_start_seconds = clip_start
+                preview_clip_duration_seconds = clip_duration
+                self.signals.log.emit(
+                    "Preview anchor: "
+                    f"cue_index={preview.cue_index} "
+                    f"cue_start={preview.cue_start_seconds:.3f} "
+                    f"cue_end={preview.cue_end_seconds:.3f} "
+                    f"anchor={preview.timestamp_seconds:.3f} "
+                    f"clip_start={clip_start:.3f} "
+                    f"clip_duration={clip_duration:.3f}",
+                    True,
+                )
         except Exception as exc:  # noqa: BLE001
             self.signals.log.emit(f"Preview generation failed: {exc}", False)
         if settings.keep_extracted_audio:
@@ -324,6 +358,8 @@ class Worker(QtCore.QObject):
             ),
             "preview_subtitle_text": preview_subtitle_text,
             "preview_timestamp_seconds": preview_timestamp_seconds,
+            "preview_clip_start_seconds": preview_clip_start_seconds,
+            "preview_clip_duration_seconds": preview_clip_duration_seconds,
         }
 
     def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:

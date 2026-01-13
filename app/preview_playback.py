@@ -174,6 +174,8 @@ class PreviewPlaybackController(QtCore.QObject):
         video_path: Path,
         srt_path: Path,
         anchor_seconds: float,
+        clip_start_seconds: Optional[float],
+        clip_duration_seconds: Optional[float],
         force_style: str,
         scale_width: int = 1280,
     ) -> None:
@@ -183,8 +185,10 @@ class PreviewPlaybackController(QtCore.QObject):
             duration = get_media_duration(video_path)
         except FileNotFoundError:
             duration = None
-        start_seconds = max(0.0, anchor_seconds - 1.0)
-        clip_duration = 8.0
+        start_seconds = (
+            clip_start_seconds if clip_start_seconds is not None else max(0.0, anchor_seconds - 1.0)
+        )
+        clip_duration = clip_duration_seconds if clip_duration_seconds is not None else 8.0
         if duration:
             clip_duration = max(0.0, min(clip_duration, duration - start_seconds))
         if clip_duration <= 0.05:

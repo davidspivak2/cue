@@ -99,6 +99,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_frame_path: Optional[Path] = None
         self._preview_subtitle_text: Optional[str] = None
         self._preview_timestamp_seconds: Optional[float] = None
+        self._preview_clip_start_seconds: Optional[float] = None
+        self._preview_clip_duration_seconds: Optional[float] = None
         self._preview_pixmap: Optional[QtGui.QPixmap] = None
         self._preview_clip_path: Optional[Path] = None
         self._preview_slider_dragging = False
@@ -1149,6 +1151,8 @@ class MainWindow(QtWidgets.QMainWindow):
             video_path=self._video_path,
             srt_path=srt_path,
             anchor_seconds=self._preview_timestamp_seconds,
+            clip_start_seconds=self._preview_clip_start_seconds,
+            clip_duration_seconds=self._preview_clip_duration_seconds,
             force_style=force_style,
         )
 
@@ -1549,6 +1553,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._preview_frame_path = Path(frame_value) if frame_value else None
             self._preview_subtitle_text = payload.get("preview_subtitle_text")
             self._preview_timestamp_seconds = payload.get("preview_timestamp_seconds")
+            self._preview_clip_start_seconds = payload.get("preview_clip_start_seconds")
+            self._preview_clip_duration_seconds = payload.get("preview_clip_duration_seconds")
             self._invalidate_preview_playback()
 
         if success:
@@ -2033,6 +2039,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_frame_path = None
         self._preview_subtitle_text = None
         self._preview_timestamp_seconds = None
+        self._preview_clip_start_seconds = None
+        self._preview_clip_duration_seconds = None
         self._preview_pixmap = None
         self._preview_clip_path = None
         self._stop_preview_playback(clear_media=True)

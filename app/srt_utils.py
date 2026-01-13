@@ -24,6 +24,7 @@ class SrtCue:
 
 @dataclass(frozen=True)
 class PreviewMoment:
+    cue_index: int
     timestamp_seconds: float
     subtitle_text: str
     cue_start_seconds: float
@@ -110,38 +111,20 @@ def select_preview_moment(
 ) -> Optional[PreviewMoment]:
     if not cues:
         return None
-    if duration_seconds and duration_seconds > 0:
-        duration = duration_seconds
-    else:
-        duration = max(cue.end_seconds for cue in cues)
-    mid_time = duration / 2 if duration > 0 else cues[len(cues) // 2].start_seconds
-
-    def cue_duration(cue: SrtCue) -> float:
-        return cue.end_seconds - cue.start_seconds
-
-    def is_weird_duration(cue: SrtCue) -> bool:
-        length = cue_duration(cue)
-        return length < 0.8 or length > 8.0
-
-    def is_too_long(cue: SrtCue) -> bool:
-        return len(cue.text) > 120
-
-    def distance_from_mid(cue: SrtCue) -> float:
-        return abs(cue.start_seconds - mid_time)
-
-    candidates = [cue for cue in cues if cue.text.strip()]
-    preferred = [cue for cue in candidates if not is_weird_duration(cue) and not is_too_long(cue)]
-    if not preferred:
-        preferred = candidates if candidates else list(cues)
-
-    chosen = min(preferred, key=distance_from_mid)
-    length = max(cue_duration(chosen), 0.0)
+    chosen_index = None
+    chosen = None
+    for idx, cue in enumerate(cues):
+        if cue.text.strip():
+            chosen_index = idx
+            chosen = cue
+            break
+    if chosen is None or chosen_index is None:
+        return None
+    length = max(chosen.end_seconds - chosen.start_seconds, 0.0)
     timestamp = chosen.start_seconds + (length * 0.25 if length > 0 else 0.0)
-    if chosen.end_seconds > chosen.start_seconds:
-        timestamp = max(chosen.start_seconds, min(timestamp, chosen.end_seconds))
-    else:
-        timestamp = chosen.start_seconds
+    timestamp = max(chosen.start_seconds, min(timestamp, chosen.end_seconds))
     return PreviewMoment(
+        cue_index=chosen_index,
         timestamp_seconds=timestamp,
         subtitle_text=chosen.text,
         cue_start_seconds=chosen.start_seconds,
