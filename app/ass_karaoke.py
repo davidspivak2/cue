@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from app.karaoke_utils import build_token_durations_cs, highlight_rgb_from_hex, is_rtl_text, iter_token_spans
+from app.karaoke_utils import (
+    build_weighted_token_durations_cs,
+    highlight_rgb_from_hex,
+    is_rtl_text,
+    iter_token_spans,
+)
 from app.srt_utils import SrtCue
 from app.subtitle_style import DEFAULT_FONT_NAME, SubtitleStyle, get_box_alpha_byte
 
@@ -34,26 +39,55 @@ def _build_ass_header(
     style: SubtitleStyle,
     *,
     highlight_rgb: tuple[int, int, int],
+    highlight_mode: str,
+    highlight_bg_opacity: int,
     play_res_x: int,
     play_res_y: int,
 ) -> str:
-    outline = style.outline
-    border_style = 3 if style.box_enabled else 1
-    back_alpha = get_box_alpha_byte(style) if style.box_enabled else 255
+    outline = style.outline + style.box_padding if style.box_enabled else style.outline
+    base_border_style = 3 if style.box_enabled else 1
+    base_back_alpha = get_box_alpha_byte(style) if style.box_enabled else 255
+    highlight_border_style = 3 if highlight_mode == "text+bg" else 1
+    highlight_back_alpha = max(0, min(255, round(255 * (highlight_bg_opacity / 100))))
     primary = _format_ass_color((255, 255, 255))
-    secondary = _format_ass_color(highlight_rgb)
+    secondary = _format_ass_color((0, 0, 0), 255)
     outline_color = _format_ass_color((0, 0, 0))
-    back_color = _format_ass_color((0, 0, 0), back_alpha)
-    style_line = (
-        "Style: Default,"
+    base_back_color = _format_ass_color((0, 0, 0), base_back_alpha)
+    highlight_primary = _format_ass_color(highlight_rgb)
+    highlight_secondary = _format_ass_color((0, 0, 0), 255)
+    highlight_back_color = (
+        _format_ass_color(highlight_rgb, highlight_back_alpha)
+        if highlight_mode == "text+bg"
+        else _format_ass_color((0, 0, 0), 255)
+    )
+    base_style = (
+        "Style: Base,"
         f"{DEFAULT_FONT_NAME},"
         f"{style.font_size},"
         f"{primary},"
         f"{secondary},"
         f"{outline_color},"
-        f"{back_color},"
+        f"{base_back_color},"
         "0,0,0,0,"
-        f"{border_style},"
+        f"{base_border_style},"
+        f"{outline},"
+        f"{style.shadow},"
+        "2,"
+        "20,"
+        "20,"
+        f"{style.margin_v},"
+        "1"
+    )
+    highlight_style = (
+        "Style: Highlight,"
+        f"{DEFAULT_FONT_NAME},"
+        f"{style.font_size},"
+        f"{highlight_primary},"
+        f"{highlight_secondary},"
+        f"{outline_color},"
+        f"{highlight_back_color},"
+        "0,0,0,0,"
+        f"{highlight_border_style},"
         f"{outline},"
         f"{style.shadow},"
         "2,"
@@ -74,7 +108,8 @@ def _build_ass_header(
             "",
             "[V4+ Styles]",
             "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
-            style_line,
+            base_style,
+            highlight_style,
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -82,10 +117,10 @@ def _build_ass_header(
     )
 
 
-def _build_karaoke_text(text: str, duration_seconds: float) -> str:
+def _build_karaoke_text(text: str, duration_seconds: float, *, rtl_marks: bool) -> str:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     token_spans = list(iter_token_spans(normalized))
-    durations = build_token_durations_cs(duration_seconds, len(token_spans))
+    durations = build_weighted_token_durations_cs(normalized, duration_seconds)
     if not token_spans:
         return normalized.replace("\n", "\\N")
     chunks: list[str] = []
@@ -94,6 +129,8 @@ def _build_karaoke_text(text: str, duration_seconds: float) -> str:
         chunks.append(normalized[last_end:start].replace("\n", "\\N"))
         duration_cs = durations[idx]
         token_text = normalized[start:end].replace("\n", "\\N")
+        if rtl_marks:
+            token_text = f"\u200F{token_text}"
         chunks.append(f"{{\\k{duration_cs}}}{token_text}")
         last_end = end
     chunks.append(normalized[last_end:].replace("\n", "\\N"))
@@ -105,6 +142,8 @@ def build_karaoke_ass_text(
     style: SubtitleStyle,
     *,
     highlight_color: str,
+    highlight_mode: str,
+    highlight_bg_opacity: int,
     play_res_x: int,
     play_res_y: int,
 ) -> tuple[str, int]:
@@ -113,6 +152,8 @@ def build_karaoke_ass_text(
         _build_ass_header(
             style,
             highlight_rgb=highlight_rgb,
+            highlight_mode=highlight_mode,
+            highlight_bg_opacity=highlight_bg_opacity,
             play_res_x=play_res_x,
             play_res_y=play_res_y,
         )
@@ -125,10 +166,14 @@ def build_karaoke_ass_text(
         duration = max(0.0, cue.end_seconds - cue.start_seconds)
         start = _format_ass_timestamp(cue.start_seconds)
         end = _format_ass_timestamp(cue.end_seconds)
-        karaoke_text = _build_karaoke_text(text, duration)
-        if is_rtl_text(text):
+        rtl_text = is_rtl_text(text)
+        base_text = text.replace("\n", "\\N")
+        karaoke_text = _build_karaoke_text(text, duration, rtl_marks=rtl_text)
+        if rtl_text:
+            base_text = f"\u202B{base_text}\u202C"
             karaoke_text = f"\u202B{karaoke_text}\u202C"
-        lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{karaoke_text}")
+        lines.append(f"Dialogue: 0,{start},{end},Base,,0,0,0,,{base_text}")
+        lines.append(f"Dialogue: 1,{start},{end},Highlight,,0,0,0,,{karaoke_text}")
         dialogue_count += 1
     return "\n".join(lines) + "\n", dialogue_count
 
@@ -139,6 +184,8 @@ def write_karaoke_ass(
     style: SubtitleStyle,
     *,
     highlight_color: str,
+    highlight_mode: str,
+    highlight_bg_opacity: int,
     play_res_x: int,
     play_res_y: int,
 ) -> KaraokeAssResult:
@@ -146,6 +193,8 @@ def write_karaoke_ass(
         cues,
         style,
         highlight_color=highlight_color,
+        highlight_mode=highlight_mode,
+        highlight_bg_opacity=highlight_bg_opacity,
         play_res_x=play_res_x,
         play_res_y=play_res_y,
     )

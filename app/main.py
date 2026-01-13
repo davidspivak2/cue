@@ -448,8 +448,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         preview_layout.addWidget(preview_frame)
 
-        controls_layout = QtWidgets.QHBoxLayout()
-        controls_layout.setSpacing(8)
+        controls_layout = QtWidgets.QVBoxLayout()
+        controls_layout.setSpacing(6)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        row1_layout = QtWidgets.QHBoxLayout()
+        row1_layout.setSpacing(8)
+        row2_layout = QtWidgets.QHBoxLayout()
+        row2_layout.setSpacing(8)
         self.preview_play_button = QtWidgets.QPushButton("Play")
         self.preview_stop_button = QtWidgets.QPushButton("Stop")
         self.preview_scrub_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
@@ -464,6 +469,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_karaoke_bg_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.preview_karaoke_bg_spinbox = QtWidgets.QSpinBox()
         self.preview_karaoke_bg_label = QtWidgets.QLabel("Highlight bg opacity")
+        self.preview_karaoke_color_combo.setMinimumWidth(130)
+        self.preview_karaoke_mode_combo.setMinimumWidth(140)
         self._populate_karaoke_color_combo()
         self._populate_karaoke_mode_combo()
         self._configure_karaoke_bg_controls()
@@ -493,18 +500,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._on_preview_karaoke_bg_opacity_changed
             )
 
-        controls_layout.addWidget(self.preview_play_button)
-        controls_layout.addWidget(self.preview_stop_button)
-        controls_layout.addWidget(self.preview_scrub_slider, 1)
-        controls_layout.addWidget(self.preview_time_label)
-        controls_layout.addWidget(self.preview_karaoke_checkbox)
-        controls_layout.addWidget(QtWidgets.QLabel("Highlight color"))
-        controls_layout.addWidget(self.preview_karaoke_color_combo)
-        controls_layout.addWidget(QtWidgets.QLabel("Highlight mode"))
-        controls_layout.addWidget(self.preview_karaoke_mode_combo)
-        controls_layout.addWidget(self.preview_karaoke_bg_label)
-        controls_layout.addWidget(self.preview_karaoke_bg_slider)
-        controls_layout.addWidget(self.preview_karaoke_bg_spinbox)
+        row1_layout.addWidget(self.preview_play_button)
+        row1_layout.addWidget(self.preview_stop_button)
+        row1_layout.addWidget(self.preview_scrub_slider, 1)
+        row1_layout.addWidget(self.preview_time_label)
+
+        row2_layout.addWidget(self.preview_karaoke_checkbox)
+        row2_layout.addWidget(QtWidgets.QLabel("Highlight color"))
+        row2_layout.addWidget(self.preview_karaoke_color_combo)
+        row2_layout.addWidget(QtWidgets.QLabel("Highlight mode"))
+        row2_layout.addWidget(self.preview_karaoke_mode_combo)
+        row2_layout.addWidget(self.preview_karaoke_bg_label)
+        row2_layout.addWidget(self.preview_karaoke_bg_slider, 1)
+        row2_layout.addWidget(self.preview_karaoke_bg_spinbox)
+
+        controls_layout.addLayout(row1_layout)
+        controls_layout.addLayout(row2_layout)
         preview_layout.addLayout(controls_layout)
 
         self.preview_status_label = QtWidgets.QLabel("")
@@ -1803,6 +1814,8 @@ class MainWindow(QtWidgets.QMainWindow):
             style,
             karaoke_highlight_enabled=self._preview_karaoke_enabled,
             karaoke_highlight_color=self._preview_karaoke_color,
+            karaoke_highlight_mode=self._preview_karaoke_mode,
+            karaoke_highlight_bg_opacity=self._preview_karaoke_bg_opacity,
         )
 
     def _start_worker(
@@ -1815,6 +1828,8 @@ class MainWindow(QtWidgets.QMainWindow):
         *,
         karaoke_highlight_enabled: bool = False,
         karaoke_highlight_color: str = "",
+        karaoke_highlight_mode: str = "text",
+        karaoke_highlight_bg_opacity: int = 40,
     ) -> None:
         if self._worker_thread:
             QtWidgets.QMessageBox.warning(self, "Please wait", "Another task is running.")
@@ -1833,6 +1848,8 @@ class MainWindow(QtWidgets.QMainWindow):
             subtitle_style=subtitle_style,
             karaoke_highlight_enabled=karaoke_highlight_enabled,
             karaoke_highlight_color=karaoke_highlight_color,
+            karaoke_highlight_mode=karaoke_highlight_mode,
+            karaoke_highlight_bg_opacity=karaoke_highlight_bg_opacity,
             diagnostics_settings=self._diagnostics_settings,
             session_log_path=self._log_path,
         )

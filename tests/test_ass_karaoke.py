@@ -10,6 +10,8 @@ def test_karaoke_ass_token_durations_sum() -> None:
         cues,
         style,
         highlight_color="#FFD666",
+        highlight_mode="text",
+        highlight_bg_opacity=40,
         play_res_x=1920,
         play_res_y=1080,
     )

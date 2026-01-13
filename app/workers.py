@@ -104,6 +104,8 @@ class Worker(QtCore.QObject):
         subtitle_style: Optional[SubtitleStyle] = None,
         karaoke_highlight_enabled: bool = False,
         karaoke_highlight_color: str = "",
+        karaoke_highlight_mode: str = "text",
+        karaoke_highlight_bg_opacity: int = 40,
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
     ) -> None:
@@ -117,6 +119,8 @@ class Worker(QtCore.QObject):
         self.subtitle_style = subtitle_style
         self.karaoke_highlight_enabled = karaoke_highlight_enabled
         self.karaoke_highlight_color = karaoke_highlight_color
+        self.karaoke_highlight_mode = karaoke_highlight_mode
+        self.karaoke_highlight_bg_opacity = karaoke_highlight_bg_opacity
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
         self._cancelled = threading.Event()
@@ -501,11 +505,19 @@ class Worker(QtCore.QObject):
                     ass_path = ass_dir / f"{self.video_path.stem}_{int(time.time())}.ass"
                     resolution = self._probe_video_resolution(self.video_path)
                     highlight_color = self.karaoke_highlight_color or DEFAULT_HIGHLIGHT_COLOR_HEX
+                    highlight_mode = (
+                        self.karaoke_highlight_mode
+                        if self.karaoke_highlight_mode in {"text", "text+bg"}
+                        else "text"
+                    )
+                    highlight_bg_opacity = max(0, min(100, self.karaoke_highlight_bg_opacity))
                     result = write_karaoke_ass(
                         ass_path,
                         cues,
                         settings,
                         highlight_color=highlight_color,
+                        highlight_mode=highlight_mode,
+                        highlight_bg_opacity=highlight_bg_opacity,
                         play_res_x=resolution[0],
                         play_res_y=resolution[1],
                     )

@@ -7,6 +7,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.karaoke_utils import (
     DEFAULT_HIGHLIGHT_COLOR_HEX,
+    build_weighted_token_durations_cs,
     highlight_rgb_from_hex,
     is_rtl_text,
     iter_token_spans,
@@ -154,8 +155,14 @@ class PreviewSubtitleItem(QtWidgets.QGraphicsObject):
             if duration <= 0:
                 self._log_karaoke_fallback("Karaoke highlight skipped: non-positive duration")
                 return
-            progress = (self._position_seconds - self._active_cue.start_seconds) / duration
-            highlight_width = self._measure_highlight_width(text, font, progress, text_rect.width())
+            elapsed = max(0.0, self._position_seconds - self._active_cue.start_seconds)
+            highlight_width = self._measure_highlight_width(
+                text,
+                font,
+                elapsed,
+                duration,
+                text_rect.width(),
+            )
             if highlight_width <= 0:
                 self._log_karaoke_fallback("Karaoke highlight skipped: no highlight width")
                 return
@@ -274,14 +281,22 @@ class PreviewSubtitleItem(QtWidgets.QGraphicsObject):
         self,
         text: str,
         font: QtGui.QFont,
-        progress: float,
+        elapsed_seconds: float,
+        duration_seconds: float,
         max_width: float,
     ) -> float:
         spans = list(iter_token_spans(text))
         if not spans:
             return 0.0
-        clamped = max(0.0, min(progress, 1.0))
-        completed = int(clamped * len(spans))
+        durations = build_weighted_token_durations_cs(text, duration_seconds)
+        elapsed_cs = max(0, min(round(elapsed_seconds * 100), sum(durations)))
+        completed = 0
+        elapsed_remaining = elapsed_cs
+        for token_cs in durations:
+            if elapsed_remaining < token_cs:
+                break
+            completed += 1
+            elapsed_remaining -= token_cs
         if completed <= 0:
             return 0.0
         end_index = spans[completed - 1][1]
