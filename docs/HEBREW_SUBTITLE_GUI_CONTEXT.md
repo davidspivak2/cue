@@ -104,6 +104,7 @@ Running it out-of-process:
 - `app/progress.py` — progress aggregation and weights
 - `app/preview_playback.py` — preview clip generation + cache management
 - `app/subtitle_style.py` — subtitle style presets + FFmpeg style formatting
+- `app/ass_render.py` — ASS subtitle document generation (static ASS groundwork)
 - `tools/*` — local benchmark tools
 - `docs/*` — handover + UX spec
 
@@ -171,6 +172,9 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `diagnostics.categories` | Category checkboxes (see below) | Object of booleans | all `true` | Diagnostics output |
 | `subtitle_style.preset` | “Subtitle style” preset dropdown | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
 | `subtitle_style.custom` | “Customize...” panel controls | Object: `font_size`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
+| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `static` | Planned: selects ASS vs SRT rendering paths |
+| `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Planned: word highlight styling |
+| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Planned: word highlight styling |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”
@@ -449,6 +453,7 @@ Unplanned but merged work since the original PR plan:
 
 Not done yet (still in PR7+ territory):
 - **PR10** — karaoke-like highlighting (default ON)
+  - In progress: config/UI controls landed, ASS renderer groundwork is in place (static ASS).
   - PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
 - **PR11** — “delightful waiting” visuals (waveform + thumbnail strip; cached under LocalAppData)
 - **PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)

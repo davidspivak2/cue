@@ -6,8 +6,9 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Drag & drop or browse a single video (`.mp4`, `.mkv`, `.mov`, `.m4v`).
 - Extracts mono 16k WAV (`<video_stem>_audio_for_whisper.wav`).
 - Generates UTF-8 SRT subtitles (`<video_stem>.srt`).
-- Hard-burns subtitles into `<video_stem>_subtitled.mp4` with subtitle style presets and customization.
+- Hard-burns subtitles into `<video_stem>_subtitled.mp4` with subtitle style presets, subtitle modes, and customization.
 - Subtitles-ready preview card with a subtitle still frame, plus optional playback (15s clip with scrub controls).
+- Subtitle mode selector (Word highlight vs Static) and highlight color picker.
 - Uses GPU (CUDA) when available, auto-falls back to CPU with clear logs.
 - Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`.
 
@@ -23,6 +24,7 @@ app/
   preview_playback.py     # Preview clip generation and playback caching
   srt_utils.py            # SRT parsing/formatting helpers
   subtitle_style.py       # Subtitle style presets and FFmpeg style mapping
+  ass_render.py           # ASS subtitle document generation (static rendering)
   ui/                     # UI components, theme, and widgets
 bin/
   ffmpeg.exe
