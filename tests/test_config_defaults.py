@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+import json
+
+from app.config import (
+    DEFAULT_HIGHLIGHT_COLOR,
+    DEFAULT_HIGHLIGHT_OPACITY,
+    DEFAULT_SUBTITLE_MODE,
+    apply_config_defaults,
+)
+
+
+def test_apply_config_defaults_adds_missing_keys() -> None:
+    config: dict = {}
+    result = apply_config_defaults(config)
+    assert result["subtitle_mode"] == DEFAULT_SUBTITLE_MODE
+    assert result["subtitle_style"]["highlight_color"] == DEFAULT_HIGHLIGHT_COLOR
+    assert result["subtitle_style"]["highlight_opacity"] == DEFAULT_HIGHLIGHT_OPACITY
+
+
+def test_apply_config_defaults_fills_partial_style() -> None:
+    config = {"subtitle_style": {"preset": "Default"}}
+    result = apply_config_defaults(config)
+    style = result["subtitle_style"]
+    assert style["highlight_color"] == DEFAULT_HIGHLIGHT_COLOR
+    assert style["highlight_opacity"] == DEFAULT_HIGHLIGHT_OPACITY
+
+
+def test_apply_config_defaults_round_trip() -> None:
+    config = {
+        "subtitle_mode": "word_highlight",
+        "subtitle_style": {
+            "highlight_color": "#AABBCC",
+            "highlight_opacity": 0.25,
+        },
+    }
+    result = apply_config_defaults(config)
+    payload = json.loads(json.dumps(result))
+    assert payload["subtitle_mode"] == "word_highlight"
+    assert payload["subtitle_style"]["highlight_color"] == "#AABBCC"
+    assert payload["subtitle_style"]["highlight_opacity"] == 0.25

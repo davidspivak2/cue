@@ -43,6 +43,7 @@ from app.ui.widgets import (
 )
 from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.preview_playback import PreviewPlaybackController
+from app.config import apply_config_defaults
 from app.workers import (
     DiagnosticsSettings,
     TaskType,
@@ -127,6 +128,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_render_timer.timeout.connect(self._refresh_preview_with_style)
         self._config = self._load_config()
         self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
+        self._subtitle_mode = self._config["subtitle_mode"]
+        self._highlight_color = self._config["subtitle_style"]["highlight_color"]
+        self._highlight_opacity = self._config["subtitle_style"]["highlight_opacity"]
         self._subtitle_style_preset, self._subtitle_style_custom = (
             self._load_subtitle_style()
         )
@@ -143,6 +147,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._state = AppState.EMPTY
 
         self._build_ui()
+        self._log(
+            "Loaded config: "
+            f"subtitle_mode={self._subtitle_mode}, "
+            f"highlight_color={self._highlight_color}, "
+            f"highlight_opacity={self._highlight_opacity}"
+        )
         self._log_diagnostics()
         self.set_state(AppState.EMPTY)
 
@@ -2066,17 +2076,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def _load_config(self) -> dict:
         config_path = self._get_app_data_dir() / "config.json"
         if not config_path.exists():
-            return {}
-        try:
-            return json.loads(config_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return {}
+            raw = {}
+        else:
+            try:
+                raw = json.loads(config_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                raw = {}
+        return apply_config_defaults(raw)
 
     def _save_subtitle_edit_path(self, path: Path) -> None:
         self._config["subtitle_edit_path"] = str(path)
         self._save_config()
 
     def _save_config(self) -> None:
+        self._config = apply_config_defaults(self._config)
+        self._subtitle_mode = self._config["subtitle_mode"]
+        self._highlight_color = self._config["subtitle_style"]["highlight_color"]
+        self._highlight_opacity = self._config["subtitle_style"]["highlight_opacity"]
         config_path = self._get_app_data_dir() / "config.json"
         config_path.write_text(json.dumps(self._config, indent=2), encoding="utf-8")
 
@@ -2136,8 +2152,21 @@ class MainWindow(QtWidgets.QMainWindow):
         return preset, custom
 
     def _store_subtitle_style_config(self) -> None:
+        current_style = self._config.get("subtitle_style")
+        highlight_color = (
+            current_style.get("highlight_color")
+            if isinstance(current_style, dict)
+            else self._highlight_color
+        )
+        highlight_opacity = (
+            current_style.get("highlight_opacity")
+            if isinstance(current_style, dict)
+            else self._highlight_opacity
+        )
         self._config["subtitle_style"] = {
             "preset": self._subtitle_style_preset,
+            "highlight_color": highlight_color,
+            "highlight_opacity": highlight_opacity,
             "custom": {
                 "font_size": self._subtitle_style_custom.font_size,
                 "outline": self._subtitle_style_custom.outline,
