@@ -504,12 +504,36 @@ class MainWindow(QtWidgets.QMainWindow):
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(10)
 
+        subtitle_mode_label = QtWidgets.QLabel("Subtitle mode")
+        self.subtitle_mode_combo = QtWidgets.QComboBox()
+        self.subtitle_mode_combo.addItem("Word highlight (recommended)", "word_highlight")
+        self.subtitle_mode_combo.addItem("Static", "static")
+
+        self.highlight_color_label = QtWidgets.QLabel("Highlight color")
+        self.highlight_color_row = QtWidgets.QWidget()
+        highlight_layout = QtWidgets.QHBoxLayout(self.highlight_color_row)
+        highlight_layout.setContentsMargins(0, 0, 0, 0)
+        highlight_layout.setSpacing(8)
+        self.highlight_color_button = QtWidgets.QPushButton("Pick color…")
+        self.highlight_color_button.setFixedHeight(32)
+        self.highlight_color_value = QtWidgets.QLineEdit()
+        self.highlight_color_value.setReadOnly(True)
+        self.highlight_color_value.setFixedHeight(32)
+        self.highlight_color_value.setMinimumWidth(110)
+        highlight_layout.addWidget(self.highlight_color_button)
+        highlight_layout.addWidget(self.highlight_color_value)
+        highlight_layout.addStretch()
+
         preset_label = QtWidgets.QLabel("Preset")
         self.subtitle_style_preset_combo = QtWidgets.QComboBox()
         self.subtitle_style_preset_combo.addItems(list(PRESET_NAMES))
 
-        grid.addWidget(preset_label, 0, 0)
-        grid.addWidget(self.subtitle_style_preset_combo, 0, 1)
+        grid.addWidget(subtitle_mode_label, 0, 0)
+        grid.addWidget(self.subtitle_mode_combo, 0, 1)
+        grid.addWidget(self.highlight_color_label, 1, 0)
+        grid.addWidget(self.highlight_color_row, 1, 1)
+        grid.addWidget(preset_label, 2, 0)
+        grid.addWidget(self.subtitle_style_preset_combo, 2, 1)
 
         self.subtitle_style_customize_button = QtWidgets.QPushButton("Customize...")
         self.subtitle_style_customize_button.setCheckable(True)
@@ -521,7 +545,7 @@ class MainWindow(QtWidgets.QMainWindow):
         customize_layout = QtWidgets.QHBoxLayout()
         customize_layout.addWidget(self.subtitle_style_customize_button)
         customize_layout.addStretch()
-        grid.addLayout(customize_layout, 1, 0, 1, 2)
+        grid.addLayout(customize_layout, 3, 0, 1, 2)
 
         card_layout.addLayout(grid)
 
@@ -598,6 +622,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.subtitle_style_customize_button.setChecked(self._subtitle_style_panel_open)
         self._connect_subtitle_style_controls()
         self._apply_subtitle_style_to_controls()
+        self._apply_subtitle_mode_to_controls()
         return card
 
     def _build_done_page(self) -> QtWidgets.QWidget:
@@ -672,6 +697,8 @@ class MainWindow(QtWidgets.QMainWindow):
         return slider, spinbox
 
     def _connect_subtitle_style_controls(self) -> None:
+        self.subtitle_mode_combo.currentIndexChanged.connect(self._on_subtitle_mode_changed)
+        self.highlight_color_button.clicked.connect(self._on_highlight_color_clicked)
         self.subtitle_style_preset_combo.currentTextChanged.connect(
             self._on_subtitle_style_preset_changed
         )
@@ -701,6 +728,56 @@ class MainWindow(QtWidgets.QMainWindow):
             spinbox.valueChanged.connect(self._on_subtitle_style_custom_changed)
 
         self.box_background_checkbox.toggled.connect(self._on_subtitle_style_custom_changed)
+
+    def _apply_subtitle_mode_to_controls(self) -> None:
+        index = self.subtitle_mode_combo.findData(self._subtitle_mode)
+        if index < 0:
+            index = self.subtitle_mode_combo.findData("static")
+        self.subtitle_mode_combo.blockSignals(True)
+        self.subtitle_mode_combo.setCurrentIndex(index)
+        self.subtitle_mode_combo.blockSignals(False)
+        self._update_highlight_color_display()
+        self._update_highlight_color_visibility()
+
+    def _update_highlight_color_display(self) -> None:
+        self.highlight_color_value.setText(self._highlight_color)
+
+    def _update_highlight_color_visibility(self) -> None:
+        show = self._subtitle_mode == "word_highlight"
+        self.highlight_color_label.setVisible(show)
+        self.highlight_color_row.setVisible(show)
+        self.highlight_color_label.setEnabled(show)
+        self.highlight_color_row.setEnabled(show)
+
+    def _on_subtitle_mode_changed(self) -> None:
+        mode = self.subtitle_mode_combo.currentData()
+        if mode not in {"word_highlight", "static"}:
+            return
+        if mode == self._subtitle_mode:
+            return
+        self._subtitle_mode = mode
+        self._config["subtitle_mode"] = mode
+        self._save_config()
+        self._log(f"Subtitle mode set to: {mode}")
+        self._update_highlight_color_visibility()
+
+    def _on_highlight_color_clicked(self) -> None:
+        color = QtWidgets.QColorDialog.getColor(
+            QtGui.QColor(self._highlight_color), self
+        )
+        if not color.isValid():
+            return
+        hex_value = color.name().upper()
+        if hex_value == self._highlight_color:
+            return
+        self._highlight_color = hex_value
+        current_style = self._config.get("subtitle_style")
+        if not isinstance(current_style, dict):
+            current_style = {}
+            self._config["subtitle_style"] = current_style
+        current_style["highlight_color"] = hex_value
+        self._save_config()
+        self._update_highlight_color_display()
 
     def _toggle_subtitle_style_panel(self, checked: bool) -> None:
         self._subtitle_style_panel_open = checked
