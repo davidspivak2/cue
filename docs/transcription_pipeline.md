@@ -60,6 +60,10 @@ This prints:
 - `TRANSCRIBE_CONFIG_JSON ...` (single-line JSON for diffing)
 - `TRANSCRIBE_CONFIG_TEXT ...` (multi-line human-readable summary)
 
+The config dump resolves the effective compute type (even in `--print-transcribe-config`
+mode), so it is safe to use for comparing GPU/CPU fallbacks without running a full
+transcription.
+
 Compare the JSON payloads between machines to spot differences in device selection,
 model cache paths, or parameter settings.
 
