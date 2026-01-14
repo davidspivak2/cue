@@ -227,6 +227,8 @@ Current implementation:
     - Play/pause button, Stop button, scrubber, and time label.
     - Loading state when generating the preview clip.
   - Right: Style Card (preset dropdown + “Customize…” panel)
+    - Subtitle mode selector: “Word highlight (recommended)” and “Static”.
+    - Highlight color row (only visible when Subtitle mode = Word highlight).
     - Presets: Default, Large outline, Large outline + box, Custom.
     - Custom controls: font size, outline, shadow, bottom margin, box enable, box opacity, box padding.
     - “Reset to preset” returns to the selected preset.

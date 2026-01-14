@@ -1,6 +1,6 @@
 # PR10 — Word Highlight Subtitles (Karaoke-Style) — Implementation Plan
 
-Last updated: 2026-01-14
+Last updated: 2026-02-10
 
 ## A) Goal and user-visible outcomes
 - Subtitle mode selector is available, with **Word highlight** recommended as the default and **Static** as the alternative.
@@ -33,7 +33,7 @@ Last updated: 2026-01-14
 ## E) Progressive task breakdown
 
 ### Codex Task 1 — Data model/config keys for `subtitle_mode` + highlight settings (no behavior change)
-- **Goal:** Add config/state support for subtitle mode and highlight settings without changing behavior.
+- **Goal:** Add config/state support for subtitle mode and highlight settings without changing behavior. ✅ Done.
 - **Scope:**
   - Add new config keys for `subtitle_mode` and highlight styling settings.
   - No UI wiring and no pipeline changes.
@@ -50,7 +50,7 @@ Last updated: 2026-01-14
 - **Depends on:** none.
 
 ### Codex Task 2 — UI controls in `SUBTITLES_READY` (no behavior change)
-- **Goal:** Add UI controls for subtitle mode and highlight settings in the Subtitles-ready view.
+- **Goal:** Add UI controls for subtitle mode and highlight settings in the Subtitles-ready view. ✅ Done.
 - **Scope:**
   - Add UI elements only; do not change preview/export behavior.
   - Persist selection to config/state.
@@ -67,20 +67,19 @@ Last updated: 2026-01-14
 - **Depends on:** Task 1.
 
 ### Codex Task 3 — Introduce ASS rendering adapter (static ASS first) + unit tests
-- **Goal:** Add an ASS rendering adapter that can render static subtitles via ASS.
+- **Goal:** Add an ASS rendering adapter that can render static subtitles via ASS. ⚠️ In progress (ASS generation exists; tests pending).
 - **Scope:**
   - Create ASS generation utilities and adapter.
   - Unit tests for ASS output structure.
 - **Primary files likely touched:**
-  - `app/subtitle_renderers/ass_renderer.py`
-  - `app/subtitle_renderers/__init__.py`
+  - `app/ass_render.py`
   - `tests/test_ass_renderer.py`
 - **Implementation notes:**
   - Match existing static SRT styling as closely as possible.
   - Keep ASS generation deterministic for tests.
 - **Acceptance criteria:**
-  - ASS output validates basic structure (header + events).
-  - Unit tests pass.
+  - ASS output validates basic structure (header + events). ✅
+  - Unit tests pass. ⚠️ Not added yet.
 - **Depends on:** Task 1.
 
 ### Codex Task 4 — Export path uses FFmpeg ass filter for word-highlight mode (still static ASS) + diagnostics fields
@@ -223,9 +222,9 @@ Last updated: 2026-01-14
 ### PR10 task tracking
 | Task | Status | PR link | Notes |
 | --- | --- | --- | --- |
-| 1 | TODO |  |  |
-| 2 | TODO |  |  |
-| 3 | TODO |  |  |
+| 1 | Done |  | Config keys + defaults for subtitle mode + highlight settings. |
+| 2 | Done |  | Subtitle mode + highlight color controls in Subtitles-ready UI. |
+| 3 | In progress |  | ASS document generation exists; tests + renderer integration pending. |
 | 4 | TODO |  |  |
 | 5 | TODO |  |  |
 | 6 | TODO |  |  |
