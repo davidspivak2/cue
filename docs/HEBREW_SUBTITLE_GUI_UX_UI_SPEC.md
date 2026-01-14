@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — UX/UI Specification (Design Contract)
 
-**Last updated:** 2026-01-12  
+**Last updated:** 2026-01-20  
 **Scope:** This document describes the intended **pixel-level UI behavior** for Hebrew Subtitle GUI, and the interaction rules the app should follow as it continues the PR1–PR13 overhaul.
 
 This is intentionally opinionated. If an implementation choice conflicts with this spec, update the spec (with rationale) or change the implementation.
@@ -215,18 +215,21 @@ Future (PR11):
 
 **Goal:** Make the result feel real; allow review/edit before export.
 
-Current minimal implementation (already OK):
+Current implementation:
 - Title: “Subtitles are ready”
 - Actions:
   - Primary: “Edit in Subtitle Edit”
   - Secondary: “Export video with subtitles”
   - Tertiary: “Open subtitles”, “Open folder”
-
-Target end-state (PR7–PR10):
 - Two-column layout
-  - Left: Preview Card (frame + real subtitle)
-  - Right: Style Card (presets + customize)
-- Optional karaoke-like highlighting (default ON)
+  - Left: Preview Card (subtitle still + optional playback)
+    - Click still frame to expand preview.
+    - Play/pause button, Stop button, scrubber, and time label.
+    - Loading state when generating the preview clip.
+  - Right: Style Card (preset dropdown + “Customize…” panel)
+    - Presets: Default, Large outline, Large outline + box, Custom.
+    - Custom controls: font size, outline, shadow, bottom margin, box enable, box opacity, box padding.
+    - “Reset to preset” returns to the selected preset.
 
 ---
 
