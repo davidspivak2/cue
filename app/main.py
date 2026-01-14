@@ -1533,13 +1533,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._video_path:
             QtWidgets.QMessageBox.warning(self, "No video selected", "Choose a video first.")
             return
-        if not self._subtitles_reviewed:
-            QtWidgets.QMessageBox.information(
-                self,
-                "Edit before exporting",
-                "Edit subtitles before exporting the video.",
-            )
-            return
         try:
             ensure_ffmpeg_available()
         except FileNotFoundError as exc:
@@ -1655,7 +1648,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.information(
                     self,
                     "Subtitles are ready",
-                    "Subtitles are ready. Next: edit them in Subtitle Edit, then export the video.",
+                    "Subtitles are ready. You can edit them in Subtitle Edit or export the video.",
                 )
                 self.set_state(AppState.SUBTITLES_READY)
                 self._update_preview_card()
@@ -2074,9 +2067,7 @@ class MainWindow(QtWidgets.QMainWindow):
         srt_ready = self._is_srt_ready(self._get_default_srt_path())
         can_generate = idle and has_video and ffmpeg_ready
         can_review = idle and has_video and srt_ready
-        can_burn = (
-            idle and has_video and ffmpeg_ready and srt_ready and self._subtitles_reviewed
-        )
+        can_burn = idle and has_video and ffmpeg_ready and srt_ready
         can_open_srt = srt_ready or self._last_srt_path is not None
         can_open_video = self._last_output_video is not None
 
