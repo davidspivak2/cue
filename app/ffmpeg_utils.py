@@ -160,9 +160,9 @@ def get_ffprobe_json(path: Path) -> Optional[dict[str, Any]]:
         return None
 
 
-def escape_subtitles_filter_path(path: os.PathLike | str) -> str:
+def escape_ffmpeg_filter_path(path: os.PathLike | str) -> str:
     """
-    Escape a Windows path for FFmpeg subtitles filter.
+    Escape a Windows path for FFmpeg filter arguments.
     """
     text = str(path)
     text = text.replace("\\", "/")
@@ -173,13 +173,25 @@ def escape_subtitles_filter_path(path: os.PathLike | str) -> str:
     return text
 
 
+def escape_subtitles_filter_path(path: os.PathLike | str) -> str:
+    """
+    Escape a Windows path for FFmpeg subtitles filter.
+    """
+    return escape_ffmpeg_filter_path(path)
+
+
 def build_subtitles_filter(
     srt_path: Path,
     *,
     force_style: str,
 ) -> str:
-    escaped_path = escape_subtitles_filter_path(srt_path)
+    escaped_path = escape_ffmpeg_filter_path(srt_path)
     return f"subtitles='{escaped_path}':force_style='{force_style}'"
+
+
+def build_ass_filter(ass_path: Path) -> str:
+    escaped_path = escape_ffmpeg_filter_path(ass_path)
+    return f"ass='{escaped_path}'"
 
 
 def extract_subtitled_frame(
