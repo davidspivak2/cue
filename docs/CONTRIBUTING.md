@@ -53,6 +53,11 @@ There is minimal test coverage currently. The preferred way to run tests locally
 scripts\run_tests.cmd
 ```
 
+Notes on `scripts\run_tests.cmd`:
+* Prompts for the branch to test and refuses dirty working trees.
+* Creates/uses `.venv`, upgrades pip, and installs `requirements.txt` (+ `requirements-dev.txt` if present).
+* Set `RUN_TESTS_NO_PAUSE=1` to skip the final pause in non-interactive runs.
+
 If you add tests, prefer pytest:
 ```bat
 pytest
