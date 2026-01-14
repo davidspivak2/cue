@@ -29,7 +29,8 @@ from .srt_splitter import (
 from .paths import get_models_dir
 from .transcription_config import build_transcription_config
 
-DEFAULT_MODEL_NAME = "large-v3"
+MODEL_NAME = "large-v3"
+DEFAULT_MODEL_NAME = MODEL_NAME
 TRANSCRIBE_DEFAULTS = [
     "best_of",
     "temperature",
@@ -143,12 +144,13 @@ def _should_use_gpu(prefer_gpu: bool, force_cpu: bool) -> tuple[bool, str]:
 
 def _resolve_compute_type(requested_type: str, device: str) -> str:
     if requested_type != "auto":
+        # If the user asked for float16 but we're on CPU, fall back to int8.
         if requested_type == "float16" and device != "cuda":
-            return "int16"
+            return "int8"
         return requested_type
     if device == "cuda":
         return "float16"
-    return "int16"
+    return "int8"
 
 
 def _validate_model_dir(model_dir: Path) -> bool:
@@ -384,7 +386,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     parser.add_argument(
         "--model",
         choices=["large-v3", "large-v2"],
-        default=DEFAULT_MODEL_NAME,
+        default=MODEL_NAME,
     )
     parser.add_argument("--vad-filter", dest="vad_filter", action="store_true")
     parser.add_argument("--no-vad-filter", dest="vad_filter", action="store_false")
