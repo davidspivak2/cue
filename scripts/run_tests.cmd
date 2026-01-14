@@ -1,63 +1,78 @@
 @echo off
-if not defined RUN_TESTS_FROM_TEMP (
-  set "TEMP_SCRIPT=%TEMP%\run_tests_%RANDOM%_%RANDOM%.cmd"
-  copy "%~f0" "%TEMP_SCRIPT%" >nul
-  set "RUN_TESTS_FROM_TEMP=1"
-  call "%TEMP_SCRIPT%" %*
-  set "TEMP_EXIT=%ERRORLEVEL%"
-  del "%TEMP_SCRIPT%" >nul 2>&1
-  exit /b %TEMP_EXIT%
-)
-
 chcp 65001 >nul
 set PYTHONUTF8=1
 setlocal EnableExtensions EnableDelayedExpansion
 
-set "SCRIPT_DIR=%~dp0"
+REM ============================================================================
+REM Run from a temporary copy so branch switching cannot change the script mid-run
+REM ============================================================================
+if not defined RUN_TESTS_FROM_TEMP (
+  set "ORIG_SCRIPT=%~f0"
+  set "ORIG_SCRIPT_DIR=%~dp0"
+  set "TMP_SCRIPT=%TEMP%\run_tests_!RANDOM!_!RANDOM!.cmd"
+
+  copy /y "!ORIG_SCRIPT!" "!TMP_SCRIPT!" >nul
+  if errorlevel 1 (
+    echo [error] Failed to copy script to temp: "!TMP_SCRIPT!"
+    exit /b 1
+  )
+
+  set "RUN_TESTS_FROM_TEMP=1"
+  call "!TMP_SCRIPT!" %*
+  set "RET=!ERRORLEVEL!"
+
+  del /f /q "!TMP_SCRIPT!" >nul 2>nul
+  exit /b !RET!
+)
+
+REM ==========================
+REM Resolve repo root robustly
+REM ==========================
+if defined ORIG_SCRIPT_DIR (
+  set "SCRIPT_DIR=%ORIG_SCRIPT_DIR%"
+) else (
+  set "SCRIPT_DIR=%~dp0"
+)
+
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
 
-set "EXIT_CODE=0"
-set "DID_PUSHD=0"
-
-pushd "%REPO_ROOT%" || (
-  echo [error] Failed to change to repo root.
-  set "EXIT_CODE=1"
-  goto :cleanup
+pushd "%REPO_ROOT%" >nul
+if errorlevel 1 (
+  echo [error] Failed to change to repo root: "%REPO_ROOT%"
+  exit /b 1
 )
-set "DID_PUSHD=1"
 
 echo [info] Using repo root: "%REPO_ROOT%"
 
-set "REQ_TXT=%REPO_ROOT%\requirements.txt"
-set "REQ_DEV=%REPO_ROOT%\requirements-dev.txt"
-if not exist "%REQ_TXT%" (
-  echo [error] Requirements file not found: "%REQ_TXT%"
-  set "EXIT_CODE=1"
-  goto :cleanup
-)
-echo [info] Using requirements: "%REQ_TXT%"
-if exist "%REQ_DEV%" (
-  echo [info] Using dev requirements: "%REQ_DEV%"
-)
-
+REM ====================
+REM Prompt for the branch
+REM ====================
+set "BRANCH="
 set /p BRANCH=Enter branch to test (e.g. codex/...):
 if "%BRANCH%"=="" (
   echo [error] Branch name is required.
-  set "EXIT_CODE=1"
+  set "TEST_EXIT=1"
   goto :cleanup
 )
 
+REM ============================
+REM Safety: refuse dirty worktree
+REM ============================
+set "DIRTY="
 for /f "delims=" %%G in ('git status --porcelain') do set "DIRTY=1"
 if defined DIRTY (
   echo [error] Working tree has uncommitted changes. Please commit or stash before switching branches.
-  set "EXIT_CODE=1"
+  set "TEST_EXIT=1"
   goto :cleanup
 )
 
+REM ===========
+REM Git actions
+REM ===========
 echo [info] Fetching latest branches...
 git fetch origin
 if errorlevel 1 (
-  set "EXIT_CODE=%errorlevel%"
+  set "TEST_EXIT=1"
   goto :cleanup
 )
 
@@ -67,70 +82,66 @@ if errorlevel 1 (
   echo [info] Creating local tracking branch "%BRANCH%" from origin...
   git switch -c "%BRANCH%" --track "origin/%BRANCH%"
   if errorlevel 1 (
-    set "EXIT_CODE=%errorlevel%"
+    set "TEST_EXIT=1"
     goto :cleanup
   )
 )
 
 echo [info] Pulling latest changes (ff-only)...
-git pull --ff-only origin "%BRANCH%"
+git show-ref --verify --quiet "refs/remotes/origin/%BRANCH%"
+if not errorlevel 1 (
+  git pull --ff-only origin "%BRANCH%"
+) else (
+  git pull --ff-only
+)
 if errorlevel 1 (
-  set "EXIT_CODE=%errorlevel%"
+  set "TEST_EXIT=1"
   goto :cleanup
 )
 
-set "VENV_PY=%REPO_ROOT%\.venv\Scripts\python.exe"
+REM ==================
+REM Ensure venv + pip
+REM ==================
+set "VENV_DIR=%REPO_ROOT%\.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+
 if not exist "%VENV_PY%" (
   echo [info] Creating virtual environment...
-  call python -m venv ".venv"
+  python -m venv "%VENV_DIR%"
   if errorlevel 1 (
-    set "EXIT_CODE=%errorlevel%"
+    set "TEST_EXIT=1"
     goto :cleanup
   )
 )
 
-set "VENV_PY=%REPO_ROOT%\.venv\Scripts\python.exe"
 echo [info] Upgrading pip...
-call "%VENV_PY%" -m pip install --upgrade pip
+"%VENV_PY%" -m pip install --upgrade pip
 if errorlevel 1 (
-  set "EXIT_CODE=%errorlevel%"
+  set "TEST_EXIT=1"
+  goto :cleanup
+)
+
+REM =========================
+REM Install deps + run pytest
+REM =========================
+set "REQ_TXT=%REPO_ROOT%\requirements.txt"
+set "REQ_DEV=%REPO_ROOT%\requirements-dev.txt"
+
+if not exist "%REQ_TXT%" (
+  echo [error] Missing requirements.txt at: "%REQ_TXT%"
+  set "TEST_EXIT=1"
   goto :cleanup
 )
 
 echo [info] Installing dependencies...
-if exist "%REQ_DEV%" (
-  call "%VENV_PY%" -m pip install -r "%REQ_TXT%"
-  if errorlevel 1 (
-    set "EXIT_CODE=%errorlevel%"
-    goto :cleanup
-  )
-  call "%VENV_PY%" -m pip install -r "%REQ_DEV%"
-  if errorlevel 1 (
-    set "EXIT_CODE=%errorlevel%"
-    goto :cleanup
-  )
-  call "%VENV_PY%" -m pip install -r "%REQ_TXT%"
-  if errorlevel 1 (
-    set "EXIT_CODE=%errorlevel%"
-    goto :cleanup
-  )
-  if errorlevel 1 (
-    set "EXIT_CODE=%errorlevel%"
-    goto :cleanup
-  )
-set "EXIT_CODE=%errorlevel%"
-goto :cleanup
+echo [info] Using requirements: "%REQ_TXT%"
 
-:cleanup
-if "%DID_PUSHD%"=="1" popd
-exit /b %EXIT_CODE%
-equirements.txt"
-  if errorlevel 1 exit /b %errorlevel%
-  call "%VENV_PY%" -m pip install pytest
-  if errorlevel 1 exit /b %errorlevel%
+"%VENV_PY%" -m pip install -r "%REQ_TXT%"
+if errorlevel 1 (
+  set "TEST_EXIT=1"
+  goto :cleanup
 )
 
-echo [info] Running tests...
-call "%VENV_PY%" -m pytest
-set "TEST_EXIT=%errorlevel%"
-exit /b %TEST_EXIT%
+if exist "%REQ_DEV%" (
+  echo [info] Using dev requirements: "%REQ_DEV%"
+  "%
