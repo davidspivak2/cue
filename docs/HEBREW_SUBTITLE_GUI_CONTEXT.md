@@ -449,6 +449,7 @@ Unplanned but merged work since the original PR plan:
 
 Not done yet (still in PR7+ territory):
 - **PR10** — karaoke-like highlighting (default ON)
+  - PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
 - **PR11** — “delightful waiting” visuals (waveform + thumbnail strip; cached under LocalAppData)
 - **PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
 - **PR13** — packaging hardening / smoke tests
