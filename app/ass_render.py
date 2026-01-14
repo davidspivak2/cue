@@ -66,6 +66,14 @@ def _coerce_cues(cues: Iterable[object]) -> list[AssCue]:
         if isinstance(cue, AssCue):
             normalized.append(cue)
             continue
+        if isinstance(cue, dict):
+            start = cue.get("start_s", cue.get("start_seconds"))
+            end = cue.get("end_s", cue.get("end_seconds"))
+            text = cue.get("text")
+            if start is None or end is None or text is None:
+                continue
+            normalized.append(AssCue(start_s=float(start), end_s=float(end), text=str(text)))
+            continue
         start = getattr(cue, "start_s", None)
         end = getattr(cue, "end_s", None)
         text = getattr(cue, "text", None)
@@ -79,21 +87,86 @@ def _coerce_cues(cues: Iterable[object]) -> list[AssCue]:
     return normalized
 
 
+from collections.abc import Mapping
+from typing import Any
+
+_DEFAULT_FONT_NAME = DEFAULT_FONT_NAME
+_DEFAULT_FONT_SIZE = 48
+_DEFAULT_OUTLINE = 2
+_DEFAULT_SHADOW = 0
+_DEFAULT_MARGIN_V = 0
+_DEFAULT_BOX_ENABLED = False
+_DEFAULT_BOX_PADDING = 0
+
+
+def _style_get(style_config: Any, key: str, default: Any) -> Any:
+    """
+    Read style values from either:
+    - an object with attributes (style_config.outline), or
+    - a dict/mapping (style_config["outline"]), or
+    - None (use defaults)
+    """
+    if style_config is None:
+        return default
+    if isinstance(style_config, Mapping):
+        return style_config.get(key, default)
+    return getattr(style_config, key, default)
+
+
 def build_ass_document(
     cues: Iterable[object],
-    style_config: SubtitleStyle,
+    style_config: object | None = None,
     play_res: Sequence[int] = (1920, 1080),
 ) -> str:
     normalized = _coerce_cues(cues)
     play_res_x, play_res_y = play_res
-    outline = style_config.outline
+
+    font_name = _style_get(style_config, "font_name", _DEFAULT_FONT_NAME)
+    font_size = _style_get(style_config, "font_size", _DEFAULT_FONT_SIZE)
+    shadow = _style_get(style_config, "shadow", _DEFAULT_SHADOW)
+    margin_v = _style_get(style_config, "margin_v", _DEFAULT_MARGIN_V)
+
+    outline = _style_get(style_config, "outline", _DEFAULT_OUTLINE)
+    box_enabled = _style_get(style_config, "box_enabled", _DEFAULT_BOX_ENABLED)
+    box_padding = _style_get(style_config, "box_padding", _DEFAULT_BOX_PADDING)
+
+    # Coerce numeric fields to safe ints
+    try:
+        font_size = int(round(float(font_size)))
+    except (TypeError, ValueError):
+        font_size = _DEFAULT_FONT_SIZE
+    try:
+        shadow = int(round(float(shadow)))
+    except (TypeError, ValueError):
+        shadow = _DEFAULT_SHADOW
+    try:
+        margin_v = int(round(float(margin_v)))
+    except (TypeError, ValueError):
+        margin_v = _DEFAULT_MARGIN_V
+    try:
+        outline = float(outline)
+    except (TypeError, ValueError):
+        outline = float(_DEFAULT_OUTLINE)
+    try:
+        box_padding = float(box_padding)
+    except (TypeError, ValueError):
+        box_padding = float(_DEFAULT_BOX_PADDING)
+
     border_style = 1
     back_colour = ass_color_from_hex("#000000", alpha=1.0)
-    if style_config.box_enabled:
-        outline = style_config.outline + style_config.box_padding
+
+    if box_enabled:
+        outline = outline + box_padding
         border_style = 3
-        alpha_byte = get_box_alpha_byte(style_config)
+        if isinstance(style_config, SubtitleStyle):
+            alpha_byte = get_box_alpha_byte(style_config)
+        else:
+            # If style_config is a dict, we don't know the app-specific opacity fields here,
+            # so fall back to fully-opaque box background.
+            alpha_byte = 0
         back_colour = f"&H{alpha_byte:02X}000000"
+
+    outline_int = int(round(outline))
 
     primary_colour = ass_color_from_hex(DEFAULT_PRIMARY_COLOR)
     outline_colour = ass_color_from_hex(DEFAULT_OUTLINE_COLOR)
@@ -117,19 +190,19 @@ def build_ass_document(
         ),
         (
             "Style: BASE,"
-            f"{DEFAULT_FONT_NAME},"
-            f"{style_config.font_size},"
+            f"{font_name},"
+            f"{font_size},"
             f"{primary_colour},"
             f"{primary_colour},"
             f"{outline_colour},"
             f"{back_colour},"
             "0,0,0,0,100,100,0,0,"
             f"{border_style},"
-            f"{outline},"
-            f"{style_config.shadow},"
+            f"{outline_int},"
+            f"{shadow},"
             "2,"
             "0,0,"
-            f"{style_config.margin_v},"
+            f"{margin_v},"
             "1"
         ),
         "",
@@ -143,7 +216,7 @@ def build_ass_document(
         end_time = format_ass_time(cue.end_s)
         payload = wrap_rtl(escape_ass_text(cue.text))
         event_lines.append(
-            f"Dialogue: 0,{start_time},{end_time},BASE,,0,0,{style_config.margin_v},,{payload}"
+            f"Dialogue: 0,{start_time},{end_time},BASE,,0,0,{margin_v},,{payload}"
         )
 
     return "\n".join(info_lines + style_lines + event_lines) + "\n"
