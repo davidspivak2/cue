@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — Project Context (Read This First)
 
-**Last updated:** 2026-01-12
+**Last updated:** 2026-01-20
 
 This document is for:
 - new contributors
@@ -102,6 +102,8 @@ Running it out-of-process:
 - `app/srt_utils.py` — SRT formatting primitives
 - `app/srt_splitter.py` — cue splitting and word alignment fallback
 - `app/progress.py` — progress aggregation and weights
+- `app/preview_playback.py` — preview clip generation + cache management
+- `app/subtitle_style.py` — subtitle style presets + FFmpeg style formatting
 - `tools/*` — local benchmark tools
 - `docs/*` — handover + UX spec
 
@@ -115,7 +117,9 @@ Running it out-of-process:
 Common subfolders:
 - `models\` — faster‑whisper model cache
 - `logs\` — GUI runtime logs (timestamped)
-- `cache\` — thumbnails, preview frames, etc. (as implemented)
+- `cache\` — thumbnails, preview frames, preview clips
+  - `cache\preview_frames` — cached subtitle preview still frames
+  - `cache\previews` — cached preview playback clips
 - `config.json` — user settings
 
 ### Per-video outputs (folder chosen by Save policy)
@@ -165,6 +169,8 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `diagnostics.enabled` | “Enable diagnostics logging” | `true` / `false` | `false` | Diagnostics output |
 | `diagnostics.write_on_success` | “Write diagnostics on successful completion” | `true` / `false` | `false` | Diagnostics output |
 | `diagnostics.categories` | Category checkboxes (see below) | Object of booleans | all `true` | Diagnostics output |
+| `subtitle_style.preset` | “Subtitle style” preset dropdown | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
+| `subtitle_style.custom` | “Customize...” panel controls | Object: `font_size`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”
@@ -411,7 +417,7 @@ Benchmarks must use the **exact** `<video_stem>_audio_for_whisper.wav` produced 
 
 This repo started with a 13‑PR UX/architecture overhaul plan. The exact PR boundaries have shifted a bit (some items were combined or rescaled), but the sequence is still a good mental model.
 
-### Status snapshot (as of 2026-01-12)
+### Status snapshot (as of 2026-01-20)
 
 Done / merged:
 - **PR1** — dark theme foundation ✅
@@ -423,6 +429,9 @@ Done / merged:
 - **PR6 (expanded)** — progress work ✅
   - burn-in/export (FFmpeg) progress: smooth and correct
   - transcription progress: improved, but can still move in coarse jumps depending on Whisper segmentation
+- **PR7** — Subtitles-ready page: auto-pick a subtitle moment and render a preview still frame ✅
+- **PR8** — style presets + customize panel + instant preview updates ✅
+- **PR9** — in-app preview playback (QtMultimedia) + caching ✅
 - **Extra (not originally in the plan)** — opt-in success diagnostics JSON + “write next to outputs” hotfix ✅
 - **PR14 — Docs refresh / handover readiness (this update)** ✅
 
@@ -439,9 +448,6 @@ Unplanned but merged work since the original PR plan:
 - Align error/warning copy with UX/UI spec
 
 Not done yet (still in PR7+ territory):
-- **PR7** — Subtitles-ready page: auto-pick a subtitle moment and render a preview still frame (no dependence on extracted WAV staying on disk)
-- **PR8** — style presets + customize panel + instant preview updates
-- **PR9** — in-app preview playback (QtMultimedia) + caching
 - **PR10** — karaoke-like highlighting (default ON)
 - **PR11** — “delightful waiting” visuals (waveform + thumbnail strip; cached under LocalAppData)
 - **PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
@@ -450,7 +456,7 @@ Not done yet (still in PR7+ territory):
 
 ### Where a new contributor should pick up
 Priority work items:
-1) If punctuation is acceptable: continue the UX roadmap at **PR7** (preview still frame).
+1) If punctuation is acceptable: continue the UX roadmap at **PR10** (karaoke-like highlighting).
 2) If punctuation regresses: use the benchmark + diagnostics to confirm whether loss happens in raw segments vs splitter; the new rescue diagnostics fields help choose.
 
 ---
