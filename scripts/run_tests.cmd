@@ -2,6 +2,8 @@
 chcp 65001 >nul
 set PYTHONUTF8=1
 setlocal EnableExtensions EnableDelayedExpansion
+REM If RUN_TESTS_NO_PAUSE is set to 1, skip pausing at the end.
+if not defined RUN_TESTS_NO_PAUSE set "RUN_TESTS_NO_PAUSE=0"
 
 REM ============================================================================
 REM Run from a temporary copy so branch switching cannot change the script mid-run
@@ -163,4 +165,9 @@ set "TEST_EXIT=!ERRORLEVEL!"
 
 :cleanup
 popd >nul
+if "%RUN_TESTS_NO_PAUSE%"=="0" (
+  echo.
+  echo [info] Done. Exit code: %TEST_EXIT%
+  pause
+)
 exit /b %TEST_EXIT%
