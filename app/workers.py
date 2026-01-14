@@ -19,7 +19,6 @@ from typing import Optional
 from PySide6 import QtCore
 from .progress import ProgressStep
 from .ffmpeg_utils import (
-    build_subtitles_filter,
     ensure_ffmpeg_available,
     extract_subtitled_frame,
     get_ffprobe_json,
@@ -28,6 +27,7 @@ from .ffmpeg_utils import (
     get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
+from .burn_in_export import build_burn_in_plan
 from .subtitle_style import (
     SubtitleStyle,
     get_box_alpha_byte,
@@ -99,6 +99,7 @@ class Worker(QtCore.QObject):
         srt_path: Optional[Path] = None,
         transcription_settings: Optional[TranscriptionSettings] = None,
         subtitle_style: Optional[SubtitleStyle] = None,
+        subtitle_mode: str = "static",
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
     ) -> None:
@@ -110,6 +111,7 @@ class Worker(QtCore.QObject):
         self.srt_path = srt_path
         self.transcription_settings = transcription_settings
         self.subtitle_style = subtitle_style
+        self.subtitle_mode = subtitle_mode
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
         self._cancelled = threading.Event()
@@ -134,6 +136,10 @@ class Worker(QtCore.QObject):
         self._transcribe_worker_config: Optional[dict[str, object]] = None
         self._transcribe_worker_note: Optional[str] = None
         self._transcribe_stats: Optional[dict[str, object]] = None
+        self._burn_in_subtitle_mode: Optional[str] = None
+        self._burn_in_pipeline: Optional[str] = None
+        self._burn_in_subtitle_path: Optional[str] = None
+        self._burn_in_filter: Optional[str] = None
         self._audio_info: Optional[dict[str, object]] = None
         self._prepare_audio_seconds: Optional[float] = None
         self._transcribe_seconds: Optional[float] = None
@@ -483,31 +489,24 @@ class Worker(QtCore.QObject):
             f"force_style={force_style}",
             True,
         )
-        subtitles_filter = build_subtitles_filter(
-            srt_path,
-            force_style=force_style,
-        )
 
-        base_command = [
-            str(ffmpeg_path),
-            "-y",
-            "-hide_banner",
-            "-i",
-            str(self.video_path),
-            "-progress",
-            "pipe:1",
-            "-nostats",
-            "-vf",
-            subtitles_filter,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "18",
-            "-movflags",
-            "+faststart",
-        ]
+        plan = build_burn_in_plan(
+            ffmpeg_path=ffmpeg_path,
+            video_path=self.video_path,
+            output_path=output_path,
+            srt_path=srt_path,
+            subtitle_mode=self.subtitle_mode,
+            style=settings,
+        )
+        base_command = plan.base_command
+        self._burn_in_subtitle_mode = self.subtitle_mode
+        self._burn_in_pipeline = plan.pipeline
+        self._burn_in_subtitle_path = str(plan.subtitles_path)
+        self._burn_in_filter = plan.filter_string
+        self.signals.log.emit(f"Export subtitle_mode={self.subtitle_mode}", True)
+        self.signals.log.emit(f"Export pipeline={plan.pipeline}", True)
+        self.signals.log.emit(f"Export subtitles path={plan.subtitles_path}", True)
+        self.signals.log.emit(f"Export filter={plan.filter_string}", True)
 
         self.signals.log.emit("Adding subtitles to the video...", True)
         self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
@@ -1173,6 +1172,10 @@ class Worker(QtCore.QObject):
                     "transcribe_command": self._transcribe_command,
                     "burn_in_command_used": self._burn_in_command,
                     "burn_in_audio_mode": self._burn_in_audio_mode,
+                    "burn_in_subtitle_mode": self._burn_in_subtitle_mode,
+                    "burn_in_pipeline": self._burn_in_pipeline,
+                    "burn_in_subtitle_path": self._burn_in_subtitle_path,
+                    "burn_in_filter": self._burn_in_filter,
                 },
                 "timings": {
                     "prepare_audio_seconds": self._prepare_audio_seconds,
