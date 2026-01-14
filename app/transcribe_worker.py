@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import faulthandler
+import importlib
 import json
 import os
 import shutil
@@ -27,7 +28,6 @@ from .srt_splitter import (
 )
 from .paths import get_models_dir
 from .transcription_config import build_transcription_config
-from .transcription_device import get_cuda_device_count
 
 DEFAULT_MODEL_NAME = "large-v3"
 TRANSCRIBE_DEFAULTS = [
@@ -110,7 +110,7 @@ def _resolve_device(
         return "cpu", "GPU disabled: --force-cpu"
     if requested_device == "cpu":
         return "cpu", "Device requested: cpu"
-    count = get_cuda_device_count()
+    count = _get_cuda_device_count()
     if requested_device == "cuda":
         if count > 0:
             return "cuda", f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}"
@@ -122,6 +122,23 @@ def _resolve_device(
         if count > 0
         else ("cpu", f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}")
     )
+
+
+def _get_cuda_device_count() -> int:
+    try:
+        ctranslate2 = importlib.import_module("ctranslate2")
+        return int(ctranslate2.get_cuda_device_count())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _should_use_gpu(prefer_gpu: bool, force_cpu: bool) -> tuple[bool, str]:
+    if force_cpu:
+        return False, "GPU disabled: --force-cpu"
+    if not prefer_gpu:
+        return False, "GPU not requested"
+    count = _get_cuda_device_count()
+    return count > 0, f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}"
 
 
 def _resolve_compute_type(requested_type: str, device: str) -> str:
