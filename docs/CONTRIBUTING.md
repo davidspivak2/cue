@@ -53,6 +53,11 @@ There is minimal test coverage currently. If you add tests, prefer pytest:
 pytest
 ```
 
+Preview playback includes a focused regression test for timestamp shifting:
+```bat
+pytest tests/test_preview_playback_shift.py
+```
+
 ### CI
 There is no CI pipeline configured yet (no `.github/workflows`), so run relevant checks locally before opening a PR.
 
@@ -69,3 +74,9 @@ dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
 ```
 
 The `dist\HebrewSubtitleGUI\` folder is the portable package you can zip or copy for release.
+
+## Preview cache notes
+The preview still frames and preview playback clips are cached under:
+`%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames` and
+`%LOCALAPPDATA%\HebrewSubtitleGUI\cache\previews`. If you need to refresh
+previews during development, clear these folders.
