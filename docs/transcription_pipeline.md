@@ -69,3 +69,17 @@ SRT segmentation is determined by `faster-whisper` output segments. The worker
 does not re-segment or post-process text beyond trimming whitespace and formatting
 timestamps. If segmentation differs between machines, focus on differences in the
 config dump, device selection, or library versions.
+
+## Subtitle preview generation (GUI)
+
+When subtitles are ready, the GUI prepares a preview moment and optional playback:
+
+1. **SRT parsing + cue selection.** The GUI parses the generated SRT file and selects
+   the first non-empty cue to anchor a preview moment.
+2. **Preview still frame.** The GUI requests a cached subtitle preview frame rendered
+   via FFmpeg with the active subtitle style (force_style). Frames are cached under
+   `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`.
+3. **Preview playback clip.** When the user presses Play, the GUI requests a short
+   clip (default 15s, anchored near the selected cue). The preview clip is rendered
+   via FFmpeg with a shifted SRT and cached under
+   `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\previews`.
