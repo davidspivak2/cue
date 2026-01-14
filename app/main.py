@@ -1491,6 +1491,7 @@ class MainWindow(QtWidgets.QMainWindow):
             None,
             settings,
             style,
+            self._subtitle_mode,
         )
 
     def _on_review(self) -> None:
@@ -1553,7 +1554,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         style = self._resolve_effective_subtitle_style()
-        self._start_worker(TaskType.BURN_IN, self._video_path, srt_path, None, style)
+        self._start_worker(
+            TaskType.BURN_IN, self._video_path, srt_path, None, style, self._subtitle_mode
+        )
 
     def _start_worker(
         self,
@@ -1562,6 +1565,7 @@ class MainWindow(QtWidgets.QMainWindow):
         srt_path: Optional[Path],
         transcription_settings: Optional[TranscriptionSettings],
         subtitle_style: Optional[SubtitleStyle],
+        subtitle_mode: str = "static",
     ) -> None:
         if self._worker_thread:
             QtWidgets.QMessageBox.warning(self, "Please wait", "Another task is running.")
@@ -1578,6 +1582,7 @@ class MainWindow(QtWidgets.QMainWindow):
             srt_path=srt_path,
             transcription_settings=transcription_settings,
             subtitle_style=subtitle_style,
+            subtitle_mode=subtitle_mode,
             diagnostics_settings=self._diagnostics_settings,
             session_log_path=self._log_path,
         )
