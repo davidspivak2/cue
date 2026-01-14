@@ -115,7 +115,7 @@ if not exist "%VENV_PY%" (
 )
 
 echo [info] Upgrading pip...
-"%VENV_PY%" -m pip install --upgrade pip
+"!VENV_PY!" -m pip install --upgrade pip
 if errorlevel 1 (
   set "TEST_EXIT=1"
   goto :cleanup
@@ -136,7 +136,7 @@ if not exist "%REQ_TXT%" (
 echo [info] Installing dependencies...
 echo [info] Using requirements: "%REQ_TXT%"
 
-"%VENV_PY%" -m pip install -r "%REQ_TXT%"
+"!VENV_PY!" -m pip install -r "%REQ_TXT%"
 if errorlevel 1 (
   set "TEST_EXIT=1"
   goto :cleanup
@@ -144,4 +144,23 @@ if errorlevel 1 (
 
 if exist "%REQ_DEV%" (
   echo [info] Using dev requirements: "%REQ_DEV%"
-  "%
+  "!VENV_PY!" -m pip install -r "%REQ_DEV%"
+  if errorlevel 1 (
+    set "TEST_EXIT=1"
+    goto :cleanup
+  )
+) else (
+  "!VENV_PY!" -m pip install pytest
+  if errorlevel 1 (
+    set "TEST_EXIT=1"
+    goto :cleanup
+  )
+)
+
+echo [info] Running tests...
+"!VENV_PY!" -m pytest
+set "TEST_EXIT=!ERRORLEVEL!"
+
+:cleanup
+popd >nul
+exit /b %TEST_EXIT%
