@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import faulthandler
 import json
 import os
@@ -30,6 +31,7 @@ from .transcription_config import build_transcription_config
 from .transcription_device import get_cuda_device_count
 
 DEFAULT_MODEL_NAME = "large-v3"
+MODEL_NAME = DEFAULT_MODEL_NAME
 TRANSCRIBE_DEFAULTS = [
     "best_of",
     "temperature",
@@ -49,6 +51,21 @@ PUNCTUATION_RESCUE_DEFAULTS = {
     "min_total_punct_ratio": 0.5,
     "max_attempts": 2,
 }
+
+
+def _should_use_gpu(prefer_gpu: bool, force_cpu: bool) -> tuple[bool, str]:
+    if force_cpu:
+        return False, "GPU disabled: --force-cpu"
+    if not prefer_gpu:
+        return False, "GPU not requested"
+    try:
+        ctranslate2 = importlib.import_module("ctranslate2")
+        count = int(ctranslate2.get_cuda_device_count())
+    except Exception:  # noqa: BLE001
+        count = 0
+    if count > 0:
+        return True, f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}"
+    return False, f"CTRANSLATE2_CUDA_DEVICE_COUNT {count}"
 
 
 def _print(message: str) -> None:
@@ -131,7 +148,7 @@ def _resolve_compute_type(requested_type: str, device: str) -> str:
         return requested_type
     if device == "cuda":
         return "float16"
-    return "int16"
+    return "int8"
 
 
 def _validate_model_dir(model_dir: Path) -> bool:
@@ -403,10 +420,10 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         if not args.print_transcribe_config:
             _print("ABOUT_TO_IMPORT_WHISPER")
             try:
-                import ctranslate2
-                import faster_whisper
-                import tokenizers
-                import av
+                ctranslate2 = importlib.import_module("ctranslate2")
+                faster_whisper = importlib.import_module("faster_whisper")
+                tokenizers = importlib.import_module("tokenizers")
+                av = importlib.import_module("av")
 
                 _print(f"faster_whisper: {getattr(faster_whisper, '__version__', 'unknown')}")
                 _print(f"ctranslate2: {getattr(ctranslate2, '__version__', 'unknown')}")
