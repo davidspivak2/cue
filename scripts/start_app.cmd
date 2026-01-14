@@ -45,15 +45,30 @@ if not exist "%VENV_PY%" (
 
 if not exist "%VENV_PY%" goto :die_venv_missing
 
+rem --------------------------
+rem Auto dependency sync logic
+rem --------------------------
 set "SHOULD_INSTALL=0"
-if /i "%INSTALL_MODE%"=="force" set "SHOULD_INSTALL=1"
-if /i "%INSTALL_MODE%"=="skip" set "SHOULD_INSTALL=0"
-if "%CREATED_VENV%"=="1" set "SHOULD_INSTALL=1"
+
+if /i "%INSTALL_MODE%"=="force" (
+  set "SHOULD_INSTALL=1"
+) else if /i "%INSTALL_MODE%"=="skip" (
+  set "SHOULD_INSTALL=0"
+) else (
+  rem auto: install if venv created OR marker missing OR dep file changed
+  if "%CREATED_VENV%"=="1" (
+    set "SHOULD_INSTALL=1"
+  ) else (
+    call :deps_need_install
+    if errorlevel 1 set "SHOULD_INSTALL=1"
+  )
+)
 
 if "%SHOULD_INSTALL%"=="1" (
   echo [info] Updating pip...
   "%VENV_PY%" -m pip install --upgrade pip
   if errorlevel 1 goto :die_pip
+
   if exist "%REPO_ROOT%\requirements.txt" (
     echo [info] Installing dependencies from requirements.txt...
     "%VENV_PY%" -m pip install -r "%REPO_ROOT%\requirements.txt"
@@ -65,8 +80,10 @@ if "%SHOULD_INSTALL%"=="1" (
   ) else (
     echo [info] No requirements.txt or pyproject.toml found. Skipping dependency installation.
   )
+
+  call :write_deps_marker
 ) else (
-  echo [info] Using existing virtual environment. Dependency install not required.
+  echo [info] Dependencies look up-to-date. Skipping pip install.
 )
 
 echo [info] Starting HebrewSubtitleGUI...
@@ -78,6 +95,71 @@ if %APP_EXIT% NEQ 0 (
 
 if "%PAUSE_AFTER%"=="1" pause
 exit /b %APP_EXIT%
+
+rem --------------------------
+rem Helpers
+rem --------------------------
+
+:select_dep_source
+set "DEP_KIND=none"
+set "DEP_FILE="
+set "MARKER_FILE="
+
+if exist "%REPO_ROOT%\requirements.txt" (
+  set "DEP_KIND=requirements"
+  set "DEP_FILE=%REPO_ROOT%\requirements.txt"
+  set "MARKER_FILE=%VENV_DIR%\.requirements_sha256.txt"
+) else if exist "%REPO_ROOT%\pyproject.toml" (
+  set "DEP_KIND=pyproject"
+  set "DEP_FILE=%REPO_ROOT%\pyproject.toml"
+  set "MARKER_FILE=%VENV_DIR%\.pyproject_sha256.txt"
+)
+
+exit /b 0
+
+
+:deps_need_install
+call :select_dep_source
+if /i "%DEP_KIND%"=="none" exit /b 0
+
+rem marker missing => install
+if not exist "%MARKER_FILE%" exit /b 1
+
+call :compute_sha256 "%DEP_FILE%"
+if errorlevel 1 exit /b 1
+
+set "NEW_DEPS_HASH=%OUT_HASH%"
+set "OLD_DEPS_HASH="
+set /p OLD_DEPS_HASH=<"%MARKER_FILE%"
+
+if /i not "%NEW_DEPS_HASH%"=="%OLD_DEPS_HASH%" exit /b 1
+exit /b 0
+
+
+:write_deps_marker
+call :select_dep_source
+if /i "%DEP_KIND%"=="none" exit /b 0
+
+call :compute_sha256 "%DEP_FILE%"
+if errorlevel 1 (
+  echo [warn] Failed to compute dependency hash; marker not updated.
+  exit /b 0
+)
+
+> "%MARKER_FILE%" echo %OUT_HASH%
+exit /b 0
+
+
+:compute_sha256
+set "OUT_HASH="
+for /f "usebackq delims=" %%H in (`certutil -hashfile "%~1" SHA256 ^| findstr /R /I "^[0-9A-F][0-9A-F]*$"`) do (
+  set "OUT_HASH=%%H"
+  goto :compute_sha256_done
+)
+:compute_sha256_done
+if not defined OUT_HASH exit /b 1
+exit /b 0
+
 
 :usage
 echo Usage: start_app.cmd [--install] [--no-install] [--no-pause] [--help]
