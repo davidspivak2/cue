@@ -48,7 +48,12 @@ FFmpeg installed on PATH.
 * **Pull requests:** describe the change, include steps to test locally, and call out any UX changes.
 
 ## Running checks/tests
-There is minimal test coverage currently. If you add tests, prefer pytest:
+There is minimal test coverage currently. The preferred way to run tests locally is:
+```bat
+scripts\run_tests.cmd
+```
+
+If you add tests, prefer pytest:
 ```bat
 pytest
 ```
