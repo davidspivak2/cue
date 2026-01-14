@@ -31,6 +31,7 @@ def build_ass_from_srt_cues(
     cues: Iterable[SrtCue],
     style: SubtitleStyle,
     *,
+    highlight_color: str,
     play_res_x: int,
     play_res_y: int,
 ) -> str:
@@ -53,7 +54,7 @@ def build_ass_from_srt_cues(
         margin_v=style.margin_v,
     )
     header = _build_header(play_res_x, play_res_y, style_spec)
-    events = _build_events(cues, style_spec)
+    events = _build_events(cues, style_spec, highlight_color)
     return "\n".join([header, events]).strip() + "\n"
 
 
@@ -91,12 +92,17 @@ def _build_header(play_res_x: int, play_res_y: int, style_spec: AssStyleSpec) ->
     )
 
 
-def _build_events(cues: Iterable[SrtCue], style_spec: AssStyleSpec) -> str:
+def _build_events(
+    cues: Iterable[SrtCue],
+    style_spec: AssStyleSpec,
+    highlight_color: str,
+) -> str:
     lines: list[str] = []
+    highlight_ass = _format_ass_colour(highlight_color)
     for cue in cues:
         start = _format_ass_timestamp(cue.start_seconds)
         end = _format_ass_timestamp(cue.end_seconds)
-        text = _format_ass_text(cue.text)
+        text = _format_ass_text(cue.text, highlight_ass)
         lines.append(
             "Dialogue: 0,"
             f"{start},{end},{style_spec.name},,"
@@ -106,10 +112,23 @@ def _build_events(cues: Iterable[SrtCue], style_spec: AssStyleSpec) -> str:
     return "\n".join(lines)
 
 
-def _format_ass_text(text: str) -> str:
+def _format_ass_text(text: str, highlight_ass: str) -> str:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", r"\N")
-    normalized = normalized.replace("<u>", r"{\u1}").replace("</u>", r"{\u0}")
+    normalized = normalized.replace("<u>", rf"{{\c{highlight_ass}}}")
+    normalized = normalized.replace("</u>", r"{\c&H00FFFFFF&}")
     return f"{RLI}{normalized}{PDI}"
+
+
+def _format_ass_colour(value: str) -> str:
+    text = value.strip()
+    if text.startswith("#"):
+        text = text[1:]
+    if len(text) != 6:
+        return "&H00FFFFFF&"
+    r = text[0:2]
+    g = text[2:4]
+    b = text[4:6]
+    return f"&H00{b}{g}{r}&"
 
 
 def _format_back_colour(box_enabled: bool, box_opacity: int) -> str:

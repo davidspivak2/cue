@@ -1699,13 +1699,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self._last_alignment_path if subtitle_mode == SubtitleMode.WORD_HIGHLIGHT else None
         )
         if subtitle_mode == SubtitleMode.WORD_HIGHLIGHT and not alignment_path:
-            if not self._last_word_highlight_fallback:
+            if self._last_word_highlight_fallback:
+                self._log(
+                    "Burn-in: using word_highlight_fallback ASS pipeline (no alignment cache).",
+                    True,
+                )
+            else:
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Word highlight unavailable",
                     "Word highlight data is missing. Exporting static subtitles instead.",
                 )
-            subtitle_mode = SubtitleMode.STATIC
+                subtitle_mode = SubtitleMode.STATIC
         self._start_worker(
             TaskType.BURN_IN,
             self._video_path,

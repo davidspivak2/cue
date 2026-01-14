@@ -842,6 +842,7 @@ class Worker(QtCore.QObject):
         ass_text = build_ass_from_srt_cues(
             cues,
             settings,
+            highlight_color=self.highlight_color,
             play_res_x=play_res_x,
             play_res_y=play_res_y,
         )
