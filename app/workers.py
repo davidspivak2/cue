@@ -18,8 +18,14 @@ from typing import Optional
 
 from PySide6 import QtCore
 from .progress import ProgressStep
+from .ass_karaoke import (
+    build_ass_document_with_karaoke_fallback,
+    build_style_config_from_subtitle_style,
+)
+from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
 from .ffmpeg_utils import (
     ensure_ffmpeg_available,
+    extract_ass_frame,
     extract_subtitled_frame,
     get_ffprobe_json,
     get_media_duration,
@@ -113,6 +119,8 @@ class Worker(QtCore.QObject):
         transcription_settings: Optional[TranscriptionSettings] = None,
         subtitle_style: Optional[SubtitleStyle] = None,
         subtitle_mode: str = "static",
+        highlight_color: Optional[str] = None,
+        highlight_opacity: Optional[float] = None,
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
     ) -> None:
@@ -125,6 +133,8 @@ class Worker(QtCore.QObject):
         self.transcription_settings = transcription_settings
         self.subtitle_style = subtitle_style
         self.subtitle_mode = subtitle_mode
+        self.highlight_color = highlight_color
+        self.highlight_opacity = highlight_opacity
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
         self._cancelled = threading.Event()
@@ -441,6 +451,11 @@ class Worker(QtCore.QObject):
             srt_mtime = int(srt_path.stat().st_mtime)
         except FileNotFoundError:
             srt_mtime = 0
+        word_timings_path = word_timings_path_for_srt(srt_path)
+        try:
+            word_timings_mtime = int(word_timings_path.stat().st_mtime)
+        except FileNotFoundError:
+            word_timings_mtime = 0
         timestamp_ms = int(round(timestamp_seconds * 1000))
         preview_width = 1280
         style_params = to_preview_params(style)
@@ -448,30 +463,67 @@ class Worker(QtCore.QObject):
             f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
             f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
             f"{style_params['shadow']}|{style_params['margin_v']}|{style_params['box_enabled']}|"
-            f"{style_params['box_opacity']}|{style_params['box_padding']}|{preview_width}"
+            f"{style_params['box_opacity']}|{style_params['box_padding']}|"
+            f"{self.subtitle_mode}|{word_timings_mtime}|"
+            f"{self.highlight_color}|{self.highlight_opacity}|{preview_width}"
         )
         cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
-        force_style = to_ffmpeg_force_style(style)
-        alpha_byte = get_box_alpha_byte(style)
-        self.signals.log.emit(
-            "Preview style: "
-            f"box_enabled={style.box_enabled} "
-            f"box_opacity={style.box_opacity} "
-            f"alpha={alpha_byte} "
-            f"force_style={force_style}",
-            True,
-        )
-        success = extract_subtitled_frame(
-            self.video_path,
-            srt_path,
-            timestamp_seconds,
-            output_path,
-            width=preview_width,
-            force_style=force_style,
-        )
+        if self.subtitle_mode == "word_highlight":
+            style_config = build_style_config_from_subtitle_style(
+                style,
+                highlight_color=self.highlight_color or DEFAULT_HIGHLIGHT_COLOR,
+                highlight_opacity=(
+                    self.highlight_opacity
+                    if self.highlight_opacity is not None
+                    else DEFAULT_HIGHLIGHT_OPACITY
+                ),
+            )
+            cues = parse_srt_file(srt_path)
+            decision = build_ass_document_with_karaoke_fallback(
+                cues,
+                srt_path=srt_path,
+                word_timings_path=word_timings_path,
+                style_config=style_config,
+            )
+            self.signals.log.emit(
+                "Preview karaoke: "
+                f"enabled={decision.karaoke_enabled} "
+                f"reason={decision.reason} "
+                f"word_timings_path={decision.word_timings_path} "
+                f"highlight_events={decision.highlight_event_count}",
+                True,
+            )
+            ass_path = output_path.with_suffix(".ass")
+            ass_path.write_text(decision.ass_text, encoding="utf-8")
+            success = extract_ass_frame(
+                self.video_path,
+                ass_path,
+                timestamp_seconds,
+                output_path,
+                width=preview_width,
+            )
+        else:
+            force_style = to_ffmpeg_force_style(style)
+            alpha_byte = get_box_alpha_byte(style)
+            self.signals.log.emit(
+                "Preview style: "
+                f"box_enabled={style.box_enabled} "
+                f"box_opacity={style.box_opacity} "
+                f"alpha={alpha_byte} "
+                f"force_style={force_style}",
+                True,
+            )
+            success = extract_subtitled_frame(
+                self.video_path,
+                srt_path,
+                timestamp_seconds,
+                output_path,
+                width=preview_width,
+                force_style=force_style,
+            )
         return output_path if success else None
 
     def _run_burn_in(self) -> dict:
@@ -520,6 +572,9 @@ class Worker(QtCore.QObject):
             srt_path=srt_path,
             subtitle_mode=self.subtitle_mode,
             style=settings,
+            word_timings_path=self._word_timings_path,
+            highlight_color=self.highlight_color,
+            highlight_opacity=self.highlight_opacity,
         )
         base_command = plan.base_command
         self._burn_in_subtitle_mode = self.subtitle_mode
@@ -530,6 +585,15 @@ class Worker(QtCore.QObject):
         self.signals.log.emit(f"Export pipeline={plan.pipeline}", True)
         self.signals.log.emit(f"Export subtitles path={plan.subtitles_path}", True)
         self.signals.log.emit(f"Export filter={plan.filter_string}", True)
+        if self.subtitle_mode == "word_highlight":
+            self.signals.log.emit(
+                "Export karaoke: "
+                f"enabled={plan.karaoke_enabled} "
+                f"reason={plan.karaoke_reason} "
+                f"word_timings_path={plan.karaoke_word_timings_path} "
+                f"highlight_events={plan.karaoke_event_count}",
+                True,
+            )
 
         self.signals.log.emit("Adding subtitles to the video...", True)
         self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
