@@ -12,7 +12,7 @@ from .ass_render import (
     build_ass_header_and_styles,
     escape_ass_text,
     format_ass_time,
-    wrap_rtl,
+    wrap_rtl_runs,
 )
 from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
 from .srt_utils import is_word_timing_stale
@@ -163,6 +163,7 @@ def build_ass_karaoke_document_with_stats(
 ) -> KaraokeAssResult:
     normalized = _coerce_karaoke_cues(cues)
     info_lines, style_lines, margin_v = build_ass_header_and_styles(style_config=style_config)
+    LOG.info("Karaoke rtl_wrap_strategy=per_run")
 
     highlight_color = _style_highlight_color(style_config)
     highlight_opacity = _style_highlight_opacity(style_config)
@@ -182,7 +183,7 @@ def build_ass_karaoke_document_with_stats(
         )
         if base_times is not None:
             base_start, base_end = base_times
-            payload = wrap_rtl(escape_ass_text(cue.text))
+            payload = wrap_rtl_runs(escape_ass_text(cue.text))
             events.append((base_start, 0, base_end, payload))
 
         cue_timing, lookup_key = _resolve_cue_timing(cue, cue_timings)
@@ -248,7 +249,7 @@ def build_ass_karaoke_document_with_stats(
                 normal_color_ass,
                 highlight_color_ass,
             )
-            events.append((event_start, 1, event_end, wrap_rtl(payload)))
+            events.append((event_start, 1, event_end, wrap_rtl_runs(payload)))
             highlight_events += 1
         if clamped:
             LOG.info(

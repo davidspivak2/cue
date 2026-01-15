@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from pathlib import Path
 
 from app.ass_karaoke import (
@@ -11,7 +12,7 @@ from app.ass_karaoke import (
     build_style_config_from_subtitle_style,
     highlight_text_for_word_index,
 )
-from app.ass_render import ass_color_from_hex, build_ass_document
+from app.ass_render import RTL_EMBEDDING, RTL_POP, ass_color_from_hex, build_ass_document
 from app.srt_utils import compute_srt_sha256
 from app.subtitle_style import PRESET_DEFAULT, preset_defaults
 from app.word_timing_schema import CueWordTimings, WordSpan, WordTimingDocument, save_word_timings_json
@@ -274,3 +275,36 @@ def test_karaoke_cue_index_mapping_from_one_based() -> None:
     )
     result = build_ass_karaoke_document_with_stats(cues, doc, style)
     assert result.highlight_event_count == 1
+
+
+def test_karaoke_rtl_wrapped_per_run() -> None:
+    cues = [KaraokeCue(index=1, start_sec=0.0, end_sec=1.0, text="שלום עולם יפה")]
+    doc = _build_word_timing_doc(
+        srt_sha256="stub",
+        cue_index=1,
+        cue_start=0.0,
+        cue_end=1.0,
+        cue_text="שלום עולם יפה",
+        words=[
+            WordSpan(text="שלום", start=0.1, end=0.3),
+            WordSpan(text="עולם", start=0.3, end=0.6),
+            WordSpan(text="יפה", start=0.6, end=0.9),
+        ],
+    )
+    style = build_style_config_from_subtitle_style(
+        preset_defaults(PRESET_DEFAULT),
+        highlight_color="#FFD400",
+        highlight_opacity=1.0,
+    )
+    result = build_ass_karaoke_document_with_stats(cues, doc, style)
+    dialogue_lines = [line for line in result.ass_text.splitlines() if line.startswith("Dialogue:")]
+    highlight_line = next(
+        line for line in dialogue_lines if _parse_ass_times(line)[2] == 1
+    )
+    text_field = highlight_line.split(",", 9)[-1]
+    parts = re.split(r"(\{[^}]*\})", text_field)
+    plain_parts = [part for part in parts if part and not part.startswith("{")]
+    assert plain_parts
+    for part in plain_parts:
+        assert part.startswith(RTL_EMBEDDING)
+        assert part.endswith(RTL_POP)

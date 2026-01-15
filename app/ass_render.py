@@ -45,6 +45,22 @@ def wrap_rtl(text: str) -> str:
     return f"{RTL_EMBEDDING}{text}{RTL_POP}"
 
 
+def wrap_rtl_runs(text: str) -> str:
+    stripped = text
+    if stripped.startswith(RTL_EMBEDDING) and stripped.endswith(RTL_POP):
+        stripped = stripped[len(RTL_EMBEDDING) : -len(RTL_POP)]
+    parts = re.split(r"(\{[^}]*\})", stripped)
+    wrapped_parts: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("{") and part.endswith("}"):
+            wrapped_parts.append(part)
+        else:
+            wrapped_parts.append(f"{RTL_EMBEDDING}{part}{RTL_POP}")
+    return "".join(wrapped_parts)
+
+
 def ass_color_from_hex(hex_rgb: str, alpha: float = 0.0) -> str:
     if not isinstance(hex_rgb, str) or not _HEX_COLOR_RE.match(hex_rgb):
         hex_rgb = DEFAULT_PRIMARY_COLOR
