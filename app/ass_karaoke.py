@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import math
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -194,6 +195,7 @@ def build_ass_step_highlight_document_with_stats(
     cue_timings = _index_word_timings(word_timings_doc)
     events: list[tuple[float, int, float, str]] = []
     highlight_events = 0
+    gaps_filled = 0
 
     for cue in normalized:
         cue_timing, lookup_key = _resolve_cue_timing(cue, cue_timings)
@@ -251,6 +253,19 @@ def build_ass_step_highlight_document_with_stats(
             if end > cue.end_sec:
                 end = cue.end_sec
                 clamped += 1
+            if word_index < limit - 1:
+                next_span = _coerce_word_span(cue_timing.words[word_index + 1])
+                if next_span is None:
+                    skipped += 1
+                    continue
+                next_start, _ = next_span
+                if next_start > end:
+                    gaps_filled += 1
+                end = next_start
+            else:
+                end = cue.end_sec
+            start = max(start, cue.start_sec)
+            end = min(end, cue.end_sec)
             if end <= start:
                 skipped += 1
                 continue
@@ -258,6 +273,12 @@ def build_ass_step_highlight_document_with_stats(
             if adjusted is None:
                 continue
             event_start, event_end = adjusted
+            event_start_cs = _floor_centiseconds(event_start)
+            event_end_cs = _ceil_centiseconds(event_end)
+            if event_end_cs <= event_start_cs:
+                event_end_cs = event_start_cs + 1
+            event_start = event_start_cs / 100
+            event_end = event_end_cs / 100
             payload = _build_step_highlight_text(
                 prefix,
                 word_parts,
@@ -294,6 +315,7 @@ def build_ass_step_highlight_document_with_stats(
         )
 
     LOG.info("total_step_events=%s", highlight_events)
+    LOG.info("step_events_contiguous=true; gaps_filled=%s", gaps_filled)
     return KaraokeAssResult(
         ass_text="\n".join(info_lines + style_lines + event_lines) + "\n",
         highlight_event_count=highlight_events,
@@ -506,3 +528,11 @@ def _apply_time_window(
     if adjusted_end <= adjusted_start:
         return None
     return adjusted_start, adjusted_end
+
+
+def _floor_centiseconds(seconds: float) -> int:
+    return int(math.floor(max(seconds, 0.0) * 100))
+
+
+def _ceil_centiseconds(seconds: float) -> int:
+    return int(math.ceil(max(seconds, 0.0) * 100))

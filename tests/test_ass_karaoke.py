@@ -120,6 +120,33 @@ def test_step_event_count_matches_words() -> None:
     assert result.highlight_event_count == 3
 
 
+def test_step_events_use_next_word_start_and_cue_end() -> None:
+    cues = [KaraokeCue(index=1, start_sec=0.0, end_sec=1.0, text="שלום עולם")]
+    doc = _build_word_timing_doc(
+        srt_sha256="stub",
+        cue_index=1,
+        cue_start=0.0,
+        cue_end=1.0,
+        cue_text="שלום עולם",
+        words=[
+            WordSpan(text="שלום", start=0.0, end=0.4),
+            WordSpan(text="עולם", start=0.46, end=0.76),
+        ],
+    )
+    style = build_style_config_from_subtitle_style(
+        preset_defaults(PRESET_DEFAULT),
+        highlight_color="#FFD400",
+        highlight_opacity=1.0,
+    )
+    ass_text = build_ass_step_highlight_document(cues, doc, style)
+    dialogue_lines = [line for line in ass_text.splitlines() if line.startswith("Dialogue:")]
+    times = [_parse_ass_times(line) for line in dialogue_lines]
+    first_end = _ass_time_to_seconds(times[0][1])
+    second_end = _ass_time_to_seconds(times[1][1])
+    assert abs(first_end - 0.46) < 0.02
+    assert abs(second_end - 1.0) < 0.02
+
+
 def test_step_highlight_bidi_isolates_present() -> None:
     cues = [KaraokeCue(index=1, start_sec=0.0, end_sec=1.0, text="שלום עולם")]
     doc = _build_word_timing_doc(
@@ -176,6 +203,32 @@ def test_time_offset_and_window() -> None:
     word_end = _ass_time_to_seconds(times[0][1])
     assert abs(word_start - 0.1) < 0.02
     assert abs(word_end - 0.3) < 0.02
+
+
+def test_step_event_centisecond_rounding_no_gap() -> None:
+    cues = [KaraokeCue(index=1, start_sec=0.0, end_sec=1.0, text="שלום עולם")]
+    doc = _build_word_timing_doc(
+        srt_sha256="stub",
+        cue_index=1,
+        cue_start=0.0,
+        cue_end=1.0,
+        cue_text="שלום עולם",
+        words=[
+            WordSpan(text="שלום", start=0.0, end=0.333),
+            WordSpan(text="עולם", start=0.335, end=0.8),
+        ],
+    )
+    style = build_style_config_from_subtitle_style(
+        preset_defaults(PRESET_DEFAULT),
+        highlight_color="#FFD400",
+        highlight_opacity=1.0,
+    )
+    ass_text = build_ass_step_highlight_document(cues, doc, style)
+    dialogue_lines = [line for line in ass_text.splitlines() if line.startswith("Dialogue:")]
+    times = [_parse_ass_times(line) for line in dialogue_lines]
+    first_end = _ass_time_to_seconds(times[0][1])
+    second_start = _ass_time_to_seconds(times[1][0])
+    assert second_start <= first_end
 
 
 def test_fallback_behavior(tmp_path: Path) -> None:
