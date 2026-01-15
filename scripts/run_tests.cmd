@@ -72,9 +72,10 @@ REM ====================
 REM Branch (optional arg)
 REM ====================
 set "BRANCH=%~1"
-if "%BRANCH%"=="" (
-  set /p BRANCH=Enter branch to test (example: codex/...):
-)
+if not "%BRANCH%"=="" goto :branch_ok
+
+set /p BRANCH=Enter branch to test, e.g. codex/...:
+:branch_ok
 
 if "%BRANCH%"=="" (
   echo [error] Branch name is required.
