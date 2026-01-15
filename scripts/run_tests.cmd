@@ -69,10 +69,13 @@ if errorlevel 1 (
 )
 
 REM ====================
-REM Ask which branch
+REM Branch (optional arg)
 REM ====================
-set "BRANCH="
-set /p BRANCH=Enter branch to test (example: codex/...):
+set "BRANCH=%~1"
+if "%BRANCH%"=="" (
+  set /p BRANCH=Enter branch to test (example: codex/...):
+)
+
 if "%BRANCH%"=="" (
   echo [error] Branch name is required.
   set "TEST_EXIT=1"
