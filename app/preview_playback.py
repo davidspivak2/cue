@@ -273,7 +273,7 @@ def build_preview_clip_plan(
     if settings.subtitle_mode == "word_highlight":
         cues = parse_srt_file(shifted_srt_path)
         ass_text = build_ass_document(cues, style_config=settings.style)
-        ass_path = output_path.with_name(f"{settings.video_path.stem}_preview_word_highlight.ass")
+        ass_path = output_path.with_suffix(".ass")
         ass_path.write_text(ass_text, encoding="utf-8")
         filter_string = build_ass_filter(ass_path)
         pipeline = WORD_HIGHLIGHT_ASS_PIPELINE
