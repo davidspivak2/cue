@@ -144,6 +144,8 @@ def _box_alpha_byte(style_config: Any) -> int:
 def build_ass_header_and_styles(
     style_config: object | None = None,
     play_res: Sequence[int] = (1920, 1080),
+    *,
+    encoding: int = 1,
 ) -> tuple[list[str], list[str], int]:
     play_res_x, play_res_y = play_res
 
@@ -224,7 +226,7 @@ def build_ass_header_and_styles(
             "2,"
             "0,0,"
             f"{margin_v},"
-            "1"
+            f"{encoding}"
         ),
         "",
     ]

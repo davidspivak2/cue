@@ -12,7 +12,6 @@ from .ass_render import (
     build_ass_header_and_styles,
     escape_ass_text,
     format_ass_time,
-    wrap_rtl_runs,
 )
 from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
 from .srt_utils import is_word_timing_stale
@@ -56,7 +55,7 @@ class KaraokeDecision:
 
 def _ass_color_tag(color_ass: str) -> str:
     suffix = color_ass if color_ass.endswith("&") else f"{color_ass}&"
-    return f"{{\\c{suffix}}}"
+    return f"{{\\1c{suffix}}}"
 
 
 def _tokenize_word_tokens(text: str) -> list[tuple[str, bool]]:
@@ -82,38 +81,57 @@ def _tokenize_word_tokens(text: str) -> list[tuple[str, bool]]:
     return tokens
 
 
-def highlight_text_for_word_index(
-    cue_text: str,
+def split_text_into_word_parts(cue_text: str) -> tuple[str, list[str]]:
+    tokens = _tokenize_word_tokens(cue_text)
+    if not tokens:
+        return "", []
+    prefix_parts: list[str] = []
+    word_parts: list[str] = []
+    idx = 0
+    while idx < len(tokens) and not tokens[idx][1]:
+        prefix_parts.append(tokens[idx][0])
+        idx += 1
+    prefix = "".join(prefix_parts)
+    while idx < len(tokens):
+        token_text, is_word = tokens[idx]
+        if not is_word:
+            idx += 1
+            continue
+        part = [token_text]
+        idx += 1
+        while idx < len(tokens) and not tokens[idx][1]:
+            part.append(tokens[idx][0])
+            idx += 1
+        word_parts.append("".join(part))
+    return prefix, word_parts
+
+
+def _build_step_highlight_text(
+    prefix: str,
+    word_parts: list[str],
     word_index: int,
     normal_color_ass: str,
     highlight_color_ass: str,
 ) -> str:
-    tokens = _tokenize_word_tokens(cue_text)
-    word_positions = [idx for idx, (_, is_word) in enumerate(tokens) if is_word]
-    if word_index < 0 or word_index >= len(word_positions):
-        LOG.info(
-            "Karaoke word index out of range: index=%s words=%s",
-            word_index,
-            len(word_positions),
-        )
-        return escape_ass_text(cue_text)
     normal_tag = _ass_color_tag(normal_color_ass)
     highlight_tag = _ass_color_tag(highlight_color_ass)
-    output_parts = [normal_tag]
-    current_word = 0
-    for token, is_word in tokens:
-        escaped = escape_ass_text(token)
-        if is_word:
-            if current_word == word_index:
-                output_parts.append(highlight_tag)
-                output_parts.append(escaped)
-                output_parts.append(normal_tag)
-            else:
-                output_parts.append(escaped)
-            current_word += 1
-        else:
-            output_parts.append(escaped)
-    return "".join(output_parts)
+    output_parts = [escape_ass_text(prefix)]
+    for idx, part in enumerate(word_parts):
+        color_tag = highlight_tag if idx == word_index else normal_tag
+        output_parts.append(color_tag)
+        output_parts.append(escape_ass_text(part))
+    combined = "".join(output_parts).rstrip()
+    return _wrap_step_bidi_isolates(combined)
+
+
+def _wrap_step_bidi_isolates(text: str) -> str:
+    rlm = "\u200F"
+    rli = "\u2067"
+    pdi = "\u2069"
+    first_tag_end = text.find("}")
+    if first_tag_end != -1:
+        return f"{text[:first_tag_end + 1]}{rli}{rlm}{text[first_tag_end + 1:]}{pdi}"
+    return f"{rli}{rlm}{text}{pdi}"
 
 
 def build_style_config_from_subtitle_style(
@@ -136,7 +154,7 @@ def build_style_config_from_subtitle_style(
     }
 
 
-def build_ass_karaoke_document(
+def build_ass_step_highlight_document(
     cues: Iterable[object],
     word_timings_doc: WordTimingDocument | Sequence[CueWordTimings] | None,
     style_config: object | None,
@@ -144,7 +162,7 @@ def build_ass_karaoke_document(
     time_offset_sec: float = 0.0,
     time_window: Optional[tuple[float, float]] = None,
 ) -> str:
-    return build_ass_karaoke_document_with_stats(
+    return build_ass_step_highlight_document_with_stats(
         cues,
         word_timings_doc,
         style_config,
@@ -153,7 +171,7 @@ def build_ass_karaoke_document(
     ).ass_text
 
 
-def build_ass_karaoke_document_with_stats(
+def build_ass_step_highlight_document_with_stats(
     cues: Iterable[object],
     word_timings_doc: WordTimingDocument | Sequence[CueWordTimings] | None,
     style_config: object | None,
@@ -162,8 +180,11 @@ def build_ass_karaoke_document_with_stats(
     time_window: Optional[tuple[float, float]] = None,
 ) -> KaraokeAssResult:
     normalized = _coerce_karaoke_cues(cues)
-    info_lines, style_lines, margin_v = build_ass_header_and_styles(style_config=style_config)
-    LOG.info("Karaoke rtl_wrap_strategy=per_run")
+    info_lines, style_lines, margin_v = build_ass_header_and_styles(
+        style_config=style_config,
+        encoding=-1,
+    )
+    LOG.info("word_highlight_ass_strategy=step_events")
 
     highlight_color = _style_highlight_color(style_config)
     highlight_opacity = _style_highlight_opacity(style_config)
@@ -175,17 +196,6 @@ def build_ass_karaoke_document_with_stats(
     highlight_events = 0
 
     for cue in normalized:
-        base_times = _apply_time_window(
-            cue.start_sec,
-            cue.end_sec,
-            time_offset_sec,
-            time_window,
-        )
-        if base_times is not None:
-            base_start, base_end = base_times
-            payload = wrap_rtl_runs(escape_ass_text(cue.text))
-            events.append((base_start, 0, base_end, payload))
-
         cue_timing, lookup_key = _resolve_cue_timing(cue, cue_timings)
         if not cue_timing:
             LOG.info(
@@ -212,9 +222,14 @@ def build_ass_karaoke_document_with_stats(
             continue
         if not cue_timing.words:
             continue
+        prefix, word_parts = split_text_into_word_parts(cue.text)
+        if not word_parts:
+            continue
         clamped = 0
         skipped = 0
-        for word_index, word in enumerate(cue_timing.words):
+        limit = min(len(cue_timing.words), len(word_parts))
+        for word_index in range(limit):
+            word = cue_timing.words[word_index]
             span = _coerce_word_span(word)
             if span is None:
                 skipped += 1
@@ -243,13 +258,14 @@ def build_ass_karaoke_document_with_stats(
             if adjusted is None:
                 continue
             event_start, event_end = adjusted
-            payload = highlight_text_for_word_index(
-                cue.text,
+            payload = _build_step_highlight_text(
+                prefix,
+                word_parts,
                 word_index,
                 normal_color_ass,
                 highlight_color_ass,
             )
-            events.append((event_start, 1, event_end, wrap_rtl_runs(payload)))
+            events.append((event_start, 0, event_end, payload))
             highlight_events += 1
         if clamped:
             LOG.info(
@@ -277,6 +293,7 @@ def build_ass_karaoke_document_with_stats(
             f"Dialogue: {layer},{start_time},{end_time},BASE,,0,0,{margin_v},,{payload}"
         )
 
+    LOG.info("total_step_events=%s", highlight_events)
     return KaraokeAssResult(
         ass_text="\n".join(info_lines + style_lines + event_lines) + "\n",
         highlight_event_count=highlight_events,
@@ -323,7 +340,7 @@ def build_ass_document_with_karaoke_fallback(
             word_timings_path=resolved_word_timings_path,
         )
 
-    result = build_ass_karaoke_document_with_stats(
+    result = build_ass_step_highlight_document_with_stats(
         cues,
         doc,
         style_config,
