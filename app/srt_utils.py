@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 import re
+import hashlib
 from typing import Iterable, Optional, Sequence
+
+from .word_timing_schema import WordTimingValidationError, load_word_timings_json
 
 
 class SrtSegment:
@@ -104,6 +107,23 @@ def parse_srt_file(path: Path) -> list[SrtCue]:
     except FileNotFoundError:
         return []
     return parse_srt_text(content)
+
+
+def compute_srt_sha256(path: Path) -> str:
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def is_word_timing_stale(word_timings_path: Path, srt_path: Path) -> bool:
+    try:
+        doc = load_word_timings_json(word_timings_path)
+    except (WordTimingValidationError, OSError):
+        return True
+    try:
+        srt_hash = compute_srt_sha256(srt_path)
+    except OSError:
+        return True
+    return doc.srt_sha256 != srt_hash
 
 
 def select_preview_moment(

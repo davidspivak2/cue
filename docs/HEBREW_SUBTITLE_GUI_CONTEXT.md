@@ -32,6 +32,7 @@ UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`
 **Primary outputs (exact naming):**
 - `<video_stem>_audio_for_whisper.wav`
 - `<video_stem>.srt`
+- `<video_stem>.word_timings.json` (word timing contract stub; see §3.6)
 - `<video_stem>_subtitled.mp4`
 
 **Runtime modes:**
@@ -132,6 +133,7 @@ Save policy determines the output folder:
 Outputs include:
 - `<video_stem>_audio_for_whisper.wav` (scratch audio)
 - `<video_stem>.srt` (subtitles)
+- `<video_stem>.word_timings.json` (word timing contract stub; see §3.6)
 - `<video_stem>_subtitled.mp4` (burned output)
 
 ### Diagnostics JSON (opt-in, **on success**)
@@ -197,6 +199,20 @@ Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - Cue splitting/word alignment fallback behavior → `app/srt_splitter.py`
 - Progress weights/aggregation behavior → `app/progress.py`
 - UI state machine, settings wiring/persistence (`config.json`), toggle behaviors, enabling/disabling buttons → `app/main.py`
+
+---
+
+## 3.6) Word-timing JSON artifact (Task 7)
+
+To support future per-word alignment (Task 8), the app now creates a **word-timing JSON**
+artifact next to each SRT:
+
+- **Naming convention:** `<video_stem>.word_timings.json` (same folder as the SRT).
+- **Schema:** validated JSON with `schema_version=1`, SRT hash, and cue metadata.
+- **Staleness rule:** if the SRT file changes, the word-timing JSON is **stale** when its
+  stored `srt_sha256` no longer matches the current SRT hash.
+- **Lifecycle:** a stub JSON file is created immediately when an SRT is generated or loaded.
+- **Future:** Task 8 will populate per-word timestamps using WhisperX alignment (no heuristics).
 
 ### Working with Codex branches (project-critical workflow rule)
 - If a branch is actively being worked on by Codex, **do not push additional local commits to that same branch** if you expect Codex to keep pushing hotfixes (risk of conflicts / Codex push failures).
