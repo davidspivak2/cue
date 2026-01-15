@@ -11,7 +11,9 @@ from typing import Callable, Optional
 
 from PySide6 import QtCore
 
+from .ass_render import build_ass_document
 from .ffmpeg_utils import (
+    build_ass_filter,
     build_subtitles_filter,
     ensure_ffmpeg_available,
     get_ffprobe_json,
@@ -19,6 +21,8 @@ from .ffmpeg_utils import (
     get_subprocess_kwargs,
 )
 from .paths import get_preview_clips_dir
+from .srt_utils import parse_srt_file
+from .subtitle_style import SubtitleStyle, to_preview_params
 
 
 @dataclass(frozen=True)
@@ -28,10 +32,25 @@ class PreviewClipSettings:
     start_seconds: float
     duration_seconds: float
     force_style: str
+    subtitle_mode: str
+    style: SubtitleStyle
     scale_width: int = 1280
     crf: int = 23
     preset: str = "veryfast"
     audio_bitrate: str = "128k"
+
+
+STATIC_SRT_PIPELINE = "static_srt"
+WORD_HIGHLIGHT_ASS_PIPELINE = "word_highlight_ass"
+
+
+@dataclass(frozen=True)
+class PreviewClipPlan:
+    command: list[str]
+    pipeline: str
+    subtitles_path: Path
+    filter_string: str
+    ass_path: Optional[Path] = None
 
 
 class PreviewClipSignals(QtCore.QObject):
@@ -74,51 +93,17 @@ class PreviewClipWorker(QtCore.QObject):
             f"first_start={shift_result.first_start} "
             f"first_end={shift_result.first_end}"
         )
-        subtitles_filter = build_subtitles_filter(
-            shifted_srt_path,
-            force_style=self._settings.force_style,
+        plan = build_preview_clip_plan(
+            ffmpeg_path=ffmpeg_path,
+            settings=self._settings,
+            output_path=self._output_path,
+            shifted_srt_path=shifted_srt_path,
         )
-        video_chain = (
-            f"trim=start={self._settings.start_seconds:.3f}:duration={self._settings.duration_seconds:.3f},"
-            "setpts=PTS-STARTPTS,"
-            f"{subtitles_filter},"
-            f"scale='min({self._settings.scale_width},iw)':-2:force_original_aspect_ratio=decrease"
-        )
-        filter_complex, audio_label = _build_filter_complex(
-            video_chain,
-            self._settings.start_seconds,
-            self._settings.duration_seconds,
-            self._settings.video_path,
-        )
-        command = [
-            str(ffmpeg_path),
-            "-y",
-            "-hide_banner",
-            "-i",
-            str(self._settings.video_path),
-            "-filter_complex",
-            filter_complex,
-            "-map",
-            "[v]",
-        ]
-        if audio_label:
-            command += ["-map", audio_label]
-        command += [
-            "-c:v",
-            "libx264",
-            "-preset",
-            self._settings.preset,
-            "-crf",
-            str(self._settings.crf),
-            "-c:a",
-            "aac",
-            "-b:a",
-            self._settings.audio_bitrate,
-            "-movflags",
-            "+faststart",
-            "-shortest",
-            str(self._output_path),
-        ]
+        self.signals.log.emit(f"Preview subtitle_mode={self._settings.subtitle_mode}")
+        self.signals.log.emit(f"Preview pipeline={plan.pipeline}")
+        self.signals.log.emit(f"Preview subtitles path={plan.subtitles_path}")
+        self.signals.log.emit(f"Preview filter={plan.filter_string}")
+        command = plan.command
         command_text = subprocess.list2cmdline(command)
         self.signals.log.emit(
             "Preview clip ffmpeg: "
@@ -177,6 +162,8 @@ class PreviewPlaybackController(QtCore.QObject):
         clip_start_seconds: Optional[float],
         clip_duration_seconds: Optional[float],
         force_style: str,
+        subtitle_mode: str,
+        style: SubtitleStyle,
         scale_width: int = 1280,
     ) -> None:
         if self._thread is not None:
@@ -201,6 +188,8 @@ class PreviewPlaybackController(QtCore.QObject):
             start_seconds=start_seconds,
             duration_seconds=clip_duration,
             force_style=force_style,
+            subtitle_mode=subtitle_mode,
+            style=style,
             scale_width=scale_width,
         )
         cache_key = self._build_cache_key(settings)
@@ -247,6 +236,8 @@ class PreviewPlaybackController(QtCore.QObject):
             "start_seconds": round(settings.start_seconds, 3),
             "duration_seconds": round(settings.duration_seconds, 3),
             "force_style": settings.force_style,
+            "subtitle_mode": settings.subtitle_mode,
+            "style": to_preview_params(settings.style),
             "scale_width": settings.scale_width,
             "crf": settings.crf,
             "preset": settings.preset,
@@ -270,6 +261,108 @@ class PreviewPlaybackController(QtCore.QObject):
             "size": size,
             "mtime": mtime,
         }
+
+
+def build_preview_clip_plan(
+    *,
+    ffmpeg_path: Path,
+    settings: PreviewClipSettings,
+    output_path: Path,
+    shifted_srt_path: Path,
+) -> PreviewClipPlan:
+    if settings.subtitle_mode == "word_highlight":
+        cues = parse_srt_file(shifted_srt_path)
+        ass_text = build_ass_document(cues, style_config=settings.style)
+        ass_path = output_path.with_name(f"{settings.video_path.stem}_preview_word_highlight.ass")
+        ass_path.write_text(ass_text, encoding="utf-8")
+        filter_string = build_ass_filter(ass_path)
+        pipeline = WORD_HIGHLIGHT_ASS_PIPELINE
+        subtitles_path = ass_path
+    else:
+        filter_string = build_subtitles_filter(
+            shifted_srt_path,
+            force_style=settings.force_style,
+        )
+        pipeline = STATIC_SRT_PIPELINE
+        subtitles_path = shifted_srt_path
+        ass_path = None
+
+    video_chain = (
+        f"trim=start={settings.start_seconds:.3f}:duration={settings.duration_seconds:.3f},"
+        "setpts=PTS-STARTPTS,"
+        f"{filter_string},"
+        f"scale='min({settings.scale_width},iw)':-2:force_original_aspect_ratio=decrease"
+    )
+    if settings.subtitle_mode == "word_highlight":
+        audio_filter_complex, audio_label = _build_audio_filter_complex(
+            settings.start_seconds,
+            settings.duration_seconds,
+            settings.video_path,
+        )
+        command = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-i",
+            str(settings.video_path),
+            "-vf",
+            video_chain,
+        ]
+        if audio_filter_complex and audio_label:
+            command += [
+                "-filter_complex",
+                audio_filter_complex,
+                "-map",
+                "0:v:0",
+                "-map",
+                audio_label,
+            ]
+        else:
+            command += ["-map", "0:v:0"]
+    else:
+        filter_complex, audio_label = _build_filter_complex(
+            video_chain,
+            settings.start_seconds,
+            settings.duration_seconds,
+            settings.video_path,
+        )
+        command = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-i",
+            str(settings.video_path),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v]",
+        ]
+        if audio_label:
+            command += ["-map", audio_label]
+    command += [
+        "-c:v",
+        "libx264",
+        "-preset",
+        settings.preset,
+        "-crf",
+        str(settings.crf),
+        "-c:a",
+        "aac",
+        "-b:a",
+        settings.audio_bitrate,
+        "-movflags",
+        "+faststart",
+        "-shortest",
+        str(output_path),
+    ]
+
+    return PreviewClipPlan(
+        command=command,
+        pipeline=pipeline,
+        subtitles_path=subtitles_path,
+        filter_string=filter_string,
+        ass_path=ass_path,
+    )
 
 
 @dataclass(frozen=True)
@@ -354,6 +447,28 @@ def _format_srt_timestamp(seconds: float) -> str:
     minutes = (total_seconds % 3600) // 60
     secs = total_seconds % 60
     return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
+
+def _build_audio_filter_complex(
+    start_seconds: float,
+    duration_seconds: float,
+    video_path: Path,
+) -> tuple[str, Optional[str]]:
+    has_audio = False
+    ffprobe_json = get_ffprobe_json(video_path)
+    if ffprobe_json:
+        streams = ffprobe_json.get("streams", [])
+        has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
+    audio_label = None
+    if has_audio:
+        audio_chain = (
+            f"atrim=start={start_seconds:.3f}:duration={duration_seconds:.3f},"
+            "asetpts=PTS-STARTPTS"
+        )
+        filter_complex = f"[0:a]{audio_chain}[a]"
+        audio_label = "[a]"
+        return filter_complex, audio_label
+    return "", None
 
 
 def _build_filter_complex(

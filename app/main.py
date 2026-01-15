@@ -1241,6 +1241,8 @@ class MainWindow(QtWidgets.QMainWindow):
             clip_start_seconds=self._preview_clip_start_seconds,
             clip_duration_seconds=self._preview_clip_duration_seconds,
             force_style=force_style,
+            subtitle_mode=self._subtitle_mode,
+            style=style,
         )
 
     def _on_preview_stop_clicked(self) -> None:
