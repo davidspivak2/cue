@@ -16,6 +16,7 @@ from .ass_karaoke import (
     build_style_config_from_subtitle_style,
 )
 from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
+from .ass_render import build_ass_document
 from .ffmpeg_utils import (
     build_ass_filter,
     build_subtitles_filter,
@@ -300,6 +301,7 @@ def build_preview_clip_plan(
 ) -> PreviewClipPlan:
     if settings.subtitle_mode == "word_highlight":
         cues = parse_srt_file(settings.srt_path)
+        shifted_cues = parse_srt_file(shifted_srt_path)
         style_config = build_style_config_from_subtitle_style(
             settings.style,
             highlight_color=settings.highlight_color or DEFAULT_HIGHLIGHT_COLOR,
@@ -317,7 +319,10 @@ def build_preview_clip_plan(
             time_offset_sec=settings.start_seconds,
             time_window=(0.0, settings.duration_seconds),
         )
-        ass_text = decision.ass_text
+        if decision.karaoke_enabled:
+            ass_text = decision.ass_text
+        else:
+            ass_text = build_ass_document(shifted_cues, style_config=style_config)
         ass_path = output_path.with_suffix(".ass")
         ass_path.write_text(ass_text, encoding="utf-8")
         filter_string = build_ass_filter(ass_path)
