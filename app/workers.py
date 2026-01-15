@@ -42,6 +42,7 @@ from .srt_utils import (
     parse_srt_file,
     select_preview_moment,
 )
+from .align_utils import audio_path_for_srt, build_alignment_plan
 from .word_timing_schema import (
     SCHEMA_VERSION,
     build_word_timing_stub,
@@ -485,6 +486,7 @@ class Worker(QtCore.QObject):
         cues = parse_srt_file(srt_path)
         self._ensure_word_timings_file(srt_path, cues)
         self._log_word_timing_status(srt_path)
+        self._run_alignment_if_needed(srt_path, audio_path_for_srt(srt_path), context="export")
 
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
         self._output_video_path = output_path
@@ -1094,6 +1096,67 @@ class Worker(QtCore.QObject):
         if stale:
             self.signals.log.emit(
                 "Word timings stale. Alignment must be regenerated (Task 8).",
+                True,
+            )
+
+    def _run_alignment_if_needed(
+        self,
+        srt_path: Path,
+        audio_path: Path,
+        *,
+        context: str,
+    ) -> None:
+        plan = build_alignment_plan(
+            subtitle_mode=self.subtitle_mode,
+            srt_path=srt_path,
+            audio_path=audio_path,
+            language="he",
+            prefer_gpu=True,
+        )
+        self.signals.log.emit(
+            f"Alignment needed? {str(plan.should_run).lower()} (context={context})",
+            True,
+        )
+        if not plan.should_run:
+            return
+        if not audio_path.exists():
+            self.signals.log.emit(
+                f"Alignment skipped: audio not found ({audio_path})",
+                True,
+            )
+            return
+        self.signals.log.emit(
+            "Alignment starting: "
+            f"wav={audio_path} srt={srt_path} output={plan.output_path} "
+            f"device={plan.device or 'auto'} model={plan.align_model or 'default'}",
+            True,
+        )
+        self.signals.log.emit(
+            f"Alignment command: {subprocess.list2cmdline(plan.command)}",
+            True,
+        )
+        result = subprocess.run(
+            plan.command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            **get_subprocess_kwargs(),
+        )
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                self.signals.log.emit(line, True)
+        if result.stderr:
+            for line in result.stderr.splitlines():
+                self.signals.log.emit(line, True)
+        self.signals.log.emit(
+            f"Alignment finished: exit_code={result.returncode} output={plan.output_path}",
+            True,
+        )
+        if result.returncode != 0:
+            self.signals.log.emit(
+                "Alignment failed; continuing with static rendering.",
                 True,
             )
 
