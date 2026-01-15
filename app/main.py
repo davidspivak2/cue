@@ -44,11 +44,18 @@ from app.ui.widgets import (
 from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.preview_playback import PreviewPlaybackController
 from app.config import apply_config_defaults
+from app.srt_utils import compute_srt_sha256, is_word_timing_stale, parse_srt_file
 from app.workers import (
     DiagnosticsSettings,
     TaskType,
     TranscriptionSettings,
     Worker,
+)
+from app.word_timing_schema import (
+    SCHEMA_VERSION,
+    build_word_timing_stub,
+    save_word_timings_json,
+    word_timings_path_for_srt,
 )
 from app.subtitle_style import (
     PRESET_CUSTOM,
@@ -91,6 +98,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._video_path: Optional[Path] = None
         self._output_dir: Optional[Path] = None
         self._last_srt_path: Optional[Path] = None
+        self._word_timings_path: Optional[Path] = None
         self._last_output_video: Optional[Path] = None
         self._worker_thread: Optional[QtCore.QThread] = None
         self._worker: Optional[Worker] = None
@@ -1230,6 +1238,8 @@ class MainWindow(QtWidgets.QMainWindow):
         srt_path = self._resolve_preview_srt_path()
         if not srt_path:
             return
+        self._ensure_word_timings_for_srt(srt_path)
+        self._log_word_timing_status(srt_path)
         style = self._resolve_effective_subtitle_style()
         force_style = to_ffmpeg_force_style(style)
         self._preview_play_request_pending = True
@@ -1632,6 +1642,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if payload.get("srt_path"):
             candidate = Path(payload["srt_path"])
             self._last_srt_path = candidate if candidate.exists() else None
+        if payload.get("word_timings_path"):
+            candidate = Path(payload["word_timings_path"])
+            self._word_timings_path = candidate if candidate.exists() else None
         if payload.get("output_path"):
             candidate = Path(payload["output_path"])
             self._last_output_video = candidate if candidate.exists() else None
@@ -2117,6 +2130,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _reset_video_state(self) -> None:
         self._last_srt_path = None
+        self._word_timings_path = None
         self._last_output_video = None
         self._subtitles_reviewed = False
         self._output_dir = None
@@ -2190,6 +2204,45 @@ class MainWindow(QtWidgets.QMainWindow):
             return TranscriptionQuality(value)
         except ValueError:
             return TranscriptionQuality.AUTO
+
+    def _ensure_word_timings_for_srt(self, srt_path: Path) -> Path:
+        word_timings_path = word_timings_path_for_srt(srt_path)
+        self._word_timings_path = word_timings_path
+        if word_timings_path.exists():
+            return word_timings_path
+        cues = parse_srt_file(srt_path)
+        cue_payload = [
+            (idx + 1, cue.start_seconds, cue.end_seconds, cue.text)
+            for idx, cue in enumerate(cues)
+        ]
+        try:
+            doc = build_word_timing_stub(
+                language="he",
+                srt_sha256=compute_srt_sha256(srt_path),
+                cues=cue_payload,
+            )
+            save_word_timings_json(word_timings_path, doc)
+            self._log(
+                f"Word timings created: {word_timings_path} (schema v{SCHEMA_VERSION})",
+                True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log(
+                f"Warning: failed to create word timings file ({word_timings_path}): {exc}",
+                True,
+            )
+        return word_timings_path
+
+    def _log_word_timing_status(self, srt_path: Path) -> None:
+        word_timings_path = word_timings_path_for_srt(srt_path)
+        stale = is_word_timing_stale(word_timings_path, srt_path)
+        self._log(f"Word timings: path={word_timings_path}", True)
+        self._log(f"Word timings stale? {str(stale).lower()}", True)
+        if stale:
+            self._log(
+                "Word timings stale. Alignment must be regenerated (Task 8).",
+                True,
+            )
 
 
     def _load_subtitle_style(self) -> tuple[str, SubtitleStyle]:

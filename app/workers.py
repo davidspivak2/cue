@@ -35,7 +35,19 @@ from .subtitle_style import (
     to_preview_params,
 )
 from .paths import get_models_dir, get_preview_frames_dir
-from .srt_utils import parse_srt_file, select_preview_moment
+from .srt_utils import (
+    SrtCue,
+    compute_srt_sha256,
+    is_word_timing_stale,
+    parse_srt_file,
+    select_preview_moment,
+)
+from .word_timing_schema import (
+    SCHEMA_VERSION,
+    build_word_timing_stub,
+    save_word_timings_json,
+    word_timings_path_for_srt,
+)
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
 
@@ -128,6 +140,7 @@ class Worker(QtCore.QObject):
         self._last_audio_extract_command: Optional[list[str]] = None
         self._audio_path: Optional[Path] = None
         self._srt_path: Optional[Path] = None
+        self._word_timings_path: Optional[Path] = None
         self._output_video_path: Optional[Path] = None
         self._transcribe_command: Optional[str] = None
         self._burn_in_command: Optional[str] = None
@@ -287,6 +300,9 @@ class Worker(QtCore.QObject):
 
         self._capture_audio_info_if_needed(audio_path)
 
+        cues = parse_srt_file(srt_path)
+        self._ensure_word_timings_file(srt_path, cues)
+
         preview_frame_path: Optional[Path] = None
         preview_subtitle_text: Optional[str] = None
         preview_timestamp_seconds: Optional[float] = None
@@ -294,7 +310,6 @@ class Worker(QtCore.QObject):
         preview_clip_duration_seconds: Optional[float] = None
         preview_style = self.subtitle_style
         try:
-            cues = parse_srt_file(srt_path)
             preview = select_preview_moment(cues, video_duration)
             if preview and preview_style:
                 clip_start = max(0.0, preview.cue_start_seconds - 1.0)
@@ -371,6 +386,9 @@ class Worker(QtCore.QObject):
         return {
             "audio_path": str(audio_path),
             "srt_path": str(srt_path),
+            "word_timings_path": (
+                str(self._word_timings_path) if self._word_timings_path is not None else None
+            ),
             "preview_frame_path": (
                 str(preview_frame_path) if preview_frame_path is not None else None
             ),
@@ -464,6 +482,9 @@ class Worker(QtCore.QObject):
         self._srt_path = srt_path
         if not srt_path.exists():
             raise FileNotFoundError(f"Subtitles file not found: {srt_path}")
+        cues = parse_srt_file(srt_path)
+        self._ensure_word_timings_file(srt_path, cues)
+        self._log_word_timing_status(srt_path)
 
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
         self._output_video_path = output_path
@@ -1038,6 +1059,43 @@ class Worker(QtCore.QObject):
         if not settings or not settings.enabled:
             return False
         return settings.categories.get(key, False)
+
+    def _ensure_word_timings_file(self, srt_path: Path, cues: list[SrtCue]) -> None:
+        word_timings_path = word_timings_path_for_srt(srt_path)
+        self._word_timings_path = word_timings_path
+        if word_timings_path.exists():
+            return
+        cue_payload = [
+            (idx + 1, cue.start_seconds, cue.end_seconds, cue.text)
+            for idx, cue in enumerate(cues)
+        ]
+        try:
+            doc = build_word_timing_stub(
+                language="he",
+                srt_sha256=compute_srt_sha256(srt_path),
+                cues=cue_payload,
+            )
+            save_word_timings_json(word_timings_path, doc)
+            self.signals.log.emit(
+                f"Word timings created: {word_timings_path} (schema v{SCHEMA_VERSION})",
+                True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.signals.log.emit(
+                f"Warning: failed to create word timings file ({word_timings_path}): {exc}",
+                True,
+            )
+
+    def _log_word_timing_status(self, srt_path: Path) -> None:
+        word_timings_path = word_timings_path_for_srt(srt_path)
+        stale = is_word_timing_stale(word_timings_path, srt_path)
+        self.signals.log.emit(f"Word timings: path={word_timings_path}", True)
+        self.signals.log.emit(f"Word timings stale? {str(stale).lower()}", True)
+        if stale:
+            self.signals.log.emit(
+                "Word timings stale. Alignment must be regenerated (Task 8).",
+                True,
+            )
 
     def _maybe_write_diagnostics(
         self,
