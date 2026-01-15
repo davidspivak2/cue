@@ -61,7 +61,9 @@ from app.workers import (
 )
 from app.word_timing_schema import (
     SCHEMA_VERSION,
+    WordTimingValidationError,
     build_word_timing_stub,
+    load_word_timings_json,
     save_word_timings_json,
     word_timings_path_for_srt,
 )
@@ -2293,6 +2295,13 @@ class MainWindow(QtWidgets.QMainWindow):
         stale = is_word_timing_stale(word_timings_path, srt_path)
         self._log(f"Word timings: path={word_timings_path}", True)
         self._log(f"Word timings stale? {str(stale).lower()}", True)
+        try:
+            doc = load_word_timings_json(word_timings_path)
+        except (WordTimingValidationError, OSError) as exc:
+            self._log(f"Word timings load failed: {exc}", True)
+        else:
+            total_words = sum(len(cue.words) for cue in doc.cues)
+            self._log(f"Word timings total_words={total_words}", True)
         if stale:
             self._log(
                 "Word timings stale. Alignment must be regenerated (Task 8).",
@@ -2308,11 +2317,17 @@ class MainWindow(QtWidgets.QMainWindow):
             prefer_gpu=True,
         )
         self._log(
-            f"Alignment needed? {str(plan.should_run).lower()} (context={context})",
+            "Alignment needed? "
+            f"{str(plan.should_run).lower()} reason={plan.reason} (context={context})",
             True,
         )
         if not plan.should_run:
             return
+        if plan.reason == "word_timings_has_no_words":
+            self._log(
+                "Alignment needed: word_timings_has_no_words",
+                True,
+            )
         if not plan.output_path.parent.exists():
             plan.output_path.parent.mkdir(parents=True, exist_ok=True)
         if not audio_path_for_srt(srt_path).exists():

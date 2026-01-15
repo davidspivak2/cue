@@ -255,3 +255,22 @@ def test_fallback_behavior(tmp_path: Path) -> None:
     )
     assert decision.karaoke_enabled is True
     assert decision.reason == "ok"
+
+
+def test_karaoke_cue_index_mapping_from_one_based() -> None:
+    cues = [{"start_s": 0.0, "end_s": 1.0, "text": "שלום עולם"}]
+    doc = _build_word_timing_doc(
+        srt_sha256="stub",
+        cue_index=1,
+        cue_start=0.0,
+        cue_end=1.0,
+        cue_text="שלום עולם",
+        words=[WordSpan(text="שלום", start=0.1, end=0.4)],
+    )
+    style = build_style_config_from_subtitle_style(
+        preset_defaults(PRESET_DEFAULT),
+        highlight_color="#FFD400",
+        highlight_opacity=1.0,
+    )
+    result = build_ass_karaoke_document_with_stats(cues, doc, style)
+    assert result.highlight_event_count == 1

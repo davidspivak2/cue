@@ -185,8 +185,13 @@ def build_ass_karaoke_document_with_stats(
             payload = wrap_rtl(escape_ass_text(cue.text))
             events.append((base_start, 0, base_end, payload))
 
-        cue_timing = cue_timings.get(cue.index)
+        cue_timing, lookup_key = _resolve_cue_timing(cue, cue_timings)
         if not cue_timing:
+            LOG.info(
+                "Karaoke cue timing missing: cue_index=%s lookup_key=%s",
+                cue.index,
+                lookup_key,
+            )
             continue
         if (
             abs(cue_timing.cue_start - cue.start_sec) > _CUE_TOLERANCE_SEC
@@ -194,12 +199,14 @@ def build_ass_karaoke_document_with_stats(
         ):
             LOG.info(
                 "Karaoke cue timing mismatch: cue_index=%s cue_start=%.3f cue_end=%.3f "
-                "timing_start=%.3f timing_end=%.3f",
+                "lookup_key=%s timing_start=%.3f timing_end=%.3f timing_cue_index=%s",
                 cue.index,
                 cue.start_sec,
                 cue.end_sec,
+                lookup_key,
                 cue_timing.cue_start,
                 cue_timing.cue_end,
+                cue_timing.cue_index,
             )
             continue
         if not cue_timing.words:
@@ -354,7 +361,7 @@ def _coerce_karaoke_cues(cues: Iterable[object]) -> list[KaraokeCue]:
                 continue
             normalized.append(
                 KaraokeCue(
-                    index=int(index) if index is not None else idx,
+                    index=int(index) if index is not None else idx + 1,
                     start_sec=float(start),
                     end_sec=float(end),
                     text=str(text),
@@ -375,13 +382,34 @@ def _coerce_karaoke_cues(cues: Iterable[object]) -> list[KaraokeCue]:
             continue
         normalized.append(
             KaraokeCue(
-                index=int(cue_index) if cue_index is not None else idx,
+                index=int(cue_index) if cue_index is not None else idx + 1,
                 start_sec=float(start),
                 end_sec=float(end),
                 text=str(text),
             )
         )
     return normalized
+
+
+def _resolve_cue_timing(
+    cue: KaraokeCue,
+    cue_timings: dict[int, CueWordTimings],
+) -> tuple[Optional[CueWordTimings], int]:
+    lookup_key = cue.index
+    cue_timing = cue_timings.get(lookup_key)
+    if cue_timing:
+        return cue_timing, lookup_key
+    fallback_key = lookup_key + 1
+    fallback = cue_timings.get(fallback_key)
+    if fallback:
+        LOG.info(
+            "Karaoke cue timing fallback: cue_index=%s lookup_key=%s fallback_key=%s",
+            cue.index,
+            lookup_key,
+            fallback_key,
+        )
+        return fallback, fallback_key
+    return None, lookup_key
 
 
 def _index_word_timings(
