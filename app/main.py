@@ -14,6 +14,7 @@ import logging
 import os
 import platform
 import sys
+import subprocess
 import time
 from enum import Enum
 from pathlib import Path
@@ -26,6 +27,7 @@ from app.ffmpeg_utils import (
     extract_subtitled_frame,
     get_ffmpeg_missing_message,
     get_runtime_mode,
+    get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
 from app.progress import ProgressController, ProgressStep
@@ -45,6 +47,7 @@ from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.preview_playback import PreviewPlaybackController
 from app.config import apply_config_defaults
 from app.srt_utils import compute_srt_sha256, is_word_timing_stale, parse_srt_file
+from app.align_utils import audio_path_for_srt, build_alignment_plan
 from app.workers import (
     DiagnosticsSettings,
     TaskType,
@@ -1240,6 +1243,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._ensure_word_timings_for_srt(srt_path)
         self._log_word_timing_status(srt_path)
+        self._run_alignment_if_needed(srt_path, context="preview")
         style = self._resolve_effective_subtitle_style()
         force_style = to_ffmpeg_force_style(style)
         self._preview_play_request_pending = True
@@ -2241,6 +2245,60 @@ class MainWindow(QtWidgets.QMainWindow):
         if stale:
             self._log(
                 "Word timings stale. Alignment must be regenerated (Task 8).",
+                True,
+            )
+
+    def _run_alignment_if_needed(self, srt_path: Path, *, context: str) -> None:
+        plan = build_alignment_plan(
+            subtitle_mode=self._subtitle_mode,
+            srt_path=srt_path,
+            audio_path=audio_path_for_srt(srt_path),
+            language="he",
+            prefer_gpu=True,
+        )
+        self._log(
+            f"Alignment needed? {str(plan.should_run).lower()} (context={context})",
+            True,
+        )
+        if not plan.should_run:
+            return
+        if not plan.output_path.parent.exists():
+            plan.output_path.parent.mkdir(parents=True, exist_ok=True)
+        if not audio_path_for_srt(srt_path).exists():
+            self._log(
+                f"Alignment skipped: audio not found ({audio_path_for_srt(srt_path)})",
+                True,
+            )
+            return
+        self._log(
+            "Alignment starting: "
+            f"wav={audio_path_for_srt(srt_path)} srt={srt_path} output={plan.output_path} "
+            f"device={plan.device or 'auto'} model={plan.align_model or 'default'}",
+            True,
+        )
+        self._log(f"Alignment command: {subprocess.list2cmdline(plan.command)}", True)
+        result = subprocess.run(
+            plan.command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            **get_subprocess_kwargs(),
+        )
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                self._log(line, True)
+        if result.stderr:
+            for line in result.stderr.splitlines():
+                self._log(line, True)
+        self._log(
+            f"Alignment finished: exit_code={result.returncode} output={plan.output_path}",
+            True,
+        )
+        if result.returncode != 0:
+            self._log(
+                "Alignment failed; continuing with static rendering.",
                 True,
             )
 
