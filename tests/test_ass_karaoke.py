@@ -116,7 +116,7 @@ def test_step_event_count_matches_words() -> None:
     )
     result = build_ass_step_highlight_document_with_stats(cues, doc, style)
     dialogue_lines = [line for line in result.ass_text.splitlines() if line.startswith("Dialogue:")]
-    assert len(dialogue_lines) == 5
+    assert len(dialogue_lines) == 4
     assert result.highlight_event_count == 3
 
 
@@ -142,11 +142,8 @@ def test_step_events_use_next_word_start_and_cue_end() -> None:
     dialogue_lines = [line for line in ass_text.splitlines() if line.startswith("Dialogue:")]
     times = [_parse_ass_times(line) for line in dialogue_lines]
     first_end = _ass_time_to_seconds(times[0][1])
-    gap_start = _ass_time_to_seconds(times[1][0])
-    gap_end = _ass_time_to_seconds(times[1][1])
     last_end = _ass_time_to_seconds(times[-1][1])
-    assert abs(first_end - 0.4) < 0.02
-    assert gap_start <= 0.43 <= gap_end
+    assert abs(first_end - 0.46) < 0.02
     assert abs(last_end - 1.0) < 0.02
 
 
@@ -235,6 +232,32 @@ def test_step_event_centisecond_rounding_no_gap() -> None:
     first_end = _ass_time_to_seconds(times[0][1])
     second_start = _ass_time_to_seconds(times[1][0])
     assert second_start <= first_end
+
+
+def test_leading_no_highlight_segment() -> None:
+    cues = [KaraokeCue(index=1, start_sec=0.0, end_sec=1.0, text="שלום עולם")]
+    doc = _build_word_timing_doc(
+        srt_sha256="stub",
+        cue_index=1,
+        cue_start=0.0,
+        cue_end=1.0,
+        cue_text="שלום עולם",
+        words=[WordSpan(text="שלום", start=0.2, end=0.4)],
+    )
+    style = build_style_config_from_subtitle_style(
+        preset_defaults(PRESET_DEFAULT),
+        highlight_color="#FFD400",
+        highlight_opacity=1.0,
+    )
+    ass_text = build_ass_step_highlight_document(cues, doc, style)
+    dialogue_lines = [line for line in ass_text.splitlines() if line.startswith("Dialogue:")]
+    highlight_color_ass = ass_color_from_hex("#FFD400", alpha=0.0)
+    highlight_tag = f"{{\\1c{highlight_color_ass}&}}"
+    leading_line = dialogue_lines[0]
+    assert highlight_tag not in leading_line
+    times = _parse_ass_times(leading_line)
+    assert abs(_ass_time_to_seconds(times[0]) - 0.0) < 0.02
+    assert abs(_ass_time_to_seconds(times[1]) - 0.2) < 0.02
 
 
 def test_step_events_have_no_overlap() -> None:
