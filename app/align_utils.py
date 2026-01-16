@@ -6,7 +6,11 @@ import sys
 from typing import Optional
 
 from .srt_utils import is_word_timing_stale
-from .word_timing_schema import word_timings_path_for_srt
+from .word_timing_schema import (
+    WordTimingValidationError,
+    load_word_timings_json,
+    word_timings_path_for_srt,
+)
 
 
 @dataclass(frozen=True)
@@ -14,6 +18,7 @@ class AlignmentPlan:
     should_run: bool
     command: list[str]
     output_path: Path
+    reason: str
     device: Optional[str]
     align_model: Optional[str]
     prefer_gpu: bool
@@ -40,17 +45,34 @@ def build_alignment_plan(
             should_run=False,
             command=[],
             output_path=output_path,
+            reason="disabled",
             device=device,
             align_model=align_model,
             prefer_gpu=prefer_gpu,
         )
 
-    stale = is_word_timing_stale(output_path, srt_path)
-    if not stale:
+    reason = None
+    if not output_path.exists():
+        reason = "missing"
+    else:
+        try:
+            doc = load_word_timings_json(output_path)
+        except (WordTimingValidationError, OSError):
+            reason = "invalid"
+        else:
+            total_words = sum(len(cue.words) for cue in doc.cues)
+            if total_words == 0:
+                reason = "word_timings_has_no_words"
+            else:
+                stale = is_word_timing_stale(output_path, srt_path)
+                if stale:
+                    reason = "stale"
+    if reason is None:
         return AlignmentPlan(
             should_run=False,
             command=[],
             output_path=output_path,
+            reason="up_to_date",
             device=device,
             align_model=align_model,
             prefer_gpu=prefer_gpu,
@@ -77,6 +99,7 @@ def build_alignment_plan(
         should_run=True,
         command=command,
         output_path=output_path,
+        reason=reason,
         device=device,
         align_model=align_model,
         prefer_gpu=prefer_gpu,

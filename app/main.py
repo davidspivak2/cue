@@ -22,8 +22,14 @@ from typing import Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets, QtMultimedia, QtMultimediaWidgets
 
+from app.ass_karaoke import (
+    build_ass_document_with_karaoke_fallback,
+    build_style_config_from_subtitle_style,
+)
+from app.config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY, apply_config_defaults
 from app.ffmpeg_utils import (
     ensure_ffmpeg_available,
+    extract_ass_frame,
     extract_subtitled_frame,
     get_ffmpeg_missing_message,
     get_runtime_mode,
@@ -45,7 +51,6 @@ from app.ui.widgets import (
 )
 from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.preview_playback import PreviewPlaybackController
-from app.config import apply_config_defaults
 from app.srt_utils import compute_srt_sha256, is_word_timing_stale, parse_srt_file
 from app.align_utils import audio_path_for_srt, build_alignment_plan
 from app.workers import (
@@ -56,7 +61,9 @@ from app.workers import (
 )
 from app.word_timing_schema import (
     SCHEMA_VERSION,
+    WordTimingValidationError,
     build_word_timing_stub,
+    load_word_timings_json,
     save_word_timings_json,
     word_timings_path_for_srt,
 )
@@ -918,6 +925,11 @@ class MainWindow(QtWidgets.QMainWindow):
             srt_mtime = int(srt_path.stat().st_mtime)
         except FileNotFoundError:
             srt_mtime = 0
+        word_timings_path = word_timings_path_for_srt(srt_path)
+        try:
+            word_timings_mtime = int(word_timings_path.stat().st_mtime)
+        except FileNotFoundError:
+            word_timings_mtime = 0
         timestamp_ms = int(round(self._preview_timestamp_seconds * 1000))
         preview_width = 1280
         style_params = to_preview_params(style)
@@ -925,30 +937,67 @@ class MainWindow(QtWidgets.QMainWindow):
             f"{self._video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
             f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
             f"{style_params['shadow']}|{style_params['margin_v']}|{style_params['box_enabled']}|"
-            f"{style_params['box_opacity']}|{style_params['box_padding']}|{preview_width}"
+            f"{style_params['box_opacity']}|{style_params['box_padding']}|"
+            f"{self._subtitle_mode}|{word_timings_mtime}|"
+            f"{self._highlight_color}|{self._highlight_opacity}|{preview_width}"
         )
         cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
-        force_style = to_ffmpeg_force_style(style)
-        alpha_byte = get_box_alpha_byte(style)
-        self._log(
-            "Preview style: "
-            f"box_enabled={style.box_enabled} "
-            f"box_opacity={style.box_opacity} "
-            f"alpha={alpha_byte} "
-            f"force_style={force_style}",
-            True,
-        )
-        success = extract_subtitled_frame(
-            self._video_path,
-            srt_path,
-            self._preview_timestamp_seconds,
-            output_path,
-            width=preview_width,
-            force_style=force_style,
-        )
+        if self._subtitle_mode == "word_highlight":
+            style_config = build_style_config_from_subtitle_style(
+                style,
+                highlight_color=self._highlight_color or DEFAULT_HIGHLIGHT_COLOR,
+                highlight_opacity=(
+                    self._highlight_opacity
+                    if self._highlight_opacity is not None
+                    else DEFAULT_HIGHLIGHT_OPACITY
+                ),
+            )
+            cues = parse_srt_file(srt_path)
+            decision = build_ass_document_with_karaoke_fallback(
+                cues,
+                srt_path=srt_path,
+                word_timings_path=word_timings_path,
+                style_config=style_config,
+            )
+            self._log(
+                "Preview karaoke: "
+                f"enabled={decision.karaoke_enabled} "
+                f"reason={decision.reason} "
+                f"word_timings_path={decision.word_timings_path} "
+                f"highlight_events={decision.highlight_event_count}",
+                True,
+            )
+            ass_path = output_path.with_suffix(".ass")
+            ass_path.write_text(decision.ass_text, encoding="utf-8")
+            success = extract_ass_frame(
+                self._video_path,
+                ass_path,
+                self._preview_timestamp_seconds,
+                output_path,
+                width=preview_width,
+            )
+        else:
+            force_style = to_ffmpeg_force_style(style)
+            alpha_byte = get_box_alpha_byte(style)
+            self._log(
+                "Preview style: "
+                f"box_enabled={style.box_enabled} "
+                f"box_opacity={style.box_opacity} "
+                f"alpha={alpha_byte} "
+                f"force_style={force_style}",
+                True,
+            )
+            success = extract_subtitled_frame(
+                self._video_path,
+                srt_path,
+                self._preview_timestamp_seconds,
+                output_path,
+                width=preview_width,
+                force_style=force_style,
+            )
         return output_path if success else None
 
     def _build_settings_page(self) -> QtWidgets.QWidget:
@@ -1257,6 +1306,8 @@ class MainWindow(QtWidgets.QMainWindow):
             force_style=force_style,
             subtitle_mode=self._subtitle_mode,
             style=style,
+            highlight_color=self._highlight_color,
+            highlight_opacity=self._highlight_opacity,
         )
 
     def _on_preview_stop_clicked(self) -> None:
@@ -1592,6 +1643,8 @@ class MainWindow(QtWidgets.QMainWindow):
             transcription_settings=transcription_settings,
             subtitle_style=subtitle_style,
             subtitle_mode=subtitle_mode,
+            highlight_color=self._highlight_color,
+            highlight_opacity=self._highlight_opacity,
             diagnostics_settings=self._diagnostics_settings,
             session_log_path=self._log_path,
         )
@@ -2242,6 +2295,13 @@ class MainWindow(QtWidgets.QMainWindow):
         stale = is_word_timing_stale(word_timings_path, srt_path)
         self._log(f"Word timings: path={word_timings_path}", True)
         self._log(f"Word timings stale? {str(stale).lower()}", True)
+        try:
+            doc = load_word_timings_json(word_timings_path)
+        except (WordTimingValidationError, OSError) as exc:
+            self._log(f"Word timings load failed: {exc}", True)
+        else:
+            total_words = sum(len(cue.words) for cue in doc.cues)
+            self._log(f"Word timings total_words={total_words}", True)
         if stale:
             self._log(
                 "Word timings stale. Alignment must be regenerated (Task 8).",
@@ -2257,11 +2317,17 @@ class MainWindow(QtWidgets.QMainWindow):
             prefer_gpu=True,
         )
         self._log(
-            f"Alignment needed? {str(plan.should_run).lower()} (context={context})",
+            "Alignment needed? "
+            f"{str(plan.should_run).lower()} reason={plan.reason} (context={context})",
             True,
         )
         if not plan.should_run:
             return
+        if plan.reason == "word_timings_has_no_words":
+            self._log(
+                "Alignment needed: word_timings_has_no_words",
+                True,
+            )
         if not plan.output_path.parent.exists():
             plan.output_path.parent.mkdir(parents=True, exist_ok=True)
         if not audio_path_for_srt(srt_path).exists():
