@@ -212,10 +212,30 @@ Last updated: 2026-02-20
 - A) Highlight opacity control.
 - B) Base text color control.
 - C) Font family picker with Hebrew-safe defaults.
-- D) Background box color control + opacity (if not already covered).
-- E) Border radius for subtitle box (likely not feasible with libass; requires spike).
-- F) Alignment/performance optimizations (caching, preview-window-only alignment improvements).
-- G) Packaging hardening for WhisperX deps (tie to packaging work).
+- D) Word highlight mode: **Line background box** (per-line, behind the whole subtitle line) support with explicit UI + config.
+  - Purpose: a rounded rectangle behind the line while the current word is highlighted (matches the example screenshot concept: semi-transparent dark line box with a differently colored highlighted word).
+  - Controls (word-highlight-specific or reused from existing subtitle style box):
+    - Enable/disable toggle for Word highlight mode.
+    - Box color.
+    - Box opacity.
+    - Padding model (explicitly decide: single padding value or separate X/Y padding; document and implement consistently).
+    - Border radius (rounded corners; see definition below).
+  - **Decision point:** either (1) reuse existing Static subtitle box controls for Word highlight mode to avoid duplicate styling knobs, or (2) duplicate word-highlight-specific controls for clarity. Document rationale in the follow-up PR.
+  - **Mutual exclusivity (Word highlight mode only):** if **Word background box** is enabled, **Line background box** must be disabled. If **Word background box** is not enabled, Line background box may be enabled.
+- E) Word highlight mode: **Word background box** (per-word, behind only the currently highlighted word) support with explicit UI + config.
+  - Controls:
+    - Enable/disable toggle.
+    - Box color.
+    - Box opacity.
+    - Padding model (explicitly decide: single padding value or separate X/Y padding; document and implement consistently).
+    - Border radius (rounded corners; see definition below).
+  - **Mutual exclusivity (Word highlight mode only):** when enabled, Line background box is forced off.
+- F) Static mode: line background box remains available as it is today (existing Subtitle style box background), unchanged by Word highlight mode behavior.
+- G) **Definition:** “Border radius” means rounded corners for the background box (rounded rectangle, not sharp corners). Applies to both Line background box and Word background box.
+- H) UX expectation (follow-up scope): Word highlight settings should expose Line background box and Word background box options with the mutual exclusivity behavior described above.
+- I) Feasibility note: Rounded rectangles and per-word boxes may require ASS vector drawing or special libass handling; treat as a feasibility spike if needed, but still implement the UI knobs + desired behavior.
+- J) Alignment/performance optimizations (caching, preview-window-only alignment improvements).
+- K) Packaging hardening for WhisperX deps (tie to packaging work).
 
 ## H) Tracking tables
 
@@ -239,7 +259,10 @@ Last updated: 2026-02-20
 | Highlight opacity control | TODO |  |
 | Base text color control | TODO |  |
 | Font family picker | TODO |  |
-| Background box color + opacity | TODO |  |
-| Border radius (libass feasibility spike) | TODO |  |
+| Word highlight: Line background box controls (toggle, color, opacity, padding, border radius) | TODO | Include mutual exclusivity with Word background box; decide reuse vs duplicate controls. |
+| Word highlight: Word background box controls (toggle, color, opacity, padding, border radius) | TODO | Box behind only the current word; mutually exclusive with Line background box. |
+| Border radius definition + feasibility spike (ASS vector drawing/libass) | TODO | Rounded corners for both line/word boxes; may need special handling. |
+| UX behavior for mutual exclusivity in Word highlight settings | TODO | Line vs word box options, mutual exclusivity rules, placement in UI. |
+| Static mode line background box (existing subtitle style box) | TODO | Explicitly unaffected by Word highlight changes. |
 | Alignment/performance optimizations | TODO |  |
 | WhisperX packaging hardening | TODO |  |
