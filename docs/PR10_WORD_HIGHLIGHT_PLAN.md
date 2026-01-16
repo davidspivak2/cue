@@ -1,6 +1,6 @@
 # PR10 — Word Highlight Subtitles (Karaoke-Style) — Implementation Plan
 
-Last updated: 2026-02-10
+Last updated: 2026-02-20
 
 ## A) Goal and user-visible outcomes
 - Subtitle mode selector is available, with **Word highlight** recommended as the default and **Static** as the alternative.
@@ -67,7 +67,7 @@ Last updated: 2026-02-10
 - **Depends on:** Task 1.
 
 ### Codex Task 3 — Introduce ASS rendering adapter (static ASS first) + unit tests
-- **Goal:** Add an ASS rendering adapter that can render static subtitles via ASS. ⚠️ In progress (ASS generation exists; tests pending).
+- **Goal:** Add an ASS rendering adapter that can render static subtitles via ASS. ✅ Done.
 - **Scope:**
   - Create ASS generation utilities and adapter.
   - Unit tests for ASS output structure.
@@ -79,11 +79,11 @@ Last updated: 2026-02-10
   - Keep ASS generation deterministic for tests.
 - **Acceptance criteria:**
   - ASS output validates basic structure (header + events). ✅
-  - Unit tests pass. ⚠️ Not added yet.
+  - Unit tests pass. ✅
 - **Depends on:** Task 1.
 
 ### Codex Task 4 — Export path uses FFmpeg ass filter for word-highlight mode (still static ASS) + diagnostics fields
-- **Goal:** Wire export to use ASS when word-highlight mode is selected (still static ASS content).
+- **Goal:** Wire export to use ASS when word-highlight mode is selected (still static ASS content). ✅ Done.
 - **Scope:**
   - Add export branch to use FFmpeg `ass` filter when mode is word-highlight.
   - Add diagnostics fields for selected subtitle mode/render path.
@@ -100,7 +100,7 @@ Last updated: 2026-02-10
 - **Depends on:** Task 3.
 
 ### Codex Task 5 — Preview still uses ASS path when word-highlight mode selected + cache key updates
-- **Goal:** Preview still renderer uses ASS when word-highlight mode is selected.
+- **Goal:** Preview still renderer uses ASS when word-highlight mode is selected. ✅ Done.
 - **Scope:**
   - Update preview still generator to select ASS path.
   - Update cache keys to include subtitle mode + highlight settings.
@@ -115,7 +115,7 @@ Last updated: 2026-02-10
 - **Depends on:** Task 4.
 
 ### Codex Task 6 — Preview playback uses shifted ASS path when word-highlight mode selected + shifting test coverage
-- **Goal:** Preview playback uses ASS for word-highlight mode, including time-shift logic.
+- **Goal:** Preview playback uses ASS for word-highlight mode, including time-shift logic. ✅ Done.
 - **Scope:**
   - Update preview playback generator to render ASS when needed.
   - Add tests for ASS time shifting and alignment.
@@ -131,7 +131,7 @@ Last updated: 2026-02-10
 - **Depends on:** Task 5.
 
 ### Codex Task 7 — Define and plumb a word-timing JSON contract end-to-end (staleness detection on SRT edits)
-- **Goal:** Define a word-timing JSON schema and plumb it through the pipeline.
+- **Goal:** Define a word-timing JSON schema and plumb it through the pipeline. ✅ Done.
 - **Scope:**
   - Define JSON contract for word timings.
   - Detect staleness when SRT edits occur.
@@ -148,7 +148,7 @@ Last updated: 2026-02-10
 - **Depends on:** Task 4.
 
 ### Codex Task 8 — Implement WhisperX alignment worker to produce word timestamps (no heuristics)
-- **Goal:** Implement alignment worker for word timestamps using WhisperX.
+- **Goal:** Implement alignment worker for word timestamps using WhisperX. ✅ Done.
 - **Scope:**
   - Add worker process to run WhisperX alignment.
   - Output word timing JSON aligned to edited SRT.
@@ -165,7 +165,7 @@ Last updated: 2026-02-10
 - **Depends on:** Task 7.
 
 ### Codex Task 9 — Implement karaoke ASS generation using aligned word timings (per-word highlight events) + tests
-- **Goal:** Generate karaoke-style ASS with per-word highlight events.
+- **Goal:** Generate karaoke-style ASS with per-word highlight events. ✅ Done.
 - **Scope:**
   - Use aligned word timings to emit ASS events/styles.
   - Add tests for word highlight generation.
@@ -202,11 +202,11 @@ Last updated: 2026-02-10
 - **Depends on:** Task 9.
 
 ## F) Definition of Done (PR10)
-- [ ] RTL stability maintained in preview and export.
-- [ ] Preview/export parity for styling and timing.
-- [ ] No heuristics: alignment-based word timing only.
-- [ ] Mode switch works; Static pipeline unchanged.
-- [ ] Highlight color is configurable and persists.
+- [x] RTL stability maintained in preview and export.
+- [x] Preview/export parity for styling and timing.
+- [x] No heuristics: alignment-based word timing only.
+- [x] Mode switch works; Static pipeline unchanged.
+- [x] Highlight color is configurable and persists.
 
 ## G) Post-PR10 follow-ups (not required for PR10 merge)
 - A) Highlight opacity control.
@@ -224,13 +224,13 @@ Last updated: 2026-02-10
 | --- | --- | --- | --- |
 | 1 | Done |  | Config keys + defaults for subtitle mode + highlight settings. |
 | 2 | Done |  | Subtitle mode + highlight color controls in Subtitles-ready UI. |
-| 3 | In progress |  | ASS document generation exists; tests + renderer integration pending. |
-| 4 | TODO |  |  |
-| 5 | TODO |  |  |
-| 6 | TODO |  |  |
-| 7 | TODO |  |  |
-| 8 | TODO |  |  |
-| 9 | TODO |  |  |
+| 3 | Done |  | ASS document generation + tests complete. |
+| 4 | Done |  | Export uses ASS for word highlight mode. |
+| 5 | Done |  | Preview still uses ASS path + cache key updates. |
+| 6 | Done |  | Preview playback uses shifted ASS + tests. |
+| 7 | Done |  | Word timing JSON contract + staleness detection. |
+| 8 | Done |  | WhisperX alignment worker added. |
+| 9 | Done |  | Karaoke step-highlight ASS generation + tests. |
 | 10 | TODO |  |  |
 
 ### Post-PR10 follow-up tracking

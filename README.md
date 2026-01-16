@@ -9,13 +9,18 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Hard-burns subtitles into `<video_stem>_subtitled.mp4` with subtitle style presets, subtitle modes, and customization.
 - Subtitles-ready preview card with a subtitle still frame, plus optional playback (15s clip with scrub controls).
 - Subtitle mode selector (Word highlight vs Static) and highlight color picker.
+- Word-highlight pipeline uses ASS rendering with WhisperX word alignment for per-word timing.
 - Uses GPU (CUDA) when available, auto-falls back to CPU with clear logs.
 - Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`.
+- Transcription includes VAD gap rescue to recover missed speech in large silent gaps.
+- Export is available immediately after subtitle creation (Subtitle Edit is optional).
 
 ## Project structure
 ```
 app/
   main.py                 # Application entry point (Qt UI + orchestration)
+  align_utils.py          # Word-alignment plan + helpers
+  align_worker.py         # WhisperX alignment worker (word timings)
   transcribe_worker.py    # Background transcription worker logic
   srt_splitter.py         # Subtitle chunking/splitting helpers
   progress.py             # Progress tracking and reporting utilities
@@ -25,6 +30,9 @@ app/
   srt_utils.py            # SRT parsing/formatting helpers
   subtitle_style.py       # Subtitle style presets and FFmpeg style mapping
   ass_render.py           # ASS subtitle document generation (static rendering)
+  ass_karaoke.py          # ASS step-highlight generation (word highlight mode)
+  burn_in_export.py       # Burn-in/export planning for SRT + ASS pipelines
+  word_timing_schema.py   # Word timing JSON contract + validation
   ui/                     # UI components, theme, and widgets
 bin/
   ffmpeg.exe

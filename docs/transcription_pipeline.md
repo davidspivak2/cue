@@ -20,6 +20,10 @@ between machines.
    `model.transcribe(...)` with the configured parameters.
 5. **SRT generation.**
    The worker converts segments into SRT, writes the file, and reports completion.
+6. **Word-timing alignment (word highlight mode).**
+   When subtitle mode is set to word highlight, the GUI runs `app.align_worker`
+   to populate `<video_stem>.word_timings.json` using WhisperX alignment. The
+   alignment step re-runs when the timings file is missing, invalid, empty, or stale.
 
 ## Model cache paths
 
@@ -74,6 +78,13 @@ does not re-segment or post-process text beyond trimming whitespace and formatti
 timestamps. If segmentation differs between machines, focus on differences in the
 config dump, device selection, or library versions.
 
+## VAD gap rescue
+
+When VAD filtering is enabled, the worker scans for large gaps between VAD segments.
+If a gap exceeds the rescue threshold, the worker extracts each gap audio slice and
+re-transcribes it with VAD disabled, then merges any usable segments back into the
+main transcript. Limits are enforced on the number of gaps and total rescued duration.
+
 ## Subtitle preview generation (GUI)
 
 When subtitles are ready, the GUI prepares a preview moment and optional playback:
@@ -81,9 +92,11 @@ When subtitles are ready, the GUI prepares a preview moment and optional playbac
 1. **SRT parsing + cue selection.** The GUI parses the generated SRT file and selects
    the first non-empty cue to anchor a preview moment.
 2. **Preview still frame.** The GUI requests a cached subtitle preview frame rendered
-   via FFmpeg with the active subtitle style (force_style). Frames are cached under
+   via FFmpeg with the active subtitle style. Word highlight mode uses an ASS render
+   path; static mode uses the SRT `subtitles` filter. Frames are cached under
    `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`.
 3. **Preview playback clip.** When the user presses Play, the GUI requests a short
    clip (default 15s, anchored near the selected cue). The preview clip is rendered
-   via FFmpeg with a shifted SRT and cached under
+   via FFmpeg with a shifted subtitle file (ASS for word highlight, SRT for static)
+   and cached under
    `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\previews`.
