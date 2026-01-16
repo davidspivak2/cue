@@ -11,6 +11,11 @@ from typing import Callable, Optional
 
 from PySide6 import QtCore
 
+from .ass_karaoke import (
+    build_ass_document_with_karaoke_fallback,
+    build_style_config_from_subtitle_style,
+)
+from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
 from .ass_render import build_ass_document
 from .ffmpeg_utils import (
     build_ass_filter,
@@ -23,6 +28,7 @@ from .ffmpeg_utils import (
 from .paths import get_preview_clips_dir
 from .srt_utils import parse_srt_file
 from .subtitle_style import SubtitleStyle, to_preview_params
+from .word_timing_schema import word_timings_path_for_srt
 
 
 @dataclass(frozen=True)
@@ -34,6 +40,8 @@ class PreviewClipSettings:
     force_style: str
     subtitle_mode: str
     style: SubtitleStyle
+    highlight_color: Optional[str] = None
+    highlight_opacity: Optional[float] = None
     scale_width: int = 1280
     crf: int = 23
     preset: str = "veryfast"
@@ -51,6 +59,10 @@ class PreviewClipPlan:
     subtitles_path: Path
     filter_string: str
     ass_path: Optional[Path] = None
+    karaoke_enabled: bool = False
+    karaoke_reason: str = ""
+    karaoke_event_count: int = 0
+    karaoke_word_timings_path: Optional[Path] = None
 
 
 class PreviewClipSignals(QtCore.QObject):
@@ -103,6 +115,14 @@ class PreviewClipWorker(QtCore.QObject):
         self.signals.log.emit(f"Preview pipeline={plan.pipeline}")
         self.signals.log.emit(f"Preview subtitles path={plan.subtitles_path}")
         self.signals.log.emit(f"Preview filter={plan.filter_string}")
+        if self._settings.subtitle_mode == "word_highlight":
+            self.signals.log.emit(
+                "Preview karaoke: "
+                f"enabled={plan.karaoke_enabled} "
+                f"reason={plan.karaoke_reason} "
+                f"word_timings_path={plan.karaoke_word_timings_path} "
+                f"highlight_events={plan.karaoke_event_count}"
+            )
         command = plan.command
         command_text = subprocess.list2cmdline(command)
         self.signals.log.emit(
@@ -164,6 +184,8 @@ class PreviewPlaybackController(QtCore.QObject):
         force_style: str,
         subtitle_mode: str,
         style: SubtitleStyle,
+        highlight_color: Optional[str] = None,
+        highlight_opacity: Optional[float] = None,
         scale_width: int = 1280,
     ) -> None:
         if self._thread is not None:
@@ -190,6 +212,8 @@ class PreviewPlaybackController(QtCore.QObject):
             force_style=force_style,
             subtitle_mode=subtitle_mode,
             style=style,
+            highlight_color=highlight_color,
+            highlight_opacity=highlight_opacity,
             scale_width=scale_width,
         )
         cache_key = self._build_cache_key(settings)
@@ -229,15 +253,20 @@ class PreviewPlaybackController(QtCore.QObject):
             self.clip_failed.emit("Preview playback unavailable.")
 
     def _build_cache_key(self, settings: PreviewClipSettings) -> str:
+        word_timings_path = word_timings_path_for_srt(settings.srt_path)
+        word_timings_stat = self._stat_payload(word_timings_path)
         payload = {
             "version": 1,
             "video": self._stat_payload(settings.video_path),
             "srt": self._stat_payload(settings.srt_path),
+            "word_timings": word_timings_stat,
             "start_seconds": round(settings.start_seconds, 3),
             "duration_seconds": round(settings.duration_seconds, 3),
             "force_style": settings.force_style,
             "subtitle_mode": settings.subtitle_mode,
             "style": to_preview_params(settings.style),
+            "highlight_color": settings.highlight_color,
+            "highlight_opacity": settings.highlight_opacity,
             "scale_width": settings.scale_width,
             "crf": settings.crf,
             "preset": settings.preset,
@@ -271,8 +300,29 @@ def build_preview_clip_plan(
     shifted_srt_path: Path,
 ) -> PreviewClipPlan:
     if settings.subtitle_mode == "word_highlight":
-        cues = parse_srt_file(shifted_srt_path)
-        ass_text = build_ass_document(cues, style_config=settings.style)
+        cues = parse_srt_file(settings.srt_path)
+        shifted_cues = parse_srt_file(shifted_srt_path)
+        style_config = build_style_config_from_subtitle_style(
+            settings.style,
+            highlight_color=settings.highlight_color or DEFAULT_HIGHLIGHT_COLOR,
+            highlight_opacity=(
+                settings.highlight_opacity
+                if settings.highlight_opacity is not None
+                else DEFAULT_HIGHLIGHT_OPACITY
+            ),
+        )
+        decision = build_ass_document_with_karaoke_fallback(
+            cues,
+            srt_path=settings.srt_path,
+            word_timings_path=word_timings_path_for_srt(settings.srt_path),
+            style_config=style_config,
+            time_offset_sec=settings.start_seconds,
+            time_window=(0.0, settings.duration_seconds),
+        )
+        if decision.karaoke_enabled:
+            ass_text = decision.ass_text
+        else:
+            ass_text = build_ass_document(shifted_cues, style_config=style_config)
         ass_path = output_path.with_suffix(".ass")
         ass_path.write_text(ass_text, encoding="utf-8")
         filter_string = build_ass_filter(ass_path)
@@ -286,6 +336,7 @@ def build_preview_clip_plan(
         pipeline = STATIC_SRT_PIPELINE
         subtitles_path = shifted_srt_path
         ass_path = None
+        decision = None
 
     video_chain = (
         f"trim=start={settings.start_seconds:.3f}:duration={settings.duration_seconds:.3f},"
@@ -362,6 +413,10 @@ def build_preview_clip_plan(
         subtitles_path=subtitles_path,
         filter_string=filter_string,
         ass_path=ass_path,
+        karaoke_enabled=decision.karaoke_enabled if decision else False,
+        karaoke_reason=decision.reason if decision else "static",
+        karaoke_event_count=decision.highlight_event_count if decision else 0,
+        karaoke_word_timings_path=decision.word_timings_path if decision else None,
     )
 
 
