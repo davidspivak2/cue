@@ -6,10 +6,13 @@ import importlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import traceback
 from pathlib import Path
+from dataclasses import dataclass
+from tempfile import TemporaryDirectory
 from typing import NoReturn
 
 from .srt_utils import SrtSegment, segments_to_srt
@@ -26,6 +29,7 @@ from .srt_splitter import (
     SplitterStats,
     split_segments_into_cues,
 )
+from .ffmpeg_utils import ensure_ffmpeg_available, get_subprocess_kwargs
 from .paths import get_models_dir
 from .transcription_config import build_transcription_config
 
@@ -50,6 +54,9 @@ PUNCTUATION_RESCUE_DEFAULTS = {
     "min_total_punct_ratio": 0.5,
     "max_attempts": 2,
 }
+VAD_GAP_RESCUE_THRESHOLD_SEC = 5.0
+VAD_GAP_RESCUE_MAX_GAPS = 5
+VAD_GAP_RESCUE_MAX_TOTAL_DURATION_SEC = 60.0
 
 
 def _print(message: str) -> None:
@@ -297,6 +304,265 @@ def _build_transcribe_kwargs(
     return transcribe_kwargs
 
 
+@dataclass(frozen=True)
+class VadGap:
+    idx: int
+    start_sec: float
+    end_sec: float
+    dur_sec: float
+
+
+def _detect_vad_gaps(
+    segments: list[SrtSegment], *, threshold_sec: float
+) -> list[VadGap]:
+    ordered = sorted(segments, key=lambda seg: (seg.start, seg.end))
+    gaps: list[VadGap] = []
+    for idx in range(len(ordered) - 1):
+        current = ordered[idx]
+        upcoming = ordered[idx + 1]
+        if (
+            current.start < 0
+            or current.end < 0
+            or upcoming.start < 0
+            or upcoming.end < 0
+        ):
+            continue
+        if current.end > upcoming.start:
+            continue
+        gap_start = current.end
+        gap_end = upcoming.start
+        gap_dur = gap_end - gap_start
+        if gap_dur >= threshold_sec:
+            gaps.append(
+                VadGap(
+                    idx=len(gaps) + 1,
+                    start_sec=gap_start,
+                    end_sec=gap_end,
+                    dur_sec=gap_dur,
+                )
+            )
+    return gaps
+
+
+def _offset_segments(segments: list[SrtSegment], offset_sec: float) -> list[SrtSegment]:
+    return [
+        SrtSegment(
+            index=segment.index,
+            start=segment.start + offset_sec,
+            end=segment.end + offset_sec,
+            text=segment.text,
+        )
+        for segment in segments
+    ]
+
+
+def _merge_segments(
+    primary_segments: list[SrtSegment], rescued_segments: list[SrtSegment]
+) -> list[SrtSegment]:
+    merged = primary_segments + rescued_segments
+    merged.sort(key=lambda segment: (segment.start, segment.end))
+    for idx, segment in enumerate(merged, start=1):
+        segment.index = idx
+    return merged
+
+
+def _rescue_text_is_usable(text: str) -> bool:
+    stripped = text.strip()
+    if len(stripped) < 2:
+        return False
+    return any(char.isalnum() for char in stripped)
+
+
+def _extract_gap_wav(
+    wav_path: Path,
+    gap_start: float,
+    gap_duration: float,
+    output_path: Path,
+) -> None:
+    ffmpeg_path, _, _ = ensure_ffmpeg_available()
+    command = [
+        str(ffmpeg_path),
+        "-y",
+        "-ss",
+        f"{gap_start:.3f}",
+        "-t",
+        f"{gap_duration:.3f}",
+        "-i",
+        str(wav_path),
+        str(output_path),
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        **get_subprocess_kwargs(),
+    )
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        detail = stderr or stdout or "ffmpeg failed"
+        raise RuntimeError(detail)
+
+
+def _apply_vad_gap_rescue(
+    *,
+    model,
+    wav_path: Path,
+    detection_segments: list[SrtSegment],
+    merge_segments: list[SrtSegment],
+    transcribe_kwargs: dict[str, object],
+    splitter_config: SplitterConfig,
+    duration_seconds: float | None,
+    enabled: bool,
+) -> tuple[list[SrtSegment], dict[str, object]]:
+    stats = {
+        "enabled": enabled,
+        "threshold_sec": VAD_GAP_RESCUE_THRESHOLD_SEC,
+        "max_gaps": VAD_GAP_RESCUE_MAX_GAPS,
+        "max_total_rescue_duration_sec": VAD_GAP_RESCUE_MAX_TOTAL_DURATION_SEC,
+        "gaps_found": 0,
+        "gaps_attempted": 0,
+        "gaps_restored": 0,
+        "total_rescue_duration_sec": 0.0,
+        "segments_added": 0,
+        "gaps": [],
+    }
+    if not enabled:
+        return merge_segments, stats
+
+    gaps = _detect_vad_gaps(
+        detection_segments, threshold_sec=VAD_GAP_RESCUE_THRESHOLD_SEC
+    )
+    stats["gaps_found"] = len(gaps)
+    max_gap = max((gap.dur_sec for gap in gaps), default=0.0)
+    _print(f"VAD_GAP_RESCUE primary_segments={len(detection_segments)}")
+    _print(
+        "VAD_GAP_RESCUE "
+        f"gaps_found={len(gaps)} max_gap_sec={max_gap:.3f}"
+    )
+    for gap in gaps:
+        _print(
+            "VAD_GAP_DETECTED "
+            f"idx={gap.idx} start={gap.start_sec:.3f} "
+            f"end={gap.end_sec:.3f} dur={gap.dur_sec:.3f}"
+        )
+
+    if not gaps:
+        return merge_segments, stats
+
+    total_rescue_duration = 0.0
+    rescued_segments_total = 0
+    gaps_attempted = 0
+    gaps_restored = 0
+    merged_segments = list(merge_segments)
+    rescue_kwargs = dict(transcribe_kwargs)
+    rescue_kwargs["vad_filter"] = False
+    rescue_kwargs.pop("vad_parameters", None)
+    with TemporaryDirectory() as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        for gap in gaps:
+            entry = {
+                "idx": gap.idx,
+                "start_sec": gap.start_sec,
+                "end_sec": gap.end_sec,
+                "dur_sec": gap.dur_sec,
+                "attempted": False,
+                "restored": False,
+                "rescued_segments": 0,
+                "kept_segments": 0,
+                "status": "skipped",
+                "reason": "not_attempted",
+            }
+            if gaps_attempted >= VAD_GAP_RESCUE_MAX_GAPS:
+                entry["reason"] = "max_gaps"
+                _print(
+                    "VAD_GAP_RESCUE_SKIPPED "
+                    f"idx={gap.idx} reason=max_gaps"
+                )
+                stats["gaps"].append(entry)
+                continue
+            if total_rescue_duration + gap.dur_sec > VAD_GAP_RESCUE_MAX_TOTAL_DURATION_SEC:
+                entry["reason"] = "max_total_duration"
+                _print(
+                    "VAD_GAP_RESCUE_SKIPPED "
+                    f"idx={gap.idx} reason=max_total_duration"
+                )
+                stats["gaps"].append(entry)
+                continue
+
+            total_rescue_duration += gap.dur_sec
+            entry["attempted"] = True
+            entry["status"] = "error"
+            entry["reason"] = "unknown"
+            gaps_attempted += 1
+            _print(
+                "VAD_GAP_RESCUE_ATTEMPT "
+                f"idx={gap.idx} start={gap.start_sec:.3f} end={gap.end_sec:.3f} "
+                f"dur={gap.dur_sec:.3f} total_rescue_sec={total_rescue_duration:.3f}"
+            )
+            try:
+                temp_wav = tmp_root / f"vad_gap_{gap.idx}.wav"
+                _extract_gap_wav(wav_path, gap.start_sec, gap.dur_sec, temp_wav)
+                raw_segments, _, rescue_segments, _ = _run_transcription_attempt(
+                    model=model,
+                    wav_path=temp_wav,
+                    transcribe_kwargs=rescue_kwargs,
+                    splitter_config=splitter_config,
+                    duration_seconds=gap.dur_sec,
+                )
+                entry["rescued_segments"] = len(rescue_segments)
+                kept = [
+                    segment
+                    for segment in rescue_segments
+                    if _rescue_text_is_usable(segment.text)
+                ]
+                entry["kept_segments"] = len(kept)
+                kept_chars = sum(len(segment.text.strip()) for segment in kept)
+                if not raw_segments:
+                    entry["status"] = "no_speech"
+                    entry["reason"] = "no_segments"
+                elif not kept:
+                    entry["status"] = "rejected"
+                    entry["reason"] = "filtered"
+                else:
+                    entry["status"] = "restored"
+                    entry["reason"] = "segments_added"
+                    entry["restored"] = True
+                    gaps_restored += 1
+                    rescued_segments_total += len(kept)
+                    offset_segments = _offset_segments(kept, gap.start_sec)
+                    merged_segments.extend(offset_segments)
+                _print(
+                    "VAD_GAP_RESCUE_RESULT "
+                    f"idx={gap.idx} rescued_segments={entry['rescued_segments']} "
+                    f"kept_segments={entry['kept_segments']} kept_chars={kept_chars} "
+                    f"status={entry['status']} reason={entry['reason']}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                entry["status"] = "error"
+                entry["reason"] = str(exc).replace("\n", " ")
+                _print(
+                    "VAD_GAP_RESCUE_RESULT "
+                    f"idx={gap.idx} rescued_segments=0 kept_segments=0 kept_chars=0 "
+                    f"status=error reason={entry['reason']}"
+                )
+            stats["gaps"].append(entry)
+
+    merged_segments = _merge_segments(merged_segments, [])
+    stats["gaps_attempted"] = gaps_attempted
+    stats["gaps_restored"] = gaps_restored
+    stats["total_rescue_duration_sec"] = total_rescue_duration
+    stats["segments_added"] = rescued_segments_total
+    _print(
+        "VAD_GAP_RESCUE_SUMMARY "
+        f"gaps_found={stats['gaps_found']} attempted={gaps_attempted} "
+        f"restored={gaps_restored} total_rescue_sec={total_rescue_duration:.3f} "
+        f"segments_added={rescued_segments_total}"
+    )
+    return merged_segments, stats
+
+
 def _run_transcription_attempt(
     *,
     model,
@@ -468,6 +734,14 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             vad_filter=args.vad_filter,
             vad_min_silence_ms=args.vad_min_silence_ms,
             initial_prompt=args.initial_prompt,
+        )
+        vad_gap_rescue_enabled = bool(transcribe_kwargs.get("vad_filter", False))
+        _print(
+            "VAD_GAP_RESCUE "
+            f"enabled={str(vad_gap_rescue_enabled).lower()} "
+            f"threshold_sec={VAD_GAP_RESCUE_THRESHOLD_SEC:.1f} "
+            f"max_gaps={VAD_GAP_RESCUE_MAX_GAPS} "
+            f"max_total_rescue_sec={VAD_GAP_RESCUE_MAX_TOTAL_DURATION_SEC:.1f}"
         )
         splitter_config = SplitterConfig(
             apply_if=SplitApplyThresholds(
@@ -718,6 +992,30 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 f"chosen={attempt is chosen_attempt}"
             )
 
+        vad_gap_segments = chosen_attempt["segments"]
+        vad_gap_stats = {
+            "enabled": False,
+            "threshold_sec": VAD_GAP_RESCUE_THRESHOLD_SEC,
+            "max_gaps": VAD_GAP_RESCUE_MAX_GAPS,
+            "max_total_rescue_duration_sec": VAD_GAP_RESCUE_MAX_TOTAL_DURATION_SEC,
+            "gaps_found": 0,
+            "gaps_attempted": 0,
+            "gaps_restored": 0,
+            "total_rescue_duration_sec": 0.0,
+            "segments_added": 0,
+            "gaps": [],
+        }
+        if vad_gap_rescue_enabled and bool(attempts[0]["vad_filter"]):
+            vad_gap_segments, vad_gap_stats = _apply_vad_gap_rescue(
+                model=model,
+                wav_path=wav_path,
+                detection_segments=attempts[0]["segments"],
+                merge_segments=vad_gap_segments,
+                transcribe_kwargs=chosen_attempt["transcribe_kwargs"],
+                splitter_config=splitter_config,
+                duration_seconds=duration_seconds,
+                enabled=vad_gap_rescue_enabled,
+            )
         transcribe_stats = build_transcription_stats(
             raw_segments=chosen_attempt["raw_segments"],
             cues=chosen_attempt["cues"],
@@ -777,8 +1075,9 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             }
             for attempt in attempts
         ]
+        transcribe_stats["vad_gap_rescue"] = vad_gap_stats
         _print(f"TRANSCRIBE_STATS_JSON {json.dumps(transcribe_stats, ensure_ascii=True)}")
-        _write_srt(chosen_attempt["segments"], srt_path)
+        _write_srt(vad_gap_segments, srt_path)
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             _print(f"ERROR SRT_WRITE_FAILED {srt_path}")
             if hard_exit:
