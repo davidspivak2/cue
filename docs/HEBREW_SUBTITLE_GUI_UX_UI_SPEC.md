@@ -226,6 +226,7 @@ Current implementation:
     - Click still frame to expand preview.
     - Play/pause button, Stop button, scrubber, and time label.
     - Loading state when generating the preview clip.
+    - Word highlight mode uses the ASS renderer for stills + playback.
   - Right: Style Card (preset dropdown + “Customize…” panel)
     - Subtitle mode selector: “Word highlight (recommended)” and “Static”.
     - Highlight color row (only visible when Subtitle mode = Word highlight).

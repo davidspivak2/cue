@@ -55,6 +55,7 @@ scripts\run_tests.cmd
 
 Notes on `scripts\run_tests.cmd`:
 * Prompts for the branch to test and refuses dirty working trees.
+* Runs from a temporary copy so branch switches don't change the script mid-run.
 * Creates/uses `.venv`, upgrades pip, and installs `requirements.txt` (+ `requirements-dev.txt` if present).
 * Set `RUN_TESTS_NO_PAUSE=1` to skip the final pause in non-interactive runs.
 
@@ -67,6 +68,17 @@ Preview playback includes a focused regression test for timestamp shifting:
 ```bat
 pytest tests/test_preview_playback_shift.py
 ```
+
+Convenience scripts for branch testing + launch:
+```bat
+scripts\test_new_branch.cmd
+scripts\test_updated_branch.cmd
+```
+
+## Dependency syncing (Windows helpers)
+`scripts\start_app.cmd` and `scripts\run_tests.cmd` automatically install dependencies when
+`requirements.txt` or `requirements-dev.txt` change. You can override this behavior with
+`start_app.cmd --install` or `start_app.cmd --no-install`.
 
 ### CI
 There is no CI pipeline configured yet (no `.github/workflows`), so run relevant checks locally before opening a PR.

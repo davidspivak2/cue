@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — Project Context (Read This First)
 
-**Last updated:** 2026-01-20
+**Last updated:** 2026-02-20
 
 This document is for:
 - new contributors
@@ -32,7 +32,7 @@ UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`
 **Primary outputs (exact naming):**
 - `<video_stem>_audio_for_whisper.wav`
 - `<video_stem>.srt`
-- `<video_stem>.word_timings.json` (word timing contract stub; see §3.6)
+- `<video_stem>.word_timings.json` (word timing output; see §3.6)
 - `<video_stem>_subtitled.mp4`
 
 **Runtime modes:**
@@ -106,6 +106,10 @@ Running it out-of-process:
 - `app/preview_playback.py` — preview clip generation + cache management
 - `app/subtitle_style.py` — subtitle style presets + FFmpeg style formatting
 - `app/ass_render.py` — ASS subtitle document generation (static ASS groundwork)
+- `app/ass_karaoke.py` — ASS step-highlight generation (word highlight)
+- `app/align_worker.py` — WhisperX alignment worker for word timings
+- `app/align_utils.py` — alignment planning + staleness checks
+- `app/burn_in_export.py` — burn-in plan builder (SRT vs ASS pipelines)
 - `tools/*` — local benchmark tools
 - `docs/*` — handover + UX spec
 
@@ -133,7 +137,8 @@ Save policy determines the output folder:
 Outputs include:
 - `<video_stem>_audio_for_whisper.wav` (scratch audio)
 - `<video_stem>.srt` (subtitles)
-- `<video_stem>.word_timings.json` (word timing contract stub; see §3.6)
+- `<video_stem>.word_timings.json` (word timing output; see §3.6)
+- `<video_stem>_word_highlight.ass` (ASS output used for word-highlight preview/export)
 - `<video_stem>_subtitled.mp4` (burned output)
 
 ### Diagnostics JSON (opt-in, **on success**)
@@ -174,9 +179,9 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `diagnostics.categories` | Category checkboxes (see below) | Object of booleans | all `true` | Diagnostics output |
 | `subtitle_style.preset` | “Subtitle style” preset dropdown | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
 | `subtitle_style.custom` | “Customize...” panel controls | Object: `font_size`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
-| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `static` | Planned: selects ASS vs SRT rendering paths |
-| `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Planned: word highlight styling |
-| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Planned: word highlight styling |
+| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `static` | Selects ASS (word highlight) vs SRT (static) rendering paths |
+| `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (ASS) |
+| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Word highlight styling (ASS) |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”
@@ -211,8 +216,8 @@ artifact next to each SRT:
 - **Schema:** validated JSON with `schema_version=1`, SRT hash, and cue metadata.
 - **Staleness rule:** if the SRT file changes, the word-timing JSON is **stale** when its
   stored `srt_sha256` no longer matches the current SRT hash.
-- **Lifecycle:** a stub JSON file is created immediately when an SRT is generated or loaded.
-- **Future:** Task 8 will populate per-word timestamps using WhisperX alignment (no heuristics).
+- **Lifecycle:** a stub JSON file is created when an SRT is generated or loaded, and WhisperX
+  alignment populates word-level timings on demand for word-highlight mode.
 
 ### Working with Codex branches (project-critical workflow rule)
 - If a branch is actively being worked on by Codex, **do not push additional local commits to that same branch** if you expect Codex to keep pushing hotfixes (risk of conflicts / Codex push failures).
@@ -469,7 +474,8 @@ Unplanned but merged work since the original PR plan:
 
 Not done yet (still in PR7+ territory):
 - **PR10** — karaoke-like highlighting (default ON)
-  - In progress: config/UI controls landed, ASS renderer groundwork is in place (static ASS).
+- In progress: config/UI controls landed, ASS renderer groundwork is in place (static ASS).
+- Added: word-highlight ASS pipeline, WhisperX alignment worker, and karaoke step-highlight generation.
   - PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
 - **PR11** — “delightful waiting” visuals (waveform + thumbnail strip; cached under LocalAppData)
 - **PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
