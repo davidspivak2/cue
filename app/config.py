@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-DEFAULT_SUBTITLE_MODE = "static"
+DEFAULT_SUBTITLE_MODE = "word_highlight"
 DEFAULT_HIGHLIGHT_COLOR = "#FFD400"
 DEFAULT_HIGHLIGHT_OPACITY = 1.0
 VALID_SUBTITLE_MODES = {"word_highlight", "static"}
