@@ -159,3 +159,29 @@ def test_build_alignment_plan_for_preview(tmp_path: Path) -> None:
     )
     assert plan.should_run is True
     assert plan.command[1:3] == ["-m", "app.align_worker"]
+
+
+def test_alignment_plan_runs_when_word_timings_empty(tmp_path: Path) -> None:
+    srt_path = tmp_path / "empty_words.srt"
+    audio_path = tmp_path / "empty_words_audio_for_whisper.wav"
+    _write_srt(
+        srt_path,
+        "1\n00:00:00,000 --> 00:00:01,000\nבדיקה\n",
+    )
+    audio_path.write_bytes(b"")
+    doc = build_word_timing_stub(
+        language="he",
+        srt_sha256=compute_srt_sha256(srt_path),
+        cues=[(1, 0.0, 1.0, "בדיקה")],
+    )
+    output_path = srt_path.with_suffix(".word_timings.json")
+    save_word_timings_json(output_path, doc)
+
+    plan = build_alignment_plan(
+        subtitle_mode="word_highlight",
+        srt_path=srt_path,
+        audio_path=audio_path,
+        language="he",
+    )
+    assert plan.should_run is True
+    assert plan.reason == "word_timings_has_no_words"

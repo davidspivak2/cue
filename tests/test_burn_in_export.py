@@ -37,6 +37,8 @@ def test_build_burn_in_plan_static_keeps_srt(tmp_path: Path) -> None:
     assert plan.subtitles_path == srt_path
     assert "ass=" not in plan.filter_string
     assert list(tmp_path.glob("*.ass")) == []
+    assert plan.karaoke_enabled is False
+    assert plan.karaoke_reason == "static"
     vf_index = plan.base_command.index("-vf")
     assert plan.base_command[vf_index + 1] == plan.filter_string
 
@@ -68,3 +70,5 @@ def test_build_burn_in_plan_word_highlight_uses_ass(tmp_path: Path) -> None:
     assert "[Events]" in ass_text
     vf_index = plan.base_command.index("-vf")
     assert plan.base_command[vf_index + 1] == plan.filter_string
+    assert plan.karaoke_enabled is False
+    assert plan.karaoke_reason == "missing json"
