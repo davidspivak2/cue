@@ -5,7 +5,6 @@ import json
 from app.config import (
     DEFAULT_HIGHLIGHT_COLOR,
     DEFAULT_HIGHLIGHT_OPACITY,
-    DEFAULT_SUBTITLE_MODE,
     apply_config_defaults,
 )
 
@@ -13,7 +12,7 @@ from app.config import (
 def test_apply_config_defaults_adds_missing_keys() -> None:
     config: dict = {}
     result = apply_config_defaults(config)
-    assert result["subtitle_mode"] == DEFAULT_SUBTITLE_MODE
+    assert result["subtitle_mode"] == "word_highlight"
     assert result["subtitle_style"]["highlight_color"] == DEFAULT_HIGHLIGHT_COLOR
     assert result["subtitle_style"]["highlight_opacity"] == DEFAULT_HIGHLIGHT_OPACITY
 
