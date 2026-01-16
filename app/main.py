@@ -50,7 +50,11 @@ from app.ui.widgets import (
     VideoCard,
 )
 from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
-from app.preview_playback import PreviewPlaybackController
+from app.preview_playback import (
+    PreviewPlaybackController,
+    STATIC_SRT_PIPELINE,
+    WORD_HIGHLIGHT_ASS_PIPELINE,
+)
 from app.srt_utils import compute_srt_sha256, is_word_timing_stale, parse_srt_file
 from app.align_utils import audio_path_for_srt, build_alignment_plan
 from app.workers import (
@@ -523,27 +527,42 @@ class MainWindow(QtWidgets.QMainWindow):
         grid.setVerticalSpacing(10)
 
         subtitle_mode_label = QtWidgets.QLabel("Subtitle mode")
+        subtitle_mode_tooltip = (
+            "Static: normal subtitles.\n"
+            "Word highlight: highlights the current spoken word."
+        )
+        subtitle_mode_label.setToolTip(subtitle_mode_tooltip)
         self.subtitle_mode_combo = QtWidgets.QComboBox()
-        self.subtitle_mode_combo.addItem("Word highlight (recommended)", "word_highlight")
+        self.subtitle_mode_combo.setToolTip(subtitle_mode_tooltip)
+        self.subtitle_mode_combo.addItem("Word highlight", "word_highlight")
         self.subtitle_mode_combo.addItem("Static", "static")
 
         self.highlight_color_label = QtWidgets.QLabel("Highlight color")
+        highlight_color_tooltip = "Color used for the highlighted word."
+        self.highlight_color_label.setToolTip(highlight_color_tooltip)
         self.highlight_color_row = QtWidgets.QWidget()
         highlight_layout = QtWidgets.QHBoxLayout(self.highlight_color_row)
         highlight_layout.setContentsMargins(0, 0, 0, 0)
         highlight_layout.setSpacing(8)
         self.highlight_color_button = QtWidgets.QPushButton("Pick color…")
         self.highlight_color_button.setFixedHeight(32)
+        self.highlight_color_button.setToolTip(highlight_color_tooltip)
         self.highlight_color_value = QtWidgets.QLineEdit()
         self.highlight_color_value.setReadOnly(True)
         self.highlight_color_value.setFixedHeight(32)
         self.highlight_color_value.setMinimumWidth(110)
+        self.highlight_color_value.setToolTip(highlight_color_tooltip)
         highlight_layout.addWidget(self.highlight_color_button)
         highlight_layout.addWidget(self.highlight_color_value)
         highlight_layout.addStretch()
 
         preset_label = QtWidgets.QLabel("Preset")
+        preset_tooltip = (
+            "Controls subtitle appearance (font size, outline, shadow, margin, box)."
+        )
+        preset_label.setToolTip(preset_tooltip)
         self.subtitle_style_preset_combo = QtWidgets.QComboBox()
+        self.subtitle_style_preset_combo.setToolTip(preset_tooltip)
         self.subtitle_style_preset_combo.addItems(list(PRESET_NAMES))
 
         grid.addWidget(subtitle_mode_label, 0, 0)
@@ -559,6 +578,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.subtitle_style_customize_button.setCursor(
             QtGui.QCursor(QtCore.Qt.PointingHandCursor)
         )
+        self.subtitle_style_customize_button.setToolTip(preset_tooltip)
 
         customize_layout = QtWidgets.QHBoxLayout()
         customize_layout.addWidget(self.subtitle_style_customize_button)
@@ -946,6 +966,22 @@ class MainWindow(QtWidgets.QMainWindow):
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
         if self._subtitle_mode == "word_highlight":
+            pipeline = WORD_HIGHLIGHT_ASS_PIPELINE
+            subtitles_path = output_path.with_suffix(".ass")
+            filter_name = "ass"
+        else:
+            pipeline = STATIC_SRT_PIPELINE
+            subtitles_path = srt_path
+            filter_name = "subtitles"
+        self._log(
+            "Preview still render: "
+            f"subtitle_mode={self._subtitle_mode} "
+            f"pipeline={pipeline} "
+            f"subtitles_path={subtitles_path} "
+            f"filter={filter_name}",
+            True,
+        )
+        if self._subtitle_mode == "word_highlight":
             style_config = build_style_config_from_subtitle_style(
                 style,
                 highlight_color=self._highlight_color or DEFAULT_HIGHLIGHT_COLOR,
@@ -970,11 +1006,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"highlight_events={decision.highlight_event_count}",
                 True,
             )
-            ass_path = output_path.with_suffix(".ass")
-            ass_path.write_text(decision.ass_text, encoding="utf-8")
+            subtitles_path.write_text(decision.ass_text, encoding="utf-8")
             success = extract_ass_frame(
                 self._video_path,
-                ass_path,
+                subtitles_path,
                 self._preview_timestamp_seconds,
                 output_path,
                 width=preview_width,
