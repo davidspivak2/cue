@@ -5,7 +5,7 @@ import math
 import re
 from typing import Iterable, Sequence
 
-from .subtitle_style import DEFAULT_FONT_NAME, SubtitleStyle, get_box_alpha_byte
+from .subtitle_style import DEFAULT_FONT_NAME
 
 
 RTL_EMBEDDING = "\u202B"
@@ -43,6 +43,22 @@ def wrap_rtl(text: str) -> str:
     if text.startswith(RTL_EMBEDDING) and text.endswith(RTL_POP):
         return text
     return f"{RTL_EMBEDDING}{text}{RTL_POP}"
+
+
+def wrap_rtl_runs(text: str) -> str:
+    stripped = text
+    if stripped.startswith(RTL_EMBEDDING) and stripped.endswith(RTL_POP):
+        stripped = stripped[len(RTL_EMBEDDING) : -len(RTL_POP)]
+    parts = re.split(r"(\{[^}]*\})", stripped)
+    wrapped_parts: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("{") and part.endswith("}"):
+            wrapped_parts.append(part)
+        else:
+            wrapped_parts.append(f"{RTL_EMBEDDING}{part}{RTL_POP}")
+    return "".join(wrapped_parts)
 
 
 def ass_color_from_hex(hex_rgb: str, alpha: float = 0.0) -> str:
@@ -113,12 +129,24 @@ def _style_get(style_config: Any, key: str, default: Any) -> Any:
     return getattr(style_config, key, default)
 
 
-def build_ass_document(
-    cues: Iterable[object],
+def _box_alpha_byte(style_config: Any) -> int:
+    opacity = _style_get(style_config, "box_opacity", None)
+    if opacity is None:
+        return 0
+    try:
+        opacity_value = int(opacity)
+    except (TypeError, ValueError):
+        return 0
+    clamped = max(0, min(opacity_value, 100))
+    return round((100 - clamped) / 100 * 255)
+
+
+def build_ass_header_and_styles(
     style_config: object | None = None,
     play_res: Sequence[int] = (1920, 1080),
-) -> str:
-    normalized = _coerce_cues(cues)
+    *,
+    encoding: int = 1,
+) -> tuple[list[str], list[str], int]:
     play_res_x, play_res_y = play_res
 
     font_name = _style_get(style_config, "font_name", _DEFAULT_FONT_NAME)
@@ -158,12 +186,7 @@ def build_ass_document(
     if box_enabled:
         outline = outline + box_padding
         border_style = 3
-        if isinstance(style_config, SubtitleStyle):
-            alpha_byte = get_box_alpha_byte(style_config)
-        else:
-            # If style_config is a dict, we don't know the app-specific opacity fields here,
-            # so fall back to fully-opaque box background.
-            alpha_byte = 0
+        alpha_byte = _box_alpha_byte(style_config)
         back_colour = f"&H{alpha_byte:02X}000000"
 
     outline_int = int(round(outline))
@@ -203,10 +226,23 @@ def build_ass_document(
             "2,"
             "0,0,"
             f"{margin_v},"
-            "1"
+            f"{encoding}"
         ),
         "",
     ]
+    return info_lines, style_lines, margin_v
+
+
+def build_ass_document(
+    cues: Iterable[object],
+    style_config: object | None = None,
+    play_res: Sequence[int] = (1920, 1080),
+) -> str:
+    normalized = _coerce_cues(cues)
+    info_lines, style_lines, margin_v = build_ass_header_and_styles(
+        style_config=style_config,
+        play_res=play_res,
+    )
     event_lines = [
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
