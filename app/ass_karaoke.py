@@ -286,25 +286,19 @@ def build_ass_step_highlight_document_with_stats(
                 )
             )
         for idx, (start, end, word_index) in enumerate(word_entries):
+            next_start = (
+                word_entries[idx + 1][0] if idx + 1 < len(word_entries) else cue.end_sec
+            )
+            if next_start > end:
+                gaps_filled += 1
             segments.append(
                 _Segment(
                     start_s=start,
-                    end_s=end,
+                    end_s=next_start,
                     word_index=word_index,
                     is_highlight=True,
                 )
             )
-            next_start = word_entries[idx + 1][0] if idx + 1 < len(word_entries) else cue.end_sec
-            if end < next_start:
-                gaps_filled += 1
-                segments.append(
-                    _Segment(
-                        start_s=end,
-                        end_s=next_start,
-                        word_index=None,
-                        is_highlight=False,
-                    )
-                )
         rounded_segments: list[tuple[int, int, Optional[int], bool]] = []
         for segment in segments:
             adjusted = _apply_time_window(
