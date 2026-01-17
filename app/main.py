@@ -20,7 +20,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from PySide6 import QtCore, QtGui, QtWidgets, QtMultimedia, QtMultimediaWidgets
+from PySide6 import QtCore, QtGui, QtWidgets, QtMultimedia
 
 from app.ass_karaoke import (
     build_ass_document_with_karaoke_fallback,
@@ -131,14 +131,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_loading = False
         self._preview_playback_controller = PreviewPlaybackController(self._log, self)
         self.preview_media_player: Optional[QtMultimedia.QMediaPlayer] = None
-        self.preview_audio_output: Optional[QtMultimedia.QAudioOutput] = None
-        self.preview_video_widget: Optional[QtMultimediaWidgets.QVideoWidget] = None
         self.preview_stack: Optional[QtWidgets.QStackedWidget] = None
         self.preview_play_button: Optional[QtWidgets.QPushButton] = None
         self.preview_stop_button: Optional[QtWidgets.QPushButton] = None
         self.preview_scrub_slider: Optional[QtWidgets.QSlider] = None
         self.preview_time_label: Optional[QtWidgets.QLabel] = None
         self.preview_status_label: Optional[QtWidgets.QLabel] = None
+        self.subtitle_mode_group: Optional[QtWidgets.QButtonGroup] = None
+        self.subtitle_mode_buttons: dict[str, QtWidgets.QPushButton] = {}
+        self.subtitle_style_preset_group: Optional[QtWidgets.QButtonGroup] = None
+        self.subtitle_style_preset_buttons: dict[str, QtWidgets.QPushButton] = {}
+        self.background_mode_group: Optional[QtWidgets.QButtonGroup] = None
+        self.background_mode_buttons: dict[str, QtWidgets.QPushButton] = {}
         self._progress_controller: Optional[ProgressController] = None
         self._worker_start_time: Optional[float] = None
         self._elapsed_timer = QtCore.QTimer(self)
@@ -186,23 +190,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.video_card = VideoCard()
 
         self.generate_button = QtWidgets.QPushButton("Create subtitles")
-        self.review_button = QtWidgets.QPushButton("Edit in Subtitle Edit")
-        self.burn_button = QtWidgets.QPushButton("Export video with subtitles")
+        self.burn_button = QtWidgets.QPushButton("Create final video")
         self.cancel_button = QtWidgets.QPushButton("Cancel")
-
-        self.ready_open_srt_button = QtWidgets.QPushButton("Open subtitles")
-        self.ready_open_folder_button = QtWidgets.QPushButton("Open folder")
 
         self.done_open_video_button = QtWidgets.QPushButton("Play video")
         self.done_open_folder_button = QtWidgets.QPushButton("Open folder")
         self.done_edit_button = QtWidgets.QPushButton("Edit subtitles and export again")
-
-        for button in (
-            self.ready_open_srt_button,
-            self.ready_open_folder_button,
-        ):
-            button.setFlat(True)
-            button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.done_edit_button.setFlat(True)
         self.done_edit_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -300,11 +293,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.video_card.clear_clicked.connect(self._clear_video)
         self.video_card.video_dropped.connect(self._handle_video_dropped)
         self.generate_button.clicked.connect(self._on_generate)
-        self.review_button.clicked.connect(self._on_review)
         self.burn_button.clicked.connect(self._on_burn)
         self.cancel_button.clicked.connect(self._on_cancel)
-        self.ready_open_srt_button.clicked.connect(self._open_srt)
-        self.ready_open_folder_button.clicked.connect(self._open_folder)
         self.done_open_video_button.clicked.connect(self._open_output_video)
         self.done_open_folder_button.clicked.connect(self._open_folder)
         self.done_edit_button.clicked.connect(self._edit_subtitles_again)
@@ -403,63 +393,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_image_label.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.preview_image_label.clicked.connect(self._open_preview_dialog)
 
-        self.preview_stack = QtWidgets.QStackedWidget()
-        still_page = QtWidgets.QWidget()
-        still_layout = QtWidgets.QVBoxLayout(still_page)
-        still_layout.setContentsMargins(0, 0, 0, 0)
-        still_layout.addWidget(self.preview_image_label)
-
-        self.preview_video_widget = QtMultimediaWidgets.QVideoWidget()
-        video_page = QtWidgets.QWidget()
-        video_layout = QtWidgets.QVBoxLayout(video_page)
-        video_layout.setContentsMargins(0, 0, 0, 0)
-        video_layout.addWidget(self.preview_video_widget)
-
-        self.preview_stack.addWidget(still_page)
-        self.preview_stack.addWidget(video_page)
-        preview_frame_layout.addWidget(self.preview_stack, 0, 0, 1, 1)
-
-        self.preview_media_player = QtMultimedia.QMediaPlayer(self)
-        self.preview_audio_output = QtMultimedia.QAudioOutput(self)
-        self.preview_media_player.setAudioOutput(self.preview_audio_output)
-        self.preview_media_player.setVideoOutput(self.preview_video_widget)
-        self.preview_media_player.playbackStateChanged.connect(
-            self._on_preview_playback_state_changed
-        )
-        self.preview_media_player.positionChanged.connect(self._on_preview_position_changed)
-        self.preview_media_player.durationChanged.connect(self._on_preview_duration_changed)
-        self.preview_media_player.mediaStatusChanged.connect(self._on_preview_media_status_changed)
-        self.preview_media_player.errorOccurred.connect(self._on_preview_player_error)
+        preview_frame_layout.addWidget(self.preview_image_label, 0, 0, 1, 1)
 
         preview_layout.addWidget(preview_frame)
-
-        controls_layout = QtWidgets.QHBoxLayout()
-        controls_layout.setSpacing(8)
-        self.preview_play_button = QtWidgets.QPushButton("Play")
-        self.preview_stop_button = QtWidgets.QPushButton("Stop")
-        self.preview_scrub_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.preview_scrub_slider.setRange(0, 0)
-        self.preview_scrub_slider.setEnabled(False)
-        self.preview_time_label = QtWidgets.QLabel("0:00 / 0:00")
-        self.preview_time_label.setObjectName("PreviewTimeLabel")
-
-        self.preview_play_button.clicked.connect(self._on_preview_play_clicked)
-        self.preview_stop_button.clicked.connect(self._on_preview_stop_clicked)
-        self.preview_scrub_slider.sliderPressed.connect(self._on_preview_slider_pressed)
-        self.preview_scrub_slider.sliderReleased.connect(self._on_preview_slider_released)
-        self.preview_scrub_slider.sliderMoved.connect(self._on_preview_slider_moved)
-
-        controls_layout.addWidget(self.preview_play_button)
-        controls_layout.addWidget(self.preview_stop_button)
-        controls_layout.addWidget(self.preview_scrub_slider, 1)
-        controls_layout.addWidget(self.preview_time_label)
-        preview_layout.addLayout(controls_layout)
-
-        self.preview_status_label = QtWidgets.QLabel("")
-        self.preview_status_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.preview_status_label.setWordWrap(True)
-        self.preview_status_label.setStyleSheet("color: #9CA3AF;")
-        preview_layout.addWidget(self.preview_status_label)
         preview_layout.addStretch()
 
         right_column = QtWidgets.QWidget()
@@ -467,9 +403,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_layout.setSpacing(12)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        actions_card = self._build_ready_actions_card()
         style_card = self._build_subtitle_style_card()
-        right_layout.addWidget(actions_card)
         right_layout.addWidget(style_card)
         right_layout.addStretch()
 
@@ -478,46 +412,10 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.setAlignment(preview_card, QtCore.Qt.AlignTop)
         layout.setAlignment(right_column, QtCore.Qt.AlignTop)
         self._update_preview_card()
-        self._set_preview_controls_enabled(False)
-        self._connect_preview_playback_controller()
         return page
 
-
-    def _build_ready_actions_card(self) -> QtWidgets.QFrame:
-        card = QtWidgets.QFrame()
-        card.setObjectName("SettingsSectionCard")
-        card_layout = QtWidgets.QVBoxLayout(card)
-        card_layout.setContentsMargins(12, 12, 12, 12)
-        card_layout.setSpacing(12)
-
-        title = QtWidgets.QLabel("Subtitles are ready")
-        title.setAlignment(QtCore.Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        card_layout.addWidget(title)
-
-        primary_layout = QtWidgets.QHBoxLayout()
-        primary_layout.addStretch()
-        primary_layout.addWidget(self.review_button)
-        primary_layout.addStretch()
-        card_layout.addLayout(primary_layout)
-
-        secondary_layout = QtWidgets.QHBoxLayout()
-        secondary_layout.addStretch()
-        secondary_layout.addWidget(self.burn_button)
-        secondary_layout.addStretch()
-        card_layout.addLayout(secondary_layout)
-
-        links_layout = QtWidgets.QHBoxLayout()
-        links_layout.addStretch()
-        links_layout.addWidget(self.ready_open_srt_button)
-        links_layout.addWidget(self.ready_open_folder_button)
-        links_layout.addStretch()
-        card_layout.addLayout(links_layout)
-        card_layout.addStretch()
-        return card
-
     def _build_subtitle_style_card(self) -> QtWidgets.QFrame:
-        card = self._build_settings_section("Subtitle style")
+        card = self._build_settings_section("Style")
         card_layout = card.layout()
 
         grid = QtWidgets.QGridLayout()
@@ -532,10 +430,30 @@ class MainWindow(QtWidgets.QMainWindow):
             "Word highlight: highlights the current spoken word."
         )
         subtitle_mode_label.setToolTip(subtitle_mode_tooltip)
-        self.subtitle_mode_combo = QtWidgets.QComboBox()
-        self.subtitle_mode_combo.setToolTip(subtitle_mode_tooltip)
-        self.subtitle_mode_combo.addItem("Word highlight", "word_highlight")
-        self.subtitle_mode_combo.addItem("Static", "static")
+        subtitle_mode_control = QtWidgets.QWidget()
+        subtitle_mode_layout = QtWidgets.QHBoxLayout(subtitle_mode_control)
+        subtitle_mode_layout.setContentsMargins(0, 0, 0, 0)
+        subtitle_mode_layout.setSpacing(0)
+        self.subtitle_mode_group = QtWidgets.QButtonGroup(self)
+        self.subtitle_mode_group.setExclusive(True)
+        self.subtitle_mode_buttons = {}
+        mode_buttons = [
+            ("Static", "static", "SegmentedLeft"),
+            ("Word highlight", "word_highlight", "SegmentedRight"),
+        ]
+        for label, mode, object_name in mode_buttons:
+            button = QtWidgets.QPushButton(label)
+            button.setCheckable(True)
+            button.setSizePolicy(
+                QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+            )
+            button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+            button.setToolTip(subtitle_mode_tooltip)
+            button.setObjectName(object_name)
+            button.setProperty("mode", mode)
+            self.subtitle_mode_group.addButton(button)
+            self.subtitle_mode_buttons[mode] = button
+            subtitle_mode_layout.addWidget(button)
 
         self.highlight_color_label = QtWidgets.QLabel("Highlight color")
         highlight_color_tooltip = "Color used for the highlighted word."
@@ -561,16 +479,34 @@ class MainWindow(QtWidgets.QMainWindow):
             "Controls subtitle appearance (font size, outline, shadow, margin, box)."
         )
         preset_label.setToolTip(preset_tooltip)
-        self.subtitle_style_preset_combo = QtWidgets.QComboBox()
-        self.subtitle_style_preset_combo.setToolTip(preset_tooltip)
-        self.subtitle_style_preset_combo.addItems(list(PRESET_NAMES))
+        preset_options = QtWidgets.QWidget()
+        preset_layout = QtWidgets.QVBoxLayout(preset_options)
+        preset_layout.setContentsMargins(0, 0, 0, 0)
+        preset_layout.setSpacing(4)
+        self.subtitle_style_preset_group = QtWidgets.QButtonGroup(self)
+        self.subtitle_style_preset_group.setExclusive(True)
+        self.subtitle_style_preset_buttons = {}
+        for preset in PRESET_NAMES:
+            button = QtWidgets.QPushButton(preset)
+            button.setCheckable(True)
+            button.setFlat(True)
+            button.setSizePolicy(
+                QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+            )
+            button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+            button.setToolTip(preset_tooltip)
+            button.setObjectName("PresetOption")
+            button.setProperty("preset", preset)
+            self.subtitle_style_preset_group.addButton(button)
+            self.subtitle_style_preset_buttons[preset] = button
+            preset_layout.addWidget(button)
 
         grid.addWidget(subtitle_mode_label, 0, 0)
-        grid.addWidget(self.subtitle_mode_combo, 0, 1)
+        grid.addWidget(subtitle_mode_control, 0, 1)
         grid.addWidget(self.highlight_color_label, 1, 0)
         grid.addWidget(self.highlight_color_row, 1, 1)
         grid.addWidget(preset_label, 2, 0)
-        grid.addWidget(self.subtitle_style_preset_combo, 2, 1)
+        grid.addWidget(preset_options, 2, 1)
 
         self.subtitle_style_customize_button = QtWidgets.QPushButton("Customize...")
         self.subtitle_style_customize_button.setCheckable(True)
@@ -621,8 +557,46 @@ class MainWindow(QtWidgets.QMainWindow):
 
         panel_layout.addLayout(controls_grid)
 
+        background_section = QtWidgets.QWidget()
+        background_layout = QtWidgets.QVBoxLayout(background_section)
+        background_layout.setContentsMargins(0, 0, 0, 0)
+        background_layout.setSpacing(6)
+        background_label = QtWidgets.QLabel("Background")
+        background_layout.addWidget(background_label)
+
+        background_controls = QtWidgets.QWidget()
+        background_controls_layout = QtWidgets.QHBoxLayout(background_controls)
+        background_controls_layout.setContentsMargins(0, 0, 0, 0)
+        background_controls_layout.setSpacing(0)
+        self.background_mode_group = QtWidgets.QButtonGroup(self)
+        self.background_mode_group.setExclusive(True)
+        self.background_mode_buttons = {}
+        background_buttons = [
+            ("None", "none", "SegmentedLeft"),
+            ("Line background", "line", "SegmentedMiddle"),
+            ("Word background", "word", "SegmentedRight"),
+        ]
+        for label, mode, object_name in background_buttons:
+            button = QtWidgets.QPushButton(label)
+            button.setCheckable(True)
+            button.setSizePolicy(
+                QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
+            )
+            button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+            button.setObjectName(object_name)
+            button.setProperty("mode", mode)
+            if mode == "word":
+                button.setEnabled(False)
+                button.setToolTip("Word background is coming soon.")
+            self.background_mode_group.addButton(button)
+            self.background_mode_buttons[mode] = button
+            background_controls_layout.addWidget(button)
+
+        background_layout.addWidget(background_controls)
+        panel_layout.addWidget(background_section)
+
         self.box_background_checkbox = QtWidgets.QCheckBox("Box background")
-        panel_layout.addWidget(self.box_background_checkbox)
+        self.box_background_checkbox.setVisible(False)
 
         self.box_options_container = QtWidgets.QWidget()
         box_grid = QtWidgets.QGridLayout(self.box_options_container)
@@ -655,6 +629,13 @@ class MainWindow(QtWidgets.QMainWindow):
         panel_layout.addLayout(reset_layout)
 
         card_layout.addWidget(self.subtitle_style_panel)
+
+        cta_layout = QtWidgets.QHBoxLayout()
+        cta_layout.addStretch()
+        cta_layout.addWidget(self.burn_button)
+        cta_layout.addStretch()
+        card_layout.addStretch()
+        card_layout.addLayout(cta_layout)
 
         self.subtitle_style_panel.setVisible(self._subtitle_style_panel_open)
         self.subtitle_style_customize_button.setChecked(self._subtitle_style_panel_open)
@@ -735,11 +716,19 @@ class MainWindow(QtWidgets.QMainWindow):
         return slider, spinbox
 
     def _connect_subtitle_style_controls(self) -> None:
-        self.subtitle_mode_combo.currentIndexChanged.connect(self._on_subtitle_mode_changed)
+        if self.subtitle_mode_group:
+            self.subtitle_mode_group.buttonClicked.connect(
+                self._on_subtitle_mode_button_clicked
+            )
         self.highlight_color_button.clicked.connect(self._on_highlight_color_clicked)
-        self.subtitle_style_preset_combo.currentTextChanged.connect(
-            self._on_subtitle_style_preset_changed
-        )
+        if self.subtitle_style_preset_group:
+            self.subtitle_style_preset_group.buttonClicked.connect(
+                self._on_subtitle_style_preset_clicked
+            )
+        if self.background_mode_group:
+            self.background_mode_group.buttonClicked.connect(
+                self._on_background_mode_clicked
+            )
         self.subtitle_style_customize_button.toggled.connect(
             self._toggle_subtitle_style_panel
         )
@@ -768,12 +757,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.box_background_checkbox.toggled.connect(self._on_subtitle_style_custom_changed)
 
     def _apply_subtitle_mode_to_controls(self) -> None:
-        index = self.subtitle_mode_combo.findData(self._subtitle_mode)
-        if index < 0:
-            index = self.subtitle_mode_combo.findData("static")
-        self.subtitle_mode_combo.blockSignals(True)
-        self.subtitle_mode_combo.setCurrentIndex(index)
-        self.subtitle_mode_combo.blockSignals(False)
+        mode = (
+            self._subtitle_mode
+            if self._subtitle_mode in {"static", "word_highlight"}
+            else "static"
+        )
+        for key, button in self.subtitle_mode_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(key == mode)
+            button.blockSignals(False)
         self._update_highlight_color_display()
         self._update_highlight_color_visibility()
 
@@ -787,8 +779,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.highlight_color_label.setEnabled(show)
         self.highlight_color_row.setEnabled(show)
 
-    def _on_subtitle_mode_changed(self) -> None:
-        mode = self.subtitle_mode_combo.currentData()
+    def _on_subtitle_mode_button_clicked(self, button: QtWidgets.QAbstractButton) -> None:
+        mode = button.property("mode")
+        if not isinstance(mode, str):
+            return
+        self._set_subtitle_mode(mode)
+
+    def _set_subtitle_mode(self, mode: str) -> None:
         if mode not in {"word_highlight", "static"}:
             return
         if mode == self._subtitle_mode:
@@ -829,9 +826,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.subtitle_style_customize_button.blockSignals(False)
 
         self._subtitle_style_preset = PRESET_DEFAULT
-        self.subtitle_style_preset_combo.blockSignals(True)
-        self.subtitle_style_preset_combo.setCurrentText(PRESET_DEFAULT)
-        self.subtitle_style_preset_combo.blockSignals(False)
+        self._set_subtitle_style_preset_buttons(PRESET_DEFAULT)
 
         self._apply_subtitle_style_to_controls()
         self._store_subtitle_style_config()
@@ -844,9 +839,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._subtitle_style_preset == PRESET_CUSTOM
             else preset_defaults(self._subtitle_style_preset)
         )
-        self.subtitle_style_preset_combo.blockSignals(True)
-        self.subtitle_style_preset_combo.setCurrentText(self._subtitle_style_preset)
-        self.subtitle_style_preset_combo.blockSignals(False)
+        self._set_subtitle_style_preset_buttons(self._subtitle_style_preset)
 
         controls = [
             (self.font_size_slider, self.font_size_spinbox, style.font_size),
@@ -867,10 +860,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.box_background_checkbox.blockSignals(True)
         self.box_background_checkbox.setChecked(style.box_enabled)
         self.box_background_checkbox.blockSignals(False)
+        self._set_background_mode_buttons("line" if style.box_enabled else "none")
         self._update_box_options_visibility(style.box_enabled)
 
     def _update_box_options_visibility(self, enabled: bool) -> None:
         self.box_options_container.setVisible(enabled)
+
+    def _set_subtitle_style_preset_buttons(self, preset: str) -> None:
+        for key, button in self.subtitle_style_preset_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(key == preset)
+            button.blockSignals(False)
+
+    def _set_background_mode_buttons(self, mode: str) -> None:
+        for key, button in self.background_mode_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(key == mode)
+            button.blockSignals(False)
 
     def _collect_custom_style_from_controls(self) -> SubtitleStyle:
         return SubtitleStyle(
@@ -894,15 +900,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._invalidate_preview_playback()
         self._schedule_preview_refresh()
 
+    def _on_subtitle_style_preset_clicked(
+        self, button: QtWidgets.QAbstractButton
+    ) -> None:
+        preset = button.property("preset")
+        if not isinstance(preset, str):
+            return
+        self._on_subtitle_style_preset_changed(preset)
+
+    def _on_background_mode_clicked(self, button: QtWidgets.QAbstractButton) -> None:
+        mode = button.property("mode")
+        if not isinstance(mode, str):
+            return
+        if mode == "word":
+            return
+        self.box_background_checkbox.setChecked(mode == "line")
+
     def _on_subtitle_style_custom_changed(self) -> None:
         box_enabled = self.box_background_checkbox.isChecked()
         self._update_box_options_visibility(box_enabled)
 
         if self._subtitle_style_preset != PRESET_CUSTOM:
             self._subtitle_style_preset = PRESET_CUSTOM
-            self.subtitle_style_preset_combo.blockSignals(True)
-            self.subtitle_style_preset_combo.setCurrentText(PRESET_CUSTOM)
-            self.subtitle_style_preset_combo.blockSignals(False)
+            self._set_subtitle_style_preset_buttons(PRESET_CUSTOM)
 
         self._subtitle_style_custom = self._collect_custom_style_from_controls()
         self._store_subtitle_style_config()
@@ -1755,7 +1775,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.information(
                     self,
                     "Subtitles are ready",
-                    "Subtitles are ready. You can edit them in Subtitle Edit or export the video.",
+                    "Subtitles are ready. You can export the video.",
                 )
                 self.set_state(AppState.SUBTITLES_READY)
                 self._update_preview_card()
@@ -2173,7 +2193,6 @@ class MainWindow(QtWidgets.QMainWindow):
         ffmpeg_ready = self._ffmpeg_available
         srt_ready = self._is_srt_ready(self._get_default_srt_path())
         can_generate = idle and has_video and ffmpeg_ready
-        can_review = idle and has_video and srt_ready
         can_burn = idle and has_video and ffmpeg_ready and srt_ready
         can_open_srt = srt_ready or self._last_srt_path is not None
         can_open_video = self._last_output_video is not None
@@ -2186,14 +2205,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.generate_button.setEnabled(
             can_generate and self._state == AppState.VIDEO_SELECTED
         )
-        self.review_button.setEnabled(can_review and self._state == AppState.SUBTITLES_READY)
         self.burn_button.setEnabled(can_burn and self._state == AppState.SUBTITLES_READY)
         self.cancel_button.setEnabled(self._state == AppState.WORKING and not idle)
 
-        ready_state = self._state == AppState.SUBTITLES_READY
         done_state = self._state == AppState.EXPORT_DONE
-        self.ready_open_srt_button.setEnabled(ready_state and can_open_srt)
-        self.ready_open_folder_button.setEnabled(ready_state and has_video)
         self.done_open_video_button.setEnabled(done_state and can_open_video)
         self.done_open_folder_button.setEnabled(done_state and has_video)
         self.done_edit_button.setEnabled(done_state and can_open_srt)
