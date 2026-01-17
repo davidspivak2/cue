@@ -37,6 +37,7 @@ from .burn_in_export import build_burn_in_plan
 from .subtitle_style import (
     SubtitleStyle,
     get_box_alpha_byte,
+    legacy_style_from_model,
     to_ffmpeg_force_style,
     to_preview_params,
 )
@@ -510,10 +511,11 @@ class Worker(QtCore.QObject):
         else:
             force_style = to_ffmpeg_force_style(style)
             alpha_byte = get_box_alpha_byte(style)
+            legacy = legacy_style_from_model(style)
             self.signals.log.emit(
                 "Preview style: "
-                f"box_enabled={style.box_enabled} "
-                f"box_opacity={style.box_opacity} "
+                f"box_enabled={legacy.box_enabled} "
+                f"box_opacity={legacy.box_opacity} "
                 f"alpha={alpha_byte} "
                 f"force_style={force_style}",
                 True,
@@ -558,10 +560,11 @@ class Worker(QtCore.QObject):
 
         force_style = to_ffmpeg_force_style(settings)
         alpha_byte = get_box_alpha_byte(settings)
+        legacy = legacy_style_from_model(settings)
         self.signals.log.emit(
             "Export style: "
-            f"box_enabled={settings.box_enabled} "
-            f"box_opacity={settings.box_opacity} "
+            f"box_enabled={legacy.box_enabled} "
+            f"box_opacity={legacy.box_opacity} "
             f"alpha={alpha_byte} "
             f"force_style={force_style}",
             True,
