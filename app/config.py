@@ -2,6 +2,17 @@ from __future__ import annotations
 
 import re
 
+from app.subtitle_style import (
+    PRESET_CUSTOM,
+    PRESET_DEFAULT,
+    PRESET_NAMES,
+    legacy_preset_defaults,
+    legacy_style_from_custom_dict,
+    normalize_style_model,
+    style_model_from_legacy,
+    style_model_to_dict,
+)
+
 DEFAULT_SUBTITLE_MODE = "word_highlight"
 DEFAULT_HIGHLIGHT_COLOR = "#FFD400"
 DEFAULT_HIGHLIGHT_OPACITY = 1.0
@@ -40,10 +51,25 @@ def apply_config_defaults(config: dict) -> dict:
     if not isinstance(raw_style, dict):
         raw_style = {}
         config["subtitle_style"] = raw_style
-    raw_style["highlight_color"] = _normalize_highlight_color(
-        raw_style.get("highlight_color")
-    )
+    highlight_color = _normalize_highlight_color(raw_style.get("highlight_color"))
+    raw_style["highlight_color"] = highlight_color
     raw_style["highlight_opacity"] = _normalize_highlight_opacity(
         raw_style.get("highlight_opacity")
     )
+    preset_value = raw_style.get("preset")
+    preset = preset_value if isinstance(preset_value, str) and preset_value in PRESET_NAMES else PRESET_DEFAULT
+    if preset_value != preset:
+        raw_style["preset"] = preset
+    legacy_defaults = legacy_preset_defaults(PRESET_DEFAULT)
+    legacy_custom = legacy_style_from_custom_dict(raw_style.get("custom"), legacy_defaults)
+    legacy_effective = legacy_custom if preset == PRESET_CUSTOM else legacy_preset_defaults(preset)
+    fallback_style = style_model_from_legacy(
+        legacy_effective,
+        subtitle_mode=config["subtitle_mode"],
+        highlight_color=highlight_color,
+    )
+    style_model = normalize_style_model(raw_style.get("appearance"), fallback_style)
+    raw_style["appearance"] = style_model_to_dict(style_model)
+    config["subtitle_mode"] = style_model.subtitle_mode
+    raw_style["highlight_color"] = style_model.highlight_color
     return config

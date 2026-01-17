@@ -16,7 +16,7 @@ from .ass_render import (
 )
 from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
 from .srt_utils import is_word_timing_stale
-from .subtitle_style import DEFAULT_FONT_NAME, SubtitleStyle
+from .subtitle_style import DEFAULT_FONT_NAME, SubtitleStyle, legacy_style_from_model
 from .word_timing_schema import (
     CueWordTimings,
     WordTimingDocument,
@@ -149,15 +149,16 @@ def build_style_config_from_subtitle_style(
     highlight_color: str,
     highlight_opacity: float,
 ) -> dict[str, object]:
+    legacy = legacy_style_from_model(style)
     return {
-        "font_name": DEFAULT_FONT_NAME,
-        "font_size": style.font_size,
-        "outline": style.outline,
-        "shadow": style.shadow,
-        "margin_v": style.margin_v,
-        "box_enabled": style.box_enabled,
-        "box_opacity": style.box_opacity,
-        "box_padding": style.box_padding,
+        "font_name": style.font_family or DEFAULT_FONT_NAME,
+        "font_size": legacy.font_size,
+        "outline": legacy.outline,
+        "shadow": legacy.shadow,
+        "margin_v": legacy.margin_v,
+        "box_enabled": legacy.box_enabled,
+        "box_opacity": legacy.box_opacity,
+        "box_padding": legacy.box_padding,
         "highlight_color": highlight_color,
         "highlight_opacity": highlight_opacity,
     }
