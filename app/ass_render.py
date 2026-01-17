@@ -12,6 +12,7 @@ RTL_EMBEDDING = "\u202B"
 RTL_POP = "\u202C"
 DEFAULT_PRIMARY_COLOR = "#FFFFFF"
 DEFAULT_OUTLINE_COLOR = "#000000"
+DEFAULT_SHADOW_COLOR = "#000000"
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -141,6 +142,15 @@ def _box_alpha_byte(style_config: Any) -> int:
     return round((100 - clamped) / 100 * 255)
 
 
+def _ass_alpha_from_opacity(opacity: Any) -> float:
+    try:
+        opacity_value = float(opacity)
+    except (TypeError, ValueError):
+        opacity_value = 1.0
+    opacity_value = max(0.0, min(opacity_value, 1.0))
+    return 1.0 - opacity_value
+
+
 def build_ass_header_and_styles(
     style_config: object | None = None,
     play_res: Sequence[int] = (1920, 1080),
@@ -157,6 +167,10 @@ def build_ass_header_and_styles(
     outline = _style_get(style_config, "outline", _DEFAULT_OUTLINE)
     box_enabled = _style_get(style_config, "box_enabled", _DEFAULT_BOX_ENABLED)
     box_padding = _style_get(style_config, "box_padding", _DEFAULT_BOX_PADDING)
+    outline_color = _style_get(style_config, "outline_color", DEFAULT_OUTLINE_COLOR)
+    shadow_color = _style_get(style_config, "shadow_color", DEFAULT_SHADOW_COLOR)
+    shadow_opacity = _style_get(style_config, "shadow_opacity", 1.0)
+    line_bg_color = _style_get(style_config, "line_bg_color", DEFAULT_OUTLINE_COLOR)
 
     # Coerce numeric fields to safe ints
     try:
@@ -181,18 +195,19 @@ def build_ass_header_and_styles(
         box_padding = float(_DEFAULT_BOX_PADDING)
 
     border_style = 1
-    back_colour = ass_color_from_hex("#000000", alpha=1.0)
+    shadow_alpha = _ass_alpha_from_opacity(shadow_opacity)
+    back_colour = ass_color_from_hex(shadow_color, alpha=shadow_alpha)
+    outline_colour = ass_color_from_hex(outline_color, alpha=0.0)
 
     if box_enabled:
         outline = outline + box_padding
         border_style = 3
         alpha_byte = _box_alpha_byte(style_config)
-        back_colour = f"&H{alpha_byte:02X}000000"
+        outline_colour = ass_color_from_hex(line_bg_color, alpha=alpha_byte / 255)
 
     outline_int = int(round(outline))
 
     primary_colour = ass_color_from_hex(DEFAULT_PRIMARY_COLOR)
-    outline_colour = ass_color_from_hex(DEFAULT_OUTLINE_COLOR)
 
     info_lines = [
         "[Script Info]",
