@@ -150,3 +150,24 @@ def select_preview_moment(
         cue_start_seconds=chosen.start_seconds,
         cue_end_seconds=chosen.end_seconds,
     )
+
+
+def select_cue_for_timestamp(
+    cues: Sequence[SrtCue], timestamp_seconds: float
+) -> Optional[SrtCue]:
+    if not cues:
+        return None
+    active = [
+        cue
+        for cue in cues
+        if cue.text.strip()
+        and cue.start_seconds <= timestamp_seconds <= cue.end_seconds
+    ]
+    if active:
+        return active[0]
+    nearest = min(
+        (cue for cue in cues if cue.text.strip()),
+        key=lambda cue: abs(((cue.start_seconds + cue.end_seconds) / 2) - timestamp_seconds),
+        default=None,
+    )
+    return nearest
