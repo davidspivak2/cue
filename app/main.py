@@ -7,6 +7,7 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import datetime
+from dataclasses import replace
 import hashlib
 import json
 import faulthandler
@@ -76,8 +77,15 @@ from app.subtitle_style import (
     PRESET_DEFAULT,
     PRESET_NAMES,
     SubtitleStyle,
-    get_box_alpha_byte,
+    legacy_style_from_model,
+    legacy_preset_defaults,
+    legacy_style_from_custom_dict,
+    normalize_style_model,
     preset_defaults,
+    style_model_from_legacy,
+    style_model_to_dict,
+    summarize_style_model,
+    get_box_alpha_byte,
     to_ffmpeg_force_style,
     to_preview_params,
 )
@@ -154,12 +162,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_render_timer.timeout.connect(self._refresh_preview_with_style)
         self._config = self._load_config()
         self._subtitle_edit_path = self._get_config_path("subtitle_edit_path")
-        self._subtitle_mode = self._config["subtitle_mode"]
-        self._highlight_color = self._config["subtitle_style"]["highlight_color"]
+        (
+            self._subtitle_style_preset,
+            self._subtitle_style_custom,
+            self._style_model,
+        ) = self._load_subtitle_style()
+        self._subtitle_mode = self._style_model.subtitle_mode
+        self._highlight_color = self._style_model.highlight_color
         self._highlight_opacity = self._config["subtitle_style"]["highlight_opacity"]
-        self._subtitle_style_preset, self._subtitle_style_custom = (
-            self._load_subtitle_style()
-        )
         self._subtitle_style_panel_open = False
         self._save_policy = self._load_save_policy()
         self._fixed_output_dir = self._get_config_path("save_folder")
@@ -175,8 +185,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_ui()
         self._log(
             "Loaded config: "
-            f"subtitle_mode={self._subtitle_mode}, "
-            f"highlight_color={self._highlight_color}, "
+            f"{summarize_style_model(self._style_model)} "
             f"highlight_opacity={self._highlight_opacity}"
         )
         self._log_diagnostics()
@@ -418,11 +427,15 @@ class MainWindow(QtWidgets.QMainWindow):
         card = self._build_settings_section("Style")
         card_layout = card.layout()
 
-        grid = QtWidgets.QGridLayout()
-        grid.setColumnMinimumWidth(0, 120)
-        grid.setColumnStretch(1, 1)
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(10)
+        def _build_style_section(title: str) -> tuple[QtWidgets.QWidget, QtWidgets.QVBoxLayout]:
+            section = QtWidgets.QWidget()
+            section_layout = QtWidgets.QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 0, 0, 0)
+            section_layout.setSpacing(6)
+            title_label = QtWidgets.QLabel(title)
+            title_label.setStyleSheet("font-weight: 600;")
+            section_layout.addWidget(title_label)
+            return section, section_layout
 
         subtitle_mode_label = QtWidgets.QLabel("Subtitle mode")
         subtitle_mode_tooltip = (
@@ -474,11 +487,9 @@ class MainWindow(QtWidgets.QMainWindow):
         highlight_layout.addWidget(self.highlight_color_value)
         highlight_layout.addStretch()
 
-        preset_label = QtWidgets.QLabel("Preset")
         preset_tooltip = (
             "Controls subtitle appearance (font size, outline, shadow, margin, box)."
         )
-        preset_label.setToolTip(preset_tooltip)
         preset_options = QtWidgets.QWidget()
         preset_layout = QtWidgets.QVBoxLayout(preset_options)
         preset_layout.setContentsMargins(0, 0, 0, 0)
@@ -501,33 +512,24 @@ class MainWindow(QtWidgets.QMainWindow):
             self.subtitle_style_preset_buttons[preset] = button
             preset_layout.addWidget(button)
 
-        grid.addWidget(subtitle_mode_label, 0, 0)
-        grid.addWidget(subtitle_mode_control, 0, 1)
-        grid.addWidget(self.highlight_color_label, 1, 0)
-        grid.addWidget(self.highlight_color_row, 1, 1)
-        grid.addWidget(preset_label, 2, 0)
-        grid.addWidget(preset_options, 2, 1)
+        mode_section, mode_layout = _build_style_section("Mode")
+        mode_grid = QtWidgets.QGridLayout()
+        mode_grid.setColumnMinimumWidth(0, 120)
+        mode_grid.setColumnStretch(1, 1)
+        mode_grid.setHorizontalSpacing(12)
+        mode_grid.setVerticalSpacing(8)
+        mode_grid.addWidget(subtitle_mode_label, 0, 0)
+        mode_grid.addWidget(subtitle_mode_control, 0, 1)
+        mode_grid.addWidget(self.highlight_color_label, 1, 0)
+        mode_grid.addWidget(self.highlight_color_row, 1, 1)
+        mode_layout.addLayout(mode_grid)
+        card_layout.addWidget(mode_section)
 
-        self.subtitle_style_customize_button = QtWidgets.QPushButton("Customize...")
-        self.subtitle_style_customize_button.setCheckable(True)
-        self.subtitle_style_customize_button.setFlat(True)
-        self.subtitle_style_customize_button.setCursor(
-            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
-        )
-        self.subtitle_style_customize_button.setToolTip(preset_tooltip)
+        preset_section, preset_layout_container = _build_style_section("Preset")
+        preset_layout_container.addWidget(preset_options)
+        card_layout.addWidget(preset_section)
 
-        customize_layout = QtWidgets.QHBoxLayout()
-        customize_layout.addWidget(self.subtitle_style_customize_button)
-        customize_layout.addStretch()
-        grid.addLayout(customize_layout, 3, 0, 1, 2)
-
-        card_layout.addLayout(grid)
-
-        self.subtitle_style_panel = QtWidgets.QWidget()
-        panel_layout = QtWidgets.QVBoxLayout(self.subtitle_style_panel)
-        panel_layout.setContentsMargins(0, 0, 0, 0)
-        panel_layout.setSpacing(8)
-
+        quick_section, quick_layout = _build_style_section("Quick tweaks")
         controls_grid = QtWidgets.QGridLayout()
         controls_grid.setColumnMinimumWidth(0, 120)
         controls_grid.setColumnStretch(1, 1)
@@ -555,7 +557,7 @@ class MainWindow(QtWidgets.QMainWindow):
         controls_grid.addWidget(self.margin_slider, 3, 1)
         controls_grid.addWidget(self.margin_spinbox, 3, 2)
 
-        panel_layout.addLayout(controls_grid)
+        quick_layout.addLayout(controls_grid)
 
         background_section = QtWidgets.QWidget()
         background_layout = QtWidgets.QVBoxLayout(background_section)
@@ -573,8 +575,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.background_mode_buttons = {}
         background_buttons = [
             ("None", "none", "SegmentedLeft"),
-            ("Line background", "line", "SegmentedMiddle"),
-            ("Word background", "word", "SegmentedRight"),
+            ("Line", "line", "SegmentedMiddle"),
+            ("Word", "word", "SegmentedRight"),
         ]
         for label, mode, object_name in background_buttons:
             button = QtWidgets.QPushButton(label)
@@ -587,16 +589,41 @@ class MainWindow(QtWidgets.QMainWindow):
             button.setProperty("mode", mode)
             if mode == "word":
                 button.setEnabled(False)
-                button.setToolTip("Word background is coming soon.")
+                button.setToolTip("Available in a future update.")
             self.background_mode_group.addButton(button)
             self.background_mode_buttons[mode] = button
             background_controls_layout.addWidget(button)
 
         background_layout.addWidget(background_controls)
-        panel_layout.addWidget(background_section)
+        self.word_background_helper_label = QtWidgets.QLabel(
+            "Word background is available in a future update."
+        )
+        self.word_background_helper_label.setEnabled(False)
+        self.word_background_helper_label.setWordWrap(True)
+        background_layout.addWidget(self.word_background_helper_label)
+        quick_layout.addWidget(background_section)
 
-        self.box_background_checkbox = QtWidgets.QCheckBox("Box background")
-        self.box_background_checkbox.setVisible(False)
+        card_layout.addWidget(quick_section)
+
+        self.subtitle_style_customize_button = QtWidgets.QPushButton("Show advanced options")
+        self.subtitle_style_customize_button.setCheckable(True)
+        self.subtitle_style_customize_button.setFlat(True)
+        self.subtitle_style_customize_button.setCursor(
+            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        )
+        self.subtitle_style_customize_button.setToolTip(preset_tooltip)
+
+        customize_layout = QtWidgets.QHBoxLayout()
+        customize_layout.addWidget(self.subtitle_style_customize_button)
+        customize_layout.addStretch()
+        advanced_section, advanced_layout = _build_style_section("Advanced")
+        advanced_layout.addLayout(customize_layout)
+        card_layout.addWidget(advanced_section)
+
+        self.subtitle_style_panel = QtWidgets.QWidget()
+        panel_layout = QtWidgets.QVBoxLayout(self.subtitle_style_panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(8)
 
         self.box_options_container = QtWidgets.QWidget()
         box_grid = QtWidgets.QGridLayout(self.box_options_container)
@@ -628,7 +655,7 @@ class MainWindow(QtWidgets.QMainWindow):
         reset_layout.addWidget(self.subtitle_style_reset_button)
         panel_layout.addLayout(reset_layout)
 
-        card_layout.addWidget(self.subtitle_style_panel)
+        advanced_layout.addWidget(self.subtitle_style_panel)
 
         cta_layout = QtWidgets.QHBoxLayout()
         cta_layout.addStretch()
@@ -754,8 +781,6 @@ class MainWindow(QtWidgets.QMainWindow):
         ):
             spinbox.valueChanged.connect(self._on_subtitle_style_custom_changed)
 
-        self.box_background_checkbox.toggled.connect(self._on_subtitle_style_custom_changed)
-
     def _apply_subtitle_mode_to_controls(self) -> None:
         mode = (
             self._subtitle_mode
@@ -791,8 +816,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if mode == self._subtitle_mode:
             return
         self._subtitle_mode = mode
+        self._style_model = replace(self._style_model, subtitle_mode=mode)
+        self._subtitle_style_custom = replace(self._subtitle_style_custom, subtitle_mode=mode)
         self._config["subtitle_mode"] = mode
-        self._save_config()
+        self._store_subtitle_style_config()
         self._log(f"Subtitle mode set to: {mode}")
         self._update_highlight_color_visibility()
 
@@ -806,12 +833,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if hex_value == self._highlight_color:
             return
         self._highlight_color = hex_value
+        self._style_model = replace(self._style_model, highlight_color=hex_value)
+        self._subtitle_style_custom = replace(self._subtitle_style_custom, highlight_color=hex_value)
         current_style = self._config.get("subtitle_style")
         if not isinstance(current_style, dict):
             current_style = {}
             self._config["subtitle_style"] = current_style
         current_style["highlight_color"] = hex_value
-        self._save_config()
+        self._store_subtitle_style_config()
         self._update_highlight_color_display()
 
     def _toggle_subtitle_style_panel(self, checked: bool) -> None:
@@ -828,26 +857,47 @@ class MainWindow(QtWidgets.QMainWindow):
         self._subtitle_style_preset = PRESET_DEFAULT
         self._set_subtitle_style_preset_buttons(PRESET_DEFAULT)
 
+        self._style_model = preset_defaults(
+            PRESET_DEFAULT,
+            subtitle_mode=self._subtitle_mode,
+            highlight_color=self._highlight_color,
+        )
         self._apply_subtitle_style_to_controls()
         self._store_subtitle_style_config()
         self._invalidate_preview_playback()
         self._schedule_preview_refresh()
 
     def _apply_subtitle_style_to_controls(self) -> None:
-        style = (
-            self._subtitle_style_custom
-            if self._subtitle_style_preset == PRESET_CUSTOM
-            else preset_defaults(self._subtitle_style_preset)
-        )
+        style = self._style_model
         self._set_subtitle_style_preset_buttons(self._subtitle_style_preset)
 
         controls = [
             (self.font_size_slider, self.font_size_spinbox, style.font_size),
-            (self.outline_slider, self.outline_spinbox, style.outline),
-            (self.shadow_slider, self.shadow_spinbox, style.shadow),
-            (self.margin_slider, self.margin_spinbox, style.margin_v),
-            (self.box_opacity_slider, self.box_opacity_spinbox, style.box_opacity),
-            (self.box_padding_slider, self.box_padding_spinbox, style.box_padding),
+            (
+                self.outline_slider,
+                self.outline_spinbox,
+                int(round(style.outline_width)),
+            ),
+            (
+                self.shadow_slider,
+                self.shadow_spinbox,
+                int(round(style.shadow_strength)),
+            ),
+            (
+                self.margin_slider,
+                self.margin_spinbox,
+                int(round(style.vertical_offset)),
+            ),
+            (
+                self.box_opacity_slider,
+                self.box_opacity_spinbox,
+                int(round(style.line_bg_opacity * 100)),
+            ),
+            (
+                self.box_padding_slider,
+                self.box_padding_spinbox,
+                int(round(style.line_bg_padding)),
+            ),
         ]
         for slider, spinbox, value in controls:
             slider.blockSignals(True)
@@ -857,11 +907,8 @@ class MainWindow(QtWidgets.QMainWindow):
             spinbox.setValue(value)
             spinbox.blockSignals(False)
 
-        self.box_background_checkbox.blockSignals(True)
-        self.box_background_checkbox.setChecked(style.box_enabled)
-        self.box_background_checkbox.blockSignals(False)
-        self._set_background_mode_buttons("line" if style.box_enabled else "none")
-        self._update_box_options_visibility(style.box_enabled)
+        self._set_background_mode_buttons(style.background_mode)
+        self._update_box_options_visibility(style.background_mode == "line")
 
     def _update_box_options_visibility(self, enabled: bool) -> None:
         self.box_options_container.setVisible(enabled)
@@ -878,15 +925,29 @@ class MainWindow(QtWidgets.QMainWindow):
             button.setChecked(key == mode)
             button.blockSignals(False)
 
+    def _current_background_mode(self) -> str:
+        for mode, button in self.background_mode_buttons.items():
+            if button.isChecked():
+                return mode
+        return "none"
+
     def _collect_custom_style_from_controls(self) -> SubtitleStyle:
-        return SubtitleStyle(
+        outline_width = self.outline_slider.value()
+        shadow_strength = self.shadow_slider.value()
+        background_mode = self._current_background_mode()
+        return replace(
+            self._subtitle_style_custom,
             font_size=self.font_size_slider.value(),
-            outline=self.outline_slider.value(),
-            shadow=self.shadow_slider.value(),
-            margin_v=self.margin_slider.value(),
-            box_enabled=self.box_background_checkbox.isChecked(),
-            box_opacity=self.box_opacity_slider.value(),
-            box_padding=self.box_padding_slider.value(),
+            outline_enabled=outline_width > 0,
+            outline_width=outline_width,
+            shadow_enabled=shadow_strength > 0,
+            shadow_strength=shadow_strength,
+            vertical_offset=self.margin_slider.value(),
+            background_mode=background_mode,
+            line_bg_opacity=self.box_opacity_slider.value() / 100.0,
+            line_bg_padding=self.box_padding_slider.value(),
+            subtitle_mode=self._subtitle_mode,
+            highlight_color=self._highlight_color,
         )
 
     def _on_subtitle_style_preset_changed(self, preset: str) -> None:
@@ -895,6 +956,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if preset == self._subtitle_style_preset:
             return
         self._subtitle_style_preset = preset
+        if preset == PRESET_CUSTOM:
+            self._style_model = self._subtitle_style_custom
+        else:
+            self._style_model = preset_defaults(
+                preset,
+                subtitle_mode=self._subtitle_mode,
+                highlight_color=self._highlight_color,
+            )
         self._apply_subtitle_style_to_controls()
         self._store_subtitle_style_config()
         self._invalidate_preview_playback()
@@ -914,17 +983,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if mode == "word":
             return
-        self.box_background_checkbox.setChecked(mode == "line")
+        self._on_subtitle_style_custom_changed()
 
     def _on_subtitle_style_custom_changed(self) -> None:
-        box_enabled = self.box_background_checkbox.isChecked()
-        self._update_box_options_visibility(box_enabled)
+        background_mode = self._current_background_mode()
+        self._update_box_options_visibility(background_mode == "line")
 
         if self._subtitle_style_preset != PRESET_CUSTOM:
             self._subtitle_style_preset = PRESET_CUSTOM
             self._set_subtitle_style_preset_buttons(PRESET_CUSTOM)
 
         self._subtitle_style_custom = self._collect_custom_style_from_controls()
+        self._style_model = self._subtitle_style_custom
         self._store_subtitle_style_config()
         self._invalidate_preview_playback()
         self._schedule_preview_refresh()
@@ -935,9 +1005,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._preview_render_timer.start()
 
     def _resolve_effective_subtitle_style(self) -> SubtitleStyle:
-        if self._subtitle_style_preset == PRESET_CUSTOM:
-            return self._subtitle_style_custom
-        return preset_defaults(self._subtitle_style_preset)
+        return self._style_model
 
     def _resolve_preview_srt_path(self) -> Optional[Path]:
         if self._last_srt_path and self._last_srt_path.exists():
@@ -1037,10 +1105,11 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             force_style = to_ffmpeg_force_style(style)
             alpha_byte = get_box_alpha_byte(style)
+            legacy = legacy_style_from_model(style)
             self._log(
                 "Preview style: "
-                f"box_enabled={style.box_enabled} "
-                f"box_opacity={style.box_opacity} "
+                f"box_enabled={legacy.box_enabled} "
+                f"box_opacity={legacy.box_opacity} "
                 f"alpha={alpha_byte} "
                 f"force_style={force_style}",
                 True,
@@ -2289,6 +2358,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._subtitle_mode = self._config["subtitle_mode"]
         self._highlight_color = self._config["subtitle_style"]["highlight_color"]
         self._highlight_opacity = self._config["subtitle_style"]["highlight_opacity"]
+        self._style_model = normalize_style_model(
+            self._config["subtitle_style"].get("appearance"),
+            self._style_model,
+        )
         config_path = self._get_app_data_dir() / "config.json"
         config_path.write_text(json.dumps(self._config, indent=2), encoding="utf-8")
 
@@ -2419,39 +2492,39 @@ class MainWindow(QtWidgets.QMainWindow):
             )
 
 
-    def _load_subtitle_style(self) -> tuple[str, SubtitleStyle]:
+    def _load_subtitle_style(self) -> tuple[str, SubtitleStyle, SubtitleStyle]:
         preset = PRESET_DEFAULT
-        custom = preset_defaults(PRESET_DEFAULT)
         raw = self._config.get("subtitle_style")
         if not isinstance(raw, dict):
-            return preset, custom
+            raw = {}
 
         preset_value = raw.get("preset")
         if isinstance(preset_value, str) and preset_value in PRESET_NAMES:
             preset = preset_value
 
-        custom_raw = raw.get("custom")
-        if isinstance(custom_raw, dict):
-            defaults = preset_defaults(PRESET_DEFAULT)
+        subtitle_mode = self._config.get("subtitle_mode", "static")
+        highlight_color = raw.get("highlight_color", DEFAULT_HIGHLIGHT_COLOR)
+        legacy_defaults = legacy_preset_defaults(PRESET_DEFAULT)
+        legacy_custom = legacy_style_from_custom_dict(raw.get("custom"), legacy_defaults)
+        custom = style_model_from_legacy(
+            legacy_custom,
+            subtitle_mode=subtitle_mode,
+            highlight_color=highlight_color,
+        )
+        if preset == PRESET_CUSTOM:
+            custom = normalize_style_model(raw.get("appearance"), custom)
 
-            def _load_int(key: str, default: int) -> int:
-                value = custom_raw.get(key)
-                return value if isinstance(value, int) else default
-
-            def _load_bool(key: str, default: bool) -> bool:
-                value = custom_raw.get(key)
-                return value if isinstance(value, bool) else default
-
-            custom = SubtitleStyle(
-                font_size=_load_int("font_size", defaults.font_size),
-                outline=_load_int("outline", defaults.outline),
-                shadow=_load_int("shadow", defaults.shadow),
-                margin_v=_load_int("margin_v", defaults.margin_v),
-                box_enabled=_load_bool("box_enabled", defaults.box_enabled),
-                box_opacity=_load_int("box_opacity", defaults.box_opacity),
-                box_padding=_load_int("box_padding", defaults.box_padding),
+        effective_fallback = (
+            custom
+            if preset == PRESET_CUSTOM
+            else preset_defaults(
+                preset,
+                subtitle_mode=subtitle_mode,
+                highlight_color=highlight_color,
             )
-        return preset, custom
+        )
+        effective_style = normalize_style_model(raw.get("appearance"), effective_fallback)
+        return preset, custom, effective_style
 
     def _store_subtitle_style_config(self) -> None:
         current_style = self._config.get("subtitle_style")
@@ -2465,20 +2538,23 @@ class MainWindow(QtWidgets.QMainWindow):
             if isinstance(current_style, dict)
             else self._highlight_opacity
         )
+        legacy_custom = legacy_style_from_model(self._subtitle_style_custom)
         self._config["subtitle_style"] = {
             "preset": self._subtitle_style_preset,
             "highlight_color": highlight_color,
             "highlight_opacity": highlight_opacity,
+            "appearance": style_model_to_dict(self._style_model),
             "custom": {
-                "font_size": self._subtitle_style_custom.font_size,
-                "outline": self._subtitle_style_custom.outline,
-                "shadow": self._subtitle_style_custom.shadow,
-                "margin_v": self._subtitle_style_custom.margin_v,
-                "box_enabled": self._subtitle_style_custom.box_enabled,
-                "box_opacity": self._subtitle_style_custom.box_opacity,
-                "box_padding": self._subtitle_style_custom.box_padding,
+                "font_size": legacy_custom.font_size,
+                "outline": legacy_custom.outline,
+                "shadow": legacy_custom.shadow,
+                "margin_v": legacy_custom.margin_v,
+                "box_enabled": legacy_custom.box_enabled,
+                "box_opacity": legacy_custom.box_opacity,
+                "box_padding": legacy_custom.box_padding,
             },
         }
+        self._config["subtitle_mode"] = self._subtitle_mode
         self._save_config()
 
     def _load_diagnostics_settings(self) -> DiagnosticsSettings:
