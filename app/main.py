@@ -8,7 +8,6 @@ if __name__ == "__main__" and __package__ is None:
 
 import datetime
 from dataclasses import replace
-import hashlib
 import json
 import faulthandler
 import logging
@@ -16,6 +15,7 @@ import os
 import platform
 import sys
 import subprocess
+import tempfile
 import time
 from enum import Enum
 from pathlib import Path
@@ -31,11 +31,16 @@ from app.config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY, apply
 from app.ffmpeg_utils import (
     ensure_ffmpeg_available,
     extract_ass_frame,
+    extract_raw_frame,
     extract_subtitled_frame,
     get_ffmpeg_missing_message,
     get_runtime_mode,
     get_subprocess_kwargs,
     resolve_ffmpeg_paths,
+)
+from app.graphics_preview_renderer import (
+    build_preview_cache_key,
+    render_graphics_preview,
 )
 from app.progress import ProgressController, ProgressStep
 from app.transcription_device import gpu_available
@@ -56,7 +61,12 @@ from app.preview_playback import (
     STATIC_SRT_PIPELINE,
     WORD_HIGHLIGHT_ASS_PIPELINE,
 )
-from app.srt_utils import compute_srt_sha256, is_word_timing_stale, parse_srt_file
+from app.srt_utils import (
+    compute_srt_sha256,
+    is_word_timing_stale,
+    parse_srt_file,
+    select_cue_for_timestamp,
+)
 from app.align_utils import audio_path_for_srt, build_alignment_plan
 from app.workers import (
     DiagnosticsSettings,
@@ -87,7 +97,6 @@ from app.subtitle_style import (
     summarize_style_model,
     get_box_alpha_byte,
     to_ffmpeg_force_style,
-    to_preview_params,
 )
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
@@ -1035,14 +1044,8 @@ class MainWindow(QtWidgets.QMainWindow):
             srt_mtime = int(srt_path.stat().st_mtime)
         except FileNotFoundError:
             srt_mtime = 0
-        word_timings_path = word_timings_path_for_srt(srt_path)
-        try:
-            word_timings_mtime = int(word_timings_path.stat().st_mtime)
-        except FileNotFoundError:
-            word_timings_mtime = 0
         timestamp_ms = int(round(self._preview_timestamp_seconds * 1000))
         preview_width = 1280
-        style_params = to_preview_params(style)
         self._log(
             "Preview style resolved: "
             f"subtitle_mode={self._subtitle_mode} "
@@ -1052,18 +1055,91 @@ class MainWindow(QtWidgets.QMainWindow):
             f"line_bg_opacity={style.line_bg_opacity:.2f}",
             True,
         )
-        cache_key = (
-            f"{self._video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
-            f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
-            f"{style_params['shadow']}|{style_params['margin_v']}|{style_params['box_enabled']}|"
-            f"{style_params['box_opacity']}|{style_params['box_padding']}|"
-            f"{self._subtitle_mode}|{word_timings_mtime}|"
-            f"{self._highlight_color}|{self._highlight_opacity}|{preview_width}"
+        resolved_highlight_color = (
+            self._highlight_color or style.highlight_color or DEFAULT_HIGHLIGHT_COLOR
         )
-        cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
+        resolved_highlight_opacity = (
+            self._highlight_opacity
+            if self._highlight_opacity is not None
+            else DEFAULT_HIGHLIGHT_OPACITY
+        )
+        cache_name = (
+            build_preview_cache_key(
+                video_path=str(self._video_path.resolve()),
+                srt_mtime=srt_mtime,
+                timestamp_ms=timestamp_ms,
+                preview_width=preview_width,
+                style=style,
+                subtitle_mode=self._subtitle_mode,
+                highlight_color=resolved_highlight_color,
+                highlight_opacity=resolved_highlight_opacity,
+            )
+            + ".jpg"
+        )
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
+        try:
+            raw_frame_path = None
+            with tempfile.NamedTemporaryFile(
+                dir=get_preview_frames_dir(), suffix=".jpg", delete=False
+            ) as tmp:
+                raw_frame_path = Path(tmp.name)
+            if not extract_raw_frame(
+                self._video_path,
+                self._preview_timestamp_seconds,
+                raw_frame_path,
+                width=preview_width,
+            ):
+                raise RuntimeError("Failed to extract raw preview frame")
+            frame_image = QtGui.QImage(str(raw_frame_path))
+            if raw_frame_path and raw_frame_path.exists():
+                try:
+                    raw_frame_path.unlink()
+                except OSError:
+                    pass
+            if frame_image.isNull():
+                raise RuntimeError("Raw preview frame image could not be loaded")
+            cues = parse_srt_file(srt_path)
+            cue = select_cue_for_timestamp(cues, self._preview_timestamp_seconds)
+            subtitle_text = cue.text if cue else ""
+            result = render_graphics_preview(
+                frame_image,
+                subtitle_text=subtitle_text,
+                style=style,
+                subtitle_mode=self._subtitle_mode,
+                highlight_color=resolved_highlight_color,
+                highlight_opacity=resolved_highlight_opacity,
+            )
+            self._log(
+                "Graphics preview: "
+                f"mode={self._subtitle_mode} "
+                f"bg={style.background_mode} "
+                f"font={style.font_family} "
+                f"size={style.font_size} "
+                f"outline={style.outline_width if style.outline_enabled else 0} "
+                f"shadow={style.shadow_strength if style.shadow_enabled else 0} "
+                f"radius={style.line_bg_radius} "
+                f"padding={style.line_bg_padding} "
+                f"highlight_word_index={result.highlight_word_index}",
+                True,
+            )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if not result.image.save(str(output_path)):
+                raise RuntimeError("Failed to save graphics preview image")
+            return output_path
+        except Exception as exc:
+            if raw_frame_path and raw_frame_path.exists():
+                try:
+                    raw_frame_path.unlink()
+                except OSError:
+                    pass
+            self._log(
+                f"Graphics preview failed: {exc}; falling back to legacy preview",
+                True,
+            )
+
+        word_timings_path = word_timings_path_for_srt(srt_path)
         if self._subtitle_mode == "word_highlight":
             pipeline = WORD_HIGHLIGHT_ASS_PIPELINE
             subtitles_path = output_path.with_suffix(".ass")
@@ -1083,12 +1159,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._subtitle_mode == "word_highlight":
             style_config = build_style_config_from_subtitle_style(
                 style,
-                highlight_color=self._highlight_color or DEFAULT_HIGHLIGHT_COLOR,
-                highlight_opacity=(
-                    self._highlight_opacity
-                    if self._highlight_opacity is not None
-                    else DEFAULT_HIGHLIGHT_OPACITY
-                ),
+                highlight_color=resolved_highlight_color,
+                highlight_opacity=resolved_highlight_opacity,
             )
             cues = parse_srt_file(srt_path)
             decision = build_ass_document_with_karaoke_fallback(
