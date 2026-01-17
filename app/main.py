@@ -822,6 +822,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._store_subtitle_style_config()
         self._log(f"Subtitle mode set to: {mode}")
         self._update_highlight_color_visibility()
+        self._invalidate_preview_playback()
+        self._schedule_preview_refresh()
 
     def _on_highlight_color_clicked(self) -> None:
         color = QtWidgets.QColorDialog.getColor(
@@ -1041,6 +1043,15 @@ class MainWindow(QtWidgets.QMainWindow):
         timestamp_ms = int(round(self._preview_timestamp_seconds * 1000))
         preview_width = 1280
         style_params = to_preview_params(style)
+        self._log(
+            "Preview style resolved: "
+            f"subtitle_mode={self._subtitle_mode} "
+            f"background={style.background_mode} "
+            f"shadow={style.shadow_strength} "
+            f"shadow_opacity={style.shadow_opacity:.2f} "
+            f"line_bg_opacity={style.line_bg_opacity:.2f}",
+            True,
+        )
         cache_key = (
             f"{self._video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
             f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
