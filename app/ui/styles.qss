@@ -188,6 +188,48 @@ QPushButton:pressed {{
   background-color: {BG};
 }}
 
+QPushButton#PresetOption {{
+  background-color: transparent;
+  border: none;
+  padding: 2px 0;
+  text-align: left;
+}}
+
+QPushButton#PresetOption:checked {{
+  color: {ACCENT};
+  font-weight: 600;
+}}
+
+QPushButton#SegmentedLeft,
+QPushButton#SegmentedMiddle,
+QPushButton#SegmentedRight {{
+  border-radius: 0;
+  padding: {SPACING_SM}px {SPACING_MD}px;
+}}
+
+QPushButton#SegmentedLeft {{
+  border-top-left-radius: {RADIUS}px;
+  border-bottom-left-radius: {RADIUS}px;
+  border-right: none;
+}}
+
+QPushButton#SegmentedMiddle {{
+  border-right: none;
+}}
+
+QPushButton#SegmentedRight {{
+  border-top-right-radius: {RADIUS}px;
+  border-bottom-right-radius: {RADIUS}px;
+}}
+
+QPushButton#SegmentedLeft:checked,
+QPushButton#SegmentedMiddle:checked,
+QPushButton#SegmentedRight:checked {{
+  background-color: {ACCENT};
+  border-color: {ACCENT};
+  color: {TEXT};
+}}
+
 QPushButton#SaveToChange {{
   background-color: transparent;
   border: none;
