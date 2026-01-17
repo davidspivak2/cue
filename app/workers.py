@@ -462,6 +462,15 @@ class Worker(QtCore.QObject):
         timestamp_ms = int(round(timestamp_seconds * 1000))
         preview_width = 1280
         style_params = to_preview_params(style)
+        self.signals.log.emit(
+            "Preview style resolved: "
+            f"subtitle_mode={self.subtitle_mode} "
+            f"background={style.background_mode} "
+            f"shadow={style.shadow_strength} "
+            f"shadow_opacity={style.shadow_opacity:.2f} "
+            f"line_bg_opacity={style.line_bg_opacity:.2f}",
+            True,
+        )
         cache_key = (
             f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
             f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"

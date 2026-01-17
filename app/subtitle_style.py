@@ -327,9 +327,54 @@ def get_box_alpha_byte(style: SubtitleStyle) -> int:
     return _opacity_to_ass_alpha(legacy.box_opacity)
 
 
-def format_back_colour(style: SubtitleStyle) -> str:
-    alpha = get_box_alpha_byte(style)
-    return f"&H{alpha:02X}000000&"
+def _ass_color_from_hex(
+    hex_rgb: str,
+    *,
+    alpha: float,
+    default: str,
+    trailing_amp: bool = True,
+) -> str:
+    resolved = hex_rgb if isinstance(hex_rgb, str) and _HEX_COLOR_RE.match(hex_rgb) else default
+    try:
+        alpha_value = float(alpha)
+    except (TypeError, ValueError):
+        alpha_value = 0.0
+    alpha_value = max(0.0, min(alpha_value, 1.0))
+    alpha_byte = int(round(alpha_value * 255))
+    red = int(resolved[1:3], 16)
+    green = int(resolved[3:5], 16)
+    blue = int(resolved[5:7], 16)
+    value = f"&H{alpha_byte:02X}{blue:02X}{green:02X}{red:02X}"
+    return f"{value}&" if trailing_amp else value
+
+
+def _opacity_to_ass_alpha_float(opacity: float) -> float:
+    clamped = max(0.0, min(opacity, 1.0))
+    return 1.0 - clamped
+
+
+def format_shadow_colour(style: SubtitleStyle) -> str:
+    return _ass_color_from_hex(
+        style.shadow_color,
+        alpha=_opacity_to_ass_alpha_float(style.shadow_opacity),
+        default=DEFAULT_SHADOW_COLOR,
+    )
+
+
+def format_outline_colour(style: SubtitleStyle) -> str:
+    return _ass_color_from_hex(
+        style.outline_color,
+        alpha=0.0,
+        default=DEFAULT_OUTLINE_COLOR,
+    )
+
+
+def format_line_back_colour(style: SubtitleStyle) -> str:
+    return _ass_color_from_hex(
+        style.line_bg_color,
+        alpha=_opacity_to_ass_alpha_float(style.line_bg_opacity),
+        default=DEFAULT_LINE_BG_COLOR,
+    )
 
 
 def to_ffmpeg_force_style(style: SubtitleStyle) -> str:
@@ -338,6 +383,10 @@ def to_ffmpeg_force_style(style: SubtitleStyle) -> str:
     if legacy.box_enabled:
         outline = legacy.outline + legacy.box_padding
     border_style = 3 if legacy.box_enabled else 1
+    outline_colour = format_outline_colour(style)
+    if legacy.box_enabled:
+        outline_colour = format_line_back_colour(style)
+    back_colour = format_shadow_colour(style)
     fields = [
         f"FontName={style.font_family or DEFAULT_FONT_NAME}",
         f"FontSize={legacy.font_size}",
@@ -346,9 +395,9 @@ def to_ffmpeg_force_style(style: SubtitleStyle) -> str:
         f"MarginV={legacy.margin_v}",
         "Alignment=2",
         f"BorderStyle={border_style}",
+        f"OutlineColour={outline_colour}",
+        f"BackColour={back_colour}",
     ]
-    if legacy.box_enabled:
-        fields.append(f"BackColour={format_back_colour(style)}")
     return ",".join(fields)
 
 
