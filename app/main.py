@@ -103,6 +103,34 @@ VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
 DEFAULT_SUBTITLE_EDIT_PATH = Path(r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe")
 
 
+def _env_enabled(name: str) -> bool:
+    return os.getenv(name) == "1"
+
+
+def _count_near_color_pixels(
+    image: QtGui.QImage,
+    target_hex: str,
+    tolerance: int = 12,
+) -> int:
+    if image.isNull():
+        return 0
+    target = QtGui.QColor(target_hex)
+    target_red = target.red()
+    target_green = target.green()
+    target_blue = target.blue()
+    count = 0
+    for y in range(image.height()):
+        for x in range(image.width()):
+            pixel = image.pixelColor(x, y)
+            if (
+                abs(pixel.red() - target_red) <= tolerance
+                and abs(pixel.green() - target_green) <= tolerance
+                and abs(pixel.blue() - target_blue) <= tolerance
+            ):
+                count += 1
+    return count
+
+
 class SaveLocationPolicy(Enum):
     SAME_FOLDER = "same_folder"
     FIXED_FOLDER = "fixed_folder"
@@ -1094,11 +1122,27 @@ class MainWindow(QtWidgets.QMainWindow):
             f"highlight_opacity={resolved_highlight_opacity}",
             True,
         )
-        if output_path.exists() and output_path.stat().st_size > 0:
+        force_rerender = _env_enabled("HSG_DEBUG_HIGHLIGHT_PREVIEW_FORCE_RERENDER")
+        if output_path.exists() and output_path.stat().st_size > 0 and not force_rerender:
             self._log(
                 f"Preview cache hit: {output_path}; skipping render",
                 True,
             )
+            if _env_enabled("HSG_DEBUG_HIGHLIGHT_PREVIEW"):
+                cached_img = QtGui.QImage(str(output_path))
+                cached_count = _count_near_color_pixels(
+                    cached_img,
+                    resolved_highlight_color,
+                )
+                self._log(
+                    "HLDIAG_CACHE: "
+                    f"font_size={style.font_size} "
+                    f"file={output_path} "
+                    f"jpg_bytes={output_path.stat().st_size} "
+                    f"highlight_color={resolved_highlight_color} "
+                    f"cached_count={cached_count}",
+                    True,
+                )
             return output_path
         try:
             raw_frame_path = None
