@@ -109,7 +109,7 @@ def render_graphics_preview(
     if subtitle_mode == "word_highlight":
         highlight_selection = _select_highlight_word(subtitle_text)
 
-    line_paths = _build_line_paths(lines)
+    line_paths = _build_line_paths(lines, subtitle_text, font)
     bg_rect = _compute_text_rect_from_lines(lines)
     if bg_rect.isEmpty() or bg_rect.width() <= 0 or bg_rect.height() <= 0:
         bg_rect = _compute_text_rect_from_metrics(
@@ -158,7 +158,6 @@ def render_graphics_preview(
                 highlight_opacity=highlight_opacity,
             )
             painter.save()
-            painter.setOpacity(effective_text_opacity)
             _draw_text_fill(painter, layout, style)
             painter.restore()
     finally:
@@ -319,35 +318,52 @@ def _apply_highlight_overlay_formats(
     highlight_opacity: Optional[float],
 ) -> None:
     resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
-    base_format = QtGui.QTextLayout.FormatRange()
-    base_format.start = 0
-    base_format.length = len(text)
-    base_char_format = QtGui.QTextCharFormat()
+    if selection is None or resolved_opacity <= 0.0:
+        layout.setFormats([])
+        return
     transparent = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
     transparent.setAlphaF(0.0)
-    base_char_format.setForeground(QtGui.QBrush(transparent))
-    base_format.format = base_char_format
-    formats = [base_format]
+    transparent_format = QtGui.QTextCharFormat()
+    transparent_format.setForeground(QtGui.QBrush(transparent))
+    highlight_format = QtGui.QTextCharFormat()
+    highlight_color_value = _resolve_color(
+        highlight_color,
+        DEFAULT_HIGHLIGHT_COLOR,
+        resolved_opacity,
+    )
+    highlight_format.setForeground(QtGui.QBrush(highlight_color_value))
 
-    if selection is not None:
-        if resolved_opacity > 0.0:
-            color = _resolve_color(
-                highlight_color,
-                DEFAULT_HIGHLIGHT_COLOR,
-                resolved_opacity,
-            )
-            highlight = QtGui.QTextLayout.FormatRange()
-            highlight.start = selection.start
-            highlight.length = max(0, selection.end - selection.start)
-            highlight_char_format = QtGui.QTextCharFormat()
-            highlight_char_format.setForeground(QtGui.QBrush(color))
-            highlight.format = highlight_char_format
-            formats.append(highlight)
+    formats: list[QtGui.QTextLayout.FormatRange] = []
+    prefix_length = max(0, min(selection.start, len(text)))
+    highlight_length = max(0, min(selection.end, len(text)) - prefix_length)
+    suffix_start = prefix_length + highlight_length
+    suffix_length = max(0, len(text) - suffix_start)
+
+    if prefix_length > 0:
+        prefix = QtGui.QTextLayout.FormatRange()
+        prefix.start = 0
+        prefix.length = prefix_length
+        prefix.format = transparent_format
+        formats.append(prefix)
+    if highlight_length > 0:
+        highlight = QtGui.QTextLayout.FormatRange()
+        highlight.start = prefix_length
+        highlight.length = highlight_length
+        highlight.format = highlight_format
+        formats.append(highlight)
+    if suffix_length > 0:
+        suffix = QtGui.QTextLayout.FormatRange()
+        suffix.start = suffix_start
+        suffix.length = suffix_length
+        suffix.format = transparent_format
+        formats.append(suffix)
 
     layout.setFormats(formats)
 
 
-def _build_line_paths(lines: Iterable[QtGui.QTextLine]) -> list[QtGui.QPainterPath]:
+def _build_line_paths(
+    lines: Iterable[QtGui.QTextLine], text: str, font: QtGui.QFont
+) -> list[QtGui.QPainterPath]:
     paths: list[QtGui.QPainterPath] = []
     for line in lines:
         if not line.textLength():
@@ -362,6 +378,11 @@ def _build_line_paths(lines: Iterable[QtGui.QTextLine]) -> list[QtGui.QPainterPa
                 glyph_path = raw_font.pathForGlyph(glyph_index)
                 glyph_path.translate(baseline + glyph_pos)
                 line_path.addPath(glyph_path)
+        if line_path.isEmpty():
+            start = line.textStart()
+            length = line.textLength()
+            fragment = text[start : start + length]
+            line_path.addText(baseline, font, fragment)
         paths.append(line_path)
     return paths
 
