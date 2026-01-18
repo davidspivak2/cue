@@ -108,6 +108,8 @@ def render_graphics_preview(
 
     line_paths = _build_line_paths(lines)
     text_rect = _compute_text_rect_from_paths(line_paths)
+    if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
+        text_rect = _compute_text_rect_from_lines(lines)
     painter = QtGui.QPainter(rendered)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
@@ -355,6 +357,21 @@ def _compute_text_rect_from_paths(paths: Iterable[QtGui.QPainterPath]) -> QtCore
     rect: Optional[QtCore.QRectF] = None
     for path in paths:
         line_rect = path.boundingRect()
+        rect = line_rect if rect is None else rect.united(line_rect)
+    return rect or QtCore.QRectF()
+
+
+def _compute_text_rect_from_lines(lines: Iterable[QtGui.QTextLine]) -> QtCore.QRectF:
+    rect: Optional[QtCore.QRectF] = None
+    for line in lines:
+        if not line.textLength():
+            continue
+        line_rect = QtCore.QRectF(
+            line.position().x(),
+            line.position().y(),
+            line.naturalTextWidth(),
+            line.height(),
+        )
         rect = line_rect if rect is None else rect.united(line_rect)
     return rect or QtCore.QRectF()
 
