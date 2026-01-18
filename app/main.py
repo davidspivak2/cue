@@ -103,6 +103,43 @@ VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
 DEFAULT_SUBTITLE_EDIT_PATH = Path(r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe")
 
 
+def _env_enabled(name: str) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _count_near_color_pixels(
+    image: QtGui.QImage,
+    target: QtGui.QColor,
+    tolerance: int = 35,
+    sample_stride: int = 2,
+) -> int:
+    if image.isNull():
+        return 0
+    if image.format() != QtGui.QImage.Format_ARGB32:
+        image = image.convertToFormat(QtGui.QImage.Format_ARGB32)
+    width = image.width()
+    height = image.height()
+    target_r = target.red()
+    target_g = target.green()
+    target_b = target.blue()
+    count = 0
+    for y in range(0, height, sample_stride):
+        for x in range(0, width, sample_stride):
+            color = image.pixelColor(x, y)
+            if color.alpha() <= 10:
+                continue
+            if (
+                abs(color.red() - target_r) <= tolerance
+                and abs(color.green() - target_g) <= tolerance
+                and abs(color.blue() - target_b) <= tolerance
+            ):
+                count += 1
+    return count
+
+
 class SaveLocationPolicy(Enum):
     SAME_FOLDER = "same_folder"
     FIXED_FOLDER = "fixed_folder"
@@ -1132,6 +1169,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 highlight_color=resolved_highlight_color,
                 highlight_opacity=resolved_highlight_opacity,
             )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            debug_highlight_preview = (
+                self._subtitle_mode == "word_highlight"
+                and _env_enabled("HSG_DEBUG_HIGHLIGHT_PREVIEW")
+            )
+            target_highlight = None
+            pre_count = 0
+            if debug_highlight_preview:
+                target_highlight = QtGui.QColor(resolved_highlight_color)
+                pre_count = _count_near_color_pixels(result.image, target_highlight)
+                pre_png_path = Path(f"{output_path}.prejpg.png")
+                try:
+                    result.image.save(str(pre_png_path))
+                except Exception:
+                    pass
             self._log(
                 "Graphics preview: "
                 f"mode={self._subtitle_mode} "
@@ -1145,9 +1197,32 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"highlight_word_index={result.highlight_word_index}",
                 True,
             )
-            output_path.parent.mkdir(parents=True, exist_ok=True)
             if not result.image.save(str(output_path)):
                 raise RuntimeError("Failed to save graphics preview image")
+            if debug_highlight_preview and target_highlight is not None:
+                post_img = QtGui.QImage(str(output_path))
+                post_count = _count_near_color_pixels(post_img, target_highlight)
+                post_png_path = Path(f"{output_path}.postjpg.png")
+                if not post_img.isNull():
+                    try:
+                        post_img.save(str(post_png_path))
+                    except Exception:
+                        pass
+                jpg_size = 0
+                try:
+                    jpg_size = output_path.stat().st_size
+                except OSError:
+                    pass
+                self._log(
+                    "HLDIAG: "
+                    f"font_size={style.font_size} "
+                    f"file={output_path.name} "
+                    f"jpg_bytes={jpg_size} "
+                    f"highlight_color={resolved_highlight_color} "
+                    f"pre_count={pre_count} "
+                    f"post_count={post_count}",
+                    True,
+                )
             return output_path
         except Exception as exc:
             if raw_frame_path and raw_frame_path.exists():
