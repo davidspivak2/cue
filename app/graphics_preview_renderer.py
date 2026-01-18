@@ -110,6 +110,15 @@ def render_graphics_preview(
     text_rect = _compute_text_rect_from_paths(line_paths)
     if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
         text_rect = _compute_text_rect_from_lines(lines)
+    if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
+        text_rect = _compute_text_rect_from_metrics(
+            subtitle_text,
+            font,
+            rendered.width(),
+            rendered.height(),
+            style.vertical_anchor,
+            style.vertical_offset,
+        )
     painter = QtGui.QPainter(rendered)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
@@ -374,6 +383,31 @@ def _compute_text_rect_from_lines(lines: Iterable[QtGui.QTextLine]) -> QtCore.QR
         )
         rect = line_rect if rect is None else rect.united(line_rect)
     return rect or QtCore.QRectF()
+
+
+def _compute_text_rect_from_metrics(
+    text: str,
+    font: QtGui.QFont,
+    width: int,
+    height: int,
+    vertical_anchor: str,
+    vertical_offset: float,
+) -> QtCore.QRectF:
+    metrics = QtGui.QFontMetricsF(font)
+    bounding = metrics.boundingRect(text)
+    text_w = max(1.0, bounding.width())
+    text_h = max(1.0, metrics.height())
+    margin_v = float(vertical_offset)
+    if vertical_anchor == "top":
+        top_y = margin_v
+    elif vertical_anchor == "middle":
+        top_y = (height - text_h) / 2 - margin_v
+    else:
+        top_y = height - margin_v - text_h
+    top_y = max(0.0, min(float(height) - text_h, top_y))
+    x = (width - text_w) / 2
+    x = max(0.0, min(float(width) - text_w, x))
+    return QtCore.QRectF(x, top_y, text_w, text_h)
 
 
 def _resolve_text_color(style: SubtitleStyle) -> QtGui.QColor:
