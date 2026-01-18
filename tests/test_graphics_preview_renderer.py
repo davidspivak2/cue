@@ -108,14 +108,14 @@ def test_normalize_style_model_clamps_text_opacity() -> None:
 
 def _has_highlight_pixel(image, QtGui, target_hex: str) -> bool:
     target = QtGui.QColor(target_hex)
+    tr, tg, tb = target.red(), target.green(), target.blue()
+    # Use a tolerant Manhattan distance for subpixel antialiasing (Windows/ClearType).
+    max_dist = 120
     for y in range(image.height()):
         for x in range(image.width()):
             color = QtGui.QColor(image.pixel(x, y))
-            if (
-                abs(color.red() - target.red()) <= 12
-                and abs(color.green() - target.green()) <= 12
-                and abs(color.blue() - target.blue()) <= 12
-            ):
+            dist = abs(color.red() - tr) + abs(color.green() - tg) + abs(color.blue() - tb)
+            if dist <= max_dist:
                 return True
     return False
 
