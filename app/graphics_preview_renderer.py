@@ -93,13 +93,18 @@ def render_graphics_preview(
     if style.letter_spacing:
         font.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, style.letter_spacing)
 
-    layout, lines, text_rect = _build_text_layout(
+    layout, lines, text_rect, line_width = _build_text_layout(
         subtitle_text,
         font,
         width=rendered.width(),
         height=rendered.height(),
         vertical_offset=style.vertical_offset,
         vertical_anchor=style.vertical_anchor,
+    )
+
+    _apply_base_text_format(
+        layout,
+        _resolve_color(style.text_color, DEFAULT_TEXT_COLOR, style.text_opacity),
     )
 
     highlight_selection = None
@@ -113,7 +118,7 @@ def render_graphics_preview(
                 highlight_opacity,
             )
 
-    line_paths = _build_line_paths(layout, lines, font, subtitle_text)
+    line_paths = _build_line_paths(layout, lines, font, subtitle_text, line_width)
     painter = QtGui.QPainter(rendered)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
@@ -161,7 +166,7 @@ def _build_text_layout(
     height: int,
     vertical_offset: float,
     vertical_anchor: str,
-) -> tuple[QtGui.QTextLayout, list[QtGui.QTextLine], QtCore.QRectF]:
+) -> tuple[QtGui.QTextLayout, list[QtGui.QTextLine], QtCore.QRectF, float]:
     layout = QtGui.QTextLayout(text, font)
     option = QtGui.QTextOption()
     option.setAlignment(QtCore.Qt.AlignHCenter)
@@ -172,11 +177,12 @@ def _build_text_layout(
     layout.beginLayout()
     lines: list[QtGui.QTextLine] = []
     y = 0.0
+    line_width = float(width)
     while True:
         line = layout.createLine()
         if not line.isValid():
             break
-        line.setLineWidth(width)
+        line.setLineWidth(line_width)
         line.setPosition(QtCore.QPointF(0.0, y))
         y += line.height()
         lines.append(line)
@@ -194,8 +200,8 @@ def _build_text_layout(
         line.setPosition(
             QtCore.QPointF(line.position().x(), line.position().y() + top_y)
         )
-    text_rect = _compute_text_rect(lines)
-    return layout, lines, text_rect
+    text_rect = _compute_text_rect(lines, line_width)
+    return layout, lines, text_rect, line_width
 
 
 def _is_rtl(text: str) -> bool:
@@ -297,7 +303,9 @@ def _apply_highlight_format(
     highlight.start = selection.start
     highlight.length = max(0, selection.end - selection.start)
     highlight.format = fmt
-    layout.setFormats([highlight])
+    formats = list(layout.formats())
+    formats.append(highlight)
+    layout.setFormats(formats)
 
 
 def _build_line_paths(
@@ -305,6 +313,7 @@ def _build_line_paths(
     lines: Iterable[QtGui.QTextLine],
     font: QtGui.QFont,
     text: str,
+    line_width: float,
 ) -> list[QtGui.QPainterPath]:
     paths: list[QtGui.QPainterPath] = []
     for line in lines:
@@ -313,18 +322,35 @@ def _build_line_paths(
         if length <= 0:
             continue
         fragment = text[start : start + length]
-        natural_rect = line.naturalTextRect()
-        x_pos = line.position().x() + natural_rect.x()
+        line_text_width = line.naturalTextWidth()
+        left_x = line.position().x() + (line_width - line_text_width) / 2
         baseline = line.position().y() + line.ascent()
         path = QtGui.QPainterPath()
-        path.addText(QtCore.QPointF(x_pos, baseline), font, fragment)
+        path.addText(QtCore.QPointF(left_x, baseline), font, fragment)
         paths.append(path)
     return paths
 
 
-def _compute_text_rect(lines: Iterable[QtGui.QTextLine]) -> QtCore.QRectF:
+def _compute_text_rect(lines: Iterable[QtGui.QTextLine], line_width: float) -> QtCore.QRectF:
     rect: Optional[QtCore.QRectF] = None
     for line in lines:
-        natural_rect = line.naturalTextRect().translated(line.position())
-        rect = natural_rect if rect is None else rect.united(natural_rect)
+        line_text_width = line.naturalTextWidth()
+        left_x = line.position().x() + (line_width - line_text_width) / 2
+        line_rect = QtCore.QRectF(
+            left_x,
+            line.position().y(),
+            line_text_width,
+            line.height(),
+        )
+        rect = line_rect if rect is None else rect.united(line_rect)
     return rect or QtCore.QRectF()
+
+
+def _apply_base_text_format(layout: QtGui.QTextLayout, color: QtGui.QColor) -> None:
+    base = QtGui.QTextLayout.FormatRange()
+    base.start = 0
+    base.length = len(layout.text())
+    fmt = QtGui.QTextCharFormat()
+    fmt.setForeground(QtGui.QBrush(color))
+    base.format = fmt
+    layout.setFormats([base])
