@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
+import os
+from pathlib import Path
 import re
 from typing import Iterable, Optional
 
@@ -20,6 +23,14 @@ from .subtitle_style import (
 )
 
 _WORD_RE = re.compile(r"\S+")
+_LOGGER = logging.getLogger(__name__)
+
+
+def _env_enabled(name: str) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -81,6 +92,7 @@ def render_graphics_preview(
     subtitle_mode: str,
     highlight_color: Optional[str],
     highlight_opacity: Optional[float],
+    debug_output_path: Optional[Path] = None,
 ) -> GraphicsPreviewResult:
     rendered = QtGui.QImage(frame)
     if rendered.isNull():
@@ -108,6 +120,9 @@ def render_graphics_preview(
     highlight_selection = None
     if subtitle_mode == "word_highlight":
         highlight_selection = _select_highlight_word(subtitle_text)
+    debug_enabled = (
+        subtitle_mode == "word_highlight" and _env_enabled("HSG_DEBUG_HIGHLIGHT_PREVIEW")
+    )
 
     line_paths = _build_line_paths(lines, subtitle_text, font)
     bg_rect = _compute_text_rect_from_lines(lines)
@@ -125,6 +140,7 @@ def render_graphics_preview(
     painter = QtGui.QPainter(rendered)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
+    debug_rects: list[QtCore.QRectF] = []
     try:
         if style.background_mode == "line":
             painter.save()
@@ -150,16 +166,35 @@ def render_graphics_preview(
             highlight_selection is not None
             and (1.0 if highlight_opacity is None else float(highlight_opacity)) > 0.0
         ):
-            _draw_highlight_overlay(
+            debug_rects = _draw_highlight_overlay(
                 painter,
                 layout,
                 subtitle_text,
                 highlight_selection,
                 highlight_color or DEFAULT_HIGHLIGHT_COLOR,
                 highlight_opacity,
+                debug_enabled=debug_enabled,
+                font_size=style.font_size,
             )
     finally:
         painter.end()
+    if debug_enabled and debug_output_path and debug_rects:
+        clip_debug = QtGui.QImage(rendered)
+        overlay_painter = QtGui.QPainter(clip_debug)
+        try:
+            overlay_color = QtGui.QColor(255, 0, 255, 120)
+            overlay_painter.setPen(QtGui.QPen(overlay_color, 1))
+            overlay_painter.setBrush(QtGui.QBrush(overlay_color))
+            for rect in debug_rects:
+                overlay_painter.drawRect(rect)
+        finally:
+            overlay_painter.end()
+        debug_path = Path(f"{debug_output_path}.clipdbg.png")
+        try:
+            debug_path.parent.mkdir(parents=True, exist_ok=True)
+            clip_debug.save(str(debug_path))
+        except Exception:
+            pass
     return GraphicsPreviewResult(
         rendered, highlight_selection.index if highlight_selection else None
     )
@@ -314,10 +349,13 @@ def _draw_highlight_overlay(
     selection: _HighlightSelection,
     highlight_color: str,
     highlight_opacity: Optional[float],
-) -> None:
+    *,
+    debug_enabled: bool = False,
+    font_size: Optional[float] = None,
+) -> list[QtCore.QRectF]:
     resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
     if resolved_opacity <= 0.0:
-        return
+        return []
     transparent = QtGui.QColor(0, 0, 0, 0)
     highlight_color_value = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
     highlight_color_value.setAlphaF(max(0.0, min(resolved_opacity, 1.0)))
@@ -350,11 +388,88 @@ def _draw_highlight_overlay(
         suffix.format = transparent_format
         selections.append(suffix)
 
+    debug_rects: list[QtCore.QRectF] = []
+    if debug_enabled:
+        for line_index in range(layout.lineCount()):
+            line = layout.lineAt(line_index)
+            line_start = line.textStart()
+            line_len = line.textLength()
+            if line_len <= 0:
+                continue
+            overlap_start = max(selection.start, line_start)
+            overlap_end = min(selection.end, line_start + line_len)
+            if overlap_start >= overlap_end:
+                continue
+            local_start = overlap_start - line_start
+            local_end = overlap_end - line_start
+            x1_raw = line.cursorToX(local_start)
+            x2_raw = line.cursorToX(local_end)
+            x1_norm = min(x1_raw, x2_raw)
+            x2_norm = max(x1_raw, x2_raw)
+            line_x = line.position().x()
+            line_y = line.position().y()
+            clip_rect = QtCore.QRectF(
+                line_x + x1_norm,
+                line_y,
+                max(0.0, x2_norm - x1_norm),
+                line.height(),
+            )
+            baseline_y = line_y + line.ascent()
+            line_rect = line.naturalTextRect()
+            debug_rects.append(clip_rect)
+            _LOGGER.info(
+                "HLOVL: "
+                "font_size=%s "
+                "line_start=%d "
+                "line_len=%d "
+                "overlap_start=%d "
+                "overlap_end=%d "
+                "local_start=%d "
+                "local_end=%d "
+                "x1_raw=%.2f "
+                "x2_raw=%.2f "
+                "x1=%.2f "
+                "x2=%.2f "
+                "line_pos=(%.2f,%.2f) "
+                "baseline_y=%.2f "
+                "ascent=%.2f "
+                "height=%.2f "
+                "clip_rect=(%.2f,%.2f,%.2f,%.2f) "
+                "x1_gt_x2=%s "
+                "line_rect=(%.2f,%.2f,%.2f,%.2f)",
+                font_size if font_size is not None else layout.font().pointSizeF(),
+                line_start,
+                line_len,
+                overlap_start,
+                overlap_end,
+                local_start,
+                local_end,
+                x1_raw,
+                x2_raw,
+                x1_norm,
+                x2_norm,
+                line_x,
+                line_y,
+                baseline_y,
+                line.ascent(),
+                line.height(),
+                clip_rect.x(),
+                clip_rect.y(),
+                clip_rect.width(),
+                clip_rect.height(),
+                x1_raw > x2_raw,
+                line_rect.x(),
+                line_rect.y(),
+                line_rect.width(),
+                line_rect.height(),
+            )
+
     painter.save()
     painter.setOpacity(1.0)
     painter.setPen(QtGui.QColor(0, 0, 0, 0))
     layout.draw(painter, QtCore.QPointF(0, 0), selections)
     painter.restore()
+    return debug_rects
 
 
 def _build_line_paths(

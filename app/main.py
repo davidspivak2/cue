@@ -1195,6 +1195,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 subtitle_mode=self._subtitle_mode,
                 highlight_color=resolved_highlight_color,
                 highlight_opacity=resolved_highlight_opacity,
+                debug_output_path=output_path if debug_highlight_preview else None,
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
             pre_count = 0
