@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import hashlib
 import json
 import re
@@ -20,6 +21,8 @@ from .subtitle_style import (
 )
 
 _WORD_RE = re.compile(r"\S+")
+_LOGGER = logging.getLogger("hebrew_subtitle_gui")
+_LOG_TEXT_MAX = 120
 
 
 @dataclass(frozen=True)
@@ -174,10 +177,31 @@ class _HighlightSelection:
 
 def _select_highlight_word(text: str) -> Optional[_HighlightSelection]:
     matches = list(_WORD_RE.finditer(text))
+    escaped_text = _escape_log_text(text)
     if not matches:
+        _LOGGER.info('HLDBG: select_highlight_word text="%s" matches=no matches', escaped_text)
         return None
+    matches_summary = ", ".join(
+        f'(i={index},s={match.start()},e={match.end()},w="{_escape_log_text(text[match.start():match.end()])}")'
+        for index, match in enumerate(matches)
+    )
+    _LOGGER.info(
+        'HLDBG: select_highlight_word text="%s" matches=[%s]',
+        escaped_text,
+        matches_summary,
+    )
     index = 1 if len(matches) > 1 else 0
     match = matches[index]
+    chosen_substring = _escape_log_text(text[match.start() : match.end()], truncate=False)
+    _LOGGER.info(
+        'HLDBG: select_highlight_word text="%s" matches=[%s] chosen=(idx=%s,s=%s,e=%s,w="%s")',
+        escaped_text,
+        matches_summary,
+        index,
+        match.start(),
+        match.end(),
+        chosen_substring,
+    )
     return _HighlightSelection(index=index, start=match.start(), end=match.end())
 
 
@@ -222,6 +246,27 @@ def _build_text_layout(
     for line in lines:
         centered_x = (line_width - line.naturalTextWidth()) / 2
         line.setPosition(QtCore.QPointF(centered_x, line.position().y() + top_y))
+    _LOGGER.info(
+        'HLDBG: layout font="%s" size=%s max_width=%s lines=%s',
+        font.family(),
+        font.pointSizeF(),
+        line_width,
+        layout.lineCount(),
+    )
+    for index, line in enumerate(lines):
+        position = line.position()
+        _LOGGER.info(
+            "HLDBG: layout_line i=%s start=%s len=%s pos=(%s,%s) natW=%s h=%s asc=%s desc=%s",
+            index,
+            line.textStart(),
+            line.textLength(),
+            position.x(),
+            position.y(),
+            line.naturalTextWidth(),
+            line.height(),
+            line.ascent(),
+            line.descent(),
+        )
     return layout, lines, line_width
 
 
@@ -316,7 +361,30 @@ def _draw_highlight_overlay(
     highlight_opacity: Optional[float],
 ) -> None:
     resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
+    selected_substring = _escape_log_text(
+        text[selection.start : selection.end], truncate=False
+    )
+    _LOGGER.info(
+        'HLDBG: overlay_enter text_len=%s sel=(idx=%s,s=%s,e=%s,sub="%s") color=%s op=%s rtl=%s layout_lines=%s',
+        len(text),
+        selection.index,
+        selection.start,
+        selection.end,
+        selected_substring,
+        highlight_color,
+        resolved_opacity,
+        _is_rtl(text),
+        layout.lineCount(),
+    )
     if resolved_opacity <= 0.0:
+        _LOGGER.info(
+            'HLDBG: overlay_skip reason="opacity<=0" text_len=%s sel=(idx=%s,s=%s,e=%s,sub="%s")',
+            len(text),
+            selection.index,
+            selection.start,
+            selection.end,
+            selected_substring,
+        )
         return
     transparent = QtGui.QColor(0, 0, 0, 0)
     highlight_color_value = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
@@ -349,12 +417,39 @@ def _draw_highlight_overlay(
         suffix.length = suffix_length
         suffix.format = transparent_format
         selections.append(suffix)
+    _LOGGER.info(
+        "HLDBG: overlay_ranges prefix=%s hl=%s suffix=%s sum=%s ranges=%s",
+        prefix_length,
+        highlight_length,
+        suffix_length,
+        prefix_length + highlight_length + suffix_length,
+        len(selections),
+    )
 
     painter.save()
     painter.setOpacity(1.0)
     painter.setPen(QtGui.QColor(0, 0, 0, 0))
+    pen = painter.pen()
+    brush = painter.brush()
+    _LOGGER.info(
+        "HLDBG: overlay_painter opacity=%s pen=%s a=%s brush=%s a=%s",
+        painter.opacity(),
+        pen.color().name(),
+        pen.color().alphaF(),
+        brush.color().name(),
+        brush.color().alphaF(),
+    )
+    _LOGGER.info("HLDBG: overlay_draw_called")
     layout.draw(painter, QtCore.QPointF(0, 0), selections)
     painter.restore()
+    _LOGGER.info("HLDBG: overlay_exit ranges=%s", len(selections))
+
+
+def _escape_log_text(text: str, *, truncate: bool = True) -> str:
+    escaped = text.replace("\n", "\\n").replace("\r", "\\r")
+    if truncate and len(escaped) > _LOG_TEXT_MAX:
+        return f"{escaped[:_LOG_TEXT_MAX]}..."
+    return escaped
 
 
 def _build_line_paths(
