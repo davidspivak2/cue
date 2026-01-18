@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
+import os
 import re
 from typing import Iterable, Optional
 
@@ -20,6 +22,8 @@ from .subtitle_style import (
 )
 
 _WORD_RE = re.compile(r"\S+")
+_LOGGER = logging.getLogger(__name__)
+_DEBUG_HIGHLIGHT_PAINTER = os.getenv("HSG_DEBUG_HIGHLIGHT_PAINTER") == "1"
 
 
 @dataclass(frozen=True)
@@ -353,6 +357,62 @@ def _draw_highlight_overlay(
     painter.save()
     painter.setOpacity(1.0)
     painter.setPen(QtGui.QColor(0, 0, 0, 0))
+    if _DEBUG_HIGHLIGHT_PAINTER:
+        font = layout.font()
+        font_size = font.pointSizeF() if font is not None else None
+        line_count = layout.lineCount() if hasattr(layout, "lineCount") else None
+        current_line_start = None
+        current_line_length = None
+        selected_text = text[selection.start : selection.end]
+        _LOGGER.info(
+            "HLPAINT: font_size=%s highlight_color=%s highlight_opacity=%s "
+            "selection.index=%s selection.start=%s selection.end=%s selected_text=%r "
+            "line_count=%s line_text_start=%s line_text_length=%s",
+            font_size,
+            highlight_color_value.name(),
+            highlight_color_value.alphaF(),
+            selection.index,
+            selection.start,
+            selection.end,
+            selected_text,
+            line_count,
+            current_line_start,
+            current_line_length,
+        )
+        pen = painter.pen()
+        pen_color = pen.color()
+        brush = painter.brush()
+        brush_color = brush.color()
+        composition = painter.compositionMode()
+        opacity = painter.opacity()
+        antialiasing = painter.testRenderHint(QtGui.QPainter.Antialiasing)
+        text_antialiasing = painter.testRenderHint(QtGui.QPainter.TextAntialiasing)
+        if hasattr(painter, "hasClipping"):
+            clip_active = painter.hasClipping()
+        else:
+            clip_active = False
+            if hasattr(painter, "clipPath") and not painter.clipPath().isEmpty():
+                clip_active = True
+            if hasattr(painter, "clipRegion") and not painter.clipRegion().isEmpty():
+                clip_active = True
+        _LOGGER.info(
+            "HLPAINT: opacity=%s composition_mode=%s "
+            "pen(color=%s alphaF=%s widthF=%s style=%s) "
+            "brush(color=%s alphaF=%s style=%s) "
+            "render_hints(antialiasing=%s text_antialiasing=%s) clip_active=%s",
+            opacity,
+            int(composition),
+            pen_color.name(),
+            pen_color.alphaF(),
+            pen.widthF(),
+            int(pen.style()),
+            brush_color.name(),
+            brush_color.alphaF(),
+            int(brush.style()),
+            antialiasing,
+            text_antialiasing,
+            clip_active,
+        )
     layout.draw(painter, QtCore.QPointF(0, 0), selections)
     painter.restore()
 
