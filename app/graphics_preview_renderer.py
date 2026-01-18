@@ -102,21 +102,17 @@ def render_graphics_preview(
         vertical_anchor=style.vertical_anchor,
     )
 
-    _apply_base_text_format(
-        layout,
-        _resolve_color(style.text_color, DEFAULT_TEXT_COLOR, style.text_opacity),
-    )
-
     highlight_selection = None
     if subtitle_mode == "word_highlight":
         highlight_selection = _select_highlight_word(subtitle_text)
-        if highlight_selection is not None:
-            _apply_highlight_format(
-                layout,
-                highlight_selection,
-                highlight_color or DEFAULT_HIGHLIGHT_COLOR,
-                highlight_opacity,
-            )
+        _apply_word_highlight_formats(
+            layout,
+            text=subtitle_text,
+            base_color=_resolve_color(style.text_color, DEFAULT_TEXT_COLOR, style.text_opacity),
+            selection=highlight_selection,
+            highlight_color=highlight_color or DEFAULT_HIGHLIGHT_COLOR,
+            highlight_opacity=highlight_opacity,
+        )
 
     line_paths = _build_line_paths(layout, lines, font, subtitle_text, line_width)
     painter = QtGui.QPainter(rendered)
@@ -200,7 +196,7 @@ def _build_text_layout(
         line.setPosition(
             QtCore.QPointF(line.position().x(), line.position().y() + top_y)
         )
-    text_rect = _compute_text_rect(lines, line_width)
+    text_rect = _compute_text_rect(lines)
     return layout, lines, text_rect, line_width
 
 
@@ -286,25 +282,39 @@ def _draw_text_fill(
     painter.restore()
 
 
-def _apply_highlight_format(
+def _apply_word_highlight_formats(
     layout: QtGui.QTextLayout,
-    selection: _HighlightSelection,
+    *,
+    text: str,
+    base_color: QtGui.QColor,
+    selection: Optional[_HighlightSelection],
     highlight_color: str,
     highlight_opacity: Optional[float],
 ) -> None:
-    color = _resolve_color(
-        highlight_color,
-        DEFAULT_HIGHLIGHT_COLOR,
-        highlight_opacity if highlight_opacity is not None else 1.0,
-    )
-    fmt = QtGui.QTextCharFormat()
-    fmt.setForeground(QtGui.QBrush(color))
-    highlight = QtGui.QTextLayout.FormatRange()
-    highlight.start = selection.start
-    highlight.length = max(0, selection.end - selection.start)
-    highlight.format = fmt
-    formats = list(layout.formats())
-    formats.append(highlight)
+    base_format = QtGui.QTextLayout.FormatRange()
+    base_format.start = 0
+    base_format.length = len(text)
+    base_char_format = QtGui.QTextCharFormat()
+    base_char_format.setForeground(QtGui.QBrush(base_color))
+    base_format.format = base_char_format
+    formats = [base_format]
+
+    if selection is not None:
+        resolved_opacity = 1.0 if highlight_opacity is None else highlight_opacity
+        if resolved_opacity > 0.0:
+            color = _resolve_color(
+                highlight_color,
+                DEFAULT_HIGHLIGHT_COLOR,
+                resolved_opacity,
+            )
+            highlight = QtGui.QTextLayout.FormatRange()
+            highlight.start = selection.start
+            highlight.length = max(0, selection.end - selection.start)
+            highlight_char_format = QtGui.QTextCharFormat()
+            highlight_char_format.setForeground(QtGui.QBrush(color))
+            highlight.format = highlight_char_format
+            formats.append(highlight)
+
     layout.setFormats(formats)
 
 
@@ -331,26 +341,18 @@ def _build_line_paths(
     return paths
 
 
-def _compute_text_rect(lines: Iterable[QtGui.QTextLine], line_width: float) -> QtCore.QRectF:
+def _compute_text_rect(lines: Iterable[QtGui.QTextLine]) -> QtCore.QRectF:
     rect: Optional[QtCore.QRectF] = None
     for line in lines:
-        line_text_width = line.naturalTextWidth()
-        left_x = line.position().x() + (line_width - line_text_width) / 2
-        line_rect = QtCore.QRectF(
-            left_x,
-            line.position().y(),
-            line_text_width,
-            line.height(),
-        )
+        natural_rect = line.naturalTextRect()
+        if natural_rect.isEmpty():
+            line_rect = QtCore.QRectF(
+                line.position().x(),
+                line.position().y(),
+                line.naturalTextWidth(),
+                line.height(),
+            )
+        else:
+            line_rect = natural_rect.translated(line.position())
         rect = line_rect if rect is None else rect.united(line_rect)
     return rect or QtCore.QRectF()
-
-
-def _apply_base_text_format(layout: QtGui.QTextLayout, color: QtGui.QColor) -> None:
-    base = QtGui.QTextLayout.FormatRange()
-    base.start = 0
-    base.length = len(layout.text())
-    fmt = QtGui.QTextCharFormat()
-    fmt.setForeground(QtGui.QBrush(color))
-    base.format = fmt
-    layout.setFormats([base])
