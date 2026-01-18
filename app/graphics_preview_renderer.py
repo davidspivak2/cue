@@ -105,14 +105,6 @@ def render_graphics_preview(
     highlight_selection = None
     if subtitle_mode == "word_highlight":
         highlight_selection = _select_highlight_word(subtitle_text)
-        _apply_word_highlight_formats(
-            layout,
-            text=subtitle_text,
-            base_color=_resolve_text_color(style),
-            selection=highlight_selection,
-            highlight_color=highlight_color or DEFAULT_HIGHLIGHT_COLOR,
-            highlight_opacity=highlight_opacity,
-        )
 
     line_paths = _build_line_paths(lines)
     text_rect = _compute_text_rect_from_paths(line_paths)
@@ -132,6 +124,18 @@ def render_graphics_preview(
         _draw_shadow(painter, line_paths, style)
         _draw_outline(painter, line_paths, style)
         _draw_text_fill(painter, layout, style)
+        if (
+            highlight_selection is not None
+            and (1.0 if highlight_opacity is None else float(highlight_opacity)) > 0.0
+        ):
+            _apply_highlight_overlay_formats(
+                layout,
+                text=subtitle_text,
+                selection=highlight_selection,
+                highlight_color=highlight_color or DEFAULT_HIGHLIGHT_COLOR,
+                highlight_opacity=highlight_opacity,
+            )
+            _draw_text_fill(painter, layout, style)
     finally:
         painter.end()
     return GraphicsPreviewResult(
@@ -281,11 +285,10 @@ def _draw_text_fill(
     painter.restore()
 
 
-def _apply_word_highlight_formats(
+def _apply_highlight_overlay_formats(
     layout: QtGui.QTextLayout,
     *,
     text: str,
-    base_color: QtGui.QColor,
     selection: Optional[_HighlightSelection],
     highlight_color: str,
     highlight_opacity: Optional[float],
@@ -295,7 +298,9 @@ def _apply_word_highlight_formats(
     base_format.start = 0
     base_format.length = len(text)
     base_char_format = QtGui.QTextCharFormat()
-    base_char_format.setForeground(QtGui.QBrush(base_color))
+    transparent = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
+    transparent.setAlphaF(0.0)
+    base_char_format.setForeground(QtGui.QBrush(transparent))
     base_format.format = base_char_format
     formats = [base_format]
 
