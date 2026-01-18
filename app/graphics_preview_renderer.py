@@ -329,8 +329,8 @@ def _draw_highlight_overlay(
             continue
         local_start = overlap_start - line_start
         local_end = overlap_end - line_start
-        x1 = _cursor_x(line.cursorToX(local_start))
-        x2 = _cursor_x(line.cursorToX(local_end))
+        x1 = _cursor_to_x(line.cursorToX(local_start))
+        x2 = _cursor_to_x(line.cursorToX(local_end))
         left = min(x1, x2)
         right = max(x1, x2)
         clip = QtCore.QRectF(
@@ -362,6 +362,12 @@ def _build_line_paths(
         line_path.addText(baseline, font, fragment)
         paths.append(line_path)
     return paths
+
+
+def _cursor_to_x(value: object) -> float:
+    if isinstance(value, (tuple, list)) and value:
+        return float(value[0])
+    return float(value)
 
 
 def _compute_text_rect_from_paths(paths: Iterable[QtGui.QPainterPath]) -> QtCore.QRectF:
