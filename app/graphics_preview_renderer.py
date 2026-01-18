@@ -24,6 +24,7 @@ from .subtitle_style import (
 _WORD_RE = re.compile(r"\S+")
 _LOGGER = logging.getLogger(__name__)
 _DEBUG_HIGHLIGHT_PAINTER = os.getenv("HSG_DEBUG_HIGHLIGHT_PAINTER") == "1"
+_DEBUG_HIGHLIGHT_PREVIEW = os.getenv("HSG_DEBUG_HIGHLIGHT_PREVIEW") == "1"
 
 
 @dataclass(frozen=True)
@@ -321,6 +322,14 @@ def _draw_highlight_overlay(
 ) -> None:
     resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
     if resolved_opacity <= 0.0:
+        if _DEBUG_HIGHLIGHT_PREVIEW:
+            try:
+                _LOGGER.info(
+                    "HIGHLIGHT_OVERLAY: skip_reason=opacity_non_positive opacity=%s",
+                    resolved_opacity,
+                )
+            except Exception as exc:
+                _LOGGER.info("HIGHLIGHT_OVERLAY: logging_failed err=%r", exc)
         return
     transparent = QtGui.QColor(0, 0, 0, 0)
     highlight_color_value = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
@@ -357,6 +366,148 @@ def _draw_highlight_overlay(
     painter.save()
     painter.setOpacity(1.0)
     painter.setPen(QtGui.QColor(0, 0, 0, 0))
+    if _DEBUG_HIGHLIGHT_PREVIEW:
+        try:
+            line_count = layout.lineCount() if hasattr(layout, "lineCount") else 0
+            draw_origin = QtCore.QPointF(0.0, 0.0)
+            for line_index in range(line_count):
+                line = layout.lineAt(line_index)
+                line_start = line.textStart()
+                line_len = line.textLength()
+                line_end = line_start + line_len
+                overlap_start = max(selection.start, line_start)
+                overlap_end = min(selection.end, line_end)
+                local_start = overlap_start - line_start
+                local_end = overlap_end - line_start
+                line_x = line.position().x()
+                line_y = line.position().y()
+                if overlap_start >= overlap_end:
+                    _LOGGER.info(
+                        "HIGHLIGHT_OVERLAY: line_index=%s "
+                        "selection_start=%s selection_end=%s "
+                        "line_start=%s line_len=%s line_end=%s "
+                        "overlap_start=%s overlap_end=%s "
+                        "local_start=%s local_end=%s "
+                        "line_x=%s line_y=%s draw_origin=(%s,%s) "
+                        "skip_reason=no_overlap",
+                        line_index,
+                        selection.start,
+                        selection.end,
+                        line_start,
+                        line_len,
+                        line_end,
+                        overlap_start,
+                        overlap_end,
+                        local_start,
+                        local_end,
+                        line_x,
+                        line_y,
+                        draw_origin.x(),
+                        draw_origin.y(),
+                    )
+                    continue
+                raw_x1 = line.cursorToX(local_start)
+                raw_x2 = line.cursorToX(local_end)
+
+                def _cursor_x(value: object) -> Optional[float]:
+                    if isinstance(value, (tuple, list)) and value:
+                        value = value[0]
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return None
+
+                x1 = _cursor_x(raw_x1)
+                x2 = _cursor_x(raw_x2)
+                left = min(x1, x2) if x1 is not None and x2 is not None else None
+                right = max(x1, x2) if x1 is not None and x2 is not None else None
+                clip_rect = None
+                clip_empty = None
+                clip_bounds = None
+                if left is not None and right is not None:
+                    width = right - left
+                    clip_rect = QtCore.QRectF(
+                        line_x + left,
+                        line_y,
+                        width,
+                        line.height(),
+                    )
+                    clip_empty = clip_rect.isEmpty() or clip_rect.width() <= 0 or clip_rect.height() <= 0
+                    painter.save()
+                    painter.setClipRect(clip_rect)
+                    clip_bounds = painter.clipBoundingRect()
+                    painter.restore()
+                pen = painter.pen()
+                pen_color = pen.color()
+                brush = painter.brush()
+                brush_color = brush.color()
+                composition = painter.compositionMode()
+                render_hints = painter.renderHints()
+                text_antialiasing = painter.testRenderHint(QtGui.QPainter.TextAntialiasing)
+                _LOGGER.info(
+                    "HIGHLIGHT_OVERLAY: line_index=%s "
+                    "selection_start=%s selection_end=%s "
+                    "line_start=%s line_len=%s line_end=%s "
+                    "overlap_start=%s overlap_end=%s "
+                    "local_start=%s local_end=%s "
+                    "cursor_x1=%r cursor_x2=%r "
+                    "norm_x1=%s norm_x2=%s left=%s right=%s "
+                    "line_x=%s line_y=%s "
+                    "clip_rect=%s clip_empty=%s "
+                    "clip_bounds=%s "
+                    "painter_opacity=%s "
+                    "pen_color=%s pen_alpha=%s "
+                    "brush_color=%s brush_alpha=%s "
+                    "composition_mode=%s "
+                    "render_hints=%s text_antialiasing=%s "
+                    "draw_origin=(%s,%s)",
+                    line_index,
+                    selection.start,
+                    selection.end,
+                    line_start,
+                    line_len,
+                    line_end,
+                    overlap_start,
+                    overlap_end,
+                    local_start,
+                    local_end,
+                    raw_x1,
+                    raw_x2,
+                    x1,
+                    x2,
+                    left,
+                    right,
+                    line_x,
+                    line_y,
+                    (
+                        None
+                        if clip_rect is None
+                        else (clip_rect.x(), clip_rect.y(), clip_rect.width(), clip_rect.height())
+                    ),
+                    clip_empty,
+                    (
+                        None
+                        if clip_bounds is None
+                        else (
+                            clip_bounds.x(),
+                            clip_bounds.y(),
+                            clip_bounds.width(),
+                            clip_bounds.height(),
+                        )
+                    ),
+                    painter.opacity(),
+                    pen_color.name(QtGui.QColor.HexArgb),
+                    pen_color.alphaF(),
+                    brush_color.name(QtGui.QColor.HexArgb),
+                    brush_color.alphaF(),
+                    str(composition),
+                    str(render_hints),
+                    text_antialiasing,
+                    draw_origin.x(),
+                    draw_origin.y(),
+                )
+        except Exception as exc:
+            _LOGGER.info("HIGHLIGHT_OVERLAY: logging_failed err=%r", exc)
     if _DEBUG_HIGHLIGHT_PAINTER:
         try:
             font = layout.font()
