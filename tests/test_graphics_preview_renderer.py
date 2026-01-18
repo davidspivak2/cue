@@ -5,6 +5,9 @@ import pytest
 
 def test_graphics_preview_renderer_hebrew() -> None:
     QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication([])
     from app.graphics_preview_renderer import render_graphics_preview
     from app.subtitle_style import preset_defaults
 

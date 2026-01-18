@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
-from typing import Optional
+from typing import Iterable, Optional
 
 from PySide6 import QtCore, QtGui
 
@@ -93,27 +93,27 @@ def render_graphics_preview(
     if style.letter_spacing:
         font.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, style.letter_spacing)
 
-    layout = _build_text_layout(subtitle_text, font, rendered.width())
-    line = layout.lineAt(0)
-    text_width = line.naturalTextWidth()
-    text_height = line.height()
-    margin_v = int(round(style.vertical_offset))
-    anchor = style.vertical_anchor
-    if anchor == "top":
-        top_y = margin_v
-    elif anchor == "middle":
-        top_y = (rendered.height() - text_height) / 2 - margin_v
-    else:
-        top_y = rendered.height() - margin_v - text_height
-    top_y = max(0.0, top_y)
-    x_pos = (rendered.width() - text_width) / 2
-    line.setPosition(QtCore.QPointF(x_pos, top_y))
+    layout, lines, text_rect = _build_text_layout(
+        subtitle_text,
+        font,
+        width=rendered.width(),
+        height=rendered.height(),
+        vertical_offset=style.vertical_offset,
+        vertical_anchor=style.vertical_anchor,
+    )
 
     highlight_selection = None
     if subtitle_mode == "word_highlight":
         highlight_selection = _select_highlight_word(subtitle_text)
+        if highlight_selection is not None:
+            _apply_highlight_format(
+                layout,
+                highlight_selection,
+                highlight_color or DEFAULT_HIGHLIGHT_COLOR,
+                highlight_opacity,
+            )
 
-    text_rect = QtCore.QRectF(x_pos, top_y, text_width, text_height)
+    line_paths = _build_line_paths(layout, lines, font, subtitle_text)
     painter = QtGui.QPainter(rendered)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
@@ -127,21 +127,9 @@ def render_graphics_preview(
                 style.line_bg_padding,
                 style.line_bg_radius,
             )
-        baseline = top_y + line.ascent()
-        text_path = QtGui.QPainterPath()
-        text_path.addText(QtCore.QPointF(x_pos, baseline), font, subtitle_text)
-        _draw_shadow(painter, text_path, style)
-        _draw_outline(painter, text_path, style)
+        _draw_shadow(painter, line_paths, style)
+        _draw_outline(painter, line_paths, style)
         _draw_text_fill(painter, layout, style)
-        if highlight_selection is not None:
-            _draw_highlight(
-                painter,
-                layout,
-                line,
-                highlight_selection,
-                highlight_color or DEFAULT_HIGHLIGHT_COLOR,
-                highlight_opacity,
-            )
     finally:
         painter.end()
     return GraphicsPreviewResult(
@@ -165,19 +153,49 @@ def _select_highlight_word(text: str) -> Optional[_HighlightSelection]:
     return _HighlightSelection(index=index, start=match.start(), end=match.end())
 
 
-def _build_text_layout(text: str, font: QtGui.QFont, width: int) -> QtGui.QTextLayout:
+def _build_text_layout(
+    text: str,
+    font: QtGui.QFont,
+    *,
+    width: int,
+    height: int,
+    vertical_offset: float,
+    vertical_anchor: str,
+) -> tuple[QtGui.QTextLayout, list[QtGui.QTextLine], QtCore.QRectF]:
     layout = QtGui.QTextLayout(text, font)
     option = QtGui.QTextOption()
     option.setAlignment(QtCore.Qt.AlignHCenter)
-    option.setWrapMode(QtGui.QTextOption.NoWrap)
+    option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
     if _is_rtl(text):
         option.setTextDirection(QtCore.Qt.RightToLeft)
     layout.setTextOption(option)
     layout.beginLayout()
-    line = layout.createLine()
-    line.setLineWidth(width)
+    lines: list[QtGui.QTextLine] = []
+    y = 0.0
+    while True:
+        line = layout.createLine()
+        if not line.isValid():
+            break
+        line.setLineWidth(width)
+        line.setPosition(QtCore.QPointF(0.0, y))
+        y += line.height()
+        lines.append(line)
     layout.endLayout()
-    return layout
+    total_height = y
+    margin_v = float(vertical_offset)
+    if vertical_anchor == "top":
+        top_y = margin_v
+    elif vertical_anchor == "middle":
+        top_y = (height - total_height) / 2 - margin_v
+    else:
+        top_y = height - margin_v - total_height
+    top_y = max(0.0, top_y)
+    for line in lines:
+        line.setPosition(
+            QtCore.QPointF(line.position().x(), line.position().y() + top_y)
+        )
+    text_rect = _compute_text_rect(lines)
+    return layout, lines, text_rect
 
 
 def _is_rtl(text: str) -> bool:
@@ -211,7 +229,11 @@ def _draw_line_background(
     painter.restore()
 
 
-def _draw_shadow(painter: QtGui.QPainter, path: QtGui.QPainterPath, style: SubtitleStyle) -> None:
+def _draw_shadow(
+    painter: QtGui.QPainter,
+    paths: Iterable[QtGui.QPainterPath],
+    style: SubtitleStyle,
+) -> None:
     if not style.shadow_enabled or style.shadow_opacity <= 0:
         return
     offset_x = style.shadow_offset_x
@@ -221,15 +243,18 @@ def _draw_shadow(painter: QtGui.QPainter, path: QtGui.QPainterPath, style: Subti
         offset_y = style.shadow_strength
     shadow_color = _resolve_color(style.shadow_color, DEFAULT_SHADOW_COLOR, style.shadow_opacity)
     painter.save()
-    painter.translate(offset_x, offset_y)
     painter.setPen(QtCore.Qt.NoPen)
     painter.setBrush(shadow_color)
-    painter.drawPath(path)
+    painter.translate(offset_x, offset_y)
+    for path in paths:
+        painter.drawPath(path)
     painter.restore()
 
 
 def _draw_outline(
-    painter: QtGui.QPainter, path: QtGui.QPainterPath, style: SubtitleStyle
+    painter: QtGui.QPainter,
+    paths: Iterable[QtGui.QPainterPath],
+    style: SubtitleStyle,
 ) -> None:
     if not style.outline_enabled or style.outline_width <= 0:
         return
@@ -240,7 +265,8 @@ def _draw_outline(
     painter.save()
     painter.setPen(pen)
     painter.setBrush(QtCore.Qt.NoBrush)
-    painter.drawPath(path)
+    for path in paths:
+        painter.drawPath(path)
     painter.restore()
 
 
@@ -254,32 +280,51 @@ def _draw_text_fill(
     painter.restore()
 
 
-def _draw_highlight(
-    painter: QtGui.QPainter,
+def _apply_highlight_format(
     layout: QtGui.QTextLayout,
-    line: QtGui.QTextLine,
     selection: _HighlightSelection,
     highlight_color: str,
     highlight_opacity: Optional[float],
 ) -> None:
-    start_x = _cursor_x(line.cursorToX(selection.start))
-    end_x = _cursor_x(line.cursorToX(selection.end))
-    left = min(start_x, end_x)
-    width = abs(end_x - start_x)
-    rect = QtCore.QRectF(line.position().x() + left, line.position().y(), width, line.height())
     color = _resolve_color(
         highlight_color,
         DEFAULT_HIGHLIGHT_COLOR,
         highlight_opacity if highlight_opacity is not None else 1.0,
     )
-    painter.save()
-    painter.setClipRect(rect)
-    painter.setPen(color)
-    layout.draw(painter, QtCore.QPointF(0, 0))
-    painter.restore()
+    fmt = QtGui.QTextCharFormat()
+    fmt.setForeground(QtGui.QBrush(color))
+    highlight = QtGui.QTextLayout.FormatRange()
+    highlight.start = selection.start
+    highlight.length = max(0, selection.end - selection.start)
+    highlight.format = fmt
+    layout.setFormats([highlight])
 
 
-def _cursor_x(value: object) -> float:
-    if isinstance(value, (tuple, list)) and value:
-        return float(value[0])
-    return float(value)
+def _build_line_paths(
+    layout: QtGui.QTextLayout,
+    lines: Iterable[QtGui.QTextLine],
+    font: QtGui.QFont,
+    text: str,
+) -> list[QtGui.QPainterPath]:
+    paths: list[QtGui.QPainterPath] = []
+    for line in lines:
+        start = line.textStart()
+        length = line.textLength()
+        if length <= 0:
+            continue
+        fragment = text[start : start + length]
+        natural_rect = line.naturalTextRect()
+        x_pos = line.position().x() + natural_rect.x()
+        baseline = line.position().y() + line.ascent()
+        path = QtGui.QPainterPath()
+        path.addText(QtCore.QPointF(x_pos, baseline), font, fragment)
+        paths.append(path)
+    return paths
+
+
+def _compute_text_rect(lines: Iterable[QtGui.QTextLine]) -> QtCore.QRectF:
+    rect: Optional[QtCore.QRectF] = None
+    for line in lines:
+        natural_rect = line.naturalTextRect().translated(line.position())
+        rect = natural_rect if rect is None else rect.united(natural_rect)
+    return rect or QtCore.QRectF()
