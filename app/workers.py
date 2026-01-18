@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import datetime
-import hashlib
 import json
 import logging
 import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from PySide6 import QtCore
+from PySide6 import QtCore, QtGui
 from .progress import ProgressStep
 from .ass_karaoke import (
     build_ass_document_with_karaoke_fallback,
@@ -26,6 +26,7 @@ from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
 from .ffmpeg_utils import (
     ensure_ffmpeg_available,
     extract_ass_frame,
+    extract_raw_frame,
     extract_subtitled_frame,
     get_ffprobe_json,
     get_media_duration,
@@ -39,7 +40,10 @@ from .subtitle_style import (
     get_box_alpha_byte,
     legacy_style_from_model,
     to_ffmpeg_force_style,
-    to_preview_params,
+)
+from .graphics_preview_renderer import (
+    build_preview_cache_key,
+    render_graphics_preview,
 )
 from .paths import get_models_dir, get_preview_frames_dir
 from .srt_utils import (
@@ -47,6 +51,7 @@ from .srt_utils import (
     compute_srt_sha256,
     is_word_timing_stale,
     parse_srt_file,
+    select_cue_for_timestamp,
     select_preview_moment,
 )
 from .align_utils import audio_path_for_srt, build_alignment_plan
@@ -454,14 +459,8 @@ class Worker(QtCore.QObject):
             srt_mtime = int(srt_path.stat().st_mtime)
         except FileNotFoundError:
             srt_mtime = 0
-        word_timings_path = word_timings_path_for_srt(srt_path)
-        try:
-            word_timings_mtime = int(word_timings_path.stat().st_mtime)
-        except FileNotFoundError:
-            word_timings_mtime = 0
         timestamp_ms = int(round(timestamp_seconds * 1000))
         preview_width = 1280
-        style_params = to_preview_params(style)
         self.signals.log.emit(
             "Preview style resolved: "
             f"subtitle_mode={self.subtitle_mode} "
@@ -471,27 +470,104 @@ class Worker(QtCore.QObject):
             f"line_bg_opacity={style.line_bg_opacity:.2f}",
             True,
         )
-        cache_key = (
-            f"{self.video_path.resolve()}|{srt_mtime}|{timestamp_ms}|"
-            f"{style_params['font_name']}|{style_params['font_size']}|{style_params['outline']}|"
-            f"{style_params['shadow']}|{style_params['margin_v']}|{style_params['box_enabled']}|"
-            f"{style_params['box_opacity']}|{style_params['box_padding']}|"
-            f"{self.subtitle_mode}|{word_timings_mtime}|"
-            f"{self.highlight_color}|{self.highlight_opacity}|{preview_width}"
+        resolved_highlight_color = (
+            self.highlight_color or style.highlight_color or DEFAULT_HIGHLIGHT_COLOR
         )
-        cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".jpg"
+        resolved_highlight_opacity = (
+            self.highlight_opacity
+            if self.highlight_opacity is not None
+            else DEFAULT_HIGHLIGHT_OPACITY
+        )
+        word_timings_mtime = None
+        if self.subtitle_mode == "word_highlight":
+            word_timings_path = word_timings_path_for_srt(srt_path)
+            try:
+                word_timings_mtime = int(word_timings_path.stat().st_mtime)
+            except FileNotFoundError:
+                word_timings_mtime = 0
+        cache_name = (
+            build_preview_cache_key(
+                video_path=str(self.video_path.resolve()),
+                srt_mtime=srt_mtime,
+                word_timings_mtime=word_timings_mtime,
+                timestamp_ms=timestamp_ms,
+                preview_width=preview_width,
+                style=style,
+                subtitle_mode=self.subtitle_mode,
+                highlight_color=resolved_highlight_color,
+                highlight_opacity=resolved_highlight_opacity,
+            )
+            + ".jpg"
+        )
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
             return output_path
+        try:
+            raw_frame_path = None
+            with tempfile.NamedTemporaryFile(
+                dir=get_preview_frames_dir(), suffix=".jpg", delete=False
+            ) as tmp:
+                raw_frame_path = Path(tmp.name)
+            if not extract_raw_frame(
+                self.video_path,
+                timestamp_seconds,
+                raw_frame_path,
+                width=preview_width,
+            ):
+                raise RuntimeError("Failed to extract raw preview frame")
+            frame_image = QtGui.QImage(str(raw_frame_path))
+            if raw_frame_path and raw_frame_path.exists():
+                try:
+                    raw_frame_path.unlink()
+                except OSError:
+                    pass
+            if frame_image.isNull():
+                raise RuntimeError("Raw preview frame image could not be loaded")
+            cues = parse_srt_file(srt_path)
+            cue = select_cue_for_timestamp(cues, timestamp_seconds)
+            subtitle_text = cue.text if cue else ""
+            result = render_graphics_preview(
+                frame_image,
+                subtitle_text=subtitle_text,
+                style=style,
+                subtitle_mode=self.subtitle_mode,
+                highlight_color=resolved_highlight_color,
+                highlight_opacity=resolved_highlight_opacity,
+            )
+            self.signals.log.emit(
+                "Graphics preview: "
+                f"mode={self.subtitle_mode} "
+                f"bg={style.background_mode} "
+                f"font={style.font_family} "
+                f"size={style.font_size} "
+                f"outline={style.outline_width if style.outline_enabled else 0} "
+                f"shadow={style.shadow_strength if style.shadow_enabled else 0} "
+                f"radius={style.line_bg_radius} "
+                f"padding={style.line_bg_padding} "
+                f"highlight_word_index={result.highlight_word_index}",
+                True,
+            )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if not result.image.save(str(output_path)):
+                raise RuntimeError("Failed to save graphics preview image")
+            return output_path
+        except Exception as exc:
+            if raw_frame_path and raw_frame_path.exists():
+                try:
+                    raw_frame_path.unlink()
+                except OSError:
+                    pass
+            self.signals.log.emit(
+                f"Graphics preview failed: {exc}; falling back to legacy preview",
+                True,
+            )
+
+        word_timings_path = word_timings_path_for_srt(srt_path)
         if self.subtitle_mode == "word_highlight":
             style_config = build_style_config_from_subtitle_style(
                 style,
-                highlight_color=self.highlight_color or DEFAULT_HIGHLIGHT_COLOR,
-                highlight_opacity=(
-                    self.highlight_opacity
-                    if self.highlight_opacity is not None
-                    else DEFAULT_HIGHLIGHT_OPACITY
-                ),
+                highlight_color=resolved_highlight_color,
+                highlight_opacity=resolved_highlight_opacity,
             )
             cues = parse_srt_file(srt_path)
             decision = build_ass_document_with_karaoke_fallback(
