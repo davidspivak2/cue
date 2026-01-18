@@ -395,7 +395,8 @@ def _compute_text_rect_from_metrics(
 ) -> QtCore.QRectF:
     metrics = QtGui.QFontMetricsF(font)
     bounding = metrics.boundingRect(text)
-    text_w = max(1.0, bounding.width())
+    advance = metrics.horizontalAdvance(text)
+    text_w = max(1.0, bounding.width(), advance)
     text_h = max(1.0, metrics.height())
     margin_v = float(vertical_offset)
     if vertical_anchor == "top":
