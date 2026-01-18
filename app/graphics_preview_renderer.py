@@ -31,6 +31,7 @@ def build_preview_cache_key(
     *,
     video_path: str,
     srt_mtime: int,
+    word_timings_mtime: Optional[int],
     timestamp_ms: int,
     preview_width: int,
     style: SubtitleStyle,
@@ -64,6 +65,7 @@ def build_preview_cache_key(
         "subtitle_mode": subtitle_mode,
         "highlight_color": highlight_color,
         "highlight_opacity": highlight_opacity,
+        "word_timings_mtime": word_timings_mtime,
     }
     signature = json.dumps(snapshot, sort_keys=True, ensure_ascii=False)
     cache_key = f"{video_path}|{srt_mtime}|{timestamp_ms}|{preview_width}|{signature}"
