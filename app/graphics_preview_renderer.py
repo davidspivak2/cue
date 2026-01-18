@@ -108,7 +108,7 @@ def render_graphics_preview(
         _apply_word_highlight_formats(
             layout,
             text=subtitle_text,
-            base_color=_resolve_color(style.text_color, DEFAULT_TEXT_COLOR, style.text_opacity),
+            base_color=_resolve_text_color(style),
             selection=highlight_selection,
             highlight_color=highlight_color or DEFAULT_HIGHLIGHT_COLOR,
             highlight_opacity=highlight_opacity,
@@ -165,7 +165,7 @@ def _build_text_layout(
 ) -> tuple[QtGui.QTextLayout, list[QtGui.QTextLine], QtCore.QRectF, float]:
     layout = QtGui.QTextLayout(text, font)
     option = QtGui.QTextOption()
-    option.setAlignment(QtCore.Qt.AlignHCenter)
+    option.setAlignment(QtCore.Qt.AlignLeft)
     option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
     if _is_rtl(text):
         option.setTextDirection(QtCore.Qt.RightToLeft)
@@ -193,10 +193,9 @@ def _build_text_layout(
         top_y = height - margin_v - total_height
     top_y = max(0.0, top_y)
     for line in lines:
-        line.setPosition(
-            QtCore.QPointF(line.position().x(), line.position().y() + top_y)
-        )
-    text_rect = _compute_text_rect(lines)
+        centered_x = (line_width - line.naturalTextWidth()) / 2
+        line.setPosition(QtCore.QPointF(centered_x, line.position().y() + top_y))
+    text_rect = _compute_text_rect(lines, font, text)
     return layout, lines, text_rect, line_width
 
 
@@ -332,8 +331,7 @@ def _build_line_paths(
         if length <= 0:
             continue
         fragment = text[start : start + length]
-        line_text_width = line.naturalTextWidth()
-        left_x = line.position().x() + (line_width - line_text_width) / 2
+        left_x = line.position().x()
         baseline = line.position().y() + line.ascent()
         path = QtGui.QPainterPath()
         path.addText(QtCore.QPointF(left_x, baseline), font, fragment)
@@ -341,18 +339,23 @@ def _build_line_paths(
     return paths
 
 
-def _compute_text_rect(lines: Iterable[QtGui.QTextLine]) -> QtCore.QRectF:
+def _compute_text_rect(
+    lines: Iterable[QtGui.QTextLine], font: QtGui.QFont, text: str
+) -> QtCore.QRectF:
     rect: Optional[QtCore.QRectF] = None
     for line in lines:
-        natural_rect = line.naturalTextRect()
-        if natural_rect.isEmpty():
-            line_rect = QtCore.QRectF(
-                line.position().x(),
-                line.position().y(),
-                line.naturalTextWidth(),
-                line.height(),
-            )
-        else:
-            line_rect = natural_rect.translated(line.position())
+        start = line.textStart()
+        length = line.textLength()
+        if length <= 0:
+            continue
+        fragment = text[start : start + length]
+        baseline = line.position().y() + line.ascent()
+        path = QtGui.QPainterPath()
+        path.addText(QtCore.QPointF(line.position().x(), baseline), font, fragment)
+        line_rect = path.boundingRect()
         rect = line_rect if rect is None else rect.united(line_rect)
     return rect or QtCore.QRectF()
+
+
+def _resolve_text_color(style: SubtitleStyle) -> QtGui.QColor:
+    return _resolve_color(style.text_color, DEFAULT_TEXT_COLOR, style.text_opacity)
