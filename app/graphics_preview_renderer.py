@@ -262,8 +262,8 @@ def _draw_highlight(
     highlight_color: str,
     highlight_opacity: Optional[float],
 ) -> None:
-    start_x = line.cursorToX(selection.start)
-    end_x = line.cursorToX(selection.end)
+    start_x = _cursor_x(line.cursorToX(selection.start))
+    end_x = _cursor_x(line.cursorToX(selection.end))
     left = min(start_x, end_x)
     width = abs(end_x - start_x)
     rect = QtCore.QRectF(line.position().x() + left, line.position().y(), width, line.height())
@@ -277,3 +277,9 @@ def _draw_highlight(
     painter.setPen(color)
     layout.draw(painter, QtCore.QPointF(0, 0))
     painter.restore()
+
+
+def _cursor_x(value: object) -> float:
+    if isinstance(value, (tuple, list)) and value:
+        return float(value[0])
+    return float(value)
