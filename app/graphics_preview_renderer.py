@@ -119,6 +119,8 @@ def render_graphics_preview(
             style.vertical_anchor,
             style.vertical_offset,
         )
+    if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
+        text_rect = _compute_text_rect_from_frame(rendered, style)
     painter = QtGui.QPainter(rendered)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
@@ -408,6 +410,26 @@ def _compute_text_rect_from_metrics(
     top_y = max(0.0, min(float(height) - text_h, top_y))
     x = (width - text_w) / 2
     x = max(0.0, min(float(width) - text_w, x))
+    return QtCore.QRectF(x, top_y, text_w, text_h)
+
+
+def _compute_text_rect_from_frame(
+    frame: QtGui.QImage, style: SubtitleStyle
+) -> QtCore.QRectF:
+    frame_width = float(frame.width())
+    frame_height = float(frame.height())
+    text_w = max(1.0, frame_width * 0.6)
+    text_h = max(1.0, frame_height * 0.1)
+    margin_v = float(style.vertical_offset)
+    if style.vertical_anchor == "top":
+        top_y = margin_v
+    elif style.vertical_anchor == "middle":
+        top_y = (frame_height - text_h) / 2 - margin_v
+    else:
+        top_y = frame_height - margin_v - text_h
+    top_y = max(0.0, min(frame_height - text_h, top_y))
+    x = (frame_width - text_w) / 2
+    x = max(0.0, min(frame_width - text_w, x))
     return QtCore.QRectF(x, top_y, text_w, text_h)
 
 
