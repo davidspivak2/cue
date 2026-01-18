@@ -290,6 +290,11 @@ def _apply_word_highlight_formats(
     highlight_color: str,
     highlight_opacity: Optional[float],
 ) -> None:
+    resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
+    if resolved_opacity <= 0.0:
+        layout.setFormats([])
+        return
+
     base_format = QtGui.QTextLayout.FormatRange()
     base_format.start = 0
     base_format.length = len(text)
@@ -299,20 +304,18 @@ def _apply_word_highlight_formats(
     formats = [base_format]
 
     if selection is not None:
-        resolved_opacity = 1.0 if highlight_opacity is None else highlight_opacity
-        if resolved_opacity > 0.0:
-            color = _resolve_color(
-                highlight_color,
-                DEFAULT_HIGHLIGHT_COLOR,
-                resolved_opacity,
-            )
-            highlight = QtGui.QTextLayout.FormatRange()
-            highlight.start = selection.start
-            highlight.length = max(0, selection.end - selection.start)
-            highlight_char_format = QtGui.QTextCharFormat()
-            highlight_char_format.setForeground(QtGui.QBrush(color))
-            highlight.format = highlight_char_format
-            formats.append(highlight)
+        color = _resolve_color(
+            highlight_color,
+            DEFAULT_HIGHLIGHT_COLOR,
+            resolved_opacity,
+        )
+        highlight = QtGui.QTextLayout.FormatRange()
+        highlight.start = selection.start
+        highlight.length = max(0, selection.end - selection.start)
+        highlight_char_format = QtGui.QTextCharFormat()
+        highlight_char_format.setForeground(QtGui.QBrush(color))
+        highlight.format = highlight_char_format
+        formats.append(highlight)
 
     layout.setFormats(formats)
 
