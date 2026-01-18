@@ -4,6 +4,8 @@ from dataclasses import replace
 
 import pytest
 
+from app.subtitle_style import MIN_TEXT_OPACITY, normalize_style_model, preset_defaults
+
 
 def _has_non_black_pixel(image, QtGui) -> bool:
     for y in range(image.height()):
@@ -19,7 +21,6 @@ def test_graphics_preview_renderer_hebrew() -> None:
     if QtWidgets.QApplication.instance() is None:
         QtWidgets.QApplication([])
     from app.graphics_preview_renderer import render_graphics_preview
-    from app.subtitle_style import preset_defaults
 
     style = preset_defaults("Default", subtitle_mode="word_highlight")
     frame = QtGui.QImage(640, 360, QtGui.QImage.Format_ARGB32)
@@ -43,7 +44,6 @@ def test_highlight_keeps_base_text_visible() -> None:
     if QtWidgets.QApplication.instance() is None:
         QtWidgets.QApplication([])
     from app.graphics_preview_renderer import render_graphics_preview
-    from app.subtitle_style import preset_defaults
 
     style = preset_defaults("Default", subtitle_mode="word_highlight")
     style = replace(
@@ -73,7 +73,6 @@ def test_line_background_visible_without_text() -> None:
     if QtWidgets.QApplication.instance() is None:
         QtWidgets.QApplication([])
     from app.graphics_preview_renderer import render_graphics_preview
-    from app.subtitle_style import preset_defaults
 
     style = preset_defaults("Default", subtitle_mode="static")
     style = replace(
@@ -85,7 +84,8 @@ def test_line_background_visible_without_text() -> None:
         line_bg_opacity=1.0,
         line_bg_padding=10,
         line_bg_radius=0.0,
-        text_opacity=0.0,
+        text_color="#000000",
+        text_opacity=1.0,
     )
     frame = QtGui.QImage(640, 360, QtGui.QImage.Format_ARGB32)
     frame.fill(QtGui.QColor("black"))
@@ -98,3 +98,9 @@ def test_line_background_visible_without_text() -> None:
         highlight_opacity=1.0,
     )
     assert _has_non_black_pixel(result.image, QtGui)
+
+
+def test_normalize_style_model_clamps_text_opacity() -> None:
+    fallback = preset_defaults("Default")
+    normalized = normalize_style_model({"text_opacity": 0.0}, fallback)
+    assert normalized.text_opacity == MIN_TEXT_OPACITY

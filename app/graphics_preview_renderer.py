@@ -15,6 +15,7 @@ from .subtitle_style import (
     DEFAULT_OUTLINE_COLOR,
     DEFAULT_SHADOW_COLOR,
     DEFAULT_TEXT_COLOR,
+    MIN_TEXT_OPACITY,
     SubtitleStyle,
 )
 
@@ -109,11 +110,9 @@ def render_graphics_preview(
         highlight_selection = _select_highlight_word(subtitle_text)
 
     line_paths = _build_line_paths(lines)
-    text_rect = _compute_text_rect_from_paths(line_paths)
-    if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
-        text_rect = _compute_text_rect_from_lines(lines)
-    if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
-        text_rect = _compute_text_rect_from_metrics(
+    bg_rect = _compute_text_rect_from_lines(lines)
+    if bg_rect.isEmpty() or bg_rect.width() <= 0 or bg_rect.height() <= 0:
+        bg_rect = _compute_text_rect_from_metrics(
             subtitle_text,
             font,
             rendered.width(),
@@ -121,8 +120,8 @@ def render_graphics_preview(
             style.vertical_anchor,
             style.vertical_offset,
         )
-    if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
-        text_rect = _compute_text_rect_from_frame(rendered, style)
+    if bg_rect.isEmpty() or bg_rect.width() <= 0 or bg_rect.height() <= 0:
+        bg_rect = _compute_text_rect_from_frame(rendered, style)
     painter = QtGui.QPainter(rendered)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
@@ -132,7 +131,7 @@ def render_graphics_preview(
             painter.setOpacity(style.line_bg_opacity)
             _draw_line_background(
                 painter,
-                text_rect,
+                bg_rect,
                 style.line_bg_color,
                 1.0,
                 style.line_bg_padding,
@@ -141,9 +140,10 @@ def render_graphics_preview(
             painter.restore()
         _draw_shadow(painter, line_paths, style)
         _draw_outline(painter, line_paths, style)
-        if style.text_opacity > 0:
+        effective_text_opacity = max(MIN_TEXT_OPACITY, style.text_opacity)
+        if effective_text_opacity > 0:
             painter.save()
-            painter.setOpacity(style.text_opacity)
+            painter.setOpacity(effective_text_opacity)
             _draw_text_fill(painter, layout, style)
             painter.restore()
         if (
@@ -158,7 +158,7 @@ def render_graphics_preview(
                 highlight_opacity=highlight_opacity,
             )
             painter.save()
-            painter.setOpacity(style.text_opacity)
+            painter.setOpacity(effective_text_opacity)
             _draw_text_fill(painter, layout, style)
             painter.restore()
     finally:
