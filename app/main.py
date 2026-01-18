@@ -1063,10 +1063,18 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._highlight_opacity is not None
             else DEFAULT_HIGHLIGHT_OPACITY
         )
+        word_timings_mtime = None
+        if self._subtitle_mode == "word_highlight":
+            word_timings_path = word_timings_path_for_srt(srt_path)
+            try:
+                word_timings_mtime = int(word_timings_path.stat().st_mtime)
+            except FileNotFoundError:
+                word_timings_mtime = 0
         cache_name = (
             build_preview_cache_key(
                 video_path=str(self._video_path.resolve()),
                 srt_mtime=srt_mtime,
+                word_timings_mtime=word_timings_mtime,
                 timestamp_ms=timestamp_ms,
                 preview_width=preview_width,
                 style=style,
