@@ -113,17 +113,24 @@ def render_graphics_preview(
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
     try:
         if style.background_mode == "line":
+            painter.save()
+            painter.setOpacity(style.line_bg_opacity)
             _draw_line_background(
                 painter,
                 text_rect,
                 style.line_bg_color,
-                style.line_bg_opacity,
+                1.0,
                 style.line_bg_padding,
                 style.line_bg_radius,
             )
+            painter.restore()
         _draw_shadow(painter, line_paths, style)
         _draw_outline(painter, line_paths, style)
-        _draw_text_fill(painter, layout, style)
+        if style.text_opacity > 0:
+            painter.save()
+            painter.setOpacity(style.text_opacity)
+            _draw_text_fill(painter, layout, style)
+            painter.restore()
         if (
             highlight_selection is not None
             and (1.0 if highlight_opacity is None else float(highlight_opacity)) > 0.0
@@ -135,7 +142,10 @@ def render_graphics_preview(
                 highlight_color=highlight_color or DEFAULT_HIGHLIGHT_COLOR,
                 highlight_opacity=highlight_opacity,
             )
+            painter.save()
+            painter.setOpacity(style.text_opacity)
             _draw_text_fill(painter, layout, style)
+            painter.restore()
     finally:
         painter.end()
     return GraphicsPreviewResult(
