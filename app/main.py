@@ -1100,6 +1100,16 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._highlight_opacity is not None
             else DEFAULT_HIGHLIGHT_OPACITY
         )
+        debug_highlight_preview = (
+            self._subtitle_mode == "word_highlight"
+            and _env_enabled("HSG_DEBUG_HIGHLIGHT_PREVIEW")
+        )
+        debug_force_rerender = debug_highlight_preview and _env_enabled(
+            "HSG_DEBUG_HIGHLIGHT_PREVIEW_FORCE_RERENDER"
+        )
+        target_highlight = (
+            QtGui.QColor(resolved_highlight_color) if debug_highlight_preview else None
+        )
         word_timings_mtime = None
         if self._subtitle_mode == "word_highlight":
             word_timings_path = word_timings_path_for_srt(srt_path)
@@ -1131,11 +1141,28 @@ class MainWindow(QtWidgets.QMainWindow):
             f"highlight_opacity={resolved_highlight_opacity}",
             True,
         )
-        if output_path.exists() and output_path.stat().st_size > 0:
+        if output_path.exists() and output_path.stat().st_size > 0 and not debug_force_rerender:
             self._log(
                 f"Preview cache hit: {output_path}; skipping render",
                 True,
             )
+            if debug_highlight_preview and target_highlight is not None:
+                cached_img = QtGui.QImage(str(output_path))
+                cached_count = _count_near_color_pixels(cached_img, target_highlight)
+                jpg_size = 0
+                try:
+                    jpg_size = output_path.stat().st_size
+                except OSError:
+                    pass
+                self._log(
+                    "HLDIAG_CACHE: "
+                    f"font_size={style.font_size} "
+                    f"file={output_path.name} "
+                    f"jpg_bytes={jpg_size} "
+                    f"highlight_color={resolved_highlight_color} "
+                    f"cached_count={cached_count}",
+                    True,
+                )
             return output_path
         try:
             raw_frame_path = None
@@ -1170,14 +1197,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 highlight_opacity=resolved_highlight_opacity,
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            debug_highlight_preview = (
-                self._subtitle_mode == "word_highlight"
-                and _env_enabled("HSG_DEBUG_HIGHLIGHT_PREVIEW")
-            )
-            target_highlight = None
             pre_count = 0
-            if debug_highlight_preview:
-                target_highlight = QtGui.QColor(resolved_highlight_color)
+            if debug_highlight_preview and target_highlight is not None:
                 pre_count = _count_near_color_pixels(result.image, target_highlight)
                 pre_png_path = Path(f"{output_path}.prejpg.png")
                 try:
