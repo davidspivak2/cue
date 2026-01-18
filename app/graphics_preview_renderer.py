@@ -152,8 +152,12 @@ def render_graphics_preview(
         ):
             _draw_highlight_overlay(
                 painter,
-                layout,
-                lines,
+                subtitle_text,
+                font,
+                rendered.width(),
+                rendered.height(),
+                style.vertical_offset,
+                style.vertical_anchor,
                 highlight_selection,
                 highlight_color or DEFAULT_HIGHLIGHT_COLOR,
                 highlight_opacity,
@@ -309,8 +313,12 @@ def _draw_text_fill(
 
 def _draw_highlight_overlay(
     painter: QtGui.QPainter,
-    layout: QtGui.QTextLayout,
-    lines: Iterable[QtGui.QTextLine],
+    text: str,
+    font: QtGui.QFont,
+    width: int,
+    height: int,
+    vertical_offset: float,
+    vertical_anchor: str,
     selection: _HighlightSelection,
     highlight_color: str,
     highlight_opacity: Optional[float],
@@ -318,33 +326,53 @@ def _draw_highlight_overlay(
     resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
     if resolved_opacity <= 0.0:
         return
-    color = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
-    color.setAlphaF(1.0)
-    for line in lines:
-        line_start = line.textStart()
-        line_end = line_start + line.textLength()
-        overlap_start = max(selection.start, line_start)
-        overlap_end = min(selection.end, line_end)
-        if overlap_start >= overlap_end:
-            continue
-        local_start = overlap_start - line_start
-        local_end = overlap_end - line_start
-        x1 = _cursor_to_x(line.cursorToX(local_start))
-        x2 = _cursor_to_x(line.cursorToX(local_end))
-        left = min(x1, x2)
-        right = max(x1, x2)
-        clip = QtCore.QRectF(
-            line.position().x() + left - 2.0,
-            line.position().y(),
-            (right - left) + 4.0,
-            line.height(),
-        )
-        painter.save()
-        painter.setClipRect(clip)
-        painter.setOpacity(resolved_opacity)
-        painter.setPen(QtGui.QPen(color))
-        layout.draw(painter, QtCore.QPointF(0, 0))
-        painter.restore()
+    overlay_layout, _, _ = _build_text_layout(
+        text,
+        font,
+        width=width,
+        height=height,
+        vertical_offset=vertical_offset,
+        vertical_anchor=vertical_anchor,
+    )
+    transparent = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
+    transparent.setAlphaF(0.0)
+    highlight_color_value = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
+    highlight_color_value.setAlphaF(resolved_opacity)
+    transparent_format = QtGui.QTextCharFormat()
+    transparent_format.setForeground(QtGui.QBrush(transparent))
+    highlight_format = QtGui.QTextCharFormat()
+    highlight_format.setForeground(QtGui.QBrush(highlight_color_value))
+
+    formats: list[QtGui.QTextLayout.FormatRange] = []
+    prefix_length = max(0, min(selection.start, len(text)))
+    highlight_length = max(0, min(selection.end, len(text)) - prefix_length)
+    suffix_start = prefix_length + highlight_length
+    suffix_length = max(0, len(text) - suffix_start)
+    if prefix_length > 0:
+        prefix = QtGui.QTextLayout.FormatRange()
+        prefix.start = 0
+        prefix.length = prefix_length
+        prefix.format = transparent_format
+        formats.append(prefix)
+    if highlight_length > 0:
+        highlight = QtGui.QTextLayout.FormatRange()
+        highlight.start = prefix_length
+        highlight.length = highlight_length
+        highlight.format = highlight_format
+        formats.append(highlight)
+    if suffix_length > 0:
+        suffix = QtGui.QTextLayout.FormatRange()
+        suffix.start = suffix_start
+        suffix.length = suffix_length
+        suffix.format = transparent_format
+        formats.append(suffix)
+
+    overlay_layout.setFormats(formats)
+    painter.save()
+    painter.setOpacity(1.0)
+    painter.setPen(QtGui.QColor(0, 0, 0, 0))
+    overlay_layout.draw(painter, QtCore.QPointF(0, 0))
+    painter.restore()
 
 
 def _build_line_paths(
@@ -364,10 +392,7 @@ def _build_line_paths(
     return paths
 
 
-def _cursor_to_x(value: object) -> float:
-    if isinstance(value, (tuple, list)) and value:
-        return float(value[0])
-    return float(value)
+
 
 
 def _compute_text_rect_from_paths(paths: Iterable[QtGui.QPainterPath]) -> QtCore.QRectF:
