@@ -23,6 +23,7 @@ DEFAULT_LINE_BG_COLOR = "#000000"
 DEFAULT_WORD_BG_COLOR = "#000000"
 DEFAULT_SUBTITLE_MODE = "word_highlight"
 DEFAULT_HIGHLIGHT_COLOR = "#FFD400"
+MIN_TEXT_OPACITY = 0.10
 
 VALID_FONT_STYLES = {"regular", "bold", "italic"}
 VALID_BACKGROUND_MODES = {"none", "line", "word"}
@@ -218,7 +219,10 @@ def normalize_style_model(raw: object, fallback: SubtitleStyle) -> SubtitleStyle
             raw.get("font_style"), VALID_FONT_STYLES, fallback.font_style
         ),
         text_color=_coerce_color(raw.get("text_color"), fallback.text_color),
-        text_opacity=max(0.0, min(_coerce_float(raw.get("text_opacity"), fallback.text_opacity), 1.0)),
+        text_opacity=max(
+            MIN_TEXT_OPACITY,
+            min(_coerce_float(raw.get("text_opacity"), fallback.text_opacity), 1.0),
+        ),
         letter_spacing=_coerce_float(raw.get("letter_spacing"), fallback.letter_spacing),
         outline_enabled=_coerce_bool(raw.get("outline_enabled"), fallback.outline_enabled),
         outline_width=_coerce_float(raw.get("outline_width"), fallback.outline_width),
