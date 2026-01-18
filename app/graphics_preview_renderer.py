@@ -150,16 +150,14 @@ def render_graphics_preview(
             highlight_selection is not None
             and (1.0 if highlight_opacity is None else float(highlight_opacity)) > 0.0
         ):
-            _apply_highlight_overlay_formats(
+            _draw_highlight_overlay(
+                painter,
                 layout,
-                text=subtitle_text,
-                selection=highlight_selection,
-                highlight_color=highlight_color or DEFAULT_HIGHLIGHT_COLOR,
-                highlight_opacity=highlight_opacity,
+                lines,
+                highlight_selection,
+                highlight_color or DEFAULT_HIGHLIGHT_COLOR,
+                highlight_opacity,
             )
-            painter.save()
-            _draw_text_fill(painter, layout, style)
-            painter.restore()
     finally:
         painter.end()
     return GraphicsPreviewResult(
@@ -302,63 +300,51 @@ def _draw_outline(
 def _draw_text_fill(
     painter: QtGui.QPainter, layout: QtGui.QTextLayout, style: SubtitleStyle
 ) -> None:
-    text_color = _resolve_color(style.text_color, DEFAULT_TEXT_COLOR, style.text_opacity)
+    text_color = _resolve_color(style.text_color, DEFAULT_TEXT_COLOR, 1.0)
     painter.save()
     painter.setPen(text_color)
     layout.draw(painter, QtCore.QPointF(0, 0))
     painter.restore()
 
 
-def _apply_highlight_overlay_formats(
+def _draw_highlight_overlay(
+    painter: QtGui.QPainter,
     layout: QtGui.QTextLayout,
-    *,
-    text: str,
-    selection: Optional[_HighlightSelection],
+    lines: Iterable[QtGui.QTextLine],
+    selection: _HighlightSelection,
     highlight_color: str,
     highlight_opacity: Optional[float],
 ) -> None:
     resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
-    if selection is None or resolved_opacity <= 0.0:
-        layout.setFormats([])
+    if resolved_opacity <= 0.0:
         return
-    transparent = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
-    transparent.setAlphaF(0.0)
-    transparent_format = QtGui.QTextCharFormat()
-    transparent_format.setForeground(QtGui.QBrush(transparent))
-    highlight_format = QtGui.QTextCharFormat()
-    highlight_color_value = _resolve_color(
-        highlight_color,
-        DEFAULT_HIGHLIGHT_COLOR,
-        resolved_opacity,
-    )
-    highlight_format.setForeground(QtGui.QBrush(highlight_color_value))
-
-    formats: list[QtGui.QTextLayout.FormatRange] = []
-    prefix_length = max(0, min(selection.start, len(text)))
-    highlight_length = max(0, min(selection.end, len(text)) - prefix_length)
-    suffix_start = prefix_length + highlight_length
-    suffix_length = max(0, len(text) - suffix_start)
-
-    if prefix_length > 0:
-        prefix = QtGui.QTextLayout.FormatRange()
-        prefix.start = 0
-        prefix.length = prefix_length
-        prefix.format = transparent_format
-        formats.append(prefix)
-    if highlight_length > 0:
-        highlight = QtGui.QTextLayout.FormatRange()
-        highlight.start = prefix_length
-        highlight.length = highlight_length
-        highlight.format = highlight_format
-        formats.append(highlight)
-    if suffix_length > 0:
-        suffix = QtGui.QTextLayout.FormatRange()
-        suffix.start = suffix_start
-        suffix.length = suffix_length
-        suffix.format = transparent_format
-        formats.append(suffix)
-
-    layout.setFormats(formats)
+    color = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
+    color.setAlphaF(1.0)
+    for line in lines:
+        line_start = line.textStart()
+        line_end = line_start + line.textLength()
+        overlap_start = max(selection.start, line_start)
+        overlap_end = min(selection.end, line_end)
+        if overlap_start >= overlap_end:
+            continue
+        local_start = overlap_start - line_start
+        local_end = overlap_end - line_start
+        x1 = _cursor_x(line.cursorToX(local_start))
+        x2 = _cursor_x(line.cursorToX(local_end))
+        left = min(x1, x2)
+        right = max(x1, x2)
+        clip = QtCore.QRectF(
+            line.position().x() + left - 2.0,
+            line.position().y(),
+            (right - left) + 4.0,
+            line.height(),
+        )
+        painter.save()
+        painter.setClipRect(clip)
+        painter.setOpacity(resolved_opacity)
+        painter.setPen(QtGui.QPen(color))
+        layout.draw(painter, QtCore.QPointF(0, 0))
+        painter.restore()
 
 
 def _build_line_paths(
@@ -370,19 +356,10 @@ def _build_line_paths(
             continue
         baseline = QtCore.QPointF(line.position().x(), line.position().y() + line.ascent())
         line_path = QtGui.QPainterPath()
-        for glyph_run in line.glyphRuns():
-            raw_font = glyph_run.rawFont()
-            positions = glyph_run.positions()
-            indexes = glyph_run.glyphIndexes()
-            for glyph_index, glyph_pos in zip(indexes, positions):
-                glyph_path = raw_font.pathForGlyph(glyph_index)
-                glyph_path.translate(baseline + glyph_pos)
-                line_path.addPath(glyph_path)
-        if line_path.isEmpty():
-            start = line.textStart()
-            length = line.textLength()
-            fragment = text[start : start + length]
-            line_path.addText(baseline, font, fragment)
+        start = line.textStart()
+        length = line.textLength()
+        fragment = text[start : start + length]
+        line_path.addText(baseline, font, fragment)
         paths.append(line_path)
     return paths
 
