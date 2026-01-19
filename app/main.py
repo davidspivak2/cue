@@ -17,6 +17,7 @@ import sys
 import subprocess
 import tempfile
 import time
+import zipfile
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -332,6 +333,9 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.diagnostics_enabled_checkbox.toggled.connect(
             self._on_diagnostics_enabled_toggled
+        )
+        self.diagnostics_archive_checkbox.toggled.connect(
+            self._on_diagnostics_archive_toggled
         )
         self.diagnostics_success_checkbox.toggled.connect(
             self._on_diagnostics_success_toggled
@@ -1382,11 +1386,15 @@ class MainWindow(QtWidgets.QMainWindow):
         diagnostics_card = self._build_settings_section("Diagnostics")
         diagnostics_layout = diagnostics_card.layout()
 
+        self.diagnostics_archive_checkbox = QtWidgets.QCheckBox(
+            "Zip logs and outputs on exit"
+        )
         self.diagnostics_enabled_checkbox = QtWidgets.QCheckBox("Enable diagnostics logging")
         self.diagnostics_success_checkbox = QtWidgets.QCheckBox(
             "Write diagnostics on successful completion"
         )
 
+        diagnostics_layout.addWidget(self.diagnostics_archive_checkbox)
         diagnostics_layout.addWidget(self.diagnostics_enabled_checkbox)
         diagnostics_layout.addWidget(self.diagnostics_success_checkbox)
 
@@ -1422,6 +1430,13 @@ class MainWindow(QtWidgets.QMainWindow):
         urls = event.mimeData().urls()
         if urls:
             self._handle_video_dropped(Path(urls[0].toLocalFile()))
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
+        try:
+            self._archive_exit_bundle()
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("Failed to archive logs on exit: %s", exc)
+        super().closeEvent(event)
 
     def set_state(self, state: AppState) -> None:
         self._state = state
@@ -2103,6 +2118,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.save_ask_radio.setChecked(True)
         self.save_policy_group.blockSignals(False)
 
+        self.diagnostics_archive_checkbox.blockSignals(True)
+        self.diagnostics_archive_checkbox.setChecked(
+            self._diagnostics_settings.archive_on_exit
+        )
+        self.diagnostics_archive_checkbox.blockSignals(False)
+
         self.diagnostics_enabled_checkbox.blockSignals(True)
         self.diagnostics_enabled_checkbox.setChecked(self._diagnostics_settings.enabled)
         self.diagnostics_enabled_checkbox.blockSignals(False)
@@ -2153,13 +2174,88 @@ class MainWindow(QtWidgets.QMainWindow):
         for checkbox in self.diagnostics_category_checkboxes.values():
             checkbox.setEnabled(enabled)
 
+    def _archive_exit_bundle(self) -> None:
+        if not self._diagnostics_settings.archive_on_exit:
+            return
+        if not self._video_path or not self._video_path.exists():
+            return
+
+        destination_dir = self._video_path.parent
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        zip_path = destination_dir / f"hebrew_subtitles_bundle_{timestamp}.zip"
+        entries = self._build_exit_archive_entries(zip_path)
+        if not entries:
+            return
+        try:
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for source, arcname in entries:
+                    archive.write(source, arcname)
+            self._logger.info("Exit archive created: %s", zip_path)
+        except Exception:
+            zip_path.unlink(missing_ok=True)
+            raise
+
+    def _build_exit_archive_entries(self, zip_path: Path) -> list[tuple[Path, str]]:
+        entries: dict[str, Path] = {}
+        if self._log_dir.exists():
+            for path in self._log_dir.rglob("*"):
+                if not path.is_file():
+                    continue
+                arcname = f"logs/{path.relative_to(self._log_dir).as_posix()}"
+                entries.setdefault(arcname, path)
+
+        output_dir = self._output_dir or (self._video_path.parent if self._video_path else None)
+        if output_dir and output_dir.exists():
+            for path in output_dir.glob("diag_*.json"):
+                if path.is_file() and path != zip_path:
+                    entries.setdefault(f"diagnostics/{path.name}", path)
+
+        for path in self._collect_output_files(output_dir, zip_path):
+            entries.setdefault(f"outputs/{path.name}", path)
+
+        return [(path, arcname) for arcname, path in entries.items()]
+
+    def _collect_output_files(self, output_dir: Optional[Path], zip_path: Path) -> set[Path]:
+        output_files: set[Path] = set()
+        if not self._video_path:
+            return output_files
+        video_stem = self._video_path.stem
+        resolved_output_dir = output_dir or self._video_path.parent
+        if resolved_output_dir.exists():
+            for path in resolved_output_dir.iterdir():
+                if not path.is_file():
+                    continue
+                if path == self._video_path or path == zip_path:
+                    continue
+                if path.name.startswith(video_stem):
+                    output_files.add(path)
+
+        for path in (self._last_srt_path, self._word_timings_path, self._last_output_video):
+            if path and path.exists():
+                output_files.add(path)
+
+        audio_path = resolved_output_dir / f"{video_stem}_audio_for_whisper.wav"
+        if audio_path.exists():
+            output_files.add(audio_path)
+
+        output_files.discard(self._video_path)
+        output_files.discard(zip_path)
+        return output_files
+
     def _store_diagnostics_settings(self) -> None:
         self._config["diagnostics"] = {
             "enabled": self._diagnostics_settings.enabled,
             "write_on_success": self._diagnostics_settings.write_on_success,
+            "archive_on_exit": self._diagnostics_settings.archive_on_exit,
             "categories": dict(self._diagnostics_settings.categories),
         }
         self._save_config()
+
+    def _on_diagnostics_archive_toggled(self, checked: bool) -> None:
+        if checked == self._diagnostics_settings.archive_on_exit:
+            return
+        self._diagnostics_settings.archive_on_exit = checked
+        self._store_diagnostics_settings()
 
     def _on_diagnostics_enabled_toggled(self, checked: bool) -> None:
         if checked == self._diagnostics_settings.enabled:
@@ -2669,12 +2765,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return DiagnosticsSettings(
                 enabled=False,
                 write_on_success=False,
+                archive_on_exit=False,
                 categories=default_categories.copy(),
             )
         enabled = raw.get("enabled") if isinstance(raw.get("enabled"), bool) else False
         write_on_success = (
             raw.get("write_on_success")
             if isinstance(raw.get("write_on_success"), bool)
+            else False
+        )
+        archive_on_exit = (
+            raw.get("archive_on_exit")
+            if isinstance(raw.get("archive_on_exit"), bool)
             else False
         )
         categories = default_categories.copy()
@@ -2686,6 +2788,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return DiagnosticsSettings(
             enabled=enabled,
             write_on_success=write_on_success,
+            archive_on_exit=archive_on_exit,
             categories=categories,
         )
 

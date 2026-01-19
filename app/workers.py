@@ -102,6 +102,7 @@ class TranscriptionSettings:
 class DiagnosticsSettings:
     enabled: bool
     write_on_success: bool
+    archive_on_exit: bool
     categories: dict[str, bool]
 
 
