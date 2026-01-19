@@ -1945,11 +1945,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if success:
             if task_type == TaskType.GENERATE_SRT:
                 self._subtitles_reviewed = False
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Subtitles are ready",
-                    "Subtitles are ready. You can export the video.",
-                )
                 self.set_state(AppState.SUBTITLES_READY)
                 self._update_preview_card()
             else:
