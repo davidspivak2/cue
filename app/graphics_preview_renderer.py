@@ -367,25 +367,25 @@ def _draw_highlight_overlay(
         pad = 3.0
         tolerance = 1.0
 
-        def _cursor_x_in_layout(line: QtGui.QTextLine, cursor_x: float) -> float:
-            line_rect = line.naturalTextRect()
+        def _cursor_x_in_layout(
+            line_rect: QtCore.QRectF, line_rect_layout: QtCore.QRectF, cursor_x: float
+        ) -> float:
             local_min = min(line_rect.left(), line_rect.right())
             local_max = max(line_rect.left(), line_rect.right())
-            line_offset = line.position().x()
+            layout_min = min(line_rect_layout.left(), line_rect_layout.right())
+            layout_max = max(line_rect_layout.left(), line_rect_layout.right())
 
             def _within(value: float, lower: float, upper: float) -> bool:
                 return lower - tolerance <= value <= upper + tolerance
 
-            if _within(cursor_x, local_min, local_max):
-                return cursor_x + line_offset
-            offset_min = local_min + line_offset
-            offset_max = local_max + line_offset
-            if _within(cursor_x, offset_min, offset_max):
+            if _within(cursor_x, layout_min, layout_max):
                 return cursor_x
+            if _within(cursor_x, local_min, local_max):
+                return cursor_x + line.position().x()
             delta_local = min(abs(cursor_x - local_min), abs(cursor_x - local_max))
-            delta_offset = min(abs(cursor_x - offset_min), abs(cursor_x - offset_max))
-            if delta_local <= delta_offset:
-                return cursor_x + line_offset
+            delta_layout = min(abs(cursor_x - layout_min), abs(cursor_x - layout_max))
+            if delta_local <= delta_layout:
+                return cursor_x + line.position().x()
             return cursor_x
 
         for line_index in range(layout.lineCount()):
@@ -398,17 +398,25 @@ def _draw_highlight_overlay(
                 continue
             local_start = max(selection.start, line_start) - line_start
             local_end = min(selection.end, line_end) - line_start
-            start_x = _cursor_x_in_layout(line, _cursor_to_x(line.cursorToX(local_start)))
-            end_x = _cursor_x_in_layout(line, _cursor_to_x(line.cursorToX(local_end)))
+            line_rect = line.naturalTextRect()
+            line_rect_layout = line_rect.translated(line.position())
+            start_x = _cursor_x_in_layout(
+                line_rect, line_rect_layout, _cursor_to_x(line.cursorToX(local_start))
+            )
+            end_x = _cursor_x_in_layout(
+                line_rect, line_rect_layout, _cursor_to_x(line.cursorToX(local_end))
+            )
             clip_left = min(start_x, end_x)
             clip_right = max(start_x, end_x)
             clip_width = max(1.0, clip_right - clip_left)
             clip_rect = QtCore.QRectF(
                 clip_left - pad,
-                line.position().y(),
+                line_rect_layout.top(),
                 clip_width + pad * 2,
-                line.height(),
-            )
+                line_rect_layout.height(),
+            ).intersected(line_rect_layout)
+            if clip_rect.isEmpty():
+                continue
             painter.save()
             painter.setClipRect(clip_rect, QtCore.Qt.IntersectClip)
             layout.draw(painter, QtCore.QPointF(0, 0), selections)
