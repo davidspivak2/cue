@@ -390,6 +390,14 @@ def _supports_glyph_runs() -> bool:
     return hasattr(QtGui.QTextLine, "glyphRuns") or hasattr(QtGui.QTextLayout, "glyphRuns")
 
 
+def _apply_font_matrix(path: QtGui.QPainterPath, raw_font: QtGui.QRawFont) -> QtGui.QPainterPath:
+    if hasattr(raw_font, "fontMatrix"):
+        matrix = raw_font.fontMatrix()
+        if not matrix.isIdentity():
+            return matrix.map(path)
+    return path
+
+
 def _glyph_runs_for_line(
     layout: QtGui.QTextLayout, line: QtGui.QTextLine
 ) -> Optional[list[QtGui.QGlyphRun]]:
@@ -420,25 +428,66 @@ def _build_line_paths(
         if not line.textLength():
             continue
         baseline = QtCore.QPointF(line.position().x(), line.position().y() + line.ascent())
-        line_path = QtGui.QPainterPath()
+        expected = QtCore.QRectF(
+            line.position().x(),
+            line.position().y(),
+            line.naturalTextWidth(),
+            line.height(),
+        )
         runs = _glyph_runs_for_line(layout, line) if glyph_runs_supported else None
         if runs is None:
+            line_path = QtGui.QPainterPath()
             start = line.textStart()
             length = line.textLength()
             fragment = text[start : start + length]
             line_path.addText(baseline, font, fragment)
             paths.append(line_path)
             continue
+
+        candidate_layout = QtGui.QPainterPath()
+        candidate_baseline = QtGui.QPainterPath()
         for run in runs:
             raw = run.rawFont()
             glyph_indexes = run.glyphIndexes()
             positions = run.positions()
             for glyph_index, position in zip(glyph_indexes, positions):
-                glyph_path = raw.pathForGlyph(glyph_index)
-                glyph_path.translate(
+                glyph_path = _apply_font_matrix(raw.pathForGlyph(glyph_index), raw)
+                glyph_layout = QtGui.QPainterPath(glyph_path)
+                glyph_layout.translate(position.x(), position.y())
+                candidate_layout.addPath(glyph_layout)
+                glyph_baseline = QtGui.QPainterPath(glyph_path)
+                glyph_baseline.translate(
                     baseline.x() + position.x(), baseline.y() + position.y()
                 )
-                line_path.addPath(glyph_path)
+                candidate_baseline.addPath(glyph_baseline)
+
+        rect_layout = candidate_layout.boundingRect()
+        rect_baseline = candidate_baseline.boundingRect()
+        expected_center = expected.center()
+
+        def _center_distance(rect: QtCore.QRectF) -> float:
+            center = rect.center()
+            dx = center.x() - expected_center.x()
+            dy = center.y() - expected_center.y()
+            return (dx * dx + dy * dy) ** 0.5
+
+        layout_intersects = rect_layout.intersects(expected)
+        baseline_intersects = rect_baseline.intersects(expected)
+        if layout_intersects and not baseline_intersects:
+            line_path = candidate_layout
+        elif baseline_intersects and not layout_intersects:
+            line_path = candidate_baseline
+        elif layout_intersects and baseline_intersects:
+            if _center_distance(rect_layout) <= _center_distance(rect_baseline):
+                line_path = candidate_layout
+            else:
+                line_path = candidate_baseline
+        else:
+            if _center_distance(rect_layout) <= _center_distance(rect_baseline):
+                line_path = candidate_layout
+            else:
+                line_path = candidate_baseline
+
         paths.append(line_path)
     return paths
 
