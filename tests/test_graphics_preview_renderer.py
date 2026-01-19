@@ -275,7 +275,11 @@ def test_wrapped_outline_shadow_alignment() -> None:
     QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
     if QtWidgets.QApplication.instance() is None:
         QtWidgets.QApplication([])
-    from app.graphics_preview_renderer import render_graphics_preview, _supports_glyph_runs
+    from app.graphics_preview_renderer import (
+        _build_text_layout,
+        _supports_glyph_runs,
+        render_graphics_preview,
+    )
 
     if not _supports_glyph_runs():
         pytest.skip("Glyph-run APIs not available; skipping wrapped-line alignment test.")
@@ -289,8 +293,27 @@ def test_wrapped_outline_shadow_alignment() -> None:
         text_opacity=1.0,
     )
 
+    font = QtGui.QFont(base_style.font_family, int(round(base_style.font_size)))
+
+    width = 320
+    lines = []
+    while width <= 800:
+        layout, lines, _ = _build_text_layout(
+            text,
+            font,
+            width=width,
+            height=240,
+            vertical_offset=base_style.vertical_offset,
+            vertical_anchor=base_style.vertical_anchor,
+        )
+        if len(lines) == 2:
+            break
+        width += 20
+    if len(lines) != 2:
+        pytest.skip("Could not find a width that yields exactly two lines.")
+
     def _render(style):
-        frame = QtGui.QImage(320, 240, QtGui.QImage.Format_ARGB32)
+        frame = QtGui.QImage(width, 240, QtGui.QImage.Format_ARGB32)
         frame.fill(QtGui.QColor("black"))
         return render_graphics_preview(
             frame,
