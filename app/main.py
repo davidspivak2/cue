@@ -845,6 +845,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not color.isValid():
             return
         hex_value = color.name().upper()
+        self._apply_highlight_color(hex_value)
+
+    def _apply_highlight_color(self, hex_value: str) -> None:
         if hex_value == self._highlight_color:
             return
         self._highlight_color = hex_value
@@ -857,6 +860,7 @@ class MainWindow(QtWidgets.QMainWindow):
         current_style["highlight_color"] = hex_value
         self._store_subtitle_style_config()
         self._update_highlight_color_display()
+        self._schedule_preview_refresh()
 
     def _toggle_subtitle_style_panel(self, checked: bool) -> None:
         self._subtitle_style_panel_open = checked
