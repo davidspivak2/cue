@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — UX/UI Specification (Design Contract)
 
-**Last updated:** 2026-01-20  
+**Last updated:** 2026-02-27  
 **Scope:** This document describes the intended **pixel-level UI behavior** for Hebrew Subtitle GUI, and the interaction rules the app should follow as it continues the PR1–PR13 overhaul.
 
 This is intentionally opinionated. If an implementation choice conflicts with this spec, update the spec (with rationale) or change the implementation.
@@ -213,26 +213,23 @@ Future (PR11):
 
 ### State D — SUBTITLES_READY
 
-**Goal:** Make the result feel real; allow review/edit before export.
+**Goal:** Make the result feel real; allow styling adjustments before export.
 
 Current implementation:
-- Title: “Subtitles are ready”
 - Actions:
-  - Primary: “Edit in Subtitle Edit”
-  - Secondary: “Export video with subtitles”
-  - Tertiary: “Open subtitles”, “Open folder”
-- Two-column layout
-  - Left: Preview Card (subtitle still + optional playback)
-    - Click still frame to expand preview.
-    - Play/pause button, Stop button, scrubber, and time label.
-    - Loading state when generating the preview clip.
-    - Word highlight mode uses the ASS renderer for stills + playback.
-  - Right: Style Card (preset dropdown + “Customize…” panel)
-    - Subtitle mode selector: “Word highlight (recommended)” and “Static”.
+  - Primary: “Create final video” (single CTA, inside the Style card).
+- Two-column layout:
+  - Left: Preview Card (subtitle still only)
+    - Click still frame to expand preview in a dialog.
+    - Preview stills are graphics-rendered to match export styling.
+  - Right: Style Card (grouped sections + CTA)
+    - Mode: segmented control (“Static” / “Word highlight”).
     - Highlight color row (only visible when Subtitle mode = Word highlight).
-    - Presets: Default, Large outline, Large outline + box, Custom.
-    - Custom controls: font size, outline, shadow, bottom margin, box enable, box opacity, box padding.
-    - “Reset to preset” returns to the selected preset.
+    - Presets: Default, Large outline, Large outline + box, Custom (text list).
+    - Quick tweaks: font size, outline width, shadow, bottom margin.
+    - Background: none/line/word segmented control (Word disabled with helper text).
+    - Line background controls: opacity + padding (visible when Line is selected).
+    - Advanced: “Show advanced options” toggle reveals extra controls and a “Reset to preset” action.
 
 ---
 
