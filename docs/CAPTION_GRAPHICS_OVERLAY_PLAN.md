@@ -1,5 +1,11 @@
 # Caption Graphics Overlay Plan
 
+## Status update (2026-02-27)
+- The Subtitles Ready screen now uses a two-column layout with a single CTA labeled “Create final video”.
+- Preview stills are graphics-rendered and highlight the second word in Word highlight mode.
+- Preview playback controls are no longer surfaced in the Subtitles Ready view.
+- Word background is still disabled in the UI (“available in a future update”).
+
 ## Goals and non-goals
 
 ### Goals
