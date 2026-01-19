@@ -137,14 +137,16 @@ def _row_target_count(image, QtGui, target, tolerance: int, y: int) -> int:
     return count
 
 
-def _row_clusters(image, QtGui, target, tolerance: int) -> list[tuple[int, int]]:
+def _row_clusters(
+    image, QtGui, target, tolerance: int, min_pixels_per_row: int
+) -> list[tuple[int, int]]:
     clusters: list[tuple[int, int]] = []
     start = None
     for y in range(image.height()):
         row_count = _row_target_count(image, QtGui, target, tolerance, y)
-        if row_count > 0 and start is None:
+        if row_count >= min_pixels_per_row and start is None:
             start = y
-        elif row_count == 0 and start is not None:
+        elif row_count < min_pixels_per_row and start is not None:
             clusters.append((start, y - 1))
             start = None
     if start is not None:
@@ -152,9 +154,11 @@ def _row_clusters(image, QtGui, target, tolerance: int) -> list[tuple[int, int]]
     return clusters
 
 
-def _line_bboxes(image, QtGui, target_hex: str, tolerance: int) -> list[tuple[int, int, int, int]]:
+def _line_bboxes(
+    image, QtGui, target_hex: str, tolerance: int, min_pixels_per_row: int = 1
+) -> list[tuple[int, int, int, int]]:
     target = QtGui.QColor(target_hex)
-    clusters = _row_clusters(image, QtGui, target, tolerance)
+    clusters = _row_clusters(image, QtGui, target, tolerance, min_pixels_per_row)
     bboxes: list[tuple[int, int, int, int]] = []
     for start_y, end_y in clusters:
         min_x = image.width()
@@ -357,7 +361,7 @@ def test_wrapped_outline_shadow_alignment() -> None:
     tolerance = 120
     fill_bboxes = _line_bboxes(fill_image, QtGui, "#FFFFFF", tolerance)
     outline_bboxes = _line_bboxes(outline_image, QtGui, "#00FF00", tolerance)
-    shadow_bboxes = _line_bboxes(shadow_image, QtGui, "#00A0FF", tolerance)
+    shadow_bboxes = _line_bboxes(shadow_image, QtGui, "#00A0FF", tolerance, min_pixels_per_row=25)
 
     assert len(fill_bboxes) == 2
     assert len(outline_bboxes) == 2
