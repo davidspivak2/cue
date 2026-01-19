@@ -1948,7 +1948,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.set_state(AppState.SUBTITLES_READY)
                 self._update_preview_card()
             else:
-                QtWidgets.QMessageBox.information(self, "Your video is ready", message)
                 self.set_state(AppState.EXPORT_DONE)
         else:
             if message == "Operation cancelled.":
