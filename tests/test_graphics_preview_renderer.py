@@ -184,7 +184,6 @@ def test_highlight_png_cache_roundtrip(tmp_path) -> None:
         text_color="#FFFFFF",
         text_opacity=1.0,
         highlight_color="#FFD400",
-        highlight_opacity=1.0,
     )
     frame = QtGui.QImage(640, 360, QtGui.QImage.Format_ARGB32)
     frame.fill(QtGui.QColor("black"))
