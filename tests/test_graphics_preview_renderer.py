@@ -149,6 +149,38 @@ def test_highlight_fill_pixels_present() -> None:
     assert _has_highlight_pixel(result.image, QtGui, "#FFD400")
 
 
+def test_highlight_fill_pixels_present_across_font_sizes() -> None:
+    QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication([])
+    from app.graphics_preview_renderer import render_graphics_preview
+
+    style = preset_defaults("Default", subtitle_mode="word_highlight")
+    style = replace(
+        style,
+        outline_enabled=False,
+        shadow_enabled=False,
+        background_mode="none",
+        text_color="#FFFFFF",
+        text_opacity=1.0,
+    )
+    for font_size in (28, 29):
+        frame = QtGui.QImage(640, 360, QtGui.QImage.Format_ARGB32)
+        frame.fill(QtGui.QColor("black"))
+        result = render_graphics_preview(
+            frame,
+            subtitle_text="שלום עולם",
+            style=replace(style, font_size=font_size),
+            subtitle_mode="word_highlight",
+            highlight_color="#FFD400",
+            highlight_opacity=1.0,
+        )
+        assert _has_highlight_pixel(
+            result.image, QtGui, "#FFD400"
+        ), f"Expected highlight pixel at font size {font_size}"
+
+
 def test_outline_visible() -> None:
     QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
     QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
