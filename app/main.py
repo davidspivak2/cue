@@ -1089,20 +1089,7 @@ class MainWindow(QtWidgets.QMainWindow):
             + ".jpg"
         )
         output_path = get_preview_frames_dir() / cache_name
-        self._log(
-            "Preview cache check: "
-            f"output_path={output_path} "
-            f"font_size={style.font_size} "
-            f"subtitle_mode={self._subtitle_mode} "
-            f"highlight_color={resolved_highlight_color} "
-            f"highlight_opacity={resolved_highlight_opacity}",
-            True,
-        )
         if output_path.exists() and output_path.stat().st_size > 0:
-            self._log(
-                f"Preview cache hit: {output_path}; skipping render",
-                True,
-            )
             return output_path
         try:
             raw_frame_path = None
