@@ -120,6 +120,64 @@ def _has_highlight_pixel(image, QtGui, target_hex: str) -> bool:
     return False
 
 
+def _color_distance(color, target) -> int:
+    return (
+        abs(color.red() - target.red())
+        + abs(color.green() - target.green())
+        + abs(color.blue() - target.blue())
+    )
+
+
+def _row_target_count(image, QtGui, target, tolerance: int, y: int) -> int:
+    count = 0
+    for x in range(image.width()):
+        color = QtGui.QColor(image.pixel(x, y))
+        if _color_distance(color, target) <= tolerance:
+            count += 1
+    return count
+
+
+def _row_clusters(image, QtGui, target, tolerance: int) -> list[tuple[int, int]]:
+    clusters: list[tuple[int, int]] = []
+    start = None
+    for y in range(image.height()):
+        row_count = _row_target_count(image, QtGui, target, tolerance, y)
+        if row_count > 0 and start is None:
+            start = y
+        elif row_count == 0 and start is not None:
+            clusters.append((start, y - 1))
+            start = None
+    if start is not None:
+        clusters.append((start, image.height() - 1))
+    return clusters
+
+
+def _line_bboxes(image, QtGui, target_hex: str, tolerance: int) -> list[tuple[int, int, int, int]]:
+    target = QtGui.QColor(target_hex)
+    clusters = _row_clusters(image, QtGui, target, tolerance)
+    bboxes: list[tuple[int, int, int, int]] = []
+    for start_y, end_y in clusters:
+        min_x = image.width()
+        max_x = -1
+        min_y = None
+        max_y = None
+        for y in range(start_y, end_y + 1):
+            row_has_target = False
+            for x in range(image.width()):
+                color = QtGui.QColor(image.pixel(x, y))
+                if _color_distance(color, target) <= tolerance:
+                    min_x = min(min_x, x)
+                    max_x = max(max_x, x)
+                    row_has_target = True
+            if row_has_target:
+                if min_y is None:
+                    min_y = y
+                max_y = y
+        if max_x >= 0 and min_y is not None and max_y is not None:
+            bboxes.append((min_x, max_x, min_y, max_y))
+    return bboxes
+
+
 def test_highlight_fill_pixels_present() -> None:
     QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
     QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
@@ -210,3 +268,81 @@ def test_shadow_visible() -> None:
         highlight_opacity=1.0,
     )
     assert _has_non_black_pixel(result.image, QtGui)
+
+
+def test_wrapped_outline_shadow_alignment() -> None:
+    QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication([])
+    from app.graphics_preview_renderer import render_graphics_preview, _supports_glyph_runs
+
+    if not _supports_glyph_runs():
+        pytest.skip("Glyph-run APIs not available; skipping wrapped-line alignment test.")
+
+    text = "שלום עולם זה מבחן ארוך מאוד כדי שיישבר לשתי שורות"
+    base_style = preset_defaults("Default", subtitle_mode="static")
+    base_style = replace(
+        base_style,
+        font_size=48,
+        background_mode="none",
+        text_opacity=1.0,
+    )
+
+    def _render(style):
+        frame = QtGui.QImage(320, 240, QtGui.QImage.Format_ARGB32)
+        frame.fill(QtGui.QColor("black"))
+        return render_graphics_preview(
+            frame,
+            subtitle_text=text,
+            style=style,
+            subtitle_mode="static",
+            highlight_color="#FF0000",
+            highlight_opacity=1.0,
+        ).image
+
+    fill_style = replace(
+        base_style,
+        outline_enabled=False,
+        shadow_enabled=False,
+        text_color="#FFFFFF",
+    )
+    outline_style = replace(
+        base_style,
+        outline_enabled=True,
+        outline_color="#00FF00",
+        outline_width=4,
+        shadow_enabled=False,
+        text_color="#000000",
+    )
+    shadow_style = replace(
+        base_style,
+        outline_enabled=False,
+        shadow_enabled=True,
+        shadow_color="#00A0FF",
+        shadow_opacity=1.0,
+        shadow_strength=4,
+        shadow_offset_x=3,
+        shadow_offset_y=3,
+        text_color="#000000",
+    )
+
+    fill_image = _render(fill_style)
+    outline_image = _render(outline_style)
+    shadow_image = _render(shadow_style)
+
+    tolerance = 120
+    fill_bboxes = _line_bboxes(fill_image, QtGui, "#FFFFFF", tolerance)
+    outline_bboxes = _line_bboxes(outline_image, QtGui, "#00FF00", tolerance)
+    shadow_bboxes = _line_bboxes(shadow_image, QtGui, "#00A0FF", tolerance)
+
+    assert len(fill_bboxes) == 2
+    assert len(outline_bboxes) == 2
+    assert len(shadow_bboxes) == 2
+
+    for index in range(2):
+        fill_center = (fill_bboxes[index][0] + fill_bboxes[index][1]) / 2
+        outline_center = (outline_bboxes[index][0] + outline_bboxes[index][1]) / 2
+        shadow_center = (shadow_bboxes[index][0] + shadow_bboxes[index][1]) / 2
+        assert abs(outline_center - fill_center) <= 3
+        assert abs(shadow_center - fill_center) <= 3
