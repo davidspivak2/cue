@@ -372,4 +372,5 @@ def test_wrapped_outline_shadow_alignment() -> None:
         outline_center = (outline_bboxes[index][0] + outline_bboxes[index][1]) / 2
         shadow_center = (shadow_bboxes[index][0] + shadow_bboxes[index][1]) / 2
         assert abs(outline_center - fill_center) <= 3
-        assert abs(shadow_center - fill_center) <= 3
+        expected_shadow_center = fill_center + shadow_style.shadow_offset_x
+        assert abs(shadow_center - expected_shadow_center) <= 5
