@@ -152,8 +152,7 @@ def render_graphics_preview(
         ):
             _draw_highlight_overlay(
                 painter,
-                layout,
-                subtitle_text,
+                lines,
                 highlight_selection,
                 highlight_color or DEFAULT_HIGHLIGHT_COLOR,
                 highlight_opacity,
@@ -309,8 +308,7 @@ def _draw_text_fill(
 
 def _draw_highlight_overlay(
     painter: QtGui.QPainter,
-    layout: QtGui.QTextLayout,
-    text: str,
+    lines: Iterable[QtGui.QTextLine],
     selection: _HighlightSelection,
     highlight_color: str,
     highlight_opacity: Optional[float],
@@ -318,36 +316,60 @@ def _draw_highlight_overlay(
     resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
     if resolved_opacity <= 0.0:
         return
-    transparent = QtGui.QColor(0, 0, 0, 0)
     highlight_color_value = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
     highlight_color_value.setAlphaF(max(0.0, min(resolved_opacity, 1.0)))
-    transparent_format = QtGui.QTextCharFormat()
-    transparent_format.setForeground(QtGui.QBrush(transparent))
-    highlight_format = QtGui.QTextCharFormat()
-    highlight_format.setForeground(QtGui.QBrush(highlight_color_value))
-
-    selections: list[QtGui.QTextLayout.FormatRange] = []
-    text_length = len(text)
-    prefix_length = max(0, min(selection.start, len(text)))
-    highlight_length = max(0, min(selection.end, len(text)) - prefix_length)
-    if text_length > 0:
-        transparent_range = QtGui.QTextLayout.FormatRange()
-        transparent_range.start = 0
-        transparent_range.length = text_length
-        transparent_range.format = transparent_format
-        selections.append(transparent_range)
-    if highlight_length > 0:
-        highlight = QtGui.QTextLayout.FormatRange()
-        highlight.start = prefix_length
-        highlight.length = highlight_length
-        highlight.format = highlight_format
-        selections.append(highlight)
-
+    selection_start = selection.start
+    selection_end = selection.end
+    if selection_end <= selection_start:
+        return
+    highlight_path = QtGui.QPainterPath()
+    for line in lines:
+        if not line.textLength():
+            continue
+        line_start = line.textStart()
+        line_end = line_start + line.textLength()
+        overlap_start = max(selection_start, line_start)
+        overlap_end = min(selection_end, line_end)
+        if overlap_end <= overlap_start:
+            continue
+        glyph_runs = _glyph_runs_for_line(line, overlap_start, overlap_end - overlap_start)
+        if not glyph_runs:
+            continue
+        baseline = QtCore.QPointF(line.position().x(), line.position().y() + line.ascent())
+        for glyph_run in glyph_runs:
+            raw_font = glyph_run.rawFont()
+            glyph_indexes = glyph_run.glyphIndexes()
+            glyph_positions = glyph_run.positions()
+            for glyph_index, glyph_pos in zip(glyph_indexes, glyph_positions):
+                glyph_path = raw_font.pathForGlyph(glyph_index)
+                glyph_path.translate(baseline + glyph_pos)
+                highlight_path.addPath(glyph_path)
+    if highlight_path.isEmpty():
+        return
     painter.save()
-    painter.setOpacity(1.0)
-    painter.setPen(QtGui.QColor(0, 0, 0, 0))
-    layout.draw(painter, QtCore.QPointF(0, 0), selections)
-    painter.restore()
+    try:
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(highlight_color_value)
+        painter.drawPath(highlight_path)
+    finally:
+        painter.restore()
+
+
+def _glyph_runs_for_line(
+    line: QtGui.QTextLine,
+    start: int,
+    length: int,
+) -> list[QtGui.QGlyphRun]:
+    if length <= 0:
+        return []
+    try:
+        return list(line.glyphRuns(start, length))
+    except TypeError:
+        try:
+            flags = QtGui.QTextLayout.GlyphRunRetrievalFlags(0)
+            return list(line.glyphRuns(start, length, flags))
+        except TypeError:
+            return list(line.glyphRuns(start, length, 0))
 
 
 def _build_line_paths(
