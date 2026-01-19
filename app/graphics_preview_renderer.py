@@ -408,13 +408,19 @@ def _draw_highlight_overlay(
             )
             clip_left = min(start_x, end_x)
             clip_right = max(start_x, end_x)
+            line_bounds = line.naturalTextRect().translated(line.position())
+            clip_left = max(clip_left, line_bounds.left())
+            clip_right = min(clip_right, line_bounds.right())
+            if clip_right <= clip_left:
+                clip_left = line_bounds.left()
+                clip_right = line_bounds.right()
             clip_width = max(1.0, clip_right - clip_left)
             clip_rect = QtCore.QRectF(
                 clip_left - pad,
                 line_rect_layout.top(),
                 clip_width + pad * 2,
                 line_rect_layout.height(),
-            ).intersected(line_rect_layout)
+            ).intersected(line_bounds)
             if clip_rect.isEmpty():
                 continue
             painter.save()
