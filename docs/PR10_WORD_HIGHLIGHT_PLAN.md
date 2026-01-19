@@ -1,6 +1,6 @@
 # PR10 — Word Highlight Subtitles (Karaoke-Style) — Implementation Plan
 
-Last updated: 2026-02-20
+Last updated: 2026-02-27
 
 ## A) Goal and user-visible outcomes
 - Subtitle mode selector is available, with **Word highlight** recommended as the default and **Static** as the alternative.
@@ -99,14 +99,15 @@ Last updated: 2026-02-20
   - Diagnostics include renderer/mode info.
 - **Depends on:** Task 3.
 
-### Codex Task 5 — Preview still uses ASS path when word-highlight mode selected + cache key updates
-- **Goal:** Preview still renderer uses ASS when word-highlight mode is selected. ✅ Done.
+### Codex Task 5 — Preview still uses graphics renderer + cache key updates
+- **Goal:** Preview still renderer supports word-highlight styling and updates cache keys. ✅ Done.
 - **Scope:**
-  - Update preview still generator to select ASS path.
+  - Update preview still generator to draw graphics directly over a raw frame.
   - Update cache keys to include subtitle mode + highlight settings.
 - **Primary files likely touched:**
-  - `app/preview_still.py`
-  - `app/cache_keys.py`
+  - `app/graphics_preview_renderer.py`
+  - `app/main.py`
+  - `app/workers.py`
 - **Implementation notes:**
   - Ensure caching differentiates Static vs Word highlight modes.
 - **Acceptance criteria:**
@@ -182,7 +183,7 @@ Last updated: 2026-02-20
 - **Depends on:** Task 8.
 
 ### Codex Task 10 — Flip default to Word highlight + tighten UX + update diagnostics + docs references
-- **Goal:** Make Word highlight the default and finalize UX/diagnostics.
+- **Goal:** Make Word highlight the default and finalize UX/diagnostics. ✅ Done.
 - **Scope:**
   - Update default mode to Word highlight.
   - Tighten labels, hints, and diagnostics.
@@ -198,8 +199,12 @@ Last updated: 2026-02-20
 - **Acceptance criteria:**
   - Default selection is Word highlight.
   - Diagnostics clearly capture mode and renderer.
-  - Docs reflect the completed change.
-- **Depends on:** Task 9.
+
+## Implementation updates (2026-02-27)
+- Preview stills now use a graphics renderer that draws subtitles directly onto the raw frame.
+- Preview cache keys include subtitle styling + word timing mtimes to refresh when alignment data changes.
+- Word highlight is the default subtitle mode, with highlight color defaults applied in config.
+- Graphics preview rendering is covered by PySide6-based tests (`tests/test_graphics_preview_renderer.py`).
 
 ## F) Definition of Done (PR10)
 - [x] RTL stability maintained in preview and export.

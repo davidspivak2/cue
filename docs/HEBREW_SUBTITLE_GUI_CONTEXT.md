@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — Project Context (Read This First)
 
-**Last updated:** 2026-02-20
+**Last updated:** 2026-02-27
 
 This document is for:
 - new contributors
@@ -107,6 +107,7 @@ Running it out-of-process:
 - `app/subtitle_style.py` — subtitle style presets + FFmpeg style formatting
 - `app/ass_render.py` — ASS subtitle document generation (static ASS groundwork)
 - `app/ass_karaoke.py` — ASS step-highlight generation (word highlight)
+- `app/graphics_preview_renderer.py` — graphics-based preview rendering for still frames
 - `app/align_worker.py` — WhisperX alignment worker for word timings
 - `app/align_utils.py` — alignment planning + staleness checks
 - `app/burn_in_export.py` — burn-in plan builder (SRT vs ASS pipelines)
@@ -148,6 +149,13 @@ If diagnostics logging is enabled and “Write diagnostics on successful complet
 
 On failure, the app still writes/keeps error logs even if success diagnostics are disabled.
 
+### Exit diagnostics bundle (optional)
+If **“Zip logs and outputs on exit”** is enabled, the app creates a ZIP file in the same
+folder as the selected video on exit. The bundle includes:
+- The current session log file.
+- Diagnostics JSON files in the output folder (if any).
+- Output artifacts (SRT, ASS, word timings JSON, output video, extracted WAV if present).
+
 ### Local dev benchmark outputs (not committed)
 
 When running `tools\punct_benchmark.py` (and similar local diagnostics), save output logs outside the repo so they are never accidentally committed:
@@ -176,10 +184,12 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `subtitle_edit_path` | “Choose Subtitle Edit…” (path picker) | String path | unset (falls back to default install path) | External tool integration |
 | `diagnostics.enabled` | “Enable diagnostics logging” | `true` / `false` | `false` | Diagnostics output |
 | `diagnostics.write_on_success` | “Write diagnostics on successful completion” | `true` / `false` | `false` | Diagnostics output |
+| `diagnostics.archive_on_exit` | “Zip logs and outputs on exit” | `true` / `false` | `false` | Diagnostics bundle |
 | `diagnostics.categories` | Category checkboxes (see below) | Object of booleans | all `true` | Diagnostics output |
-| `subtitle_style.preset` | “Subtitle style” preset dropdown | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
+| `subtitle_style.preset` | Subtitle style preset buttons | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
 | `subtitle_style.custom` | “Customize...” panel controls | Object: `font_size`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
-| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `static` | Selects ASS (word highlight) vs SRT (static) rendering paths |
+| `subtitle_style.appearance` | (style model, internal) | Object with font, color, outline, shadow, background, and layout fields | Derived from preset/custom | Preview + export styling |
+| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects ASS (word highlight) vs SRT (static) rendering paths |
 | `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (ASS) |
 | `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Word highlight styling (ASS) |
 
@@ -442,7 +452,7 @@ Benchmarks must use the **exact** `<video_stem>_audio_for_whisper.wav` produced 
 
 This repo started with a 13‑PR UX/architecture overhaul plan. The exact PR boundaries have shifted a bit (some items were combined or rescaled), but the sequence is still a good mental model.
 
-### Status snapshot (as of 2026-01-20)
+### Status snapshot (as of 2026-02-27)
 
 Done / merged:
 - **PR1** — dark theme foundation ✅
@@ -457,6 +467,7 @@ Done / merged:
 - **PR7** — Subtitles-ready page: auto-pick a subtitle moment and render a preview still frame ✅
 - **PR8** — style presets + customize panel + instant preview updates ✅
 - **PR9** — in-app preview playback (QtMultimedia) + caching ✅
+- **PR10** — word highlight default mode + highlight color picker + ASS export ✅
 - **Extra (not originally in the plan)** — opt-in success diagnostics JSON + “write next to outputs” hotfix ✅
 - **PR14 — Docs refresh / handover readiness (this update)** ✅
 
@@ -465,6 +476,9 @@ Unplanned but merged work since the original PR plan:
 - Punctuation rescue behavior changes + chooser gate
 - Audio extraction filter chain changes
 - Windows Unicode stdout hardening affecting benchmark/worker output
+- Unified subtitle style model + regrouped style UI
+- Graphics-based preview renderer for subtitle stills
+- Exit diagnostics bundle (zip logs + outputs on close)
 
 **PR15 — copy polish + CTA reduction sweep (final pass)**
 - One-primary-CTA-per-state audit
@@ -472,19 +486,17 @@ Unplanned but merged work since the original PR plan:
 - Remove leftover technical terms in user-facing labels
 - Align error/warning copy with UX/UI spec
 
-Not done yet (still in PR7+ territory):
-- **PR10** — karaoke-like highlighting (default ON)
-- In progress: config/UI controls landed, ASS renderer groundwork is in place (static ASS).
-- Added: word-highlight ASS pipeline, WhisperX alignment worker, and karaoke step-highlight generation.
-  - PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
+Not done yet (still in PR11+ territory):
 - **PR11** — “delightful waiting” visuals (waveform + thumbnail strip; cached under LocalAppData)
 - **PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
 - **PR13** — packaging hardening / smoke tests
 - **PR15** — copy polish + CTA reduction sweep (after stabilization)
 
+PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
+
 ### Where a new contributor should pick up
 Priority work items:
-1) If punctuation is acceptable: continue the UX roadmap at **PR10** (karaoke-like highlighting).
+1) If punctuation is acceptable: continue the UX roadmap at **PR11** (delightful waiting visuals).
 2) If punctuation regresses: use the benchmark + diagnostics to confirm whether loss happens in raw segments vs splitter; the new rescue diagnostics fields help choose.
 
 ---
@@ -541,6 +553,16 @@ What changed:
 Current reality:
 - We have a reliable way to measure punctuation density and compare raw vs final output.
 - Rescue now protects against regressions instead of blindly swapping outputs.
+
+---
+
+### 11.5 Subtitle styling + preview renderer updates
+Recent updates include:
+- A unified subtitle style model (font, outline, shadow, background, alignment) now backs the style UI.
+- The Subtitles Ready screen is reorganized into a two-column layout with a dedicated style panel and a single CTA for export.
+- Preview stills now use a graphics-based renderer that draws subtitle styling directly onto the raw video frame, rather than relying on FFmpeg’s subtitle filters.
+- Preview cache keys now include word-timing metadata and highlight settings so word-highlight previews refresh when alignment data changes.
+- Diagnostics can optionally zip logs + outputs on exit for easier support handoffs.
 
 ---
 
