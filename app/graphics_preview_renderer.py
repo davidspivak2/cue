@@ -327,28 +327,21 @@ def _draw_highlight_overlay(
     highlight_format.setForeground(QtGui.QBrush(highlight_color_value))
 
     selections: list[QtGui.QTextLayout.FormatRange] = []
+    text_length = len(text)
     prefix_length = max(0, min(selection.start, len(text)))
     highlight_length = max(0, min(selection.end, len(text)) - prefix_length)
-    suffix_start = prefix_length + highlight_length
-    suffix_length = max(0, len(text) - suffix_start)
-    if prefix_length > 0:
-        prefix = QtGui.QTextLayout.FormatRange()
-        prefix.start = 0
-        prefix.length = prefix_length
-        prefix.format = transparent_format
-        selections.append(prefix)
+    if text_length > 0:
+        transparent_range = QtGui.QTextLayout.FormatRange()
+        transparent_range.start = 0
+        transparent_range.length = text_length
+        transparent_range.format = transparent_format
+        selections.append(transparent_range)
     if highlight_length > 0:
         highlight = QtGui.QTextLayout.FormatRange()
         highlight.start = prefix_length
         highlight.length = highlight_length
         highlight.format = highlight_format
         selections.append(highlight)
-    if suffix_length > 0:
-        suffix = QtGui.QTextLayout.FormatRange()
-        suffix.start = suffix_start
-        suffix.length = suffix_length
-        suffix.format = transparent_format
-        selections.append(suffix)
 
     painter.save()
     painter.setOpacity(1.0)
