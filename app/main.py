@@ -2197,12 +2197,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_exit_archive_entries(self, zip_path: Path) -> list[tuple[Path, str]]:
         entries: dict[str, Path] = {}
-        if self._log_dir.exists():
-            for path in self._log_dir.rglob("*"):
-                if not path.is_file():
-                    continue
-                arcname = f"logs/{path.relative_to(self._log_dir).as_posix()}"
-                entries.setdefault(arcname, path)
+        if self._log_path.exists():
+            entries.setdefault(f"logs/{self._log_path.name}", self._log_path)
 
         output_dir = self._output_dir or (self._video_path.parent if self._video_path else None)
         if output_dir and output_dir.exists():
