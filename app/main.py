@@ -1086,7 +1086,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 highlight_color=resolved_highlight_color,
                 highlight_opacity=resolved_highlight_opacity,
             )
-            + ".jpg"
+            + ".png"
         )
         output_path = get_preview_frames_dir() / cache_name
         if output_path.exists() and output_path.stat().st_size > 0:
@@ -1137,7 +1137,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 True,
             )
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            if not result.image.save(str(output_path)):
+            if not result.image.save(str(output_path), "PNG"):
                 raise RuntimeError("Failed to save graphics preview image")
             return output_path
         except Exception as exc:

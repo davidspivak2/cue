@@ -120,6 +120,25 @@ def _has_highlight_pixel(image, QtGui, target_hex: str) -> bool:
     return False
 
 
+def _has_highlight_pixel_close(
+    image, QtGui, target_hex: str, *, channel_tolerance: int = 30
+) -> bool:
+    target = QtGui.QColor(target_hex)
+    tr, tg, tb = target.red(), target.green(), target.blue()
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = QtGui.QColor(image.pixel(x, y))
+            if color.alpha() <= 0:
+                continue
+            if (
+                abs(color.red() - tr) <= channel_tolerance
+                and abs(color.green() - tg) <= channel_tolerance
+                and abs(color.blue() - tb) <= channel_tolerance
+            ):
+                return True
+    return False
+
+
 def test_highlight_fill_pixels_present() -> None:
     QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
     QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
@@ -147,6 +166,44 @@ def test_highlight_fill_pixels_present() -> None:
         highlight_opacity=1.0,
     )
     assert _has_highlight_pixel(result.image, QtGui, "#FFD400")
+
+
+def test_highlight_png_cache_roundtrip(tmp_path) -> None:
+    QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication([])
+    from app.graphics_preview_renderer import render_graphics_preview
+
+    style = preset_defaults("Default", subtitle_mode="word_highlight")
+    style = replace(
+        style,
+        outline_enabled=False,
+        shadow_enabled=False,
+        background_mode="none",
+        text_color="#FFFFFF",
+        text_opacity=1.0,
+        highlight_color="#FFD400",
+        highlight_opacity=1.0,
+    )
+    frame = QtGui.QImage(640, 360, QtGui.QImage.Format_ARGB32)
+    frame.fill(QtGui.QColor("black"))
+    subtitle_text = "אז אני רוצה"
+    for font_size in (28, 29):
+        sized_style = replace(style, font_size=font_size)
+        result = render_graphics_preview(
+            frame,
+            subtitle_text=subtitle_text,
+            style=sized_style,
+            subtitle_mode="word_highlight",
+            highlight_color="#FFD400",
+            highlight_opacity=1.0,
+        )
+        output_path = tmp_path / f"highlight-preview-{font_size}.png"
+        assert result.image.save(str(output_path), "PNG")
+        loaded = QtGui.QImage(str(output_path))
+        assert not loaded.isNull()
+        assert _has_highlight_pixel_close(loaded, QtGui, "#FFD400")
 
 
 def test_outline_visible() -> None:
