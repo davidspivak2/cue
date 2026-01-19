@@ -64,6 +64,9 @@ If you add tests, prefer pytest:
 pytest
 ```
 
+Qt-based tests auto-create a `QApplication` (see `tests/conftest.py`). If PySide6
+is missing, those tests will be skipped via `pytest.importorskip`.
+
 Preview playback includes a focused regression test for timestamp shifting:
 ```bat
 pytest tests/test_preview_playback_shift.py

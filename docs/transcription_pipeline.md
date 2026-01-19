@@ -25,6 +25,13 @@ between machines.
    to populate `<video_stem>.word_timings.json` using WhisperX alignment. The
    alignment step re-runs when the timings file is missing, invalid, empty, or stale.
 
+## FFmpeg discovery notes
+
+FFmpeg and FFprobe are resolved in this order:
+1. Packaged `bin\ffmpeg.exe`/`bin\ffprobe.exe` for PyInstaller builds.
+2. `bin\ffmpeg.exe`/`bin\ffprobe.exe` in the repo for source runs.
+3. System `PATH` fallback.
+
 ## Model cache paths
 
 Model files live under the models directory returned by `app.paths.get_models_dir()`.
@@ -91,10 +98,11 @@ When subtitles are ready, the GUI prepares a preview moment and optional playbac
 
 1. **SRT parsing + cue selection.** The GUI parses the generated SRT file and selects
    the first non-empty cue to anchor a preview moment.
-2. **Preview still frame.** The GUI requests a cached subtitle preview frame rendered
-   via FFmpeg with the active subtitle style. Word highlight mode uses an ASS render
-   path; static mode uses the SRT `subtitles` filter. Frames are cached under
-   `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`.
+2. **Preview still frame.** The GUI extracts a raw video frame via FFmpeg and renders
+   subtitles with the graphics preview renderer (draws text directly onto the image).
+   The preview cache key includes subtitle style + highlight settings and word-timing
+   mtimes so word-highlight previews update when alignment data changes. Frames are
+   cached under `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`.
 3. **Preview playback clip.** When the user presses Play, the GUI requests a short
    clip (default 15s, anchored near the selected cue). The preview clip is rendered
    via FFmpeg with a shifted subtitle file (ASS for word highlight, SRT for static)
