@@ -109,7 +109,7 @@ def render_graphics_preview(
     if subtitle_mode == "word_highlight":
         highlight_selection = _select_highlight_word(subtitle_text)
 
-    line_paths = _build_line_paths(lines, subtitle_text, font)
+    line_paths = _build_line_paths(layout, lines, subtitle_text, font)
     bg_rect = _compute_text_rect_from_lines(lines)
     if bg_rect.isEmpty() or bg_rect.width() <= 0 or bg_rect.height() <= 0:
         bg_rect = _compute_text_rect_from_metrics(
@@ -386,19 +386,59 @@ def _draw_highlight_overlay(
         painter.restore()
 
 
+def _supports_glyph_runs() -> bool:
+    return hasattr(QtGui.QTextLine, "glyphRuns") or hasattr(QtGui.QTextLayout, "glyphRuns")
+
+
+def _glyph_runs_for_line(
+    layout: QtGui.QTextLayout, line: QtGui.QTextLine
+) -> Optional[list[QtGui.QGlyphRun]]:
+    if hasattr(line, "glyphRuns"):
+        try:
+            runs = list(line.glyphRuns())
+            return runs
+        except TypeError:
+            pass
+    if hasattr(layout, "glyphRuns"):
+        try:
+            runs = list(layout.glyphRuns(line.textStart(), line.textLength()))
+            return runs
+        except TypeError:
+            pass
+    return None
+
+
 def _build_line_paths(
-    lines: Iterable[QtGui.QTextLine], text: str, font: QtGui.QFont
+    layout: QtGui.QTextLayout,
+    lines: Iterable[QtGui.QTextLine],
+    text: str,
+    font: QtGui.QFont,
 ) -> list[QtGui.QPainterPath]:
     paths: list[QtGui.QPainterPath] = []
+    glyph_runs_supported = _supports_glyph_runs()
     for line in lines:
         if not line.textLength():
             continue
         baseline = QtCore.QPointF(line.position().x(), line.position().y() + line.ascent())
         line_path = QtGui.QPainterPath()
-        start = line.textStart()
-        length = line.textLength()
-        fragment = text[start : start + length]
-        line_path.addText(baseline, font, fragment)
+        runs = _glyph_runs_for_line(layout, line) if glyph_runs_supported else None
+        if runs is None:
+            start = line.textStart()
+            length = line.textLength()
+            fragment = text[start : start + length]
+            line_path.addText(baseline, font, fragment)
+            paths.append(line_path)
+            continue
+        for run in runs:
+            raw = run.rawFont()
+            glyph_indexes = run.glyphIndexes()
+            positions = run.positions()
+            for glyph_index, position in zip(glyph_indexes, positions):
+                glyph_path = raw.pathForGlyph(glyph_index)
+                glyph_path.translate(
+                    baseline.x() + position.x(), baseline.y() + position.y()
+                )
+                line_path.addPath(glyph_path)
         paths.append(line_path)
     return paths
 
