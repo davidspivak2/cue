@@ -1095,6 +1095,11 @@ class MainWindow(QtWidgets.QMainWindow):
             True,
         )
         if output_path.exists() and output_path.stat().st_size > 0:
+            if os.getenv("HSG_DEBUG_HIGHLIGHT_PREVIEW") == "1":
+                self._log(
+                    f"HLDBG_CACHE_HIT: output_path={output_path}",
+                    True,
+                )
             self._log(
                 f"Preview cache hit: {output_path}; skipping render",
                 True,

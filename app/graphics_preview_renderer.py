@@ -24,7 +24,49 @@ from .subtitle_style import (
 _WORD_RE = re.compile(r"\S+")
 _LOGGER = logging.getLogger(__name__)
 _DEBUG_HIGHLIGHT_PAINTER = os.getenv("HSG_DEBUG_HIGHLIGHT_PAINTER") == "1"
-_DEBUG_HIGHLIGHT_PREVIEW = os.getenv("HSG_DEBUG_HIGHLIGHT_PREVIEW") == "1"
+DEBUG_HL = os.getenv("HSG_DEBUG_HIGHLIGHT_PREVIEW") == "1"
+
+
+def _format_qcolor(color: QtGui.QColor) -> str:
+    try:
+        return f"{color.name(QtGui.QColor.HexArgb)}@{color.alphaF():.3f}"
+    except Exception:
+        return "<invalid-color>"
+
+
+def _format_qpen(pen: QtGui.QPen) -> str:
+    try:
+        width = pen.widthF()
+        style = int(pen.style())
+    except Exception:
+        width = None
+        style = None
+    return f"{_format_qcolor(pen.color())} width={width} style={style}"
+
+
+def _format_qbrush(brush: QtGui.QBrush) -> str:
+    return _format_qcolor(brush.color())
+
+
+def _format_painter_state(painter: QtGui.QPainter) -> dict[str, object]:
+    try:
+        composition = painter.compositionMode()
+        composition_value = getattr(composition, "value", None)
+        if composition_value is None:
+            composition_value = int(composition)
+    except Exception:
+        composition_value = str(painter.compositionMode())
+    try:
+        render_hints = int(painter.renderHints())
+    except Exception:
+        render_hints = str(painter.renderHints())
+    return {
+        "opacity": painter.opacity(),
+        "pen": _format_qpen(painter.pen()),
+        "brush": _format_qbrush(painter.brush()),
+        "composition": composition_value,
+        "render_hints": render_hints,
+    }
 
 
 @dataclass(frozen=True)
@@ -113,6 +155,17 @@ def render_graphics_preview(
     highlight_selection = None
     if subtitle_mode == "word_highlight":
         highlight_selection = _select_highlight_word(subtitle_text)
+    if DEBUG_HL and subtitle_mode == "word_highlight" and highlight_selection is None:
+        try:
+            _LOGGER.info(
+                "HLDBG: phase=pre_highlight_overlay skip_reason=selection_none "
+                "font_size=%s subtitle_mode=%s text_length=%s",
+                style.font_size,
+                subtitle_mode,
+                len(subtitle_text),
+            )
+        except Exception as exc:
+            _LOGGER.info("HLDBG: logging_failed err=%r", exc)
 
     line_paths = _build_line_paths(lines, subtitle_text, font)
     bg_rect = _compute_text_rect_from_lines(lines)
@@ -155,6 +208,52 @@ def render_graphics_preview(
             highlight_selection is not None
             and (1.0 if highlight_opacity is None else float(highlight_opacity)) > 0.0
         ):
+            if DEBUG_HL and subtitle_mode == "word_highlight":
+                try:
+                    line_count = layout.lineCount() if hasattr(layout, "lineCount") else 0
+                    resolved_highlight_color = highlight_color or DEFAULT_HIGHLIGHT_COLOR
+                    resolved_highlight_opacity = (
+                        1.0 if highlight_opacity is None else float(highlight_opacity)
+                    )
+                    selection_start = max(0, min(highlight_selection.start, len(subtitle_text)))
+                    selection_end = max(0, min(highlight_selection.end, len(subtitle_text)))
+                    selection_text = subtitle_text[selection_start:selection_end]
+                    _LOGGER.info(
+                        "HLDBG: phase=pre_highlight_overlay font_size=%s subtitle_mode=%s "
+                        "text_length=%s highlight_color=%s highlight_opacity=%s "
+                        "text_opacity=%s selection_index=%s selection_start=%s "
+                        "selection_end=%s selection_length=%s selection_text=%r "
+                        "line_count=%s",
+                        style.font_size,
+                        subtitle_mode,
+                        len(subtitle_text),
+                        resolved_highlight_color,
+                        resolved_highlight_opacity,
+                        effective_text_opacity,
+                        highlight_selection.index,
+                        selection_start,
+                        selection_end,
+                        selection_end - selection_start,
+                        selection_text,
+                        line_count,
+                    )
+                    for line_index in range(line_count):
+                        line = layout.lineAt(line_index)
+                        _LOGGER.info(
+                            "HLDBG_LINE: phase=pre_highlight_overlay line_index=%s "
+                            "start=%s length=%s natural_width=%s ascent=%s descent=%s "
+                            "pos=(%s,%s)",
+                            line_index,
+                            line.textStart(),
+                            line.textLength(),
+                            line.naturalTextWidth(),
+                            line.ascent(),
+                            line.descent(),
+                            line.position().x(),
+                            line.position().y(),
+                        )
+                except Exception as exc:
+                    _LOGGER.info("HLDBG: logging_failed err=%r", exc)
             _draw_highlight_overlay(
                 painter,
                 layout,
@@ -163,6 +262,52 @@ def render_graphics_preview(
                 highlight_color or DEFAULT_HIGHLIGHT_COLOR,
                 highlight_opacity,
             )
+            if DEBUG_HL and subtitle_mode == "word_highlight":
+                try:
+                    line_count = layout.lineCount() if hasattr(layout, "lineCount") else 0
+                    resolved_highlight_color = highlight_color or DEFAULT_HIGHLIGHT_COLOR
+                    resolved_highlight_opacity = (
+                        1.0 if highlight_opacity is None else float(highlight_opacity)
+                    )
+                    selection_start = max(0, min(highlight_selection.start, len(subtitle_text)))
+                    selection_end = max(0, min(highlight_selection.end, len(subtitle_text)))
+                    selection_text = subtitle_text[selection_start:selection_end]
+                    _LOGGER.info(
+                        "HLDBG: phase=post_highlight_overlay font_size=%s subtitle_mode=%s "
+                        "text_length=%s highlight_color=%s highlight_opacity=%s "
+                        "text_opacity=%s selection_index=%s selection_start=%s "
+                        "selection_end=%s selection_length=%s selection_text=%r "
+                        "line_count=%s",
+                        style.font_size,
+                        subtitle_mode,
+                        len(subtitle_text),
+                        resolved_highlight_color,
+                        resolved_highlight_opacity,
+                        effective_text_opacity,
+                        highlight_selection.index,
+                        selection_start,
+                        selection_end,
+                        selection_end - selection_start,
+                        selection_text,
+                        line_count,
+                    )
+                    for line_index in range(line_count):
+                        line = layout.lineAt(line_index)
+                        _LOGGER.info(
+                            "HLDBG_LINE: phase=post_highlight_overlay line_index=%s "
+                            "start=%s length=%s natural_width=%s ascent=%s descent=%s "
+                            "pos=(%s,%s)",
+                            line_index,
+                            line.textStart(),
+                            line.textLength(),
+                            line.naturalTextWidth(),
+                            line.ascent(),
+                            line.descent(),
+                            line.position().x(),
+                            line.position().y(),
+                        )
+                except Exception as exc:
+                    _LOGGER.info("HLDBG: logging_failed err=%r", exc)
     finally:
         painter.end()
     return GraphicsPreviewResult(
@@ -312,38 +457,22 @@ def _draw_text_fill(
     painter.restore()
 
 
-def _draw_highlight_overlay(
-    painter: QtGui.QPainter,
-    layout: QtGui.QTextLayout,
+def _apply_highlight_overlay_formats(
     text: str,
-    selection: _HighlightSelection,
-    highlight_color: str,
-    highlight_opacity: Optional[float],
-) -> None:
-    resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
-    if resolved_opacity <= 0.0:
-        if _DEBUG_HIGHLIGHT_PREVIEW:
-            try:
-                _LOGGER.info(
-                    "HIGHLIGHT_OVERLAY: skip_reason=opacity_non_positive opacity=%s",
-                    resolved_opacity,
-                )
-            except Exception as exc:
-                _LOGGER.info("HIGHLIGHT_OVERLAY: logging_failed err=%r", exc)
-        return
-    transparent = QtGui.QColor(0, 0, 0, 0)
-    highlight_color_value = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
-    highlight_color_value.setAlphaF(max(0.0, min(resolved_opacity, 1.0)))
-    transparent_format = QtGui.QTextCharFormat()
-    transparent_format.setForeground(QtGui.QBrush(transparent))
-    highlight_format = QtGui.QTextCharFormat()
-    highlight_format.setForeground(QtGui.QBrush(highlight_color_value))
-
+    selection: Optional[_HighlightSelection],
+    transparent_format: QtGui.QTextCharFormat,
+    highlight_format: QtGui.QTextCharFormat,
+    resolved_opacity: float,
+) -> tuple[list[QtGui.QTextLayout.FormatRange], int, int]:
     selections: list[QtGui.QTextLayout.FormatRange] = []
-    prefix_length = max(0, min(selection.start, len(text)))
-    highlight_length = max(0, min(selection.end, len(text)) - prefix_length)
+    text_length = len(text)
+    prefix_length = 0
+    highlight_length = 0
+    if selection is not None:
+        prefix_length = max(0, min(selection.start, text_length))
+        highlight_length = max(0, min(selection.end, text_length) - prefix_length)
     suffix_start = prefix_length + highlight_length
-    suffix_length = max(0, len(text) - suffix_start)
+    suffix_length = max(0, text_length - suffix_start)
     if prefix_length > 0:
         prefix = QtGui.QTextLayout.FormatRange()
         prefix.start = 0
@@ -362,152 +491,87 @@ def _draw_highlight_overlay(
         suffix.length = suffix_length
         suffix.format = transparent_format
         selections.append(suffix)
+    if DEBUG_HL:
+        try:
+            _LOGGER.info(
+                "HLDBG: phase=apply_highlight_formats resolved_opacity=%s selection_none=%s "
+                "highlight_start=%s highlight_length=%s base_start=%s base_length=%s",
+                resolved_opacity,
+                selection is None,
+                prefix_length,
+                highlight_length,
+                0,
+                text_length,
+            )
+            for format_range in selections:
+                color = format_range.format.foreground().color()
+                _LOGGER.info(
+                    "HLDBG: phase=apply_highlight_formats range_start=%s range_length=%s "
+                    "fg=%s",
+                    format_range.start,
+                    format_range.length,
+                    _format_qcolor(color),
+                )
+        except Exception as exc:
+            _LOGGER.info("HLDBG: logging_failed err=%r", exc)
+    return selections, prefix_length, highlight_length
+
+
+def _draw_highlight_overlay(
+    painter: QtGui.QPainter,
+    layout: QtGui.QTextLayout,
+    text: str,
+    selection: _HighlightSelection,
+    highlight_color: str,
+    highlight_opacity: Optional[float],
+) -> None:
+    resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
+    if resolved_opacity <= 0.0:
+        if DEBUG_HL:
+            try:
+                _LOGGER.info(
+                    "HLDBG: phase=highlight_overlay skip_reason=opacity_non_positive opacity=%s",
+                    resolved_opacity,
+                )
+            except Exception as exc:
+                _LOGGER.info("HLDBG: logging_failed err=%r", exc)
+        return
+    transparent = QtGui.QColor(0, 0, 0, 0)
+    highlight_color_value = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
+    highlight_color_value.setAlphaF(max(0.0, min(resolved_opacity, 1.0)))
+    transparent_format = QtGui.QTextCharFormat()
+    transparent_format.setForeground(QtGui.QBrush(transparent))
+    highlight_format = QtGui.QTextCharFormat()
+    highlight_format.setForeground(QtGui.QBrush(highlight_color_value))
+
+    selections, highlight_start, highlight_length = _apply_highlight_overlay_formats(
+        text,
+        selection,
+        transparent_format,
+        highlight_format,
+        resolved_opacity,
+    )
 
     painter.save()
     painter.setOpacity(1.0)
     painter.setPen(QtGui.QColor(0, 0, 0, 0))
-    if _DEBUG_HIGHLIGHT_PREVIEW:
+    if DEBUG_HL:
         try:
-            line_count = layout.lineCount() if hasattr(layout, "lineCount") else 0
-            draw_origin = QtCore.QPointF(0.0, 0.0)
-            for line_index in range(line_count):
-                line = layout.lineAt(line_index)
-                line_start = line.textStart()
-                line_len = line.textLength()
-                line_end = line_start + line_len
-                overlap_start = max(selection.start, line_start)
-                overlap_end = min(selection.end, line_end)
-                local_start = overlap_start - line_start
-                local_end = overlap_end - line_start
-                line_x = line.position().x()
-                line_y = line.position().y()
-                if overlap_start >= overlap_end:
-                    _LOGGER.info(
-                        "HIGHLIGHT_OVERLAY: line_index=%s "
-                        "selection_start=%s selection_end=%s "
-                        "line_start=%s line_len=%s line_end=%s "
-                        "overlap_start=%s overlap_end=%s "
-                        "local_start=%s local_end=%s "
-                        "line_x=%s line_y=%s draw_origin=(%s,%s) "
-                        "skip_reason=no_overlap",
-                        line_index,
-                        selection.start,
-                        selection.end,
-                        line_start,
-                        line_len,
-                        line_end,
-                        overlap_start,
-                        overlap_end,
-                        local_start,
-                        local_end,
-                        line_x,
-                        line_y,
-                        draw_origin.x(),
-                        draw_origin.y(),
-                    )
-                    continue
-                raw_x1 = line.cursorToX(local_start)
-                raw_x2 = line.cursorToX(local_end)
-
-                def _cursor_x(value: object) -> Optional[float]:
-                    if isinstance(value, (tuple, list)) and value:
-                        value = value[0]
-                    try:
-                        return float(value)
-                    except (TypeError, ValueError):
-                        return None
-
-                x1 = _cursor_x(raw_x1)
-                x2 = _cursor_x(raw_x2)
-                left = min(x1, x2) if x1 is not None and x2 is not None else None
-                right = max(x1, x2) if x1 is not None and x2 is not None else None
-                clip_rect = None
-                clip_empty = None
-                clip_bounds = None
-                if left is not None and right is not None:
-                    width = right - left
-                    clip_rect = QtCore.QRectF(
-                        line_x + left,
-                        line_y,
-                        width,
-                        line.height(),
-                    )
-                    clip_empty = clip_rect.isEmpty() or clip_rect.width() <= 0 or clip_rect.height() <= 0
-                    painter.save()
-                    painter.setClipRect(clip_rect)
-                    clip_bounds = painter.clipBoundingRect()
-                    painter.restore()
-                pen = painter.pen()
-                pen_color = pen.color()
-                brush = painter.brush()
-                brush_color = brush.color()
-                composition = painter.compositionMode()
-                render_hints = painter.renderHints()
-                text_antialiasing = painter.testRenderHint(QtGui.QPainter.TextAntialiasing)
-                _LOGGER.info(
-                    "HIGHLIGHT_OVERLAY: line_index=%s "
-                    "selection_start=%s selection_end=%s "
-                    "line_start=%s line_len=%s line_end=%s "
-                    "overlap_start=%s overlap_end=%s "
-                    "local_start=%s local_end=%s "
-                    "cursor_x1=%r cursor_x2=%r "
-                    "norm_x1=%s norm_x2=%s left=%s right=%s "
-                    "line_x=%s line_y=%s "
-                    "clip_rect=%s clip_empty=%s "
-                    "clip_bounds=%s "
-                    "painter_opacity=%s "
-                    "pen_color=%s pen_alpha=%s "
-                    "brush_color=%s brush_alpha=%s "
-                    "composition_mode=%s "
-                    "render_hints=%s text_antialiasing=%s "
-                    "draw_origin=(%s,%s)",
-                    line_index,
-                    selection.start,
-                    selection.end,
-                    line_start,
-                    line_len,
-                    line_end,
-                    overlap_start,
-                    overlap_end,
-                    local_start,
-                    local_end,
-                    raw_x1,
-                    raw_x2,
-                    x1,
-                    x2,
-                    left,
-                    right,
-                    line_x,
-                    line_y,
-                    (
-                        None
-                        if clip_rect is None
-                        else (clip_rect.x(), clip_rect.y(), clip_rect.width(), clip_rect.height())
-                    ),
-                    clip_empty,
-                    (
-                        None
-                        if clip_bounds is None
-                        else (
-                            clip_bounds.x(),
-                            clip_bounds.y(),
-                            clip_bounds.width(),
-                            clip_bounds.height(),
-                        )
-                    ),
-                    painter.opacity(),
-                    pen_color.name(QtGui.QColor.HexArgb),
-                    pen_color.alphaF(),
-                    brush_color.name(QtGui.QColor.HexArgb),
-                    brush_color.alphaF(),
-                    str(composition),
-                    str(render_hints),
-                    text_antialiasing,
-                    draw_origin.x(),
-                    draw_origin.y(),
-                )
+            state = _format_painter_state(painter)
+            _LOGGER.info(
+                "HLDBG_PAINTER: opacity=%s pen=%s brush=%s composition=%s render_hints=%s "
+                "formats_count=%s highlight_start=%s highlight_length=%s",
+                state["opacity"],
+                state["pen"],
+                state["brush"],
+                state["composition"],
+                state["render_hints"],
+                len(selections),
+                highlight_start,
+                highlight_length,
+            )
         except Exception as exc:
-            _LOGGER.info("HIGHLIGHT_OVERLAY: logging_failed err=%r", exc)
+            _LOGGER.info("HLDBG_PAINTER: logging_failed err=%r", exc)
     if _DEBUG_HIGHLIGHT_PAINTER:
         try:
             font = layout.font()
