@@ -1095,7 +1095,7 @@ class MainWindow(QtWidgets.QMainWindow):
             True,
         )
         if output_path.exists() and output_path.stat().st_size > 0:
-            if os.getenv("HSG_DEBUG_HIGHLIGHT_PREVIEW") == "1":
+            if self._subtitle_mode == "word_highlight":
                 self._log(
                     f"HLDBG_CACHE_HIT: output_path={output_path}",
                     True,
@@ -1105,6 +1105,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 True,
             )
             return output_path
+        if self._subtitle_mode == "word_highlight":
+            self._log(
+                "HLDBG_CACHE_MISS: "
+                f"output_path={output_path} "
+                f"size={style.font_size} "
+                f"mode={self._subtitle_mode} "
+                f"highlight_color={resolved_highlight_color} "
+                f"highlight_opacity={resolved_highlight_opacity}",
+                True,
+            )
         try:
             raw_frame_path = None
             with tempfile.NamedTemporaryFile(

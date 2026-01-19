@@ -4,7 +4,6 @@ from dataclasses import dataclass
 import hashlib
 import json
 import logging
-import os
 import re
 from typing import Iterable, Optional
 
@@ -22,9 +21,8 @@ from .subtitle_style import (
 )
 
 _WORD_RE = re.compile(r"\S+")
-_LOGGER = logging.getLogger(__name__)
-_DEBUG_HIGHLIGHT_PAINTER = os.getenv("HSG_DEBUG_HIGHLIGHT_PAINTER") == "1"
-DEBUG_HL = os.getenv("HSG_DEBUG_HIGHLIGHT_PREVIEW") == "1"
+DIAG_LOGGER = logging.getLogger("hebrew_subtitle_gui")
+_MAX_HLDBG_LINES = 3
 
 
 def _format_qcolor(color: QtGui.QColor) -> str:
@@ -45,7 +43,11 @@ def _format_qpen(pen: QtGui.QPen) -> str:
 
 
 def _format_qbrush(brush: QtGui.QBrush) -> str:
-    return _format_qcolor(brush.color())
+    try:
+        style = int(brush.style())
+    except Exception:
+        style = None
+    return f"{_format_qcolor(brush.color())} style={style}"
 
 
 def _format_painter_state(painter: QtGui.QPainter) -> dict[str, object]:
@@ -53,7 +55,7 @@ def _format_painter_state(painter: QtGui.QPainter) -> dict[str, object]:
         composition = painter.compositionMode()
         composition_value = getattr(composition, "value", None)
         if composition_value is None:
-            composition_value = int(composition)
+            composition_value = str(composition)
     except Exception:
         composition_value = str(painter.compositionMode())
     try:
@@ -155,17 +157,17 @@ def render_graphics_preview(
     highlight_selection = None
     if subtitle_mode == "word_highlight":
         highlight_selection = _select_highlight_word(subtitle_text)
-    if DEBUG_HL and subtitle_mode == "word_highlight" and highlight_selection is None:
+    if subtitle_mode == "word_highlight" and highlight_selection is None:
         try:
-            _LOGGER.info(
+            DIAG_LOGGER.info(
                 "HLDBG: phase=pre_highlight_overlay skip_reason=selection_none "
-                "font_size=%s subtitle_mode=%s text_length=%s",
+                "font_size=%s subtitle_mode=%s text_len=%s",
                 style.font_size,
                 subtitle_mode,
                 len(subtitle_text),
             )
         except Exception as exc:
-            _LOGGER.info("HLDBG: logging_failed err=%r", exc)
+            DIAG_LOGGER.info("HLDBG: logging_failed err=%r", exc)
 
     line_paths = _build_line_paths(lines, subtitle_text, font)
     bg_rect = _compute_text_rect_from_lines(lines)
@@ -208,7 +210,7 @@ def render_graphics_preview(
             highlight_selection is not None
             and (1.0 if highlight_opacity is None else float(highlight_opacity)) > 0.0
         ):
-            if DEBUG_HL and subtitle_mode == "word_highlight":
+            if subtitle_mode == "word_highlight":
                 try:
                     line_count = layout.lineCount() if hasattr(layout, "lineCount") else 0
                     resolved_highlight_color = highlight_color or DEFAULT_HIGHLIGHT_COLOR
@@ -218,30 +220,28 @@ def render_graphics_preview(
                     selection_start = max(0, min(highlight_selection.start, len(subtitle_text)))
                     selection_end = max(0, min(highlight_selection.end, len(subtitle_text)))
                     selection_text = subtitle_text[selection_start:selection_end]
-                    _LOGGER.info(
+                    DIAG_LOGGER.info(
                         "HLDBG: phase=pre_highlight_overlay font_size=%s subtitle_mode=%s "
-                        "text_length=%s highlight_color=%s highlight_opacity=%s "
-                        "text_opacity=%s selection_index=%s selection_start=%s "
-                        "selection_end=%s selection_length=%s selection_text=%r "
-                        "line_count=%s",
+                        "text_len=%s highlight_color=%s highlight_opacity=%s "
+                        "text_opacity=%s selection_start=%s selection_end=%s "
+                        "selection_len=%s selected=%r line_count=%s",
                         style.font_size,
                         subtitle_mode,
                         len(subtitle_text),
                         resolved_highlight_color,
                         resolved_highlight_opacity,
                         effective_text_opacity,
-                        highlight_selection.index,
                         selection_start,
                         selection_end,
                         selection_end - selection_start,
                         selection_text,
                         line_count,
                     )
-                    for line_index in range(line_count):
+                    for line_index in range(min(line_count, _MAX_HLDBG_LINES)):
                         line = layout.lineAt(line_index)
-                        _LOGGER.info(
+                        DIAG_LOGGER.info(
                             "HLDBG_LINE: phase=pre_highlight_overlay line_index=%s "
-                            "start=%s length=%s natural_width=%s ascent=%s descent=%s "
+                            "line_start=%s line_len=%s natural_width=%s ascent=%s descent=%s "
                             "pos=(%s,%s)",
                             line_index,
                             line.textStart(),
@@ -253,7 +253,7 @@ def render_graphics_preview(
                             line.position().y(),
                         )
                 except Exception as exc:
-                    _LOGGER.info("HLDBG: logging_failed err=%r", exc)
+                    DIAG_LOGGER.info("HLDBG: logging_failed err=%r", exc)
             _draw_highlight_overlay(
                 painter,
                 layout,
@@ -262,7 +262,7 @@ def render_graphics_preview(
                 highlight_color or DEFAULT_HIGHLIGHT_COLOR,
                 highlight_opacity,
             )
-            if DEBUG_HL and subtitle_mode == "word_highlight":
+            if subtitle_mode == "word_highlight":
                 try:
                     line_count = layout.lineCount() if hasattr(layout, "lineCount") else 0
                     resolved_highlight_color = highlight_color or DEFAULT_HIGHLIGHT_COLOR
@@ -272,30 +272,28 @@ def render_graphics_preview(
                     selection_start = max(0, min(highlight_selection.start, len(subtitle_text)))
                     selection_end = max(0, min(highlight_selection.end, len(subtitle_text)))
                     selection_text = subtitle_text[selection_start:selection_end]
-                    _LOGGER.info(
+                    DIAG_LOGGER.info(
                         "HLDBG: phase=post_highlight_overlay font_size=%s subtitle_mode=%s "
-                        "text_length=%s highlight_color=%s highlight_opacity=%s "
-                        "text_opacity=%s selection_index=%s selection_start=%s "
-                        "selection_end=%s selection_length=%s selection_text=%r "
-                        "line_count=%s",
+                        "text_len=%s highlight_color=%s highlight_opacity=%s "
+                        "text_opacity=%s selection_start=%s selection_end=%s "
+                        "selection_len=%s selected=%r line_count=%s",
                         style.font_size,
                         subtitle_mode,
                         len(subtitle_text),
                         resolved_highlight_color,
                         resolved_highlight_opacity,
                         effective_text_opacity,
-                        highlight_selection.index,
                         selection_start,
                         selection_end,
                         selection_end - selection_start,
                         selection_text,
                         line_count,
                     )
-                    for line_index in range(line_count):
+                    for line_index in range(min(line_count, _MAX_HLDBG_LINES)):
                         line = layout.lineAt(line_index)
-                        _LOGGER.info(
+                        DIAG_LOGGER.info(
                             "HLDBG_LINE: phase=post_highlight_overlay line_index=%s "
-                            "start=%s length=%s natural_width=%s ascent=%s descent=%s "
+                            "line_start=%s line_len=%s natural_width=%s ascent=%s descent=%s "
                             "pos=(%s,%s)",
                             line_index,
                             line.textStart(),
@@ -307,7 +305,20 @@ def render_graphics_preview(
                             line.position().y(),
                         )
                 except Exception as exc:
-                    _LOGGER.info("HLDBG: logging_failed err=%r", exc)
+                    DIAG_LOGGER.info("HLDBG: logging_failed err=%r", exc)
+        elif subtitle_mode == "word_highlight":
+            try:
+                resolved_highlight_opacity = (
+                    1.0 if highlight_opacity is None else float(highlight_opacity)
+                )
+                DIAG_LOGGER.info(
+                    "HLDBG: phase=pre_highlight_overlay skip_reason=no_overlay "
+                    "selection_none=%s highlight_opacity=%s",
+                    highlight_selection is None,
+                    resolved_highlight_opacity,
+                )
+            except Exception as exc:
+                DIAG_LOGGER.info("HLDBG: logging_failed err=%r", exc)
     finally:
         painter.end()
     return GraphicsPreviewResult(
@@ -491,29 +502,22 @@ def _apply_highlight_overlay_formats(
         suffix.length = suffix_length
         suffix.format = transparent_format
         selections.append(suffix)
-    if DEBUG_HL:
-        try:
-            _LOGGER.info(
-                "HLDBG: phase=apply_highlight_formats resolved_opacity=%s selection_none=%s "
-                "highlight_start=%s highlight_length=%s base_start=%s base_length=%s",
-                resolved_opacity,
-                selection is None,
-                prefix_length,
-                highlight_length,
-                0,
-                text_length,
+    try:
+        DIAG_LOGGER.info(
+            "HLDBG: phase=apply_highlight_formats resolved_opacity=%s ranges_count=%s",
+            resolved_opacity,
+            len(selections),
+        )
+        for format_range in selections:
+            color = format_range.format.foreground().color()
+            DIAG_LOGGER.info(
+                "HLDBG: phase=apply_highlight_formats range_start=%s range_length=%s fg=%s",
+                format_range.start,
+                format_range.length,
+                _format_qcolor(color),
             )
-            for format_range in selections:
-                color = format_range.format.foreground().color()
-                _LOGGER.info(
-                    "HLDBG: phase=apply_highlight_formats range_start=%s range_length=%s "
-                    "fg=%s",
-                    format_range.start,
-                    format_range.length,
-                    _format_qcolor(color),
-                )
-        except Exception as exc:
-            _LOGGER.info("HLDBG: logging_failed err=%r", exc)
+    except Exception as exc:
+        DIAG_LOGGER.info("HLDBG: logging_failed err=%r", exc)
     return selections, prefix_length, highlight_length
 
 
@@ -527,14 +531,13 @@ def _draw_highlight_overlay(
 ) -> None:
     resolved_opacity = 1.0 if highlight_opacity is None else float(highlight_opacity)
     if resolved_opacity <= 0.0:
-        if DEBUG_HL:
-            try:
-                _LOGGER.info(
-                    "HLDBG: phase=highlight_overlay skip_reason=opacity_non_positive opacity=%s",
-                    resolved_opacity,
-                )
-            except Exception as exc:
-                _LOGGER.info("HLDBG: logging_failed err=%r", exc)
+        try:
+            DIAG_LOGGER.info(
+                "HLDBG: phase=highlight_overlay skip_reason=opacity_non_positive opacity=%s",
+                resolved_opacity,
+            )
+        except Exception as exc:
+            DIAG_LOGGER.info("HLDBG: logging_failed err=%r", exc)
         return
     transparent = QtGui.QColor(0, 0, 0, 0)
     highlight_color_value = QtGui.QColor(highlight_color or DEFAULT_HIGHLIGHT_COLOR)
@@ -555,85 +558,78 @@ def _draw_highlight_overlay(
     painter.save()
     painter.setOpacity(1.0)
     painter.setPen(QtGui.QColor(0, 0, 0, 0))
-    if DEBUG_HL:
-        try:
-            state = _format_painter_state(painter)
-            _LOGGER.info(
-                "HLDBG_PAINTER: opacity=%s pen=%s brush=%s composition=%s render_hints=%s "
-                "formats_count=%s highlight_start=%s highlight_length=%s",
-                state["opacity"],
-                state["pen"],
-                state["brush"],
-                state["composition"],
-                state["render_hints"],
-                len(selections),
-                highlight_start,
-                highlight_length,
+    try:
+        state = _format_painter_state(painter)
+        DIAG_LOGGER.info(
+            "HLDBG_PAINTER: opacity=%s pen=%s brush=%s comp=%s hints=%s formats_count=%s",
+            state["opacity"],
+            state["pen"],
+            state["brush"],
+            state["composition"],
+            state["render_hints"],
+            len(selections),
+        )
+        if hasattr(layout, "lineCount"):
+            line_count = layout.lineCount()
+        else:
+            line_count = 0
+        logged_lines = 0
+        for line_index in range(line_count):
+            line = layout.lineAt(line_index)
+            line_start = line.textStart()
+            line_len = line.textLength()
+            line_end = line_start + line_len
+            overlap_start = max(selection.start, line_start)
+            overlap_end = min(selection.end, line_end)
+            if overlap_start >= overlap_end:
+                continue
+            local_start = overlap_start - line_start
+            local_end = overlap_end - line_start
+            raw_x1 = line.cursorToX(local_start)
+            raw_x2 = line.cursorToX(local_end)
+
+            def _cursor_x(value: object) -> Optional[float]:
+                if isinstance(value, (tuple, list)) and value:
+                    value = value[0]
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
+            x1 = _cursor_x(raw_x1)
+            x2 = _cursor_x(raw_x2)
+            left = min(x1, x2) if x1 is not None and x2 is not None else None
+            right = max(x1, x2) if x1 is not None and x2 is not None else None
+            clip_rect = None
+            if left is not None and right is not None:
+                clip_rect = QtCore.QRectF(
+                    line.position().x() + left,
+                    line.position().y(),
+                    right - left,
+                    line.height(),
+                )
+            DIAG_LOGGER.info(
+                "HLDBG_LINE: phase=highlight_overlay line_index=%s line_start=%s line_len=%s "
+                "overlap_start=%s overlap_end=%s cursor_x1_raw=%r cursor_x2_raw=%r "
+                "x1=%s x2=%s clip_rect=%s",
+                line_index,
+                line_start,
+                line_len,
+                overlap_start,
+                overlap_end,
+                raw_x1,
+                raw_x2,
+                x1,
+                x2,
+                None
+                if clip_rect is None
+                else (clip_rect.x(), clip_rect.y(), clip_rect.width(), clip_rect.height()),
             )
-        except Exception as exc:
-            _LOGGER.info("HLDBG_PAINTER: logging_failed err=%r", exc)
-    if _DEBUG_HIGHLIGHT_PAINTER:
-        try:
-            font = layout.font()
-            font_size = font.pointSizeF() if font is not None else None
-            line_count = layout.lineCount() if hasattr(layout, "lineCount") else None
-            current_line_start = None
-            current_line_length = None
-            selected_text = text[selection.start : selection.end]
-            _LOGGER.info(
-                "HLPAINT: font_size=%s highlight_color=%s highlight_opacity=%s "
-                "selection.index=%s selection.start=%s selection.end=%s selected_text=%r "
-                "line_count=%s line_text_start=%s line_text_length=%s",
-                font_size,
-                highlight_color_value.name(),
-                highlight_color_value.alphaF(),
-                selection.index,
-                selection.start,
-                selection.end,
-                selected_text,
-                line_count,
-                current_line_start,
-                current_line_length,
-            )
-            pen = painter.pen()
-            pen_color = pen.color()
-            brush = painter.brush()
-            brush_color = brush.color()
-            composition = painter.compositionMode()
-            composition_value = getattr(composition, "value", None)
-            if composition_value is None:
-                composition_value = str(composition)
-            opacity = painter.opacity()
-            antialiasing = painter.testRenderHint(QtGui.QPainter.Antialiasing)
-            text_antialiasing = painter.testRenderHint(QtGui.QPainter.TextAntialiasing)
-            if hasattr(painter, "hasClipping"):
-                clip_active = painter.hasClipping()
-            else:
-                clip_active = False
-                if hasattr(painter, "clipPath") and not painter.clipPath().isEmpty():
-                    clip_active = True
-                if hasattr(painter, "clipRegion") and not painter.clipRegion().isEmpty():
-                    clip_active = True
-            _LOGGER.info(
-                "HLPAINT: opacity=%s composition_mode=%s "
-                "pen(color=%s alphaF=%s widthF=%s style=%s) "
-                "brush(color=%s alphaF=%s style=%s) "
-                "render_hints(antialiasing=%s text_antialiasing=%s) clip_active=%s",
-                opacity,
-                composition_value,
-                pen_color.name(),
-                pen_color.alphaF(),
-                pen.widthF(),
-                int(pen.style()),
-                brush_color.name(),
-                brush_color.alphaF(),
-                int(brush.style()),
-                antialiasing,
-                text_antialiasing,
-                clip_active,
-            )
-        except Exception as exc:
-            _LOGGER.info("HLPAINT: logging_failed err=%r", exc)
+            logged_lines += 1
+            if logged_lines >= _MAX_HLDBG_LINES:
+                break
+    except Exception as exc:
+        DIAG_LOGGER.info("HLDBG: logging_failed err=%r", exc)
     layout.draw(painter, QtCore.QPointF(0, 0), selections)
     painter.restore()
 
