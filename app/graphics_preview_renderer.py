@@ -307,11 +307,18 @@ def _draw_text_fill(
     painter.restore()
 
 
-def _cursor_to_x(line: QtGui.QTextLine, position: int) -> float:
-    cursor_value = line.cursorToX(position)
-    if isinstance(cursor_value, tuple):
-        return float(cursor_value[0])
-    return float(cursor_value)
+def _cursor_x_value(value: object) -> float:
+    if isinstance(value, tuple):
+        return float(value[0])
+    return float(value)
+
+
+def _to_layout_x(line: QtGui.QTextLine, x: float) -> float:
+    left = float(line.x())
+    right = left + float(line.naturalTextWidth())
+    if (left - 1.0) <= x <= (right + 1.0):
+        return x
+    return left + x
 
 
 def _iter_highlight_clip_rects(
@@ -339,15 +346,16 @@ def _iter_highlight_clip_rects(
             continue
         line_relative_start = overlap_start - line_start
         line_relative_end = overlap_end - line_start
-        x_start = line.position().x() + _cursor_to_x(line, line_relative_start)
-        x_end = line.position().x() + _cursor_to_x(line, line_relative_end)
+        x_start_raw = _cursor_x_value(line.cursorToX(line_relative_start))
+        x_end_raw = _cursor_x_value(line.cursorToX(line_relative_end))
+        x_start = _to_layout_x(line, x_start_raw)
+        x_end = _to_layout_x(line, x_end_raw)
         left = min(x_start, x_end)
         right = max(x_start, x_end)
         width = right - left
         if width <= min_width:
             continue
-        rect = QtCore.QRectF(left, line.position().y(), width, line.height())
-        rect.adjust(-epsilon, -epsilon, epsilon, epsilon)
+        rect = QtCore.QRectF(left - epsilon, float(line.y()) - epsilon, width + 2.0 * epsilon, float(line.height()) + 2.0 * epsilon)
         if rect.width() <= min_width or rect.height() <= 0:
             continue
         yield rect
