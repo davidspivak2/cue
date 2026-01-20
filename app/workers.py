@@ -840,10 +840,10 @@ class Worker(QtCore.QObject):
                     if state in render_cache:
                         last_frame = render_cache[state]
                         if perf_stats:
-                            perf_stats.render_cache_hits += 1
+                            perf_stats.record_render_cache_hit()
                     else:
                         if perf_stats:
-                            perf_stats.render_cache_misses += 1
+                            perf_stats.record_render_cache_miss()
                         frame_bytes, _ = render_overlay_frame(
                             width=plan.width,
                             height=plan.height,
