@@ -225,6 +225,7 @@ Current implementation:
   - Right: Style Card (grouped sections + CTA)
     - Mode: segmented control (“Static” / “Word highlight”).
     - Highlight color row (only visible when Subtitle mode = Word highlight).
+      - Changing the highlight color refreshes the preview still immediately.
     - Presets: Default, Large outline, Large outline + box, Custom (text list).
     - Quick tweaks: font size, outline width, shadow, bottom margin.
     - Background: none/line/word segmented control (Word disabled with helper text).

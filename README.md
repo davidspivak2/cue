@@ -9,6 +9,7 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Hard-burns subtitles into `<video_stem>_subtitled.mp4` with subtitle style presets, subtitle modes, and customization.
 - Subtitles-ready preview card with a subtitle still frame (click to expand).
 - Subtitle mode selector (Word highlight vs Static) and highlight color picker (Word highlight is the default).
+- Highlight color changes refresh the preview still immediately.
 - Word-highlight pipeline uses ASS rendering with WhisperX word alignment for per-word timing.
 - Graphics-based preview rendering keeps subtitle styling aligned with export results.
 - Graphics overlay export pipeline streams RGBA frames to FFmpeg (default on; set `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` to force legacy export).
@@ -30,7 +31,6 @@ app/
   workers.py              # Worker queue/thread management
   ffmpeg_utils.py         # FFmpeg invocation helpers
   graphics_preview_renderer.py # Graphics-based preview rendering
-  preview_playback.py     # Preview clip generation and playback caching
   srt_utils.py            # SRT parsing/formatting helpers
   subtitle_style.py       # Subtitle style presets and FFmpeg style mapping
   ass_render.py           # ASS subtitle document generation (static rendering)
