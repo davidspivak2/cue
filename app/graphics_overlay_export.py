@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, TYPE_CHECKING
 
 from .ffmpeg_utils import get_ffprobe_json
 from .srt_utils import SrtCue
 from .subtitle_style import SubtitleStyle
 from .word_timing_schema import CueWordTimings, WordTimingDocument
+
+if TYPE_CHECKING:
+    from .graphics_preview_renderer import RenderContext
 
 GRAPHICS_OVERLAY_PIPELINE = "graphics_overlay_stream"
 
@@ -304,6 +307,7 @@ def render_overlay_frame(
     highlight_color: Optional[str],
     highlight_opacity: Optional[float],
     highlight_word_index: Optional[int] = None,
+    render_context: Optional["RenderContext"] = None,
 ) -> tuple[bytes, Optional[int]]:
     from PySide6 import QtCore, QtGui
     from .graphics_preview_renderer import render_graphics_preview
@@ -318,6 +322,7 @@ def render_overlay_frame(
         highlight_color=highlight_color,
         highlight_opacity=highlight_opacity,
         highlight_word_index=highlight_word_index,
+        render_context=render_context,
     )
     image = result.image.convertToFormat(QtGui.QImage.Format_RGBA8888)
     size = image.sizeInBytes()
