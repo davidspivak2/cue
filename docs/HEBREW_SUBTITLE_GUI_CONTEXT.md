@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — Project Context (Read This First)
 
-**Last updated:** 2026-02-27
+**Last updated:** 2026-03-10
 
 This document is for:
 - new contributors
@@ -256,7 +256,7 @@ The UI aggregates progress without regression (percent should not go backwards).
 7) Confirm `<video_stem>_audio_for_whisper.wav` is created during processing.
 8) Confirm `<video_stem>.srt` is created in the expected output folder.
 9) Open the SRT in Subtitle Edit (via the UI or file association).
-10) In the app, click **Export video with subtitles**.
+10) In the app, click **Create final video**.
 11) Confirm `<video_stem>_subtitled.mp4` is created.
 12) Play the exported MP4 and verify subtitles display and audio plays.
 13) Toggle **Clean up audio before transcription** ON, re-run on the same clip, confirm it still completes.
@@ -563,6 +563,8 @@ Recent updates include:
 - Changing the highlight color forces an immediate preview refresh.
 - Word-highlight clipping and clip-rect alignment were tightened for the graphics preview renderer.
 - Outline/shadow alignment was corrected for wrapped text and glyph-run paths in graphics rendering.
+- Wrapped-line word highlight fixes now make highlight clip rects line-relative so multi-line cues highlight correctly.
+- Graphics overlay export is now the default path, with `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` as a legacy fallback.
 - Diagnostics can optionally zip logs + outputs on exit for easier support handoffs.
 
 ---
