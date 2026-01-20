@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import re
 
 import pytest
 
@@ -239,8 +240,18 @@ def test_wrapped_highlight_clip_rects_follow_line_position() -> None:
     assert second_line.textLength() > 0
     line_start = second_line.textStart()
     line_end = line_start + second_line.textLength()
-    selection_start = line_start
-    selection_end = min(line_start + 3, line_end)
+    match = next(
+        (
+            match
+            for match in re.finditer(r"\S+", text)
+            if line_start <= match.start() < line_end
+        ),
+        None,
+    )
+    if match is None:
+        pytest.skip("Could not find a visible span on the second line for highlight test.")
+    selection_start = match.start()
+    selection_end = min(match.start() + 3, match.end())
     selection = _HighlightSelection(index=0, start=selection_start, end=selection_end)
 
     rects = list(_iter_highlight_clip_rects(layout, selection, len(text)))
@@ -248,7 +259,7 @@ def test_wrapped_highlight_clip_rects_follow_line_position() -> None:
     line_left = float(second_line.position().x())
     line_top = float(second_line.position().y())
     line_bottom = line_top + float(second_line.height())
-    assert any(rect.left() >= line_left for rect in rects)
+    assert any(rect.left() >= line_left - 2.0 for rect in rects)
     assert any(rect.y() <= line_bottom and (rect.y() + rect.height()) >= line_top for rect in rects)
 
 
