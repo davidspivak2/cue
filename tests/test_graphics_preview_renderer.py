@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import re
+import math
 
 import pytest
 
@@ -121,6 +121,23 @@ def _has_highlight_pixel(image, QtGui, target_hex: str) -> bool:
     return False
 
 
+def _has_highlight_pixel_in_rows(
+    image, QtGui, target_hex: str, y_start: int, y_end: int
+) -> bool:
+    target = QtGui.QColor(target_hex)
+    tr, tg, tb = target.red(), target.green(), target.blue()
+    max_dist = 120
+    y_start = max(0, y_start)
+    y_end = min(image.height() - 1, y_end)
+    for y in range(y_start, y_end + 1):
+        for x in range(image.width()):
+            color = QtGui.QColor(image.pixel(x, y))
+            dist = abs(color.red() - tr) + abs(color.green() - tg) + abs(color.blue() - tb)
+            if dist <= max_dist:
+                return True
+    return False
+
+
 def _color_distance(color, target) -> int:
     return (
         abs(color.red() - target.red())
@@ -212,27 +229,40 @@ def test_highlight_fill_pixels_present() -> None:
     assert _has_highlight_pixel(result.image, QtGui, "#FFD400")
 
 
-def test_wrapped_highlight_clip_rects_follow_line_position() -> None:
+def test_wrapped_highlight_present_on_second_line() -> None:
     QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
     QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
     if QtWidgets.QApplication.instance() is None:
         QtWidgets.QApplication([])
     from app.graphics_preview_renderer import (
-        _HighlightSelection,
         _build_text_layout,
-        _iter_highlight_clip_rects,
+        _WORD_RE,
+        render_graphics_preview,
     )
 
     text = "This is a long subtitle that should wrap onto multiple lines."
-    font = QtGui.QFont("Arial", 48)
     width = 260
+    height = 240
+    style = preset_defaults("Default", subtitle_mode="word_highlight")
+    style = replace(
+        style,
+        outline_enabled=False,
+        shadow_enabled=False,
+        background_mode="none",
+        text_color="#FFFFFF",
+        text_opacity=1.0,
+        font_size=48,
+        vertical_anchor="top",
+        vertical_offset=0.0,
+    )
+    font = QtGui.QFont(style.font_family, int(round(style.font_size)))
     layout, lines, _ = _build_text_layout(
         text,
         font,
         width=width,
-        height=240,
-        vertical_offset=0.0,
-        vertical_anchor="top",
+        height=height,
+        vertical_offset=style.vertical_offset,
+        vertical_anchor=style.vertical_anchor,
     )
     if len(lines) < 2:
         pytest.skip("Could not create wrapped text for highlight clip rect test.")
@@ -240,27 +270,29 @@ def test_wrapped_highlight_clip_rects_follow_line_position() -> None:
     assert second_line.textLength() > 0
     line_start = second_line.textStart()
     line_end = line_start + second_line.textLength()
+    matches = list(_WORD_RE.finditer(text))
     match = next(
-        (
-            match
-            for match in re.finditer(r"\S+", text)
-            if line_start <= match.start() < line_end
-        ),
+        (candidate for candidate in matches if line_start <= candidate.start() < line_end),
         None,
     )
     if match is None:
         pytest.skip("Could not find a visible span on the second line for highlight test.")
-    selection_start = match.start()
-    selection_end = min(match.start() + 3, match.end())
-    selection = _HighlightSelection(index=0, start=selection_start, end=selection_end)
+    highlight_word_index = matches.index(match)
 
-    rects = list(_iter_highlight_clip_rects(layout, selection, len(text)))
-    assert rects
-    line_left = float(second_line.position().x())
-    line_top = float(second_line.position().y())
-    line_bottom = line_top + float(second_line.height())
-    assert any(rect.left() >= line_left - 2.0 for rect in rects)
-    assert any(rect.y() <= line_bottom and (rect.y() + rect.height()) >= line_top for rect in rects)
+    frame = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32)
+    frame.fill(QtGui.QColor("black"))
+    result = render_graphics_preview(
+        frame,
+        subtitle_text=text,
+        style=style,
+        subtitle_mode="word_highlight",
+        highlight_color="#FFD400",
+        highlight_opacity=1.0,
+        highlight_word_index=highlight_word_index,
+    )
+    y0 = int(math.floor(second_line.position().y()))
+    y1 = int(math.ceil(second_line.position().y() + second_line.height()))
+    assert _has_highlight_pixel_in_rows(result.image, QtGui, "#FFD400", y0, y1)
 
 
 def test_outline_visible() -> None:
