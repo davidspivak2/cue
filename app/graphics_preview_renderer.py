@@ -324,7 +324,7 @@ def _cursor_x_value(value: object) -> float:
 
 
 def _to_layout_x(line: QtGui.QTextLine, x: float) -> float:
-    left = float(line.x())
+    left = float(line.position().x())
     right = left + float(line.naturalTextWidth())
     if (left - 1.0) <= x <= (right + 1.0):
         return x
@@ -365,7 +365,12 @@ def _iter_highlight_clip_rects(
         width = right - left
         if width <= min_width:
             continue
-        rect = QtCore.QRectF(left - epsilon, float(line.y()) - epsilon, width + 2.0 * epsilon, float(line.height()) + 2.0 * epsilon)
+        rect = QtCore.QRectF(
+            left - epsilon,
+            float(line.position().y()) - epsilon,
+            width + 2.0 * epsilon,
+            float(line.height()) + 2.0 * epsilon,
+        )
         if rect.width() <= min_width or rect.height() <= 0:
             continue
         yield rect

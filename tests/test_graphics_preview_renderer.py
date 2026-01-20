@@ -211,6 +211,47 @@ def test_highlight_fill_pixels_present() -> None:
     assert _has_highlight_pixel(result.image, QtGui, "#FFD400")
 
 
+def test_wrapped_highlight_clip_rects_follow_line_position() -> None:
+    QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
+    QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication([])
+    from app.graphics_preview_renderer import (
+        _HighlightSelection,
+        _build_text_layout,
+        _iter_highlight_clip_rects,
+    )
+
+    text = "This is a long subtitle that should wrap onto multiple lines."
+    font = QtGui.QFont("Arial", 48)
+    width = 260
+    layout, lines, _ = _build_text_layout(
+        text,
+        font,
+        width=width,
+        height=240,
+        vertical_offset=0.0,
+        vertical_anchor="top",
+    )
+    if len(lines) < 2:
+        pytest.skip("Could not create wrapped text for highlight clip rect test.")
+    second_line = lines[1]
+    assert second_line.textLength() > 0
+    line_start = second_line.textStart()
+    line_end = line_start + second_line.textLength()
+    selection_start = line_start
+    selection_end = min(line_start + 3, line_end)
+    selection = _HighlightSelection(index=0, start=selection_start, end=selection_end)
+
+    rects = list(_iter_highlight_clip_rects(layout, selection, len(text)))
+    assert rects
+    line_left = float(second_line.position().x())
+    line_top = float(second_line.position().y())
+    line_bottom = line_top + float(second_line.height())
+    assert any(rect.left() >= line_left for rect in rects)
+    assert any(rect.y() <= line_bottom and (rect.y() + rect.height()) >= line_top for rect in rects)
+
+
 def test_outline_visible() -> None:
     QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
     QtWidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
