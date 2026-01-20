@@ -31,7 +31,6 @@ app/
   workers.py              # Worker queue/thread management
   ffmpeg_utils.py         # FFmpeg invocation helpers
   graphics_preview_renderer.py # Graphics-based preview rendering
-  preview_playback.py     # Preview clip generation and playback caching
   srt_utils.py            # SRT parsing/formatting helpers
   subtitle_style.py       # Subtitle style presets and FFmpeg style mapping
   ass_render.py           # ASS subtitle document generation (static rendering)

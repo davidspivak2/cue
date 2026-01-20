@@ -5,7 +5,6 @@ Last updated: 2026-02-27
 ## A) Goal and user-visible outcomes
 - Subtitle mode selector is available, with **Word highlight** recommended as the default and **Static** as the alternative.
 - RTL Hebrew ordering stays stable during and after highlighting.
-- Preview playback matches export styling and timing behavior.
 - Highlight is real highlighting (not underline), with user-selectable highlight color.
 - Word timings come from alignment (WhisperX), not heuristic splitting.
 
@@ -18,7 +17,7 @@ Last updated: 2026-02-27
 - **Static mode:** existing SRT + `subtitles` filter.
 - **Word highlight mode:** generate ASS + FFmpeg `-vf ass=...`.
 - **Alignment:** WhisperX produces word-level timestamps keyed to the edited SRT (so edits are respected).
-- **Preview still + preview playback:** same renderer as export (no divergence).
+- **Preview still:** same renderer as export (no divergence).
 
 **RTL hardening in ASS:**
 - Include explicit RTL embedding marks per event.
@@ -115,7 +114,7 @@ Last updated: 2026-02-27
   - Cache invalidates on mode/setting change.
 - **Depends on:** Task 4.
 
-### Codex Task 6 — Preview playback uses shifted ASS path when word-highlight mode selected + shifting test coverage
+### Codex Task 6 — Preview playback uses shifted ASS path when word-highlight mode selected + shifting test coverage (GUI removed)
 - **Goal:** Preview playback uses ASS for word-highlight mode, including time-shift logic. ✅ Done.
 - **Scope:**
   - Update preview playback generator to render ASS when needed.
@@ -127,7 +126,7 @@ Last updated: 2026-02-27
 - **Implementation notes:**
   - Ensure timing shifts match preview slice logic.
 - **Acceptance criteria:**
-  - Preview playback matches export for word-highlight mode.
+  - Preview playback matches export for word-highlight mode (feature no longer surfaced in the GUI).
   - Tests cover time shifting for ASS.
 - **Depends on:** Task 5.
 
@@ -255,7 +254,7 @@ Last updated: 2026-02-27
 | 3 | Done |  | ASS document generation + tests complete. |
 | 4 | Done |  | Export uses ASS for word highlight mode. |
 | 5 | Done |  | Preview still uses ASS path + cache key updates. |
-| 6 | Done |  | Preview playback uses shifted ASS + tests. |
+| 6 | Done |  | Preview playback uses shifted ASS + tests (GUI no longer exposes playback). |
 | 7 | Done |  | Word timing JSON contract + staleness detection. |
 | 8 | Done |  | WhisperX alignment worker added. |
 | 9 | Done |  | Karaoke step-highlight ASS generation + tests. |
