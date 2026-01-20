@@ -55,6 +55,7 @@ class LRUCache:
 
 @dataclass
 class RenderPerfStats:
+    segments_total: int = 0
     render_calls_total: int = 0
     render_cache_hits: int = 0
     render_cache_misses: int = 0
@@ -68,8 +69,18 @@ class RenderPerfStats:
     draw_text_and_effects_seconds: float = 0.0
     highlight_overlay_seconds: float = 0.0
 
+    def record_render_cache_hit(self) -> None:
+        self.segments_total += 1
+        self.render_cache_hits += 1
+
+    def record_render_cache_miss(self) -> None:
+        self.segments_total += 1
+        self.render_cache_misses += 1
+        self.render_calls_total += 1
+
     def to_dict(self) -> dict[str, object]:
         return {
+            "segments_total": self.segments_total,
             "render_calls_total": self.render_calls_total,
             "render_cache_hits": self.render_cache_hits,
             "render_cache_misses": self.render_cache_misses,
@@ -85,11 +96,18 @@ class RenderPerfStats:
         }
 
     def summary_line(self) -> str:
+        hit_rate = (
+            self.render_cache_hits / self.segments_total
+            if self.segments_total
+            else 0.0
+        )
         return (
             "Graphics overlay render perf: "
-            f"calls={self.render_calls_total} "
+            f"segments_total={self.segments_total} "
+            f"render_calls_total={self.render_calls_total} "
             f"render_cache_hits={self.render_cache_hits} "
             f"render_cache_misses={self.render_cache_misses} "
+            f"render_cache_hit_rate={hit_rate:.2%} "
             f"layout_cache_hits={self.layout_cache_hits} "
             f"layout_cache_misses={self.layout_cache_misses} "
             f"path_cache_hits={self.path_cache_hits} "
@@ -188,11 +206,7 @@ def render_graphics_preview(
         font.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, style.letter_spacing)
 
     perf_stats = render_context.perf_stats if render_context else None
-    if perf_stats:
-        perf_stats.render_calls_total += 1
-        render_start = time.perf_counter()
-    else:
-        render_start = None
+    render_start = time.perf_counter() if perf_stats else None
 
     layout_entry = None
     layout_cache_key = None

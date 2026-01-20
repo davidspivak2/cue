@@ -78,7 +78,6 @@ def test_render_context_caches_layout_and_paths() -> None:
     )
 
     assert _image_bytes(first.image, QtGui) == _image_bytes(second.image, QtGui)
-    assert perf_stats.render_calls_total == 2
     assert perf_stats.layout_cache_misses == 1
     assert perf_stats.path_cache_misses == 1
     assert perf_stats.layout_cache_hits == 1
