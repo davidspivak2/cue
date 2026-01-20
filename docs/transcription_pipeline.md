@@ -100,6 +100,8 @@ When subtitles are ready, the GUI prepares a preview moment:
    the first non-empty cue to anchor a preview moment.
 2. **Preview still frame.** The GUI extracts a raw video frame via FFmpeg and renders
    subtitles with the graphics preview renderer (draws text directly onto the image).
+   The graphics preview renderer computes highlight clip rects line-relative so wrapped
+   lines highlight correctly.
    The preview cache key includes subtitle style + highlight settings and word-timing
    mtimes so word-highlight previews update when alignment data changes. Highlight
    color changes force an immediate preview refresh. Frames are cached under
