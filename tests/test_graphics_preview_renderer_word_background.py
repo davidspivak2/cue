@@ -13,9 +13,13 @@ def _ensure_qt_app(QtGui) -> None:
 
 
 def _image_bytes(image, QtGui) -> bytes:
-    ptr = image.bits()
-    ptr.setsize(image.sizeInBytes())
-    return bytes(ptr)
+    buf = image.constBits() if hasattr(image, "constBits") else image.bits()
+    size = image.sizeInBytes()
+    if hasattr(buf, "setsize"):
+        buf.setsize(size)
+        return bytes(buf)
+    data = buf.tobytes() if hasattr(buf, "tobytes") else bytes(buf)
+    return data[:size]
 
 
 def test_word_background_applies_only_in_word_highlight_mode() -> None:
