@@ -103,7 +103,6 @@ Running it out-of-process:
 - `app/srt_utils.py` — SRT formatting primitives
 - `app/srt_splitter.py` — cue splitting and word alignment fallback
 - `app/progress.py` — progress aggregation and weights
-- `app/preview_playback.py` — preview clip generation + cache management
 - `app/subtitle_style.py` — subtitle style presets + FFmpeg style formatting
 - `app/ass_render.py` — ASS subtitle document generation (static ASS groundwork)
 - `app/ass_karaoke.py` — ASS step-highlight generation (word highlight)
@@ -124,9 +123,8 @@ Running it out-of-process:
 Common subfolders:
 - `models\` — faster‑whisper model cache
 - `logs\` — GUI runtime logs (timestamped)
-- `cache\` — thumbnails, preview frames, preview clips
+- `cache\` — thumbnails, preview frames
   - `cache\preview_frames` — cached subtitle preview still frames
-  - `cache\previews` — cached preview playback clips
 - `config.json` — user settings
 
 ### Per-video outputs (folder chosen by Save policy)
@@ -466,7 +464,7 @@ Done / merged:
   - transcription progress: improved, but can still move in coarse jumps depending on Whisper segmentation
 - **PR7** — Subtitles-ready page: auto-pick a subtitle moment and render a preview still frame ✅
 - **PR8** — style presets + customize panel + instant preview updates ✅
-- **PR9** — in-app preview playback (QtMultimedia) + caching ✅
+- **PR9** — in-app preview playback (QtMultimedia) + caching ✅ (feature no longer surfaced in the GUI)
 - **PR10** — word highlight default mode + highlight color picker + ASS export ✅
 - **Extra (not originally in the plan)** — opt-in success diagnostics JSON + “write next to outputs” hotfix ✅
 - **PR14 — Docs refresh / handover readiness (this update)** ✅

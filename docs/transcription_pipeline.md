@@ -94,7 +94,7 @@ main transcript. Limits are enforced on the number of gaps and total rescued dur
 
 ## Subtitle preview generation (GUI)
 
-When subtitles are ready, the GUI prepares a preview moment and optional playback:
+When subtitles are ready, the GUI prepares a preview moment:
 
 1. **SRT parsing + cue selection.** The GUI parses the generated SRT file and selects
    the first non-empty cue to anchor a preview moment.
@@ -104,8 +104,3 @@ When subtitles are ready, the GUI prepares a preview moment and optional playbac
    mtimes so word-highlight previews update when alignment data changes. Highlight
    color changes force an immediate preview refresh. Frames are cached under
    `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`.
-3. **Preview playback clip.** When the user presses Play, the GUI requests a short
-   clip (default 15s, anchored near the selected cue). The preview clip is rendered
-   via FFmpeg with a shifted subtitle file (ASS for word highlight, SRT for static)
-   and cached under
-   `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\previews`.

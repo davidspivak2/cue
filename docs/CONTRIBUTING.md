@@ -67,7 +67,7 @@ pytest
 Qt-based tests auto-create a `QApplication` (see `tests/conftest.py`). If PySide6
 is missing, those tests will be skipped via `pytest.importorskip`.
 
-Preview playback includes a focused regression test for timestamp shifting:
+Preview playback includes a focused regression test for timestamp shifting (feature currently hidden in the GUI):
 ```bat
 pytest tests/test_preview_playback_shift.py
 ```
@@ -101,7 +101,6 @@ dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
 The `dist\HebrewSubtitleGUI\` folder is the portable package you can zip or copy for release.
 
 ## Preview cache notes
-The preview still frames and preview playback clips are cached under:
-`%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames` and
-`%LOCALAPPDATA%\HebrewSubtitleGUI\cache\previews`. If you need to refresh
-previews during development, clear these folders.
+Preview still frames are cached under:
+`%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`. If you need to refresh
+previews during development, clear this folder.
