@@ -17,6 +17,7 @@ from .subtitle_style import (
     DEFAULT_OUTLINE_COLOR,
     DEFAULT_SHADOW_COLOR,
     DEFAULT_TEXT_COLOR,
+    DEFAULT_WORD_BG_COLOR,
     MIN_TEXT_OPACITY,
     SubtitleStyle,
 )
@@ -168,6 +169,10 @@ def build_preview_cache_key(
         "line_bg_opacity": style.line_bg_opacity,
         "line_bg_padding": style.line_bg_padding,
         "line_bg_radius": style.line_bg_radius,
+        "word_bg_color": style.word_bg_color,
+        "word_bg_opacity": style.word_bg_opacity,
+        "word_bg_padding": style.word_bg_padding,
+        "word_bg_radius": style.word_bg_radius,
         "vertical_anchor": style.vertical_anchor,
         "vertical_offset": style.vertical_offset,
         "subtitle_mode": subtitle_mode,
@@ -314,6 +319,21 @@ def render_graphics_preview(
                 style.line_bg_radius,
             )
             painter.restore()
+        if (
+            style.background_mode == "word"
+            and subtitle_mode == "word_highlight"
+            and highlight_selection is not None
+        ):
+            _draw_word_background(
+                painter,
+                layout,
+                subtitle_text,
+                highlight_selection,
+                style.word_bg_color,
+                style.word_bg_opacity,
+                style.word_bg_padding,
+                style.word_bg_radius,
+            )
         _draw_shadow(painter, line_paths, style)
         _draw_outline(painter, line_paths, style)
         effective_text_opacity = max(MIN_TEXT_OPACITY, style.text_opacity)
@@ -489,6 +509,32 @@ def _draw_line_background(
     painter.setPen(QtCore.Qt.NoPen)
     painter.setBrush(bg_color)
     painter.drawRoundedRect(rect, radius, radius)
+    painter.restore()
+
+
+def _draw_word_background(
+    painter: QtGui.QPainter,
+    layout: QtGui.QTextLayout,
+    text: str,
+    selection: _HighlightSelection,
+    color: str,
+    opacity: float,
+    padding: float,
+    radius: float,
+) -> None:
+    if opacity <= 0:
+        return
+    rects = list(_iter_highlight_clip_rects(layout, selection, len(text)))
+    if not rects:
+        return
+    bg_color = _resolve_color(color, DEFAULT_WORD_BG_COLOR, opacity)
+    painter.save()
+    painter.setPen(QtCore.Qt.NoPen)
+    painter.setBrush(bg_color)
+    for rect in rects:
+        padded = QtCore.QRectF(rect)
+        padded.adjust(-padding, -padding, padding, padding)
+        painter.drawRoundedRect(padded, radius, radius)
     painter.restore()
 
 

@@ -603,20 +603,11 @@ class MainWindow(QtWidgets.QMainWindow):
             button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
             button.setObjectName(object_name)
             button.setProperty("mode", mode)
-            if mode == "word":
-                button.setEnabled(False)
-                button.setToolTip("Available in a future update.")
             self.background_mode_group.addButton(button)
             self.background_mode_buttons[mode] = button
             background_controls_layout.addWidget(button)
 
         background_layout.addWidget(background_controls)
-        self.word_background_helper_label = QtWidgets.QLabel(
-            "Word background is available in a future update."
-        )
-        self.word_background_helper_label.setEnabled(False)
-        self.word_background_helper_label.setWordWrap(True)
-        background_layout.addWidget(self.word_background_helper_label)
         quick_layout.addWidget(background_section)
 
         card_layout.addWidget(quick_section)
@@ -807,6 +798,7 @@ class MainWindow(QtWidgets.QMainWindow):
             button.blockSignals(True)
             button.setChecked(key == mode)
             button.blockSignals(False)
+        self._update_background_mode_controls()
         self._update_highlight_color_display()
         self._update_highlight_color_visibility()
 
@@ -834,9 +826,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._subtitle_mode = mode
         self._style_model = replace(self._style_model, subtitle_mode=mode)
         self._subtitle_style_custom = replace(self._subtitle_style_custom, subtitle_mode=mode)
+        if mode == "static" and self._style_model.background_mode == "word":
+            self._style_model = replace(self._style_model, background_mode="none")
+            self._subtitle_style_custom = replace(
+                self._subtitle_style_custom, background_mode="none"
+            )
+            self._set_background_mode_buttons("none")
+            self._update_box_options_visibility(False)
         self._config["subtitle_mode"] = mode
         self._store_subtitle_style_config()
         self._log(f"Subtitle mode set to: {mode}")
+        self._update_background_mode_controls()
         self._update_highlight_color_visibility()
         self._invalidate_preview_playback()
         self._schedule_preview_refresh()
@@ -929,8 +929,20 @@ class MainWindow(QtWidgets.QMainWindow):
             spinbox.setValue(value)
             spinbox.blockSignals(False)
 
-        self._set_background_mode_buttons(style.background_mode)
-        self._update_box_options_visibility(style.background_mode == "line")
+        effective_background_mode = self._sanitize_background_mode_for_mode(
+            style.background_mode
+        )
+        if effective_background_mode != style.background_mode:
+            self._style_model = replace(
+                self._style_model, background_mode=effective_background_mode
+            )
+            self._subtitle_style_custom = replace(
+                self._subtitle_style_custom, background_mode=effective_background_mode
+            )
+            self._store_subtitle_style_config()
+        self._set_background_mode_buttons(effective_background_mode)
+        self._update_box_options_visibility(effective_background_mode == "line")
+        self._update_background_mode_controls()
 
     def _update_box_options_visibility(self, enabled: bool) -> None:
         self.box_options_container.setVisible(enabled)
@@ -947,10 +959,38 @@ class MainWindow(QtWidgets.QMainWindow):
             button.setChecked(key == mode)
             button.blockSignals(False)
 
+    def _sanitize_background_mode_for_mode(self, mode: str) -> str:
+        if self._subtitle_mode != "word_highlight" and mode == "word":
+            return "none"
+        return mode
+
+    def _update_background_mode_controls(self) -> None:
+        allow_word = self._subtitle_mode == "word_highlight"
+        none_button = self.background_mode_buttons.get("none")
+        line_button = self.background_mode_buttons.get("line")
+        word_button = self.background_mode_buttons.get("word")
+        if word_button:
+            word_button.setVisible(allow_word)
+            word_button.setEnabled(allow_word)
+        if none_button:
+            none_button.setObjectName("SegmentedLeft")
+        if line_button:
+            line_button.setObjectName(
+                "SegmentedMiddle" if allow_word else "SegmentedRight"
+            )
+        if word_button:
+            word_button.setObjectName("SegmentedRight")
+        for button in (none_button, line_button, word_button):
+            if not button:
+                continue
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+
     def _current_background_mode(self) -> str:
         for mode, button in self.background_mode_buttons.items():
             if button.isChecked():
-                return mode
+                return self._sanitize_background_mode_for_mode(mode)
         return "none"
 
     def _collect_custom_style_from_controls(self) -> SubtitleStyle:
@@ -1003,7 +1043,8 @@ class MainWindow(QtWidgets.QMainWindow):
         mode = button.property("mode")
         if not isinstance(mode, str):
             return
-        if mode == "word":
+        if mode == "word" and self._subtitle_mode != "word_highlight":
+            self._set_background_mode_buttons("none")
             return
         self._on_subtitle_style_custom_changed()
 
