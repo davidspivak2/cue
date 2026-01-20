@@ -324,11 +324,35 @@ def _cursor_x_value(value: object) -> float:
 
 
 def _to_layout_x(line: QtGui.QTextLine, x: float) -> float:
-    left = float(line.x())
+    left = float(line.position().x())
     right = left + float(line.naturalTextWidth())
-    if (left - 1.0) <= x <= (right + 1.0):
-        return x
-    return left + x
+    raw = float(x)
+    cand_abs = raw
+    cand_local = left + raw
+    tolerance = 4.0
+
+    def _in_range(value: float) -> bool:
+        return (left - tolerance) <= value <= (right + tolerance)
+
+    cand_abs_in = _in_range(cand_abs)
+    cand_local_in = _in_range(cand_local)
+    if cand_abs_in and cand_local_in:
+        return cand_abs
+    if cand_abs_in:
+        return cand_abs
+    if cand_local_in:
+        return cand_local
+
+    def _distance_to_range(value: float) -> float:
+        if value < left:
+            return left - value
+        if value > right:
+            return value - right
+        return 0.0
+
+    if _distance_to_range(cand_abs) <= _distance_to_range(cand_local):
+        return max(left, min(right, cand_abs))
+    return max(left, min(right, cand_local))
 
 
 def _iter_highlight_clip_rects(
@@ -365,7 +389,12 @@ def _iter_highlight_clip_rects(
         width = right - left
         if width <= min_width:
             continue
-        rect = QtCore.QRectF(left - epsilon, float(line.y()) - epsilon, width + 2.0 * epsilon, float(line.height()) + 2.0 * epsilon)
+        rect = QtCore.QRectF(
+            left - epsilon,
+            float(line.position().y()) - epsilon,
+            width + 2.0 * epsilon,
+            float(line.height()) + 2.0 * epsilon,
+        )
         if rect.width() <= min_width or rect.height() <= 0:
             continue
         yield rect
