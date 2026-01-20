@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 import hashlib
 import json
 import re
-from typing import Iterable, Optional
+import time
+from typing import Iterable, Optional, TypeVar
 
 from PySide6 import QtCore, QtGui
 
@@ -20,12 +22,99 @@ from .subtitle_style import (
 )
 
 _WORD_RE = re.compile(r"\S+")
+LAYOUT_CACHE_MAX_ENTRIES = 128
+PATH_CACHE_MAX_ENTRIES = 256
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
 class GraphicsPreviewResult:
     image: QtGui.QImage
     highlight_word_index: Optional[int]
+
+
+class LRUCache:
+    def __init__(self, *, max_entries: int) -> None:
+        self._max_entries = max(1, int(max_entries))
+        self._entries: OrderedDict[object, _T] = OrderedDict()
+
+    def get(self, key: object) -> Optional[_T]:
+        if key not in self._entries:
+            return None
+        value = self._entries.pop(key)
+        self._entries[key] = value
+        return value
+
+    def set(self, key: object, value: _T) -> None:
+        if key in self._entries:
+            self._entries.pop(key)
+        self._entries[key] = value
+        if len(self._entries) > self._max_entries:
+            self._entries.popitem(last=False)
+
+
+@dataclass
+class RenderPerfStats:
+    render_calls_total: int = 0
+    render_cache_hits: int = 0
+    render_cache_misses: int = 0
+    layout_cache_hits: int = 0
+    layout_cache_misses: int = 0
+    path_cache_hits: int = 0
+    path_cache_misses: int = 0
+    total_render_seconds: float = 0.0
+    layout_build_seconds: float = 0.0
+    path_build_seconds: float = 0.0
+    draw_text_and_effects_seconds: float = 0.0
+    highlight_overlay_seconds: float = 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "render_calls_total": self.render_calls_total,
+            "render_cache_hits": self.render_cache_hits,
+            "render_cache_misses": self.render_cache_misses,
+            "layout_cache_hits": self.layout_cache_hits,
+            "layout_cache_misses": self.layout_cache_misses,
+            "path_cache_hits": self.path_cache_hits,
+            "path_cache_misses": self.path_cache_misses,
+            "total_render_seconds": self.total_render_seconds,
+            "layout_build_seconds": self.layout_build_seconds,
+            "path_build_seconds": self.path_build_seconds,
+            "draw_text_and_effects_seconds": self.draw_text_and_effects_seconds,
+            "highlight_overlay_seconds": self.highlight_overlay_seconds,
+        }
+
+    def summary_line(self) -> str:
+        return (
+            "Graphics overlay render perf: "
+            f"calls={self.render_calls_total} "
+            f"render_cache_hits={self.render_cache_hits} "
+            f"render_cache_misses={self.render_cache_misses} "
+            f"layout_cache_hits={self.layout_cache_hits} "
+            f"layout_cache_misses={self.layout_cache_misses} "
+            f"path_cache_hits={self.path_cache_hits} "
+            f"path_cache_misses={self.path_cache_misses} "
+            f"total_render_seconds={self.total_render_seconds:.4f} "
+            f"layout_build_seconds={self.layout_build_seconds:.4f} "
+            f"path_build_seconds={self.path_build_seconds:.4f} "
+            f"draw_text_and_effects_seconds={self.draw_text_and_effects_seconds:.4f} "
+            f"highlight_overlay_seconds={self.highlight_overlay_seconds:.4f}"
+        )
+
+
+@dataclass(frozen=True)
+class RenderContext:
+    layout_cache: LRUCache
+    path_cache: LRUCache
+    perf_stats: Optional[RenderPerfStats] = None
+
+
+@dataclass(frozen=True)
+class _LayoutCacheEntry:
+    layout: QtGui.QTextLayout
+    lines: list[QtGui.QTextLine]
+    line_width: float
+    text_rect: QtCore.QRectF
 
 
 def build_preview_cache_key(
@@ -82,6 +171,7 @@ def render_graphics_preview(
     highlight_color: Optional[str],
     highlight_opacity: Optional[float],
     highlight_word_index: Optional[int] = None,
+    render_context: Optional[RenderContext] = None,
 ) -> GraphicsPreviewResult:
     rendered = QtGui.QImage(frame)
     if rendered.isNull():
@@ -97,14 +187,70 @@ def render_graphics_preview(
     if style.letter_spacing:
         font.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, style.letter_spacing)
 
-    layout, lines, line_width = _build_text_layout(
-        subtitle_text,
-        font,
-        width=rendered.width(),
-        height=rendered.height(),
-        vertical_offset=style.vertical_offset,
-        vertical_anchor=style.vertical_anchor,
-    )
+    perf_stats = render_context.perf_stats if render_context else None
+    if perf_stats:
+        perf_stats.render_calls_total += 1
+        render_start = time.perf_counter()
+    else:
+        render_start = None
+
+    layout_entry = None
+    layout_cache_key = None
+    if render_context:
+        layout_cache_key = _build_layout_cache_key(
+            subtitle_text,
+            rendered.width(),
+            rendered.height(),
+            style,
+            subtitle_mode,
+        )
+        layout_entry = render_context.layout_cache.get(layout_cache_key)
+        if layout_entry is None:
+            if perf_stats:
+                perf_stats.layout_cache_misses += 1
+        elif perf_stats:
+            perf_stats.layout_cache_hits += 1
+
+    if layout_entry is None:
+        if perf_stats:
+            layout_start = time.perf_counter()
+        else:
+            layout_start = None
+        layout, lines, line_width = _build_text_layout(
+            subtitle_text,
+            font,
+            width=rendered.width(),
+            height=rendered.height(),
+            vertical_offset=style.vertical_offset,
+            vertical_anchor=style.vertical_anchor,
+        )
+        text_rect = _compute_text_rect_from_lines(lines)
+        if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
+            metrics = QtGui.QFontMetricsF(font)
+            text_rect = _compute_text_rect_from_metrics(
+                subtitle_text,
+                font,
+                rendered.width(),
+                rendered.height(),
+                style.vertical_anchor,
+                style.vertical_offset,
+                metrics=metrics,
+            )
+        if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
+            text_rect = _compute_text_rect_from_frame(rendered, style)
+        if perf_stats and layout_start is not None:
+            perf_stats.layout_build_seconds += time.perf_counter() - layout_start
+        layout_entry = _LayoutCacheEntry(
+            layout=layout,
+            lines=lines,
+            line_width=line_width,
+            text_rect=text_rect,
+        )
+        if render_context:
+            render_context.layout_cache.set(layout_cache_key, layout_entry)
+
+    layout = layout_entry.layout
+    lines = layout_entry.lines
 
     highlight_selection = None
     if subtitle_mode == "word_highlight":
@@ -112,23 +258,36 @@ def render_graphics_preview(
             subtitle_text, highlight_word_index=highlight_word_index
         )
 
-    line_paths = _build_line_paths(layout, lines, subtitle_text, font)
-    bg_rect = _compute_text_rect_from_lines(lines)
-    if bg_rect.isEmpty() or bg_rect.width() <= 0 or bg_rect.height() <= 0:
-        bg_rect = _compute_text_rect_from_metrics(
-            subtitle_text,
-            font,
-            rendered.width(),
-            rendered.height(),
-            style.vertical_anchor,
-            style.vertical_offset,
-        )
-    if bg_rect.isEmpty() or bg_rect.width() <= 0 or bg_rect.height() <= 0:
-        bg_rect = _compute_text_rect_from_frame(rendered, style)
+    line_paths = None
+    if render_context and layout_cache_key is not None:
+        path_cache_key = _build_path_cache_key(layout_cache_key, style)
+        line_paths = render_context.path_cache.get(path_cache_key)
+        if line_paths is None:
+            if perf_stats:
+                perf_stats.path_cache_misses += 1
+        elif perf_stats:
+            perf_stats.path_cache_hits += 1
+
+    if line_paths is None:
+        if perf_stats:
+            path_start = time.perf_counter()
+        else:
+            path_start = None
+        line_paths = _build_line_paths(layout, lines, subtitle_text, font)
+        if perf_stats and path_start is not None:
+            perf_stats.path_build_seconds += time.perf_counter() - path_start
+        if render_context:
+            render_context.path_cache.set(path_cache_key, line_paths)
+
+    bg_rect = layout_entry.text_rect
     painter = QtGui.QPainter(rendered)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     painter.setRenderHint(QtGui.QPainter.TextAntialiasing)
     try:
+        if perf_stats:
+            draw_start = time.perf_counter()
+        else:
+            draw_start = None
         if style.background_mode == "line":
             painter.save()
             painter.setOpacity(style.line_bg_opacity)
@@ -149,10 +308,16 @@ def render_graphics_preview(
             painter.setOpacity(effective_text_opacity)
             _draw_text_fill(painter, layout, style)
             painter.restore()
+        if perf_stats and draw_start is not None:
+            perf_stats.draw_text_and_effects_seconds += time.perf_counter() - draw_start
         if (
             highlight_selection is not None
             and (1.0 if highlight_opacity is None else float(highlight_opacity)) > 0.0
         ):
+            if perf_stats:
+                highlight_start = time.perf_counter()
+            else:
+                highlight_start = None
             _draw_highlight_overlay(
                 painter,
                 layout,
@@ -161,8 +326,14 @@ def render_graphics_preview(
                 highlight_color or DEFAULT_HIGHLIGHT_COLOR,
                 highlight_opacity,
             )
+            if perf_stats and highlight_start is not None:
+                perf_stats.highlight_overlay_seconds += (
+                    time.perf_counter() - highlight_start
+                )
     finally:
         painter.end()
+    if perf_stats and render_start is not None:
+        perf_stats.total_render_seconds += time.perf_counter() - render_start
     return GraphicsPreviewResult(
         rendered, highlight_selection.index if highlight_selection else None
     )
@@ -237,6 +408,47 @@ def _build_text_layout(
 
 def _is_rtl(text: str) -> bool:
     return any("\u0590" <= char <= "\u08FF" for char in text)
+
+
+def _build_layout_cache_key(
+    text: str,
+    width: int,
+    height: int,
+    style: SubtitleStyle,
+    subtitle_mode: str,
+) -> tuple[object, ...]:
+    return (
+        text,
+        int(width),
+        int(height),
+        style.font_family,
+        style.font_size,
+        style.font_style,
+        style.letter_spacing,
+        style.vertical_anchor,
+        style.vertical_offset,
+        subtitle_mode,
+    )
+
+
+def _build_path_cache_key(
+    layout_key: tuple[object, ...], style: SubtitleStyle
+) -> tuple[object, ...]:
+    return (
+        layout_key,
+        style.font_family,
+        style.font_size,
+        style.font_style,
+        style.outline_enabled,
+        style.outline_width,
+        style.outline_color,
+        style.shadow_enabled,
+        style.shadow_strength,
+        style.shadow_offset_x,
+        style.shadow_offset_y,
+        style.shadow_color,
+        style.shadow_opacity,
+    )
 
 
 def _resolve_color(value: str, default: str, alpha: Optional[float] = None) -> QtGui.QColor:
@@ -431,7 +643,7 @@ def _build_line_paths(
     font: QtGui.QFont,
 ) -> list[QtGui.QPainterPath]:
     paths: list[QtGui.QPainterPath] = []
-    glyph_runs_supported = _supports_glyph_runs()
+    glyph_runs_supported = _GLYPH_RUNS_SUPPORTED
     for line in lines:
         if not line.textLength():
             continue
@@ -500,6 +712,8 @@ def _build_line_paths(
     return paths
 
 
+_GLYPH_RUNS_SUPPORTED = _supports_glyph_runs()
+
 
 
 
@@ -533,8 +747,10 @@ def _compute_text_rect_from_metrics(
     height: int,
     vertical_anchor: str,
     vertical_offset: float,
+    *,
+    metrics: Optional[QtGui.QFontMetricsF] = None,
 ) -> QtCore.QRectF:
-    metrics = QtGui.QFontMetricsF(font)
+    metrics = metrics or QtGui.QFontMetricsF(font)
     bounding = metrics.boundingRect(text)
     advance = metrics.horizontalAdvance(text)
     text_w = max(1.0, bounding.width(), advance)

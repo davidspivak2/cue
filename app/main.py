@@ -340,6 +340,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.diagnostics_success_checkbox.toggled.connect(
             self._on_diagnostics_success_toggled
         )
+        self.diagnostics_render_timing_checkbox.toggled.connect(
+            self._on_diagnostics_render_timing_toggled
+        )
         for key, checkbox in self.diagnostics_category_checkboxes.items():
             checkbox.toggled.connect(
                 lambda checked, category_key=key: self._on_diagnostics_category_toggled(
@@ -1384,10 +1387,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.diagnostics_success_checkbox = QtWidgets.QCheckBox(
             "Write diagnostics on successful completion"
         )
+        self.diagnostics_render_timing_checkbox = QtWidgets.QCheckBox(
+            "Enable render timing logs (dev-only)"
+        )
 
         diagnostics_layout.addWidget(self.diagnostics_archive_checkbox)
         diagnostics_layout.addWidget(self.diagnostics_enabled_checkbox)
         diagnostics_layout.addWidget(self.diagnostics_success_checkbox)
+        diagnostics_layout.addWidget(self.diagnostics_render_timing_checkbox)
 
         self.diagnostics_category_checkboxes: dict[str, QtWidgets.QCheckBox] = {}
         category_labels = {
@@ -2125,6 +2132,12 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.diagnostics_success_checkbox.blockSignals(False)
 
+        self.diagnostics_render_timing_checkbox.blockSignals(True)
+        self.diagnostics_render_timing_checkbox.setChecked(
+            self._diagnostics_settings.render_timing_logs_enabled
+        )
+        self.diagnostics_render_timing_checkbox.blockSignals(False)
+
         for key, checkbox in self.diagnostics_category_checkboxes.items():
             checkbox.blockSignals(True)
             checkbox.setChecked(self._diagnostics_settings.categories.get(key, True))
@@ -2162,6 +2175,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_diagnostics_controls(self) -> None:
         enabled = self._diagnostics_settings.enabled
         self.diagnostics_success_checkbox.setEnabled(enabled)
+        self.diagnostics_render_timing_checkbox.setEnabled(enabled)
         for checkbox in self.diagnostics_category_checkboxes.values():
             checkbox.setEnabled(enabled)
 
@@ -2235,6 +2249,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "write_on_success": self._diagnostics_settings.write_on_success,
             "archive_on_exit": self._diagnostics_settings.archive_on_exit,
             "categories": dict(self._diagnostics_settings.categories),
+            "render_timing_logs_enabled": self._diagnostics_settings.render_timing_logs_enabled,
         }
         self._save_config()
 
@@ -2255,6 +2270,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if checked == self._diagnostics_settings.write_on_success:
             return
         self._diagnostics_settings.write_on_success = checked
+        self._store_diagnostics_settings()
+
+    def _on_diagnostics_render_timing_toggled(self, checked: bool) -> None:
+        if checked == self._diagnostics_settings.render_timing_logs_enabled:
+            return
+        self._diagnostics_settings.render_timing_logs_enabled = checked
         self._store_diagnostics_settings()
 
     def _on_diagnostics_category_toggled(self, key: str, checked: bool) -> None:
@@ -2754,6 +2775,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 write_on_success=False,
                 archive_on_exit=False,
                 categories=default_categories.copy(),
+                render_timing_logs_enabled=False,
             )
         enabled = raw.get("enabled") if isinstance(raw.get("enabled"), bool) else False
         write_on_success = (
@@ -2764,6 +2786,11 @@ class MainWindow(QtWidgets.QMainWindow):
         archive_on_exit = (
             raw.get("archive_on_exit")
             if isinstance(raw.get("archive_on_exit"), bool)
+            else False
+        )
+        render_timing_logs_enabled = (
+            raw.get("render_timing_logs_enabled")
+            if isinstance(raw.get("render_timing_logs_enabled"), bool)
             else False
         )
         categories = default_categories.copy()
@@ -2777,6 +2804,7 @@ class MainWindow(QtWidgets.QMainWindow):
             write_on_success=write_on_success,
             archive_on_exit=archive_on_exit,
             categories=categories,
+            render_timing_logs_enabled=render_timing_logs_enabled,
         )
 
     def _load_punctuation_rescue_fallback_enabled(self) -> bool:
