@@ -12,6 +12,7 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Highlight color changes refresh the preview still immediately.
 - Word-highlight pipeline uses ASS rendering with WhisperX word alignment for per-word timing.
 - Graphics-based preview rendering keeps subtitle styling aligned with export results.
+- Word highlighting now applies correctly on wrapped subtitle lines in the graphics overlay preview/export path.
 - Graphics overlay export pipeline streams RGBA frames to FFmpeg (default on; set `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` to force legacy export).
 - Uses GPU (CUDA) when available, auto-falls back to CPU with clear logs.
 - Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`.
