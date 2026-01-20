@@ -323,11 +323,10 @@ def _cursor_x_value(value: object) -> float:
     return float(value)
 
 
-def _to_layout_x(line: QtGui.QTextLine, x: float) -> float:
+def _to_layout_x(line: QtGui.QTextLine, x: float, relative_cursor: int) -> float:
     left = float(line.position().x())
-    width = float(line.naturalTextWidth())
-    epsilon = 1.0
-    if 0.0 <= x <= (width + epsilon):
+    cursor_from_x = line.xToCursor(x)
+    if abs(cursor_from_x - relative_cursor) <= 1:
         return left + x
     return x
 
@@ -359,8 +358,8 @@ def _iter_highlight_clip_rects(
         line_relative_end = overlap_end - line_start
         x_start_raw = _cursor_x_value(line.cursorToX(line_relative_start))
         x_end_raw = _cursor_x_value(line.cursorToX(line_relative_end))
-        x_start = _to_layout_x(line, x_start_raw)
-        x_end = _to_layout_x(line, x_end_raw)
+        x_start = _to_layout_x(line, x_start_raw, line_relative_start)
+        x_end = _to_layout_x(line, x_end_raw, line_relative_end)
         left = min(x_start, x_end)
         right = max(x_start, x_end)
         width = right - left
