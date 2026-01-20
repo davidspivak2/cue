@@ -5,6 +5,8 @@
 - Preview stills are graphics-rendered and highlight the second word in Word highlight mode.
 - Preview playback controls are no longer surfaced in the Subtitles Ready view.
 - Word background is still disabled in the UI (“available in a future update”).
+- Graphics overlay export now handles QImage bit-buffer variants for RGBA streaming.
+- Overlay render caching keys are normalized to the expected text + highlight index format.
 
 ## Goals and non-goals
 

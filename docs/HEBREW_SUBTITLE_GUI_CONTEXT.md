@@ -562,6 +562,9 @@ Recent updates include:
 - The Subtitles Ready screen is reorganized into a two-column layout with a dedicated style panel and a single CTA for export.
 - Preview stills now use a graphics-based renderer that draws subtitle styling directly onto the raw video frame, rather than relying on FFmpeg’s subtitle filters.
 - Preview cache keys now include word-timing metadata and highlight settings so word-highlight previews refresh when alignment data changes.
+- Changing the highlight color forces an immediate preview refresh.
+- Word-highlight clipping and clip-rect alignment were tightened for the graphics preview renderer.
+- Outline/shadow alignment was corrected for wrapped text and glyph-run paths in graphics rendering.
 - Diagnostics can optionally zip logs + outputs on exit for easier support handoffs.
 
 ---

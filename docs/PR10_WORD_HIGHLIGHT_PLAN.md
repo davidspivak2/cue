@@ -205,6 +205,9 @@ Last updated: 2026-02-27
 - Preview cache keys include subtitle styling + word timing mtimes to refresh when alignment data changes.
 - Word highlight is the default subtitle mode, with highlight color defaults applied in config.
 - Graphics preview rendering is covered by PySide6-based tests (`tests/test_graphics_preview_renderer.py`).
+- Highlight color changes now trigger an immediate preview refresh.
+- Highlight overlay clipping and clip-rect alignment were corrected in graphics previews.
+- Outline/shadow alignment was fixed for wrapped text and glyph-run paths in graphics rendering.
 
 ## F) Definition of Done (PR10)
 - [x] RTL stability maintained in preview and export.
