@@ -42,6 +42,9 @@ python -m app.main
 The app will use `bin\ffmpeg.exe`/`bin\ffprobe.exe` if present, otherwise it will fall back to
 FFmpeg installed on PATH.
 
+Developer/debugging tip: set `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` to force the legacy export
+pipeline when diagnosing graphics overlay issues.
+
 ## Recommended dev workflow
 * **Branching:** create feature branches from `main`, e.g. `feature/short-description`.
 * **Commits:** there are no strict commit conventions enforced; prefer clear, imperative messages (e.g., `Add settings validation`).
