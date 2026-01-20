@@ -75,10 +75,9 @@ Preview playback includes a focused regression test for timestamp shifting (feat
 pytest tests/test_preview_playback_shift.py
 ```
 
-Convenience scripts for branch testing + launch:
+Convenience script for branch testing + launch:
 ```bat
-scripts\test_new_branch.cmd
-scripts\test_updated_branch.cmd
+scripts\test_branch.cmd
 ```
 
 ## Dependency syncing (Windows helpers)
