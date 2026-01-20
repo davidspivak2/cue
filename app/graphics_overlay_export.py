@@ -149,6 +149,17 @@ def render_overlay_frame(
         highlight_opacity=highlight_opacity,
     )
     image = result.image.convertToFormat(QtGui.QImage.Format_RGBA8888)
+    size = image.sizeInBytes()
     buffer = image.bits()
-    buffer.setsize(image.sizeInBytes())
-    return bytes(buffer), result.highlight_word_index
+    if hasattr(buffer, "setsize"):
+        buffer.setsize(size)
+        data = bytes(buffer)
+    else:
+        data = buffer.tobytes()
+        if len(data) != size:
+            if len(data) < size:
+                raise RuntimeError(
+                    f"Unexpected QImage bits size: got {len(data)} expected {size}"
+                )
+            data = data[:size]
+    return data, result.highlight_word_index
