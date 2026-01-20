@@ -1,6 +1,6 @@
 # Hebrew Subtitle GUI — UX/UI Specification (Design Contract)
 
-**Last updated:** 2026-02-27  
+**Last updated:** 2026-03-10  
 **Scope:** This document describes the intended **pixel-level UI behavior** for Hebrew Subtitle GUI, and the interaction rules the app should follow as it continues the PR1–PR13 overhaul.
 
 This is intentionally opinionated. If an implementation choice conflicts with this spec, update the spec (with rationale) or change the implementation.
@@ -30,7 +30,7 @@ This is intentionally opinionated. If an implementation choice conflicts with th
   - “Choose video…”
   - “Create subtitles”
   - “Open subtitles”
-  - “Export video with subtitles”
+  - “Create final video”
 
 5) **Delightful waiting / never feel stuck**
 - Even when progress is slow or coarse (e.g., long Whisper segments), the UI should communicate:
@@ -449,7 +449,7 @@ Note:
 - “Subtitles are ready”
 - “Open subtitles”
 - “Edit in Subtitle Edit”
-- “Export video with subtitles”
+- “Create final video”
 - “Exporting video”
 - “Your video is ready”
 - “Play video”
