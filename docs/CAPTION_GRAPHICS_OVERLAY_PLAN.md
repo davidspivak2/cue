@@ -1,12 +1,15 @@
 # Caption Graphics Overlay Plan
 
-## Status update (2026-02-27)
+## Status update (2025-02-14)
+- PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
+- PR6 has not started.
+- Wrapped-line word-highlight clip rects now use line-relative cursor offsets in the graphics overlay renderer.
+- Graphics overlay export now handles QImage bit-buffer variants for RGBA streaming.
+- Overlay render caching keys are normalized to the expected text + highlight index format.
 - The Subtitles Ready screen now uses a two-column layout with a single CTA labeled “Create final video”.
 - Preview stills are graphics-rendered and highlight the second word in Word highlight mode.
 - Preview playback controls are no longer surfaced in the Subtitles Ready view.
 - Word background is still disabled in the UI (“available in a future update”).
-- Graphics overlay export now handles QImage bit-buffer variants for RGBA streaming.
-- Overlay render caching keys are normalized to the expected text + highlight index format.
 
 ## Goals and non-goals
 
