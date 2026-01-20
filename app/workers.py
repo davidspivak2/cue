@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import math
 import platform
 import re
 import shutil
@@ -14,7 +15,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from PySide6 import QtCore, QtGui
 from .progress import ProgressStep
@@ -22,7 +23,11 @@ from .ass_karaoke import (
     build_ass_document_with_karaoke_fallback,
     build_style_config_from_subtitle_style,
 )
-from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
+from .config import (
+    DEFAULT_HIGHLIGHT_COLOR,
+    DEFAULT_HIGHLIGHT_OPACITY,
+    GRAPHICS_OVERLAY_EXPORT_ENABLED,
+)
 from .ffmpeg_utils import (
     ensure_ffmpeg_available,
     extract_ass_frame,
@@ -44,6 +49,14 @@ from .subtitle_style import (
 from .graphics_preview_renderer import (
     build_preview_cache_key,
     render_graphics_preview,
+)
+from .graphics_overlay_export import (
+    OverlaySegment,
+    build_graphics_overlay_plan,
+    build_static_overlay_segments,
+    build_word_highlight_overlay_segments,
+    render_overlay_frame,
+    resolve_video_stream_info,
 )
 from .paths import get_models_dir, get_preview_frames_dir
 from .srt_utils import (
@@ -656,6 +669,23 @@ class Worker(QtCore.QObject):
             True,
         )
 
+        if GRAPHICS_OVERLAY_EXPORT_ENABLED:
+            try:
+                return self._run_graphics_overlay_export(
+                    ffmpeg_path=ffmpeg_path,
+                    settings=settings,
+                    srt_path=srt_path,
+                    cues=cues,
+                    output_path=output_path,
+                    video_duration=video_duration,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.signals.log.emit(
+                    "Graphics overlay export failed; falling back to legacy export.",
+                    True,
+                )
+                self.signals.log.emit(str(exc), True)
+
         plan = build_burn_in_plan(
             ffmpeg_path=ffmpeg_path,
             video_path=self.video_path,
@@ -716,6 +746,173 @@ class Worker(QtCore.QObject):
         )
         self._burn_in_seconds = time.monotonic() - burn_start
         return {"output_path": str(output_path)}
+
+    def _run_graphics_overlay_export(
+        self,
+        *,
+        ffmpeg_path: Path,
+        settings: SubtitleStyle,
+        srt_path: Path,
+        cues: list[SrtCue],
+        output_path: Path,
+        video_duration: Optional[float],
+    ) -> dict:
+        stream_info = resolve_video_stream_info(self.video_path)
+        duration_seconds = video_duration
+        if duration_seconds is None:
+            duration_seconds = max((cue.end_seconds for cue in cues), default=0.0)
+        if not duration_seconds or duration_seconds <= 0:
+            raise ValueError("Unable to determine video duration for overlay export")
+
+        plan = build_graphics_overlay_plan(
+            ffmpeg_path=ffmpeg_path,
+            video_path=self.video_path,
+            output_path=output_path,
+            width=stream_info.width,
+            height=stream_info.height,
+            fps=stream_info.fps,
+        )
+        self._burn_in_subtitle_mode = self.subtitle_mode
+        self._burn_in_pipeline = plan.pipeline
+        self._burn_in_subtitle_path = str(srt_path)
+        self._burn_in_filter = plan.filter_string
+        self.signals.log.emit(f"Export subtitle_mode={self.subtitle_mode}", True)
+        self.signals.log.emit(f"Export pipeline={plan.pipeline}", True)
+        self.signals.log.emit(f"Export subtitles path={srt_path}", True)
+        self.signals.log.emit(f"Export filter={plan.filter_string}", True)
+        self.signals.log.emit(
+            f"Overlay stream: {plan.width}x{plan.height} @{plan.fps:.3f}fps",
+            True,
+        )
+
+        segments = self._build_overlay_segments(
+            cues=cues,
+            duration_seconds=duration_seconds,
+        )
+        frame_segments, total_frames = self._build_overlay_frame_segments(
+            segments,
+            duration_seconds,
+            plan.fps,
+        )
+        self.signals.log.emit(
+            f"Overlay frames: total={total_frames} segments={len(frame_segments)}",
+            True,
+        )
+        render_cache: dict[str, bytes] = {}
+
+        def make_frame_generator() -> Iterable[bytes]:
+            last_state: Optional[tuple[str, Optional[int]]] = None
+            last_frame: Optional[bytes] = None
+            for text, highlight_index, frame_count in frame_segments:
+                state = (text.strip(), highlight_index)
+                if state != last_state:
+                    cache_key = f"{state[0]}|{state[1] if state[1] is not None else 'none'}"
+                    if cache_key in render_cache:
+                        last_frame = render_cache[cache_key]
+                    else:
+                        frame_bytes, _ = render_overlay_frame(
+                            width=plan.width,
+                            height=plan.height,
+                            subtitle_text=text,
+                            style=settings,
+                            subtitle_mode=self.subtitle_mode,
+                            highlight_color=self.highlight_color,
+                            highlight_opacity=self.highlight_opacity,
+                            highlight_word_index=highlight_index,
+                        )
+                        render_cache[cache_key] = frame_bytes
+                        last_frame = frame_bytes
+                    last_state = state
+                if last_frame is None:
+                    continue
+                for _ in range(frame_count):
+                    if self._cancelled.is_set():
+                        return
+                    yield last_frame
+
+        self.signals.log.emit("Adding subtitles to the video...", True)
+        self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
+        burn_start = time.monotonic()
+        copy_command = plan.base_command + ["-c:a", "copy", str(output_path)]
+        self._burn_in_command = subprocess.list2cmdline(copy_command)
+        self._burn_in_audio_mode = "copy"
+        try:
+            self._run_ffmpeg_with_progress_streaming(
+                copy_command,
+                duration_seconds,
+                ProgressStep.EXPORT,
+                "Encoding",
+                make_frame_generator(),
+            )
+            self._burn_in_seconds = time.monotonic() - burn_start
+            return {"output_path": str(output_path)}
+        except RuntimeError as exc:
+            self.signals.log.emit("Audio copy failed, trying another format...", True)
+            self.signals.log.emit(str(exc), True)
+
+        aac_command = plan.base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
+        self._burn_in_command = subprocess.list2cmdline(aac_command)
+        self._burn_in_audio_mode = "aac"
+        self._run_ffmpeg_with_progress_streaming(
+            aac_command,
+            duration_seconds,
+            ProgressStep.EXPORT,
+            "Encoding",
+            make_frame_generator(),
+        )
+        self._burn_in_seconds = time.monotonic() - burn_start
+        return {"output_path": str(output_path)}
+
+    def _build_overlay_segments(
+        self,
+        *,
+        cues: list[SrtCue],
+        duration_seconds: float,
+    ) -> list[OverlaySegment]:
+        if self.subtitle_mode != "word_highlight":
+            return build_static_overlay_segments(cues, duration_seconds)
+        word_timings_path = self._word_timings_path
+        if not word_timings_path or not word_timings_path.exists():
+            self.signals.log.emit(
+                "Overlay word timings missing; rendering static overlay text.",
+                True,
+            )
+            return build_static_overlay_segments(cues, duration_seconds)
+        try:
+            doc = load_word_timings_json(word_timings_path)
+        except (WordTimingValidationError, OSError) as exc:
+            self.signals.log.emit(
+                f"Overlay word timings failed to load ({exc}); using static overlay text.",
+                True,
+            )
+            return build_static_overlay_segments(cues, duration_seconds)
+        return build_word_highlight_overlay_segments(cues, doc, duration_seconds)
+
+    def _build_overlay_frame_segments(
+        self,
+        segments: list[OverlaySegment],
+        duration_seconds: float,
+        fps: float,
+    ) -> tuple[list[tuple[str, Optional[int], int]], int]:
+        total_frames = max(0, int(math.ceil(duration_seconds * fps)))
+        frame_segments: list[tuple[str, Optional[int], int]] = []
+        frame_cursor = 0
+        for segment in segments:
+            if segment.start_seconds >= duration_seconds:
+                break
+            start_frame = int(round(segment.start_seconds * fps))
+            end_frame = int(round(min(segment.end_seconds, duration_seconds) * fps))
+            start_frame = max(frame_cursor, start_frame)
+            if start_frame > frame_cursor:
+                frame_segments.append(("", None, start_frame - frame_cursor))
+            if end_frame > start_frame:
+                frame_segments.append(
+                    (segment.text, segment.highlight_word_index, end_frame - start_frame)
+                )
+            frame_cursor = max(frame_cursor, end_frame)
+        if total_frames > frame_cursor:
+            frame_segments.append(("", None, total_frames - frame_cursor))
+        return frame_segments, total_frames
 
     def _run_ffmpeg(self, command: list[str]) -> None:
         if self._cancelled.is_set():
@@ -830,6 +1027,106 @@ class Worker(QtCore.QObject):
 
         if return_code != 0:
             tail_text = "\n".join(stderr_tail)
+            raise RuntimeError("Video processing failed. Details:\n" + tail_text)
+
+    def _run_ffmpeg_with_progress_streaming(
+        self,
+        command: list[str],
+        duration_seconds: Optional[float],
+        step_id: str,
+        status_label: str,
+        frame_iterator: Iterable[bytes],
+    ) -> None:
+        if self._cancelled.is_set():
+            raise CancelledError()
+
+        self.signals.log.emit(f"Video tool command: {subprocess.list2cmdline(command)}", True)
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            **get_subprocess_kwargs(),
+        )
+        self._process = process
+        stderr_tail: deque[str] = deque(maxlen=50)
+        log_lock = threading.Lock()
+        writer_error: Optional[BaseException] = None
+
+        def _read_stderr() -> None:
+            assert process.stderr is not None
+            for line in process.stderr:
+                text = line.rstrip()
+                stderr_tail.append(text)
+                if text:
+                    with log_lock:
+                        self.signals.log.emit(text, True)
+                if self._cancelled.is_set():
+                    break
+
+        def _write_frames() -> None:
+            nonlocal writer_error
+            assert process.stdin is not None
+            try:
+                for frame in frame_iterator:
+                    if self._cancelled.is_set():
+                        break
+                    process.stdin.buffer.write(frame)
+                process.stdin.close()
+            except Exception as exc:  # noqa: BLE001
+                writer_error = exc
+
+        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+        stderr_thread.start()
+        writer_thread = threading.Thread(target=_write_frames, daemon=True)
+        writer_thread.start()
+
+        last_log_time = 0.0
+        end_emitted = False
+        if duration_seconds is None:
+            self._start_smooth_progress(step_id, status_label)
+        assert process.stdout is not None
+        for line in process.stdout:
+            if self._cancelled.is_set():
+                process.terminate()
+                raise CancelledError()
+            text = line.strip()
+            if text.startswith("out_time_ms=") and duration_seconds:
+                try:
+                    out_time_ms = int(text.split("=", 1)[1])
+                except ValueError:
+                    continue
+                progress = out_time_ms / (duration_seconds * 1_000_000)
+                progress = max(0.0, min(progress, 1.0))
+                self._emit_step_progress(step_id, progress, status_label)
+                now = time.monotonic()
+                if now - last_log_time >= 0.25:
+                    self.signals.log.emit(
+                        f"{status_label} progress: {int(progress * 100)}%",
+                        True,
+                    )
+                    last_log_time = now
+            elif text == "progress=end":
+                self._emit_step_progress(step_id, 1.0, status_label, force=True)
+                end_emitted = True
+
+        return_code = process.wait()
+        writer_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+        self._process = None
+
+        if return_code == 0:
+            if not end_emitted:
+                self._emit_step_progress(step_id, 1.0, status_label, force=True)
+        self._stop_smooth_progress()
+
+        if return_code != 0:
+            tail_text = "\n".join(stderr_tail)
+            if writer_error:
+                tail_text = f"{tail_text}\nOverlay writer error: {writer_error}"
             raise RuntimeError("Video processing failed. Details:\n" + tail_text)
 
     def _run_transcription_subprocess(

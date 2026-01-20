@@ -64,3 +64,23 @@ def test_word_highlight_overlay_visible(font_size: int) -> None:
     )
     static_pixels = _count_yellowish_pixels(static_result.image, QtGui)
     assert static_pixels < 10
+
+
+def test_explicit_highlight_word_index_overrides_default() -> None:
+    QtGui = pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
+    _ensure_qt_app(QtGui)
+    from app.graphics_preview_renderer import render_graphics_preview
+
+    style = preset_defaults("Default", subtitle_mode="word_highlight")
+    frame = QtGui.QImage(640, 360, QtGui.QImage.Format_ARGB32)
+    frame.fill(QtGui.QColor("black"))
+    result = render_graphics_preview(
+        frame,
+        subtitle_text="שלום עולם זה מבחן",
+        style=style,
+        subtitle_mode="word_highlight",
+        highlight_color="#FFF04C",
+        highlight_opacity=1.0,
+        highlight_word_index=0,
+    )
+    assert result.highlight_word_index == 0
