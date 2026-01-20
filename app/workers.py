@@ -806,7 +806,7 @@ class Worker(QtCore.QObject):
             for text, highlight_index, frame_count in frame_segments:
                 state = (text.strip(), highlight_index)
                 if state != last_state:
-                    cache_key = f\"{state[0]}|{state[1] if state[1] is not None else 'none'}\"
+                    cache_key = f"{state[0]}|{state[1] if state[1] is not None else 'none'}"
                     if cache_key in render_cache:
                         last_frame = render_cache[cache_key]
                     else:
