@@ -47,6 +47,11 @@ from .subtitle_style import (
     to_ffmpeg_force_style,
 )
 from .graphics_preview_renderer import (
+    LAYOUT_CACHE_MAX_ENTRIES,
+    LRUCache,
+    PATH_CACHE_MAX_ENTRIES,
+    RenderContext,
+    RenderPerfStats,
     build_preview_cache_key,
     render_graphics_preview,
 )
@@ -117,6 +122,7 @@ class DiagnosticsSettings:
     write_on_success: bool
     archive_on_exit: bool
     categories: dict[str, bool]
+    render_timing_logs_enabled: bool
 
 
 class WorkerSignals(QtCore.QObject):
@@ -191,6 +197,7 @@ class Worker(QtCore.QObject):
         self._transcribe_seconds: Optional[float] = None
         self._burn_in_seconds: Optional[float] = None
         self._total_seconds: Optional[float] = None
+        self._graphics_overlay_render_perf: Optional[RenderPerfStats] = None
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -798,18 +805,45 @@ class Worker(QtCore.QObject):
             f"Overlay frames: total={total_frames} segments={len(frame_segments)}",
             True,
         )
-        render_cache: dict[str, bytes] = {}
+        render_cache: dict[tuple[object, ...], bytes] = {}
+        layout_cache = LRUCache(max_entries=LAYOUT_CACHE_MAX_ENTRIES)
+        path_cache = LRUCache(max_entries=PATH_CACHE_MAX_ENTRIES)
+        perf_stats = None
+        if (
+            self.diagnostics_settings
+            and self.diagnostics_settings.enabled
+            and self.diagnostics_settings.render_timing_logs_enabled
+        ):
+            perf_stats = RenderPerfStats()
+        render_context = RenderContext(
+            layout_cache=layout_cache,
+            path_cache=path_cache,
+            perf_stats=perf_stats,
+        )
+        self._graphics_overlay_render_perf = perf_stats
 
         def make_frame_generator() -> Iterable[bytes]:
-            last_state: Optional[tuple[str, Optional[int]]] = None
+            last_state: Optional[tuple[object, ...]] = None
             last_frame: Optional[bytes] = None
             for text, highlight_index, frame_count in frame_segments:
-                state = (text.strip(), highlight_index)
+                state = (
+                    text.strip(),
+                    highlight_index,
+                    plan.width,
+                    plan.height,
+                    settings,
+                    self.subtitle_mode,
+                    self.highlight_color,
+                    self.highlight_opacity,
+                )
                 if state != last_state:
-                    cache_key = f"{state[0]}|{state[1] if state[1] is not None else 'none'}"
-                    if cache_key in render_cache:
-                        last_frame = render_cache[cache_key]
+                    if state in render_cache:
+                        last_frame = render_cache[state]
+                        if perf_stats:
+                            perf_stats.record_render_cache_hit()
                     else:
+                        if perf_stats:
+                            perf_stats.record_render_cache_miss()
                         frame_bytes, _ = render_overlay_frame(
                             width=plan.width,
                             height=plan.height,
@@ -819,8 +853,9 @@ class Worker(QtCore.QObject):
                             highlight_color=self.highlight_color,
                             highlight_opacity=self.highlight_opacity,
                             highlight_word_index=highlight_index,
+                            render_context=render_context,
                         )
-                        render_cache[cache_key] = frame_bytes
+                        render_cache[state] = frame_bytes
                         last_frame = frame_bytes
                     last_state = state
                 if last_frame is None:
@@ -845,6 +880,8 @@ class Worker(QtCore.QObject):
                 make_frame_generator(),
             )
             self._burn_in_seconds = time.monotonic() - burn_start
+            if perf_stats:
+                self.signals.log.emit(perf_stats.summary_line(), True)
             return {"output_path": str(output_path)}
         except RuntimeError as exc:
             self.signals.log.emit("Audio copy failed, trying another format...", True)
@@ -861,6 +898,8 @@ class Worker(QtCore.QObject):
             make_frame_generator(),
         )
         self._burn_in_seconds = time.monotonic() - burn_start
+        if perf_stats:
+            self.signals.log.emit(perf_stats.summary_line(), True)
         return {"output_path": str(output_path)}
 
     def _build_overlay_segments(
@@ -1770,6 +1809,11 @@ class Worker(QtCore.QObject):
                     "total_seconds": self._total_seconds,
                 },
             }
+
+        if self._graphics_overlay_render_perf is not None:
+            data["graphics_overlay_render_perf"] = (
+                self._graphics_overlay_render_perf.to_dict()
+            )
 
         return data
 
