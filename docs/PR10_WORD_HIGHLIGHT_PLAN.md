@@ -215,6 +215,9 @@ Last updated: 2026-02-27
 - [x] Mode switch works; Static pipeline unchanged.
 - [x] Highlight color is configurable and persists.
 
+## Post-merge fixes
+- Wrapped-line highlight fix: graphics overlay clip rects are now line-relative.
+
 ## G) Post-PR10 follow-ups (not required for PR10 merge)
 - A) Highlight opacity control.
 - B) Base text color control.
