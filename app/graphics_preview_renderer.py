@@ -81,6 +81,7 @@ def render_graphics_preview(
     subtitle_mode: str,
     highlight_color: Optional[str],
     highlight_opacity: Optional[float],
+    highlight_word_index: Optional[int] = None,
 ) -> GraphicsPreviewResult:
     rendered = QtGui.QImage(frame)
     if rendered.isNull():
@@ -107,7 +108,9 @@ def render_graphics_preview(
 
     highlight_selection = None
     if subtitle_mode == "word_highlight":
-        highlight_selection = _select_highlight_word(subtitle_text)
+        highlight_selection = _select_highlight_word(
+            subtitle_text, highlight_word_index=highlight_word_index
+        )
 
     line_paths = _build_line_paths(layout, lines, subtitle_text, font)
     bg_rect = _compute_text_rect_from_lines(lines)
@@ -172,11 +175,18 @@ class _HighlightSelection:
     end: int
 
 
-def _select_highlight_word(text: str) -> Optional[_HighlightSelection]:
+def _select_highlight_word(
+    text: str, *, highlight_word_index: Optional[int] = None
+) -> Optional[_HighlightSelection]:
     matches = list(_WORD_RE.finditer(text))
     if not matches:
         return None
-    index = 1 if len(matches) > 1 else 0
+    if highlight_word_index is None:
+        index = 1 if len(matches) > 1 else 0
+    else:
+        if highlight_word_index < 0 or highlight_word_index >= len(matches):
+            return None
+        index = highlight_word_index
     match = matches[index]
     return _HighlightSelection(index=index, start=match.start(), end=match.end())
 
