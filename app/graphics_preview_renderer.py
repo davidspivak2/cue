@@ -354,10 +354,8 @@ def _iter_highlight_clip_rects(
         overlap_end = min(selection_end, line_end)
         if overlap_end <= overlap_start:
             continue
-        line_relative_start = overlap_start - line_start
-        line_relative_end = overlap_end - line_start
-        x_start_raw = _cursor_x_value(line.cursorToX(line_relative_start))
-        x_end_raw = _cursor_x_value(line.cursorToX(line_relative_end))
+        x_start_raw = _cursor_x_value(line.cursorToX(overlap_start))
+        x_end_raw = _cursor_x_value(line.cursorToX(overlap_end))
         x_start = _to_layout_x(line, x_start_raw)
         x_end = _to_layout_x(line, x_end_raw)
         left = min(x_start, x_end)
