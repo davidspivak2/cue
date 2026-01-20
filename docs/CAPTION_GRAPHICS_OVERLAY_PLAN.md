@@ -171,12 +171,13 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Add a state-driven render loop that emits frames only when caption state changes.
   - Pipe raw RGBA frames to FFmpeg stdin and composite via overlay filter.
   - Preserve existing progress bar and worker UX.
+  - Keep the new pipeline gated (legacy remains default).
 - Likely files/modules:
   - Export pipeline and FFmpeg invocation logic.
   - Renderer integration points.
 - Key implementation notes and risks:
   - Ensure the export progress UI behaves exactly as before.
-  - Keep legacy path intact as a fallback switch.
+  - Keep legacy path intact as a fallback switch (env flag: `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=1`).
 - Manual test checklist:
   - Export a short clip and confirm no PNGs are written.
   - Verify progress bar and worker behavior unchanged.

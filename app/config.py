@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 
 from app.subtitle_style import (
@@ -17,6 +18,10 @@ DEFAULT_SUBTITLE_MODE = "word_highlight"
 DEFAULT_HIGHLIGHT_COLOR = "#FFD400"
 DEFAULT_HIGHLIGHT_OPACITY = 1.0
 VALID_SUBTITLE_MODES = {"word_highlight", "static"}
+
+GRAPHICS_OVERLAY_EXPORT_ENABLED = (
+    os.environ.get("SUBTITLES_GRAPHICS_OVERLAY_EXPORT", "0").strip() == "1"
+)
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
