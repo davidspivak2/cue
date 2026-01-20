@@ -51,7 +51,10 @@ from .graphics_preview_renderer import (
     render_graphics_preview,
 )
 from .graphics_overlay_export import (
+    OverlaySegment,
     build_graphics_overlay_plan,
+    build_static_overlay_segments,
+    build_word_highlight_overlay_segments,
     render_overlay_frame,
     resolve_video_stream_info,
 )
@@ -782,25 +785,30 @@ class Worker(QtCore.QObject):
             True,
         )
 
-        segments, total_frames = self._build_overlay_frame_segments(
-            cues,
+        segments = self._build_overlay_segments(
+            cues=cues,
+            duration_seconds=duration_seconds,
+        )
+        frame_segments, total_frames = self._build_overlay_frame_segments(
+            segments,
             duration_seconds,
             plan.fps,
         )
         self.signals.log.emit(
-            f"Overlay frames: total={total_frames} segments={len(segments)}",
+            f"Overlay frames: total={total_frames} segments={len(frame_segments)}",
             True,
         )
         render_cache: dict[str, bytes] = {}
 
         def make_frame_generator() -> Iterable[bytes]:
-            last_state: Optional[str] = None
+            last_state: Optional[tuple[str, Optional[int]]] = None
             last_frame: Optional[bytes] = None
-            for text, frame_count in segments:
-                state = text.strip()
+            for text, highlight_index, frame_count in frame_segments:
+                state = (text.strip(), highlight_index)
                 if state != last_state:
-                    if state in render_cache:
-                        last_frame = render_cache[state]
+                    cache_key = f\"{state[0]}|{state[1] if state[1] is not None else 'none'}\"
+                    if cache_key in render_cache:
+                        last_frame = render_cache[cache_key]
                     else:
                         frame_bytes, _ = render_overlay_frame(
                             width=plan.width,
@@ -810,8 +818,9 @@ class Worker(QtCore.QObject):
                             subtitle_mode=self.subtitle_mode,
                             highlight_color=self.highlight_color,
                             highlight_opacity=self.highlight_opacity,
+                            highlight_word_index=highlight_index,
                         )
-                        render_cache[state] = frame_bytes
+                        render_cache[cache_key] = frame_bytes
                         last_frame = frame_bytes
                     last_state = state
                 if last_frame is None:
@@ -854,29 +863,56 @@ class Worker(QtCore.QObject):
         self._burn_in_seconds = time.monotonic() - burn_start
         return {"output_path": str(output_path)}
 
-    def _build_overlay_frame_segments(
+    def _build_overlay_segments(
         self,
+        *,
         cues: list[SrtCue],
         duration_seconds: float,
+    ) -> list[OverlaySegment]:
+        if self.subtitle_mode != "word_highlight":
+            return build_static_overlay_segments(cues, duration_seconds)
+        word_timings_path = self._word_timings_path
+        if not word_timings_path or not word_timings_path.exists():
+            self.signals.log.emit(
+                "Overlay word timings missing; rendering static overlay text.",
+                True,
+            )
+            return build_static_overlay_segments(cues, duration_seconds)
+        try:
+            doc = load_word_timings_json(word_timings_path)
+        except (WordTimingValidationError, OSError) as exc:
+            self.signals.log.emit(
+                f"Overlay word timings failed to load ({exc}); using static overlay text.",
+                True,
+            )
+            return build_static_overlay_segments(cues, duration_seconds)
+        return build_word_highlight_overlay_segments(cues, doc, duration_seconds)
+
+    def _build_overlay_frame_segments(
+        self,
+        segments: list[OverlaySegment],
+        duration_seconds: float,
         fps: float,
-    ) -> tuple[list[tuple[str, int]], int]:
+    ) -> tuple[list[tuple[str, Optional[int], int]], int]:
         total_frames = max(0, int(math.ceil(duration_seconds * fps)))
-        segments: list[tuple[str, int]] = []
+        frame_segments: list[tuple[str, Optional[int], int]] = []
         frame_cursor = 0
-        for cue in sorted(cues, key=lambda item: item.start_seconds):
-            if cue.start_seconds >= duration_seconds:
+        for segment in segments:
+            if segment.start_seconds >= duration_seconds:
                 break
-            start_frame = int(round(cue.start_seconds * fps))
-            end_frame = int(round(min(cue.end_seconds, duration_seconds) * fps))
+            start_frame = int(round(segment.start_seconds * fps))
+            end_frame = int(round(min(segment.end_seconds, duration_seconds) * fps))
             start_frame = max(frame_cursor, start_frame)
             if start_frame > frame_cursor:
-                segments.append(("", start_frame - frame_cursor))
+                frame_segments.append(("", None, start_frame - frame_cursor))
             if end_frame > start_frame:
-                segments.append((cue.text, end_frame - start_frame))
+                frame_segments.append(
+                    (segment.text, segment.highlight_word_index, end_frame - start_frame)
+                )
             frame_cursor = max(frame_cursor, end_frame)
         if total_frames > frame_cursor:
-            segments.append(("", total_frames - frame_cursor))
-        return segments, total_frames
+            frame_segments.append(("", None, total_frames - frame_cursor))
+        return frame_segments, total_frames
 
     def _run_ffmpeg(self, command: list[str]) -> None:
         if self._cancelled.is_set():
