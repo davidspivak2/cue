@@ -2,12 +2,12 @@
 
 ## Status update (2025-02-14)
 - PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
-- PR6 has not started.
+- PR6 is complete (performance pass landed).
 - PR7 is complete (word background rendering, mutual exclusivity, and UI controls for line/word background color, opacity, padding, and corner radius are in place).
 - Wrapped-line word-highlight clip rects now use line-relative cursor offsets in the graphics overlay renderer.
 - Graphics overlay export now handles QImage bit-buffer variants for RGBA streaming.
 - Overlay render caching keys are normalized to the expected text + highlight index format.
-- The Subtitles Ready screen now uses a two-column layout with a single CTA labeled “Create final video”.
+- The Subtitles Ready screen uses a two-column layout with a sticky bottom bar showing “Saving as:” plus the “Create video with subtitles” CTA.
 - Preview stills are graphics-rendered and highlight the second word in Word highlight mode.
 - Preview playback controls are no longer surfaced in the Subtitles Ready view.
 
@@ -22,7 +22,7 @@
   - Single CTA only.
   - Still preview only (no playback).
   - When Word highlight mode is selected, preview highlights the 2nd word (preview-only behavior).
-  - Presets are plain text options.
+  - Presets are a dropdown (no preview tiles).
   - Line background and word background are mutually exclusive.
 
 ### Non-goals
@@ -34,9 +34,9 @@
 - Must not create thousands of PNGs on disk; no “PNG per state” for full exports.
 - Must preserve the current main behavior as a fallback restore point.
 - Must keep export progress UI behavior unchanged (reuse existing progress bar/worker UX).
-- CTA label must be exactly: “Create final video”.
+- CTA label must be exactly: “Create video with subtitles”.
 - No live preview playback; preview is always a still frame.
-- Presets must be text options (no tiny preview tiles).
+- Presets must be a dropdown (no tiny preview tiles).
 - Must not allow both line background and word background at the same time.
 
 ## Restore baseline main later
@@ -76,24 +76,28 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
 
 ### CTA
 - Only one CTA button.
-- Label must be exactly: “Create final video”.
+- Label must be exactly: “Create video with subtitles”.
+- CTA lives in the sticky bottom bar (not inside the style panel).
+- Bottom bar also shows “Saving as: <output path>”.
 
 ### Mode control
 - Segmented control: Static | Word highlight.
 - Do not use a dropdown.
 
 ### Presets
-- Display presets as a plain text option list.
+- Display presets in a dropdown.
 - No preview tiles.
 
 ### Preview behavior
 - Still preview only.
 - No play buttons.
 - No “auto-picked moment”.
-- No status labels.
+- Header shows “Subtitles ready ✓”.
 
 ### Line vs word background controls
 - Provide controls for line background and word background.
+- Segmented control labels: None / Around line / Around word.
+- Around word is visible but disabled in Static mode with a tooltip that it requires Word highlight.
 - They are mutually exclusive:
   - Enabling one must disable the other.
   - The UI must make the enable/disable behavior clear.
@@ -104,10 +108,10 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
 - Purpose: Implement the new UI layout and controls without touching rendering or export logic.
 - Scope:
   - Rework the SUBTITLES_READY screen layout to the two-column design.
-  - Update CTA label to “Create final video”.
+  - Update CTA label to “Create video with subtitles” in the sticky bottom bar.
   - Replace mode dropdown with segmented control.
-  - Convert presets to a plain text list.
-  - Remove playback-related elements (play buttons, status labels, auto-picked moment).
+  - Convert presets to a dropdown.
+  - Remove playback-related elements (play buttons, auto-picked moment).
   - Add mutually exclusive line vs word background UI controls (logic can be visual-only for now).
 - Likely files/modules:
   - UI components for the SUBTITLES_READY screen.
@@ -118,8 +122,8 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
 - Manual test checklist:
   - Verify two-column layout and still preview on the left.
   - Verify CTA text matches exactly.
-  - Confirm segmented control and text preset list appear.
-  - Confirm no playback controls or status labels are present.
+  - Confirm segmented control and preset dropdown appear.
+  - Confirm no playback controls or auto-picked moment are present.
   - Toggle line vs word background and ensure only one can be enabled.
 
 ### PR2 — Style/config schema foundation
@@ -205,15 +209,16 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Confirm output matches previous visual results.
 
 ### PR7 — Word background controls + rendering with mutual exclusivity
-- Purpose: Implement functional word background rendering and enforce mutual exclusivity in logic.
-- Scope:
-  - Add word background rendering to graphics overlay.
-  - Wire UI controls to the renderer.
-  - Enforce mutual exclusivity between line background and word background in state logic.
+- Status: ✅ Complete (merged).
+- Purpose: Implemented word background rendering and enforced mutual exclusivity in logic.
+- Scope (delivered):
+  - Added word background rendering to graphics overlay.
+  - Wired UI controls to the renderer.
+  - Enforced mutual exclusivity between line background and word background in state logic.
 - Likely files/modules:
   - UI state management for background mode.
   - Graphics renderer background drawing.
-- Key implementation notes and risks:
+- Key implementation notes and risks (resolved):
   - The mutual exclusivity must be enforced both in UI and in persisted state.
   - Ensure the renderer behaves predictably when toggling modes.
 - Manual test checklist:
