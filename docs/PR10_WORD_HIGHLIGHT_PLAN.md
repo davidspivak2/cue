@@ -12,7 +12,7 @@ Last updated: 2026-02-27
 - Static SRT pipeline remains as-is (regression-free).
 - Word highlight uses a separate ASS-based pipeline (FFmpeg `ass` filter) in the legacy/export
   and preview playback paths; graphics-overlay export is now the default path when enabled.
-- Styling items not already supported (e.g., border radius) are deferred to Post-PR10.
+- Styling items not supported in legacy ASS/force_style (e.g., border radius) are deferred to Post-PR10.
 
 ## C) High-level technical approach
 - **Static mode:** existing SRT + `subtitles` filter.
@@ -83,8 +83,8 @@ Last updated: 2026-02-27
   - Unit tests pass. ✅
 - **Depends on:** Task 1.
 
-### Codex Task 4 — Export path uses FFmpeg ass filter for word-highlight mode (still static ASS) + diagnostics fields
-- **Goal:** Wire export to use ASS when word-highlight mode is selected (still static ASS content). ✅ Done.
+### Codex Task 4 — Legacy export path uses FFmpeg ass filter for word-highlight mode (still static ASS) + diagnostics fields
+- **Goal:** Wire legacy export fallback to use ASS when word-highlight mode is selected (still static ASS content). ✅ Done.
 - **Scope:**
   - Add export branch to use FFmpeg `ass` filter when mode is word-highlight.
   - Add diagnostics fields for selected subtitle mode/render path.
@@ -224,28 +224,7 @@ Last updated: 2026-02-27
 - A) Highlight opacity control.
 - B) Base text color control.
 - C) Font family picker with Hebrew-safe defaults.
-- D) Word highlight mode: **Line background box** (per-line, behind the whole subtitle line) support with explicit UI + config.
-  - Purpose: a rounded rectangle behind the line while the current word is highlighted (matches the example screenshot concept: semi-transparent dark line box with a differently colored highlighted word).
-  - Controls (word-highlight-specific or reused from existing subtitle style box):
-    - Enable/disable toggle for Word highlight mode.
-    - Box color.
-    - Box opacity.
-    - Padding model (explicitly decide: single padding value or separate X/Y padding; document and implement consistently).
-    - Border radius (rounded corners; see definition below).
-  - **Decision point:** either (1) reuse existing Static subtitle box controls for Word highlight mode to avoid duplicate styling knobs, or (2) duplicate word-highlight-specific controls for clarity. Document rationale in the follow-up PR.
-  - **Mutual exclusivity (Word highlight mode only):** if **Word background box** is enabled, **Line background box** must be disabled. If **Word background box** is not enabled, Line background box may be enabled.
-- E) Word highlight mode: **Word background box** (per-word, behind only the currently highlighted word) support with explicit UI + config.
-  - Controls:
-    - Enable/disable toggle.
-    - Box color.
-    - Box opacity.
-    - Padding model (explicitly decide: single padding value or separate X/Y padding; document and implement consistently).
-    - Border radius (rounded corners; see definition below).
-  - **Mutual exclusivity (Word highlight mode only):** when enabled, Line background box is forced off.
-- F) Static mode: line background box remains available as it is today (existing Subtitle style box background), unchanged by Word highlight mode behavior.
-- G) **Definition:** “Border radius” means rounded corners for the background box (rounded rectangle, not sharp corners). Applies to both Line background box and Word background box.
-- H) UX expectation (follow-up scope): Word highlight settings should expose Line background box and Word background box options with the mutual exclusivity behavior described above.
-- I) Feasibility note: Rounded rectangles and per-word boxes may require ASS vector drawing or special libass handling; treat as a feasibility spike if needed, but still implement the UI knobs + desired behavior.
+- D) Legacy parity note: Line/word background controls (including opacity/padding/radius) are implemented in the Subtitles Ready UI and used by the graphics renderer for preview stills and graphics overlay export. The legacy ASS/force_style fallback supports only line background via box settings and does not support word backgrounds or rounded corners.
 - J) Alignment/performance optimizations (caching, preview-window-only alignment improvements).
 - K) Packaging hardening for WhisperX deps (tie to packaging work).
 
@@ -257,8 +236,8 @@ Last updated: 2026-02-27
 | 1 | Done |  | Config keys + defaults for subtitle mode + highlight settings. |
 | 2 | Done |  | Subtitle mode + highlight color controls in Subtitles-ready UI. |
 | 3 | Done |  | ASS document generation + tests complete. |
-| 4 | Done |  | Export uses ASS for word highlight mode. |
-| 5 | Done |  | Preview still uses ASS path + cache key updates. |
+| 4 | Done |  | Export defaults to graphics overlay rendering when enabled; legacy ASS (word highlight) is used only as a fallback if graphics overlay export is disabled (SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0) or fails. |
+| 5 | Done |  | Preview still uses the graphics renderer by default; legacy ASS (word highlight) or SRT+force_style (static) is used only as a fallback if graphics preview rendering fails. |
 | 6 | Done |  | Preview playback uses shifted ASS + tests (GUI no longer exposes playback). |
 | 7 | Done |  | Word timing JSON contract + staleness detection. |
 | 8 | Done |  | WhisperX alignment worker added. |
@@ -271,10 +250,6 @@ Last updated: 2026-02-27
 | Highlight opacity control | TODO |  |
 | Base text color control | TODO |  |
 | Font family picker | TODO |  |
-| Word highlight: Line background box controls (toggle, color, opacity, padding, border radius) | TODO | Include mutual exclusivity with Word background box; decide reuse vs duplicate controls. |
-| Word highlight: Word background box controls (toggle, color, opacity, padding, border radius) | TODO | Box behind only the current word; mutually exclusive with Line background box. |
-| Border radius definition + feasibility spike (ASS vector drawing/libass) | TODO | Rounded corners for both line/word boxes; may need special handling. |
-| UX behavior for mutual exclusivity in Word highlight settings | TODO | Line vs word box options, mutual exclusivity rules, placement in UI. |
-| Static mode line background box (existing subtitle style box) | TODO | Explicitly unaffected by Word highlight changes. |
+| Legacy parity note: Line/word background controls (including opacity/padding/radius) are implemented in the Subtitles Ready UI and used by the graphics renderer for preview stills and graphics overlay export. The legacy ASS/force_style fallback supports only line background via box settings and does not support word backgrounds or rounded corners. | TODO |  |
 | Alignment/performance optimizations | TODO |  |
 | WhisperX packaging hardening | TODO |  |
