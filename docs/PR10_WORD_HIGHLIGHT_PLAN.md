@@ -13,7 +13,7 @@ Last updated: 2026-02-27
 - Word highlight uses the graphics overlay renderer for export and preview.
 - Styling items not supported in FFmpeg subtitle filters (e.g., border radius) are handled by the graphics renderer.
 
-**Legacy removal note:** The ASS/SRT legacy export and preview pipelines were removed in the graphics-only export PR (this PR).
+**Removal note:** The subtitle-filter export and preview pipelines were removed in the graphics-only export PR (this PR).
 
 ## C) High-level technical approach
 - **Static mode:** graphics overlay renderer (no FFmpeg subtitle filters).
@@ -67,10 +67,10 @@ Last updated: 2026-02-27
   - No behavioral changes to preview/export.
 - **Depends on:** Task 1.
 
-### Codex Task 3 — ASS rendering adapter (removed)
-- **Status:** Removed in the graphics-only export PR (legacy ASS pipeline deleted).
+### Codex Task 3 — Subtitle-filter rendering adapter (removed)
+- **Status:** Removed in the graphics-only export PR (subtitle-filter pipeline deleted).
 
-### Codex Task 4 — Legacy export path with FFmpeg subtitle filters (removed)
+### Codex Task 4 — Subtitle-filter export path (removed)
 - **Status:** Removed in the graphics-only export PR (no FFmpeg subtitle filters remain).
 
 ### Codex Task 5 — Preview still uses graphics renderer + cache key updates
@@ -92,7 +92,7 @@ Last updated: 2026-02-27
 ### Codex Task 6 — Preview playback renderer alignment
 - **Goal:** Preview playback uses the graphics overlay renderer for both modes.
 - **Scope:**
-  - Update preview playback generator to stream overlay frames (no ASS/SRT filters).
+  - Update preview playback generator to stream overlay frames (no subtitle filters).
   - Add/update tests for overlay clip planning.
 - **Primary files likely touched:**
   - `app/preview_playback.py`
@@ -206,8 +206,8 @@ Last updated: 2026-02-27
 | --- | --- | --- | --- |
 | 1 | Done |  | Config keys + defaults for subtitle mode + highlight settings. |
 | 2 | Done |  | Subtitle mode + highlight color controls in Subtitles-ready UI. |
-| 3 | Done |  | Legacy ASS adapter removed with graphics-only export. |
-| 4 | Done |  | Export uses graphics overlay only; no runtime toggle or legacy filters. |
+| 3 | Done |  | Subtitle-filter adapter removed with graphics-only export. |
+| 4 | Done |  | Export uses graphics overlay only; no runtime toggle or subtitle filters. |
 | 5 | Done |  | Preview still uses graphics renderer only. |
 | 6 | Done |  | Preview playback uses graphics overlay clip streaming. |
 | 7 | Done |  | Word timing JSON contract + staleness detection. |

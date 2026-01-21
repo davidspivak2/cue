@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from app.graphics_overlay_export import GRAPHICS_OVERLAY_PIPELINE
 from app.preview_playback import (
@@ -41,8 +42,8 @@ def test_build_preview_clip_plan_graphics_overlay(tmp_path: Path) -> None:
     assert plan.pipeline == GRAPHICS_OVERLAY_PIPELINE
     assert "overlay=0:0:format=auto" in plan.filter_string
     assert "scale='min(1280,iw)'" in plan.filter_string
-    assert "subtitles=" not in plan.filter_string
-    assert "ass=" not in plan.filter_string
+    assert re.search(r"\\bsubtitles\\b", plan.filter_string) is None
+    assert re.search(r"\\bass\\b", plan.filter_string) is None
     assert list(tmp_path.glob("*.ass")) == []
     filter_index = plan.command.index("-filter_complex")
     assert plan.filter_string in plan.command[filter_index + 1]

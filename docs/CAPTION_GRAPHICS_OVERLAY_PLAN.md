@@ -128,17 +128,17 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Toggle line vs word background and ensure only one can be enabled.
 
 ### Overlay PR2 — Style/config schema foundation
-- Purpose: Create a unified style schema that supports both legacy and graphics overlay rendering paths.
+- Purpose: Create a unified style schema that supports the graphics overlay rendering path.
 - Scope:
   - Define or extend a style/config model for caption graphics overlay options.
   - Ensure the schema includes fields for word highlight, rounded corners, and line/word backgrounds.
-  - Introduce a compatibility layer so existing exports still work.
+  - Introduce a compatibility layer so existing presets still load.
 - Likely files/modules:
   - Configuration models or schema definitions.
   - Settings serialization/deserialization.
 - Key implementation notes and risks:
   - Maintain backward compatibility with existing saved presets.
-  - Include a clear marker or flag for renderer choice with a default of legacy.
+  - Include a clear marker or flag for renderer choice with graphics overlay as the default.
 - Manual test checklist:
   - Load existing projects without schema errors.
   - Create a new preset and confirm it serializes and reloads.
@@ -187,7 +187,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Renderer integration points.
 - Key implementation notes and risks:
   - Ensure the export progress UI behaves exactly as before.
-  - No legacy export path or runtime toggle remains.
+  - No subtitle-filter export path or runtime toggle remains.
 - Manual test checklist:
   - Export a short clip and confirm no PNGs are written.
   - Verify progress bar and worker behavior unchanged.
@@ -227,10 +227,10 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Switch back to line background and verify word background turns off.
   - Export a short clip and confirm the correct background mode renders.
 
-### Overlay PR8 — Graphics-only export (legacy removed)
-- Purpose: Make graphics overlay the only export renderer and remove legacy paths.
+### Overlay PR8 — Graphics-only export (graphics overlay only)
+- Purpose: Make graphics overlay the only export renderer and remove subtitle-filter paths.
 - Scope:
-  - Remove legacy export paths and runtime toggles.
+  - Remove subtitle-filter export paths and runtime toggles.
   - Log the renderer choice at export start.
 - Likely files/modules:
   - Renderer selection logic.
@@ -241,15 +241,14 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Verify export uses graphics overlay renderer.
 
 ### Overlay PR9 — Optional cleanup and follow-ups
-- Purpose: Remove dead code and document new renderer usage after stability is confirmed.
-- Scope:
-  - Remove unused helpers left behind by the transition.
-  - Add developer notes for renderer selection and debug logging.
+- Status: ✅ Complete.
+- Purpose: Remove dead code and document graphics overlay renderer usage.
+- Scope (delivered):
+  - Removed unused helpers left behind by the transition.
+  - Added developer notes for renderer debugging and logging.
 - Likely files/modules:
-  - Renderer utilities and legacy glue code.
-  - Developer documentation (only if explicitly permitted later; do not touch now).
-- Key implementation notes and risks:
-  - Only proceed after verifying rollback path and production stability.
+  - Renderer utilities cleanup.
+  - Developer documentation.
 - Manual test checklist:
   - Smoke test export and preview still to confirm no regressions.
 

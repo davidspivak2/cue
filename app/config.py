@@ -6,10 +6,10 @@ from app.subtitle_style import (
     PRESET_CUSTOM,
     PRESET_DEFAULT,
     PRESET_NAMES,
-    legacy_preset_defaults,
-    legacy_style_from_custom_dict,
     normalize_style_model,
-    style_model_from_legacy,
+    preset_style_defaults,
+    preset_style_from_custom_dict,
+    style_model_from_preset,
     style_model_to_dict,
 )
 
@@ -60,11 +60,16 @@ def apply_config_defaults(config: dict) -> dict:
     preset = preset_value if isinstance(preset_value, str) and preset_value in PRESET_NAMES else PRESET_DEFAULT
     if preset_value != preset:
         raw_style["preset"] = preset
-    legacy_defaults = legacy_preset_defaults(PRESET_DEFAULT)
-    legacy_custom = legacy_style_from_custom_dict(raw_style.get("custom"), legacy_defaults)
-    legacy_effective = legacy_custom if preset == PRESET_CUSTOM else legacy_preset_defaults(preset)
-    fallback_style = style_model_from_legacy(
-        legacy_effective,
+    preset_defaults_style = preset_style_defaults(PRESET_DEFAULT)
+    preset_custom = preset_style_from_custom_dict(
+        raw_style.get("custom"),
+        preset_defaults_style,
+    )
+    preset_effective = (
+        preset_custom if preset == PRESET_CUSTOM else preset_style_defaults(preset)
+    )
+    fallback_style = style_model_from_preset(
+        preset_effective,
         subtitle_mode=config["subtitle_mode"],
         highlight_color=highlight_color,
     )
