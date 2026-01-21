@@ -367,6 +367,167 @@ class ClickableLabel(QtWidgets.QLabel):
         super().mousePressEvent(event)
 
 
+class ClickableFrame(QtWidgets.QFrame):
+    clicked = QtCore.Signal()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class ColorSwatch(QtWidgets.QFrame):
+    clicked = QtCore.Signal()
+
+    def __init__(
+        self,
+        color: Optional[str] = None,
+        *,
+        multicolor: bool = False,
+        parent: Optional[QtWidgets.QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._color = color
+        self._multicolor = multicolor
+        self.setFixedSize(28, 28)
+        self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.setProperty("active", False)
+
+    @property
+    def color(self) -> Optional[str]:
+        return self._color
+
+    def set_color(self, color: Optional[str]) -> None:
+        self._color = color
+        self.update()
+
+    def set_active(self, active: bool) -> None:
+        if self.property("active") == active:
+            return
+        self.setProperty("active", active)
+        self.update()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        if self._multicolor:
+            gradient = QtGui.QLinearGradient(rect.topLeft(), rect.topRight())
+            gradient.setColorAt(0.0, QtGui.QColor("#F43F5E"))
+            gradient.setColorAt(0.33, QtGui.QColor("#F59E0B"))
+            gradient.setColorAt(0.66, QtGui.QColor("#22C55E"))
+            gradient.setColorAt(1.0, QtGui.QColor("#3B82F6"))
+            painter.setBrush(gradient)
+        else:
+            painter.setBrush(QtGui.QColor(self._color or "#000000"))
+        border_color = QtGui.QColor(ACCENT if self.property("active") else BORDER)
+        pen = QtGui.QPen(border_color, 2 if self.property("active") else 1)
+        painter.setPen(pen)
+        painter.drawRoundedRect(rect, 6, 6)
+
+
+class ColorSwatchRow(QtWidgets.QWidget):
+    colorChanged = QtCore.Signal(str)
+
+    def __init__(
+        self,
+        recommended_colors: list[str],
+        *,
+        initial_color: Optional[str] = None,
+        parent: Optional[QtWidgets.QWidget] = None,
+        dialog_title: str = "Pick color…",
+    ) -> None:
+        super().__init__(parent)
+        if len(recommended_colors) != 3:
+            raise ValueError("ColorSwatchRow expects exactly three recommended colors.")
+        self._recommended_colors = [color.upper() for color in recommended_colors]
+        self._custom_color: Optional[str] = None
+        self._dialog_title = dialog_title
+        initial = (initial_color or self._recommended_colors[0]).upper()
+        if initial not in self._recommended_colors:
+            self._custom_color = initial
+
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self._swatches: list[ColorSwatch] = []
+        swatch_one = ColorSwatch(self._custom_color or self._recommended_colors[0])
+        self._swatches.append(swatch_one)
+        for color in self._recommended_colors:
+            self._swatches.append(ColorSwatch(color))
+        self._more_swatch = ColorSwatch(multicolor=True)
+        self._swatches.append(self._more_swatch)
+
+        for index, swatch in enumerate(self._swatches):
+            layout.addWidget(swatch)
+            if swatch is self._more_swatch:
+                swatch.setToolTip("More colors…")
+                swatch.clicked.connect(self._choose_custom_color)
+            else:
+                swatch.clicked.connect(
+                    lambda _, swatch_index=index: self._apply_swatch_color(swatch_index)
+                )
+
+        self.set_color(initial)
+
+    @property
+    def current_color(self) -> str:
+        color = self._custom_color or self._recommended_colors[0]
+        for index, swatch in enumerate(self._swatches[:-1]):
+            if swatch.property("active"):
+                return self._color_for_index(index)
+        return color
+
+    def set_color(self, color: str) -> None:
+        hex_color = color.upper()
+        if hex_color not in self._recommended_colors:
+            self._custom_color = hex_color
+            self._swatches[0].set_color(hex_color)
+        self._set_active_from_color(hex_color)
+
+    def _color_for_index(self, index: int) -> str:
+        if index == 0:
+            return (self._custom_color or self._recommended_colors[0]).upper()
+        return self._recommended_colors[index - 1]
+
+    def _apply_swatch_color(self, index: int) -> None:
+        color = self._color_for_index(index)
+        self._set_active_from_color(color, active_index=index)
+        self.colorChanged.emit(color)
+
+    def _set_active_from_color(self, color: str, active_index: Optional[int] = None) -> None:
+        if active_index is None:
+            if color == (self._custom_color or "").upper():
+                active_index = 0
+            elif color in self._recommended_colors:
+                active_index = self._recommended_colors.index(color) + 1
+            else:
+                active_index = 0
+        for idx, swatch in enumerate(self._swatches[:-1]):
+            swatch.set_active(idx == active_index)
+
+    def _choose_custom_color(self) -> None:
+        current = QtGui.QColor(self.current_color)
+        color = QtWidgets.QColorDialog.getColor(current, self, self._dialog_title)
+        if not color.isValid():
+            return
+        hex_value = color.name().upper()
+        if hex_value not in self._recommended_colors:
+            self._custom_color = hex_value
+            self._swatches[0].set_color(hex_value)
+            self._set_active_from_color(hex_value, active_index=0)
+        else:
+            self._set_active_from_color(hex_value)
+        self.colorChanged.emit(hex_value)
+
+
 class SavingToLine(QtWidgets.QWidget):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
