@@ -9,20 +9,20 @@ Last updated: 2026-02-27
 - Word timings come from alignment (WhisperX), not heuristic splitting.
 
 ## B) Scope boundaries (anti-scope-explosion guardrails)
-- Static SRT pipeline remains as-is (regression-free).
-- Word highlight uses a separate ASS-based pipeline (FFmpeg `ass` filter) in the legacy/export
-  and preview playback paths; graphics-overlay export is now the default path when enabled.
-- Styling items not supported in legacy ASS/force_style (e.g., border radius) are deferred to Post-PR10.
+- Static rendering is supported via the graphics overlay renderer (regression-free).
+- Word highlight uses the graphics overlay renderer for export and preview.
+- Styling items not supported in FFmpeg subtitle filters (e.g., border radius) are handled by the graphics renderer.
+
+**Legacy removal note:** The ASS/SRT legacy export and preview pipelines were removed in the graphics-only export PR (this PR).
 
 ## C) High-level technical approach
-- **Static mode:** existing SRT + `subtitles` filter.
-- **Word highlight mode (legacy pipeline):** generate ASS + FFmpeg `-vf ass=...`
-  (graphics-overlay export is the default when enabled).
+- **Static mode:** graphics overlay renderer (no FFmpeg subtitle filters).
+- **Word highlight mode:** graphics overlay renderer with word timing alignment.
 - **Alignment:** WhisperX produces word-level timestamps keyed to the edited SRT (so edits are respected).
 - **Preview still:** same renderer as export (no divergence).
 
-**RTL hardening in ASS:**
-- Include explicit RTL embedding marks per event.
+**RTL hardening in graphics renderer:**
+- Ensure RTL ordering stays stable during word highlight updates.
 - Avoid style changes that cause reflow in RTL runs.
 
 ## D) Execution strategy (how we split work)
@@ -67,38 +67,11 @@ Last updated: 2026-02-27
   - No behavioral changes to preview/export.
 - **Depends on:** Task 1.
 
-### Codex Task 3 — Introduce ASS rendering adapter (static ASS first) + unit tests
-- **Goal:** Add an ASS rendering adapter that can render static subtitles via ASS. ✅ Done.
-- **Scope:**
-  - Create ASS generation utilities and adapter.
-  - Unit tests for ASS output structure.
-- **Primary files likely touched:**
-  - `app/ass_render.py`
-  - `tests/test_ass_renderer.py`
-- **Implementation notes:**
-  - Match existing static SRT styling as closely as possible.
-  - Keep ASS generation deterministic for tests.
-- **Acceptance criteria:**
-  - ASS output validates basic structure (header + events). ✅
-  - Unit tests pass. ✅
-- **Depends on:** Task 1.
+### Codex Task 3 — ASS rendering adapter (removed)
+- **Status:** Removed in the graphics-only export PR (legacy ASS pipeline deleted).
 
-### Codex Task 4 — Legacy export path uses FFmpeg ass filter for word-highlight mode (still static ASS) + diagnostics fields
-- **Goal:** Wire legacy export fallback to use ASS when word-highlight mode is selected (still static ASS content). ✅ Done.
-- **Scope:**
-  - Add export branch to use FFmpeg `ass` filter when mode is word-highlight.
-  - Add diagnostics fields for selected subtitle mode/render path.
-- **Primary files likely touched:**
-  - `app/workers.py`
-  - `app/ffmpeg_utils.py`
-  - `app/diagnostics.py`
-- **Implementation notes:**
-  - Keep static SRT export as default for Static mode.
-  - Log which renderer and filter are used.
-- **Acceptance criteria:**
-  - Export works for both modes.
-  - Diagnostics include renderer/mode info.
-- **Depends on:** Task 3.
+### Codex Task 4 — Legacy export path with FFmpeg subtitle filters (removed)
+- **Status:** Removed in the graphics-only export PR (no FFmpeg subtitle filters remain).
 
 ### Codex Task 5 — Preview still uses graphics renderer + cache key updates
 - **Goal:** Preview still renderer supports word-highlight styling and updates cache keys. ✅ Done.
@@ -116,20 +89,19 @@ Last updated: 2026-02-27
   - Cache invalidates on mode/setting change.
 - **Depends on:** Task 4.
 
-### Codex Task 6 — Preview playback uses shifted ASS path when word-highlight mode selected + shifting test coverage (GUI removed)
-- **Goal:** Preview playback uses ASS for word-highlight mode, including time-shift logic. ✅ Done.
+### Codex Task 6 — Preview playback renderer alignment
+- **Goal:** Preview playback uses the graphics overlay renderer for both modes.
 - **Scope:**
-  - Update preview playback generator to render ASS when needed.
-  - Add tests for ASS time shifting and alignment.
+  - Update preview playback generator to stream overlay frames (no ASS/SRT filters).
+  - Add/update tests for overlay clip planning.
 - **Primary files likely touched:**
   - `app/preview_playback.py`
-  - `app/subtitle_renderers/ass_renderer.py`
-  - `tests/test_preview_playback.py`
+  - `tests/test_preview_playback_plan.py`
 - **Implementation notes:**
   - Ensure timing shifts match preview slice logic.
 - **Acceptance criteria:**
-  - Preview playback matches export for word-highlight mode (feature no longer surfaced in the GUI).
-  - Tests cover time shifting for ASS.
+  - Preview playback matches graphics overlay export styling.
+  - Tests cover overlay clip planning.
 - **Depends on:** Task 5.
 
 ### Codex Task 7 — Define and plumb a word-timing JSON contract end-to-end (staleness detection on SRT edits)
@@ -166,21 +138,20 @@ Last updated: 2026-02-27
   - No heuristic fallback in normal path.
 - **Depends on:** Task 7.
 
-### Codex Task 9 — Implement karaoke ASS generation using aligned word timings (per-word highlight events) + tests
-- **Goal:** Generate karaoke-style ASS with per-word highlight events. ✅ Done.
+### Codex Task 9 — Word highlight rendering using aligned word timings
+- **Goal:** Render karaoke-style word highlighting via the graphics overlay renderer. ✅ Done.
 - **Scope:**
-  - Use aligned word timings to emit ASS events/styles.
-  - Add tests for word highlight generation.
+  - Use aligned word timings to emit per-word highlight states.
+  - Add/update tests for overlay clip planning where needed.
 - **Primary files likely touched:**
-  - `app/subtitle_renderers/ass_karaoke.py`
-  - `app/subtitle_renderers/ass_renderer.py`
-  - `tests/test_ass_karaoke.py`
+  - `app/graphics_overlay_export.py`
+  - `app/preview_playback.py`
+  - `tests/test_preview_playback_plan.py`
 - **Implementation notes:**
-  - Preserve RTL stability via embedding marks.
-  - Use ASS `\k`/`\kf` or separate events depending on stability.
+  - Preserve RTL stability in graphics rendering.
 - **Acceptance criteria:**
   - Highlighted words match timing JSON.
-  - RTL ordering remains stable in generated ASS.
+  - RTL ordering remains stable in graphics rendering.
 - **Depends on:** Task 8.
 
 ### Codex Task 10 — Flip default to Word highlight + tighten UX + update diagnostics + docs references
@@ -214,7 +185,7 @@ Last updated: 2026-02-27
 - [x] RTL stability maintained in preview and export.
 - [x] Preview/export parity for styling and timing.
 - [x] No heuristics: alignment-based word timing only.
-- [x] Mode switch works; Static pipeline unchanged.
+- [x] Mode switch works; Static mode supported by graphics overlay.
 - [x] Highlight color is configurable and persists.
 
 ## Post-merge fixes
@@ -224,7 +195,7 @@ Last updated: 2026-02-27
 - A) Highlight opacity control.
 - B) Base text color control.
 - C) Font family picker with Hebrew-safe defaults.
-- D) Legacy parity note: Line/word background controls (including opacity/padding/radius) are implemented in the Subtitles Ready UI and used by the graphics renderer for preview stills and graphics overlay export. The legacy ASS/force_style fallback supports only line background via box settings and does not support word backgrounds or rounded corners.
+- D) Line/word background controls (including opacity/padding/radius) are implemented in the Subtitles Ready UI and used by the graphics renderer for preview stills and graphics overlay export.
 - J) Alignment/performance optimizations (caching, preview-window-only alignment improvements).
 - K) Packaging hardening for WhisperX deps (tie to packaging work).
 
@@ -235,13 +206,13 @@ Last updated: 2026-02-27
 | --- | --- | --- | --- |
 | 1 | Done |  | Config keys + defaults for subtitle mode + highlight settings. |
 | 2 | Done |  | Subtitle mode + highlight color controls in Subtitles-ready UI. |
-| 3 | Done |  | ASS document generation + tests complete. |
-| 4 | Done |  | Export defaults to graphics overlay rendering when enabled; legacy ASS (word highlight) is used only as a fallback if graphics overlay export is disabled (SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0) or fails. |
-| 5 | Done |  | Preview still uses the graphics renderer by default; legacy ASS (word highlight) or SRT+force_style (static) is used only as a fallback if graphics preview rendering fails. |
-| 6 | Done |  | Preview playback uses shifted ASS + tests (GUI no longer exposes playback). |
+| 3 | Done |  | Legacy ASS adapter removed with graphics-only export. |
+| 4 | Done |  | Export uses graphics overlay only; no runtime toggle or legacy filters. |
+| 5 | Done |  | Preview still uses graphics renderer only. |
+| 6 | Done |  | Preview playback uses graphics overlay clip streaming. |
 | 7 | Done |  | Word timing JSON contract + staleness detection. |
 | 8 | Done |  | WhisperX alignment worker added. |
-| 9 | Done |  | Karaoke step-highlight ASS generation + tests. |
+| 9 | Done |  | Word highlight overlay states driven by aligned word timings. |
 | 10 | Done |  | Default subtitle mode is Word highlight; docs + diagnostics updated. |
 
 ### Post-PR10 follow-up tracking
@@ -250,6 +221,5 @@ Last updated: 2026-02-27
 | Highlight opacity control | TODO |  |
 | Base text color control | TODO |  |
 | Font family picker | TODO |  |
-| Legacy parity note: Line/word background controls (including opacity/padding/radius) are implemented in the Subtitles Ready UI and used by the graphics renderer for preview stills and graphics overlay export. The legacy ASS/force_style fallback supports only line background via box settings and does not support word backgrounds or rounded corners. | TODO |  |
 | Alignment/performance optimizations | TODO |  |
 | WhisperX packaging hardening | TODO |  |
