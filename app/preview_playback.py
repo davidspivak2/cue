@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -30,6 +31,10 @@ from .paths import get_preview_clips_dir
 from .srt_utils import SrtCue, parse_srt_file
 from .subtitle_style import SubtitleStyle, to_preview_params
 from .word_timing_schema import WordTimingValidationError, load_word_timings_json, word_timings_path_for_srt
+
+_SRT_TIMESTAMP_RE = re.compile(
+    r"(?P<start>\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(?P<end>\d{2}:\d{2}:\d{2},\d{3})"
+)
 
 
 @dataclass(frozen=True)
@@ -207,6 +212,74 @@ class PreviewClipWorker(QtCore.QObject):
             )
             return build_static_overlay_segments(cues, clip_end)
         return build_word_highlight_overlay_segments(cues, doc, clip_end)
+
+
+def _parse_srt_timestamp(value: str) -> Optional[float]:
+    parts = value.replace(",", ".").split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = float(parts[2])
+    except ValueError:
+        return None
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _format_srt_timestamp(seconds: float) -> str:
+    total_seconds = int(seconds)
+    millis = int(round((seconds - total_seconds) * 1000))
+    if millis == 1000:
+        total_seconds += 1
+        millis = 0
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
+
+def _shift_srt_text(srt_text: str, shift_seconds: float) -> str:
+    normalized = srt_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return ""
+    blocks = re.split(r"\n\s*\n", normalized)
+    output_blocks: list[str] = []
+    cue_index = 1
+    for block in blocks:
+        lines = block.split("\n")
+        timestamp_index = None
+        match = None
+        for idx, line in enumerate(lines):
+            match = _SRT_TIMESTAMP_RE.search(line)
+            if match:
+                timestamp_index = idx
+                break
+        if timestamp_index is None or not match:
+            continue
+        start_seconds = _parse_srt_timestamp(match.group("start"))
+        end_seconds = _parse_srt_timestamp(match.group("end"))
+        if start_seconds is None or end_seconds is None:
+            continue
+        shifted_start = start_seconds - shift_seconds
+        shifted_end = end_seconds - shift_seconds
+        if shifted_end <= 0:
+            continue
+        if shifted_start < 0:
+            shifted_start = 0.0
+        if shifted_end <= shifted_start:
+            continue
+        text_lines = lines[timestamp_index + 1 :]
+        output_lines = [
+            str(cue_index),
+            f"{_format_srt_timestamp(shifted_start)} --> {_format_srt_timestamp(shifted_end)}",
+            *text_lines,
+        ]
+        output_blocks.append("\n".join(output_lines).rstrip())
+        cue_index += 1
+    if not output_blocks:
+        return ""
+    return "\n\n".join(output_blocks).strip() + "\n"
 
 
 class PreviewPlaybackController(QtCore.QObject):
