@@ -50,9 +50,17 @@ from app.ui.theme import apply_theme
 from app.ui.utils import format_duration, generate_thumbnail, get_media_duration_seconds
 from app.ui.widgets import (
     AspectRatioFrame,
+    ClickableFrame,
     ClickableLabel,
+    ColorChipPicker,
     DropZone,
+    ElidedLabel,
     ElidedLineEdit,
+    NoWheelComboBox,
+    NoWheelDoubleSpinBox,
+    NoWheelFontComboBox,
+    NoWheelSlider,
+    NoWheelSpinBox,
     SavingToLine,
     VideoCard,
 )
@@ -157,10 +165,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_status_label: Optional[QtWidgets.QLabel] = None
         self.subtitle_mode_group: Optional[QtWidgets.QButtonGroup] = None
         self.subtitle_mode_buttons: dict[str, QtWidgets.QPushButton] = {}
-        self.subtitle_style_preset_group: Optional[QtWidgets.QButtonGroup] = None
-        self.subtitle_style_preset_buttons: dict[str, QtWidgets.QPushButton] = {}
+        self.subtitle_style_preset_combo: Optional[QtWidgets.QComboBox] = None
         self.background_mode_group: Optional[QtWidgets.QButtonGroup] = None
         self.background_mode_buttons: dict[str, QtWidgets.QPushButton] = {}
+        self.vertical_anchor_group: Optional[QtWidgets.QButtonGroup] = None
+        self.vertical_anchor_buttons: dict[str, QtWidgets.QPushButton] = {}
+        self.subtitles_ready_page: Optional[QtWidgets.QWidget] = None
+        self.subtitles_ready_header_label: Optional[QtWidgets.QLabel] = None
+        self.subtitles_ready_footer: Optional[QtWidgets.QFrame] = None
+        self.subtitles_ready_path_label: Optional[ElidedLabel] = None
+        self.style_drawer: Optional[QtWidgets.QFrame] = None
+        self.style_drawer_scrim: Optional[ClickableFrame] = None
+        self.style_drawer_open = False
+        self.style_drawer_mode = False
+        self.style_drawer_open_button: Optional[QtWidgets.QPushButton] = None
+        self.style_drawer_close_button: Optional[QtWidgets.QToolButton] = None
+        self.style_inspector_container: Optional[QtWidgets.QFrame] = None
+        self.style_inspector_layout: Optional[QtWidgets.QVBoxLayout] = None
+        self.style_drawer_body: Optional[QtWidgets.QWidget] = None
+        self.style_drawer_body_layout: Optional[QtWidgets.QVBoxLayout] = None
+        self.style_right_column: Optional[QtWidgets.QWidget] = None
+        self.style_right_column_layout: Optional[QtWidgets.QVBoxLayout] = None
         self._progress_controller: Optional[ProgressController] = None
         self._worker_start_time: Optional[float] = None
         self._elapsed_timer = QtCore.QTimer(self)
@@ -209,7 +234,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.video_card = VideoCard()
 
         self.generate_button = QtWidgets.QPushButton("Create subtitles")
-        self.burn_button = QtWidgets.QPushButton("Create final video")
+        self.burn_button = QtWidgets.QPushButton("Create video with subtitles")
         self.cancel_button = QtWidgets.QPushButton("Cancel")
 
         self.done_open_video_button = QtWidgets.QPushButton("Play video")
@@ -288,6 +313,10 @@ class MainWindow(QtWidgets.QMainWindow):
         home_page = QtWidgets.QWidget()
         home_layout = QtWidgets.QVBoxLayout(home_page)
         header_layout = QtWidgets.QHBoxLayout()
+        self.subtitles_ready_header_label = QtWidgets.QLabel("Subtitles ready ✓")
+        self.subtitles_ready_header_label.setStyleSheet("font-weight: 600;")
+        self.subtitles_ready_header_label.setVisible(False)
+        header_layout.addWidget(self.subtitles_ready_header_label)
         header_layout.addStretch()
         header_layout.addWidget(self.settings_button)
         home_layout.addLayout(header_layout)
@@ -390,13 +419,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_subtitles_ready_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
-        layout = QtWidgets.QHBoxLayout(page)
-        layout.setSpacing(24)
-        layout.setAlignment(QtCore.Qt.AlignTop)
+        self.subtitles_ready_page = page
+        root_layout = QtWidgets.QVBoxLayout(page)
+        root_layout.setSpacing(16)
 
-        preview_card = QtWidgets.QFrame()
-        preview_layout = QtWidgets.QVBoxLayout(preview_card)
+        content_widget = QtWidgets.QWidget()
+        content_layout = QtWidgets.QHBoxLayout(content_widget)
+        content_layout.setSpacing(24)
+        content_layout.setAlignment(QtCore.Qt.AlignTop)
+
+        preview_column = QtWidgets.QWidget()
+        preview_layout = QtWidgets.QVBoxLayout(preview_column)
         preview_layout.setSpacing(12)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+
+        preview_header = QtWidgets.QHBoxLayout()
+        preview_header.addStretch()
+        self.style_drawer_open_button = QtWidgets.QPushButton("Style")
+        self.style_drawer_open_button.setVisible(False)
+        self.style_drawer_open_button.setCursor(
+            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        )
+        preview_header.addWidget(self.style_drawer_open_button)
+        preview_layout.addLayout(preview_header)
 
         preview_frame = AspectRatioFrame()
         preview_frame.setObjectName("PreviewCardFrame")
@@ -423,25 +468,106 @@ class MainWindow(QtWidgets.QMainWindow):
         preview_layout.addWidget(preview_frame)
         preview_layout.addStretch()
 
-        right_column = QtWidgets.QWidget()
-        right_layout = QtWidgets.QVBoxLayout(right_column)
-        right_layout.setSpacing(12)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        self.style_inspector_container = QtWidgets.QFrame()
+        self.style_inspector_container.setObjectName("StyleInspectorContainer")
+        self.style_inspector_container.setFixedWidth(420)
+        self.style_inspector_container.setSizePolicy(
+            QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Expanding
+        )
+        self.style_inspector_layout = QtWidgets.QVBoxLayout(self.style_inspector_container)
+        self.style_inspector_layout.setContentsMargins(0, 0, 0, 0)
+        self.style_inspector_layout.setSpacing(0)
 
         style_card = self._build_subtitle_style_card()
-        right_layout.addWidget(style_card)
-        right_layout.addStretch()
+        style_scroll = QtWidgets.QScrollArea()
+        style_scroll.setWidgetResizable(True)
+        style_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        style_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        style_scroll.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        style_scroll.setMinimumHeight(0)
+        style_scroll.setWidget(style_card)
+        self.style_inspector_layout.addWidget(style_scroll)
 
-        layout.addWidget(preview_card, 3)
-        layout.addWidget(right_column, 2)
-        layout.setAlignment(preview_card, QtCore.Qt.AlignTop)
-        layout.setAlignment(right_column, QtCore.Qt.AlignTop)
+        self.style_right_column = QtWidgets.QWidget()
+        self.style_right_column.setSizePolicy(
+            QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Expanding
+        )
+        self.style_right_column_layout = QtWidgets.QVBoxLayout(self.style_right_column)
+        self.style_right_column_layout.setSpacing(12)
+        self.style_right_column_layout.setContentsMargins(0, 0, 0, 0)
+        self.style_right_column_layout.addWidget(self.style_inspector_container)
+
+        content_layout.addWidget(preview_column, 3)
+        content_layout.addWidget(self.style_right_column, 2)
+        content_layout.setAlignment(preview_column, QtCore.Qt.AlignTop)
+        content_layout.setAlignment(self.style_right_column, QtCore.Qt.AlignTop)
+
+        self.subtitles_ready_footer = QtWidgets.QFrame()
+        self.subtitles_ready_footer.setObjectName("SubtitlesReadyFooter")
+        footer_layout = QtWidgets.QHBoxLayout(self.subtitles_ready_footer)
+        footer_layout.setContentsMargins(12, 8, 12, 8)
+        footer_layout.setSpacing(12)
+        saving_label = QtWidgets.QLabel("Saving as:")
+        saving_label.setObjectName("SavingAsPrefix")
+        self.subtitles_ready_path_label = ElidedLabel()
+        self.subtitles_ready_path_label.setObjectName("SavingAsPath")
+        footer_layout.addWidget(saving_label)
+        footer_layout.addWidget(self.subtitles_ready_path_label, stretch=1)
+        footer_layout.addStretch()
+        footer_layout.addWidget(self.burn_button)
+
+        root_layout.addWidget(content_widget, stretch=1)
+        root_layout.addWidget(self.subtitles_ready_footer)
+
+        self.style_drawer_scrim = ClickableFrame(page)
+        self.style_drawer_scrim.setObjectName("StyleDrawerScrim")
+        self.style_drawer_scrim.setVisible(False)
+        self.style_drawer = QtWidgets.QFrame(page)
+        self.style_drawer.setObjectName("StyleDrawer")
+        self.style_drawer.setVisible(False)
+        drawer_layout = QtWidgets.QVBoxLayout(self.style_drawer)
+        drawer_layout.setContentsMargins(0, 0, 0, 0)
+        drawer_layout.setSpacing(0)
+        drawer_header = QtWidgets.QFrame()
+        drawer_header.setObjectName("StyleDrawerHeader")
+        header_layout = QtWidgets.QHBoxLayout(drawer_header)
+        header_layout.setContentsMargins(12, 10, 12, 10)
+        header_layout.setSpacing(8)
+        header_label = QtWidgets.QLabel("Style")
+        header_label.setObjectName("StyleDrawerTitle")
+        self.style_drawer_close_button = QtWidgets.QToolButton()
+        self.style_drawer_close_button.setText("✕")
+        self.style_drawer_close_button.setCursor(
+            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        )
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self.style_drawer_close_button)
+        drawer_layout.addWidget(drawer_header)
+
+        self.style_drawer_body = QtWidgets.QWidget()
+        self.style_drawer_body_layout = QtWidgets.QVBoxLayout(self.style_drawer_body)
+        self.style_drawer_body_layout.setContentsMargins(12, 12, 12, 12)
+        self.style_drawer_body_layout.setSpacing(0)
+        drawer_layout.addWidget(self.style_drawer_body)
+
+        if self.style_drawer_open_button:
+            self.style_drawer_open_button.clicked.connect(self._open_style_drawer)
+        if self.style_drawer_close_button:
+            self.style_drawer_close_button.clicked.connect(self._close_style_drawer)
+        if self.style_drawer_scrim:
+            self.style_drawer_scrim.clicked.connect(self._close_style_drawer)
+
         self._update_preview_card()
+        self._update_subtitles_ready_layout()
         return page
 
     def _build_subtitle_style_card(self) -> QtWidgets.QFrame:
         card = self._build_settings_section("Style")
         card_layout = card.layout()
+        card_layout.setSpacing(12)
 
         def _build_style_section(title: str) -> tuple[QtWidgets.QWidget, QtWidgets.QVBoxLayout]:
             section = QtWidgets.QWidget()
@@ -487,46 +613,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.highlight_color_label = QtWidgets.QLabel("Highlight color")
         highlight_color_tooltip = "Color used for the highlighted word."
         self.highlight_color_label.setToolTip(highlight_color_tooltip)
-        self.highlight_color_row = QtWidgets.QWidget()
-        highlight_layout = QtWidgets.QHBoxLayout(self.highlight_color_row)
-        highlight_layout.setContentsMargins(0, 0, 0, 0)
-        highlight_layout.setSpacing(8)
-        self.highlight_color_button = QtWidgets.QPushButton("Pick color…")
-        self.highlight_color_button.setFixedHeight(32)
-        self.highlight_color_button.setToolTip(highlight_color_tooltip)
-        self.highlight_color_value = QtWidgets.QLineEdit()
-        self.highlight_color_value.setReadOnly(True)
-        self.highlight_color_value.setFixedHeight(32)
-        self.highlight_color_value.setMinimumWidth(110)
-        self.highlight_color_value.setToolTip(highlight_color_tooltip)
-        highlight_layout.addWidget(self.highlight_color_button)
-        highlight_layout.addWidget(self.highlight_color_value)
-        highlight_layout.addStretch()
+        self.highlight_color_row = ColorChipPicker(
+            ["#FFD400", "#46D9FF", "#00FF66"],
+            initial_color=self._highlight_color,
+            dialog_title="Pick highlight color…",
+        )
+        self.highlight_color_row.setToolTip(highlight_color_tooltip)
 
         preset_tooltip = (
             "Controls subtitle appearance (font size, outline, shadow, margin, box)."
         )
-        preset_options = QtWidgets.QWidget()
-        preset_layout = QtWidgets.QVBoxLayout(preset_options)
-        preset_layout.setContentsMargins(0, 0, 0, 0)
-        preset_layout.setSpacing(4)
-        self.subtitle_style_preset_group = QtWidgets.QButtonGroup(self)
-        self.subtitle_style_preset_group.setExclusive(True)
-        self.subtitle_style_preset_buttons = {}
-        for preset in PRESET_NAMES:
-            button = QtWidgets.QPushButton(preset)
-            button.setCheckable(True)
-            button.setFlat(True)
-            button.setSizePolicy(
-                QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed
-            )
-            button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-            button.setToolTip(preset_tooltip)
-            button.setObjectName("PresetOption")
-            button.setProperty("preset", preset)
-            self.subtitle_style_preset_group.addButton(button)
-            self.subtitle_style_preset_buttons[preset] = button
-            preset_layout.addWidget(button)
+        self.subtitle_style_preset_combo = NoWheelComboBox()
+        self.subtitle_style_preset_combo.addItems(list(PRESET_NAMES))
+        self.subtitle_style_preset_combo.setToolTip(preset_tooltip)
 
         mode_section, mode_layout = _build_style_section("Mode")
         mode_grid = QtWidgets.QGridLayout()
@@ -542,7 +641,16 @@ class MainWindow(QtWidgets.QMainWindow):
         card_layout.addWidget(mode_section)
 
         preset_section, preset_layout_container = _build_style_section("Preset")
-        preset_layout_container.addWidget(preset_options)
+        preset_layout_container.addWidget(self.subtitle_style_preset_combo)
+        reset_layout = QtWidgets.QHBoxLayout()
+        reset_layout.addStretch()
+        self.subtitle_style_reset_button = QtWidgets.QPushButton("Reset to preset")
+        self.subtitle_style_reset_button.setFlat(True)
+        self.subtitle_style_reset_button.setCursor(
+            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        )
+        reset_layout.addWidget(self.subtitle_style_reset_button)
+        preset_layout_container.addLayout(reset_layout)
         card_layout.addWidget(preset_section)
 
         quick_section, quick_layout = _build_style_section("Quick tweaks")
@@ -561,7 +669,7 @@ class MainWindow(QtWidgets.QMainWindow):
         controls_grid.addWidget(self.font_size_slider, 0, 1)
         controls_grid.addWidget(self.font_size_spinbox, 0, 2)
 
-        controls_grid.addWidget(QtWidgets.QLabel("Outline width"), 1, 0)
+        controls_grid.addWidget(QtWidgets.QLabel("Outline"), 1, 0)
         controls_grid.addWidget(self.outline_slider, 1, 1)
         controls_grid.addWidget(self.outline_spinbox, 1, 2)
 
@@ -591,8 +699,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.background_mode_buttons = {}
         background_buttons = [
             ("None", "none", "SegmentedLeft"),
-            ("Line", "line", "SegmentedMiddle"),
-            ("Word", "word", "SegmentedRight"),
+            ("Around line", "line", "SegmentedMiddle"),
+            ("Around word", "word", "SegmentedRight"),
         ]
         for label, mode, object_name in background_buttons:
             button = QtWidgets.QPushButton(label)
@@ -639,17 +747,11 @@ class MainWindow(QtWidgets.QMainWindow):
         line_bg_grid.setHorizontalSpacing(12)
         line_bg_grid.setVerticalSpacing(8)
 
-        self.line_bg_color_row = QtWidgets.QWidget()
-        line_bg_color_layout = QtWidgets.QHBoxLayout(self.line_bg_color_row)
-        line_bg_color_layout.setContentsMargins(0, 0, 0, 0)
-        self.line_bg_color_button = QtWidgets.QPushButton("Pick color…")
-        self.line_bg_color_button.setFixedHeight(32)
-        self.line_bg_color_value = QtWidgets.QLineEdit()
-        self.line_bg_color_value.setReadOnly(True)
-        self.line_bg_color_value.setFixedHeight(32)
-        self.line_bg_color_value.setMinimumWidth(110)
-        line_bg_color_layout.addWidget(self.line_bg_color_button)
-        line_bg_color_layout.addWidget(self.line_bg_color_value)
+        self.line_bg_color_row = ColorChipPicker(
+            ["#000000", "#1B1E28", "#0B1F3A"],
+            initial_color=self._style_model.line_bg_color,
+            dialog_title="Pick line background color…",
+        )
 
         self.line_bg_opacity_slider, self.line_bg_opacity_spinbox = self._build_style_control(
             0, 100
@@ -680,17 +782,11 @@ class MainWindow(QtWidgets.QMainWindow):
         word_bg_grid.setHorizontalSpacing(12)
         word_bg_grid.setVerticalSpacing(8)
 
-        self.word_bg_color_row = QtWidgets.QWidget()
-        word_bg_color_layout = QtWidgets.QHBoxLayout(self.word_bg_color_row)
-        word_bg_color_layout.setContentsMargins(0, 0, 0, 0)
-        self.word_bg_color_button = QtWidgets.QPushButton("Pick color…")
-        self.word_bg_color_button.setFixedHeight(32)
-        self.word_bg_color_value = QtWidgets.QLineEdit()
-        self.word_bg_color_value.setReadOnly(True)
-        self.word_bg_color_value.setFixedHeight(32)
-        self.word_bg_color_value.setMinimumWidth(110)
-        word_bg_color_layout.addWidget(self.word_bg_color_button)
-        word_bg_color_layout.addWidget(self.word_bg_color_value)
+        self.word_bg_color_row = ColorChipPicker(
+            ["#000000", "#1B1E28", "#0B1F3A"],
+            initial_color=self._style_model.word_bg_color,
+            dialog_title="Pick word background color…",
+        )
 
         self.word_bg_opacity_slider, self.word_bg_opacity_spinbox = self._build_style_control(
             0, 100
@@ -717,24 +813,146 @@ class MainWindow(QtWidgets.QMainWindow):
         panel_layout.addWidget(self.line_bg_options_container)
         panel_layout.addWidget(self.word_bg_options_container)
 
-        reset_layout = QtWidgets.QHBoxLayout()
-        reset_layout.addStretch()
-        self.subtitle_style_reset_button = QtWidgets.QPushButton("Reset to preset")
-        self.subtitle_style_reset_button.setFlat(True)
-        self.subtitle_style_reset_button.setCursor(
-            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        self.advanced_toolbox = QtWidgets.QToolBox()
+        self.advanced_toolbox.setObjectName("StyleToolbox")
+
+        text_section = QtWidgets.QWidget()
+        text_layout = QtWidgets.QGridLayout(text_section)
+        text_layout.setColumnMinimumWidth(0, 120)
+        text_layout.setColumnStretch(1, 1)
+        text_layout.setHorizontalSpacing(12)
+        text_layout.setVerticalSpacing(8)
+
+        self.font_family_combo = NoWheelFontComboBox()
+        self.font_style_combo = NoWheelComboBox()
+        self.font_style_combo.addItem("Regular", "regular")
+        self.font_style_combo.addItem("Bold", "bold")
+        self.font_style_combo.addItem("Italic", "italic")
+
+        self.text_color_row = ColorChipPicker(
+            ["#FFFFFF", "#F2F2F2", "#FFE8A3"],
+            initial_color=self._style_model.text_color,
+            dialog_title="Pick text color…",
         )
-        reset_layout.addWidget(self.subtitle_style_reset_button)
-        panel_layout.addLayout(reset_layout)
+
+        self.text_opacity_slider, self.text_opacity_spinbox = self._build_style_control(
+            10, 100
+        )
+        self.letter_spacing_slider, self.letter_spacing_spinbox = self._build_float_style_control(
+            -2.0, 10.0, 0.5
+        )
+
+        text_layout.addWidget(QtWidgets.QLabel("Font family"), 0, 0)
+        text_layout.addWidget(self.font_family_combo, 0, 1, 1, 2)
+        text_layout.addWidget(QtWidgets.QLabel("Font style"), 1, 0)
+        text_layout.addWidget(self.font_style_combo, 1, 1, 1, 2)
+        text_layout.addWidget(QtWidgets.QLabel("Text color"), 2, 0)
+        text_layout.addWidget(self.text_color_row, 2, 1, 1, 2)
+        text_layout.addWidget(QtWidgets.QLabel("Text opacity"), 3, 0)
+        text_layout.addWidget(self.text_opacity_slider, 3, 1)
+        text_layout.addWidget(self.text_opacity_spinbox, 3, 2)
+        text_layout.addWidget(QtWidgets.QLabel("Letter spacing"), 4, 0)
+        text_layout.addWidget(self.letter_spacing_slider, 4, 1)
+        text_layout.addWidget(self.letter_spacing_spinbox, 4, 2)
+
+        outline_section = QtWidgets.QWidget()
+        outline_layout = QtWidgets.QGridLayout(outline_section)
+        outline_layout.setColumnMinimumWidth(0, 120)
+        outline_layout.setColumnStretch(1, 1)
+        outline_layout.setHorizontalSpacing(12)
+        outline_layout.setVerticalSpacing(8)
+
+        self.outline_enabled_checkbox = QtWidgets.QCheckBox("Outline enabled")
+        self.outline_color_row = ColorChipPicker(
+            ["#000000", "#1B1E28", "#2D2D2D"],
+            initial_color=self._style_model.outline_color,
+            dialog_title="Pick outline color…",
+        )
+
+        outline_layout.addWidget(self.outline_enabled_checkbox, 0, 0, 1, 3)
+        outline_layout.addWidget(QtWidgets.QLabel("Outline color"), 1, 0)
+        outline_layout.addWidget(self.outline_color_row, 1, 1, 1, 2)
+
+        shadow_section = QtWidgets.QWidget()
+        shadow_layout = QtWidgets.QGridLayout(shadow_section)
+        shadow_layout.setColumnMinimumWidth(0, 120)
+        shadow_layout.setColumnStretch(1, 1)
+        shadow_layout.setHorizontalSpacing(12)
+        shadow_layout.setVerticalSpacing(8)
+
+        self.shadow_enabled_checkbox = QtWidgets.QCheckBox("Shadow enabled")
+        self.shadow_color_row = ColorChipPicker(
+            ["#000000", "#1B1E28", "#2D2D2D"],
+            initial_color=self._style_model.shadow_color,
+            dialog_title="Pick shadow color…",
+        )
+        self.shadow_opacity_slider, self.shadow_opacity_spinbox = self._build_style_control(
+            0, 100
+        )
+        self.shadow_offset_x_spinbox = NoWheelSpinBox()
+        self.shadow_offset_x_spinbox.setRange(-30, 30)
+        self.shadow_offset_x_spinbox.setSingleStep(1)
+        self.shadow_offset_y_spinbox = NoWheelSpinBox()
+        self.shadow_offset_y_spinbox.setRange(-30, 30)
+        self.shadow_offset_y_spinbox.setSingleStep(1)
+
+        shadow_layout.addWidget(self.shadow_enabled_checkbox, 0, 0, 1, 3)
+        shadow_layout.addWidget(QtWidgets.QLabel("Shadow color"), 1, 0)
+        shadow_layout.addWidget(self.shadow_color_row, 1, 1, 1, 2)
+        shadow_layout.addWidget(QtWidgets.QLabel("Shadow opacity"), 2, 0)
+        shadow_layout.addWidget(self.shadow_opacity_slider, 2, 1)
+        shadow_layout.addWidget(self.shadow_opacity_spinbox, 2, 2)
+        shadow_layout.addWidget(QtWidgets.QLabel("Shadow offset X"), 3, 0)
+        shadow_layout.addWidget(self.shadow_offset_x_spinbox, 3, 1, 1, 2)
+        shadow_layout.addWidget(QtWidgets.QLabel("Shadow offset Y"), 4, 0)
+        shadow_layout.addWidget(self.shadow_offset_y_spinbox, 4, 1, 1, 2)
+
+        vertical_section = QtWidgets.QWidget()
+        vertical_layout = QtWidgets.QGridLayout(vertical_section)
+        vertical_layout.setColumnMinimumWidth(0, 120)
+        vertical_layout.setColumnStretch(1, 1)
+        vertical_layout.setHorizontalSpacing(12)
+        vertical_layout.setVerticalSpacing(8)
+
+        vertical_anchor_control = QtWidgets.QWidget()
+        vertical_anchor_layout = QtWidgets.QHBoxLayout(vertical_anchor_control)
+        vertical_anchor_layout.setContentsMargins(0, 0, 0, 0)
+        vertical_anchor_layout.setSpacing(0)
+        self.vertical_anchor_group = QtWidgets.QButtonGroup(self)
+        self.vertical_anchor_group.setExclusive(True)
+        self.vertical_anchor_buttons = {}
+        for label, mode, object_name in (
+            ("Bottom", "bottom", "SegmentedLeft"),
+            ("Middle", "middle", "SegmentedMiddle"),
+            ("Top", "top", "SegmentedRight"),
+        ):
+            button = QtWidgets.QPushButton(label)
+            button.setCheckable(True)
+            button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+            button.setObjectName(object_name)
+            button.setProperty("anchor", mode)
+            self.vertical_anchor_group.addButton(button)
+            self.vertical_anchor_buttons[mode] = button
+            vertical_anchor_layout.addWidget(button)
+
+        self.vertical_offset_slider, self.vertical_offset_spinbox = self._build_style_control(
+            -200, 200
+        )
+
+        vertical_layout.addWidget(QtWidgets.QLabel("Vertical position"), 0, 0)
+        vertical_layout.addWidget(vertical_anchor_control, 0, 1, 1, 2)
+        vertical_layout.addWidget(QtWidgets.QLabel("Vertical offset"), 1, 0)
+        vertical_layout.addWidget(self.vertical_offset_slider, 1, 1)
+        vertical_layout.addWidget(self.vertical_offset_spinbox, 1, 2)
+
+        self.advanced_toolbox.addItem(text_section, "Text")
+        self.advanced_toolbox.addItem(outline_section, "Outline")
+        self.advanced_toolbox.addItem(shadow_section, "Shadow")
+        self.advanced_toolbox.addItem(vertical_section, "Vertical position")
+
+        panel_layout.addWidget(self.advanced_toolbox)
 
         advanced_layout.addWidget(self.subtitle_style_panel)
-
-        cta_layout = QtWidgets.QHBoxLayout()
-        cta_layout.addStretch()
-        cta_layout.addWidget(self.burn_button)
-        cta_layout.addStretch()
-        card_layout.addStretch()
-        card_layout.addLayout(cta_layout)
 
         self.subtitle_style_panel.setVisible(self._subtitle_style_panel_open)
         self.subtitle_style_customize_button.setChecked(self._subtitle_style_panel_open)
@@ -786,12 +1004,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_style_control(
         self, minimum: int, maximum: int
     ) -> tuple[QtWidgets.QSlider, QtWidgets.QSpinBox]:
-        slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        slider = NoWheelSlider(QtCore.Qt.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setSingleStep(1)
         slider.setPageStep(1)
 
-        spinbox = QtWidgets.QSpinBox()
+        spinbox = NoWheelSpinBox()
         spinbox.setRange(minimum, maximum)
         spinbox.setSingleStep(1)
         spinbox.setMinimumWidth(56)
@@ -814,21 +1032,68 @@ class MainWindow(QtWidgets.QMainWindow):
         spinbox.valueChanged.connect(_sync_slider)
         return slider, spinbox
 
+    def _build_float_style_control(
+        self,
+        minimum: float,
+        maximum: float,
+        step: float,
+        *,
+        decimals: int = 1,
+    ) -> tuple[QtWidgets.QSlider, QtWidgets.QDoubleSpinBox]:
+        scale = 10**decimals
+        slider = NoWheelSlider(QtCore.Qt.Horizontal)
+        slider.setRange(int(round(minimum * scale)), int(round(maximum * scale)))
+        slider.setSingleStep(int(round(step * scale)))
+        slider.setPageStep(int(round(step * scale)))
+
+        spinbox = NoWheelDoubleSpinBox()
+        spinbox.setRange(minimum, maximum)
+        spinbox.setSingleStep(step)
+        spinbox.setDecimals(decimals)
+        spinbox.setMinimumWidth(64)
+
+        def _sync_spinbox(value: int) -> None:
+            target = value / scale
+            if abs(spinbox.value() - target) < (1 / scale):
+                return
+            spinbox.blockSignals(True)
+            spinbox.setValue(target)
+            spinbox.blockSignals(False)
+
+        def _sync_slider(value: float) -> None:
+            target = int(round(value * scale))
+            if slider.value() == target:
+                return
+            slider.blockSignals(True)
+            slider.setValue(target)
+            slider.blockSignals(False)
+
+        slider.valueChanged.connect(_sync_spinbox)
+        spinbox.valueChanged.connect(_sync_slider)
+        return slider, spinbox
+
     def _connect_subtitle_style_controls(self) -> None:
         if self.subtitle_mode_group:
             self.subtitle_mode_group.buttonClicked.connect(
                 self._on_subtitle_mode_button_clicked
             )
-        self.highlight_color_button.clicked.connect(self._on_highlight_color_clicked)
-        self.line_bg_color_button.clicked.connect(self._on_line_bg_color_clicked)
-        self.word_bg_color_button.clicked.connect(self._on_word_bg_color_clicked)
-        if self.subtitle_style_preset_group:
-            self.subtitle_style_preset_group.buttonClicked.connect(
-                self._on_subtitle_style_preset_clicked
+        self.highlight_color_row.colorChanged.connect(self._apply_highlight_color)
+        self.line_bg_color_row.colorChanged.connect(self._on_subtitle_style_custom_changed)
+        self.word_bg_color_row.colorChanged.connect(self._on_subtitle_style_custom_changed)
+        self.text_color_row.colorChanged.connect(self._on_subtitle_style_custom_changed)
+        self.outline_color_row.colorChanged.connect(self._on_subtitle_style_custom_changed)
+        self.shadow_color_row.colorChanged.connect(self._on_subtitle_style_custom_changed)
+        if self.subtitle_style_preset_combo:
+            self.subtitle_style_preset_combo.currentTextChanged.connect(
+                self._on_subtitle_style_preset_changed
             )
         if self.background_mode_group:
             self.background_mode_group.buttonClicked.connect(
                 self._on_background_mode_clicked
+            )
+        if self.vertical_anchor_group:
+            self.vertical_anchor_group.buttonClicked.connect(
+                self._on_vertical_anchor_clicked
             )
         self.subtitle_style_customize_button.toggled.connect(
             self._toggle_subtitle_style_panel
@@ -846,6 +1111,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.word_bg_opacity_slider,
             self.word_bg_padding_slider,
             self.word_bg_radius_slider,
+            self.text_opacity_slider,
+            self.letter_spacing_slider,
+            self.shadow_opacity_slider,
+            self.vertical_offset_slider,
         ):
             slider.valueChanged.connect(self._on_subtitle_style_custom_changed)
 
@@ -860,8 +1129,38 @@ class MainWindow(QtWidgets.QMainWindow):
             self.word_bg_opacity_spinbox,
             self.word_bg_padding_spinbox,
             self.word_bg_radius_spinbox,
+            self.text_opacity_spinbox,
+            self.letter_spacing_spinbox,
+            self.shadow_opacity_spinbox,
+            self.vertical_offset_spinbox,
         ):
             spinbox.valueChanged.connect(self._on_subtitle_style_custom_changed)
+
+        self.font_family_combo.currentFontChanged.connect(
+            lambda _: self._on_subtitle_style_custom_changed()
+        )
+        self.font_style_combo.currentIndexChanged.connect(
+            lambda _: self._on_subtitle_style_custom_changed()
+        )
+        self.outline_enabled_checkbox.toggled.connect(
+            self._on_outline_enabled_toggled
+        )
+        self.shadow_enabled_checkbox.toggled.connect(self._on_shadow_enabled_toggled)
+        self.shadow_offset_x_spinbox.valueChanged.connect(
+            self._on_subtitle_style_custom_changed
+        )
+        self.shadow_offset_y_spinbox.valueChanged.connect(
+            self._on_subtitle_style_custom_changed
+        )
+
+        self.margin_slider.valueChanged.connect(self._sync_vertical_offset_from_margin)
+        self.margin_spinbox.valueChanged.connect(self._sync_vertical_offset_from_margin)
+        self.vertical_offset_slider.valueChanged.connect(
+            self._sync_margin_from_vertical_offset
+        )
+        self.vertical_offset_spinbox.valueChanged.connect(
+            self._sync_margin_from_vertical_offset
+        )
 
     def _apply_subtitle_mode_to_controls(self) -> None:
         mode = (
@@ -879,7 +1178,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_background_options_visibility()
 
     def _update_highlight_color_display(self) -> None:
-        self.highlight_color_value.setText(self._highlight_color)
+        self.highlight_color_row.set_color(self._highlight_color)
 
     def _update_highlight_color_visibility(self) -> None:
         show = self._subtitle_mode == "word_highlight"
@@ -917,15 +1216,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._invalidate_preview_playback()
         self._schedule_preview_refresh()
 
-    def _on_highlight_color_clicked(self) -> None:
-        color = QtWidgets.QColorDialog.getColor(
-            QtGui.QColor(self._highlight_color), self
-        )
-        if not color.isValid():
-            return
-        hex_value = color.name().upper()
-        self._apply_highlight_color(hex_value)
-
     def _apply_highlight_color(self, hex_value: str) -> None:
         if hex_value == self._highlight_color:
             return
@@ -941,54 +1231,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_highlight_color_display()
         self._schedule_preview_refresh()
 
-    def _on_line_bg_color_clicked(self) -> None:
-        color = QtWidgets.QColorDialog.getColor(
-            QtGui.QColor(self._style_model.line_bg_color), self
-        )
-        if not color.isValid():
-            return
-        hex_value = color.name().upper()
-        self._apply_line_bg_color(hex_value)
-
-    def _apply_line_bg_color(self, hex_value: str) -> None:
-        if hex_value == self._subtitle_style_custom.line_bg_color:
-            return
-        if self._subtitle_style_preset != PRESET_CUSTOM:
-            self._subtitle_style_preset = PRESET_CUSTOM
-            self._set_subtitle_style_preset_buttons(PRESET_CUSTOM)
-        self._subtitle_style_custom = replace(
-            self._collect_custom_style_from_controls(), line_bg_color=hex_value
-        )
-        self._style_model = self._subtitle_style_custom
-        self._store_subtitle_style_config()
-        self._update_line_bg_color_display()
-        self._invalidate_preview_playback()
-        self._schedule_preview_refresh()
-
-    def _on_word_bg_color_clicked(self) -> None:
-        color = QtWidgets.QColorDialog.getColor(
-            QtGui.QColor(self._style_model.word_bg_color), self
-        )
-        if not color.isValid():
-            return
-        hex_value = color.name().upper()
-        self._apply_word_bg_color(hex_value)
-
-    def _apply_word_bg_color(self, hex_value: str) -> None:
-        if hex_value == self._subtitle_style_custom.word_bg_color:
-            return
-        if self._subtitle_style_preset != PRESET_CUSTOM:
-            self._subtitle_style_preset = PRESET_CUSTOM
-            self._set_subtitle_style_preset_buttons(PRESET_CUSTOM)
-        self._subtitle_style_custom = replace(
-            self._collect_custom_style_from_controls(), word_bg_color=hex_value
-        )
-        self._style_model = self._subtitle_style_custom
-        self._store_subtitle_style_config()
-        self._update_word_bg_color_display()
-        self._invalidate_preview_playback()
-        self._schedule_preview_refresh()
-
     def _toggle_subtitle_style_panel(self, checked: bool) -> None:
         self._subtitle_style_panel_open = checked
         self.subtitle_style_panel.setVisible(checked)
@@ -1001,7 +1243,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.subtitle_style_customize_button.blockSignals(False)
 
         self._subtitle_style_preset = PRESET_DEFAULT
-        self._set_subtitle_style_preset_buttons(PRESET_DEFAULT)
+        self._set_subtitle_style_preset_combo(PRESET_DEFAULT)
 
         self._style_model = preset_defaults(
             PRESET_DEFAULT,
@@ -1015,7 +1257,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_subtitle_style_to_controls(self) -> None:
         style = self._style_model
-        self._set_subtitle_style_preset_buttons(self._subtitle_style_preset)
+        self._set_subtitle_style_preset_combo(self._subtitle_style_preset)
 
         controls = [
             (self.font_size_slider, self.font_size_spinbox, style.font_size),
@@ -1064,14 +1306,69 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.word_bg_radius_spinbox,
                 int(round(style.word_bg_radius)),
             ),
+            (
+                self.text_opacity_slider,
+                self.text_opacity_spinbox,
+                int(round(style.text_opacity * 100)),
+            ),
+            (
+                self.shadow_opacity_slider,
+                self.shadow_opacity_spinbox,
+                int(round(style.shadow_opacity * 100)),
+            ),
+            (
+                self.vertical_offset_slider,
+                self.vertical_offset_spinbox,
+                int(round(style.vertical_offset)),
+            ),
         ]
         for slider, spinbox, value in controls:
             slider.blockSignals(True)
-            slider.setValue(value)
+            slider.setValue(int(round(value)))
             slider.blockSignals(False)
             spinbox.blockSignals(True)
             spinbox.setValue(value)
             spinbox.blockSignals(False)
+
+        self.letter_spacing_slider.blockSignals(True)
+        self.letter_spacing_slider.setValue(int(round(style.letter_spacing * 10)))
+        self.letter_spacing_slider.blockSignals(False)
+        self.letter_spacing_spinbox.blockSignals(True)
+        self.letter_spacing_spinbox.setValue(style.letter_spacing)
+        self.letter_spacing_spinbox.blockSignals(False)
+
+        self.font_family_combo.blockSignals(True)
+        self.font_family_combo.setCurrentFont(QtGui.QFont(style.font_family))
+        self.font_family_combo.blockSignals(False)
+        font_style_index = self.font_style_combo.findData(style.font_style)
+        if font_style_index == -1:
+            font_style_index = 0
+        self.font_style_combo.blockSignals(True)
+        self.font_style_combo.setCurrentIndex(font_style_index)
+        self.font_style_combo.blockSignals(False)
+
+        self.text_color_row.set_color(style.text_color)
+        self.outline_color_row.set_color(style.outline_color)
+        self.shadow_color_row.set_color(style.shadow_color)
+        self.line_bg_color_row.set_color(style.line_bg_color)
+        self.word_bg_color_row.set_color(style.word_bg_color)
+
+        self.outline_enabled_checkbox.blockSignals(True)
+        self.outline_enabled_checkbox.setChecked(style.outline_enabled)
+        self.outline_enabled_checkbox.blockSignals(False)
+        self.shadow_enabled_checkbox.blockSignals(True)
+        self.shadow_enabled_checkbox.setChecked(style.shadow_enabled)
+        self.shadow_enabled_checkbox.blockSignals(False)
+
+        self.shadow_offset_x_spinbox.blockSignals(True)
+        self.shadow_offset_x_spinbox.setValue(int(round(style.shadow_offset_x)))
+        self.shadow_offset_x_spinbox.blockSignals(False)
+        self.shadow_offset_y_spinbox.blockSignals(True)
+        self.shadow_offset_y_spinbox.setValue(int(round(style.shadow_offset_y)))
+        self.shadow_offset_y_spinbox.blockSignals(False)
+
+        self._set_vertical_anchor_buttons(style.vertical_anchor)
+        self._update_outline_shadow_controls()
 
         effective_background_mode = self._sanitize_background_mode_for_mode(
             style.background_mode
@@ -1085,16 +1382,15 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self._store_subtitle_style_config()
         self._set_background_mode_buttons(effective_background_mode)
-        self._update_line_bg_color_display()
-        self._update_word_bg_color_display()
         self._update_background_options_visibility(effective_background_mode)
         self._update_background_mode_controls()
+        self._update_vertical_position_controls()
 
     def _update_line_bg_color_display(self) -> None:
-        self.line_bg_color_value.setText(self._style_model.line_bg_color)
+        self.line_bg_color_row.set_color(self._style_model.line_bg_color)
 
     def _update_word_bg_color_display(self) -> None:
-        self.word_bg_color_value.setText(self._style_model.word_bg_color)
+        self.word_bg_color_row.set_color(self._style_model.word_bg_color)
 
     def _update_background_options_visibility(self, background_mode: str | None = None) -> None:
         if background_mode is None:
@@ -1106,11 +1402,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.line_bg_options_container.setVisible(show_line)
         self.word_bg_options_container.setVisible(show_word)
 
-    def _set_subtitle_style_preset_buttons(self, preset: str) -> None:
-        for key, button in self.subtitle_style_preset_buttons.items():
-            button.blockSignals(True)
-            button.setChecked(key == preset)
-            button.blockSignals(False)
+    def _set_subtitle_style_preset_combo(self, preset: str) -> None:
+        if not self.subtitle_style_preset_combo:
+            return
+        index = self.subtitle_style_preset_combo.findText(preset)
+        if index == -1:
+            index = 0
+        self.subtitle_style_preset_combo.blockSignals(True)
+        self.subtitle_style_preset_combo.setCurrentIndex(index)
+        self.subtitle_style_preset_combo.blockSignals(False)
 
     def _set_background_mode_buttons(self, mode: str) -> None:
         for key, button in self.background_mode_buttons.items():
@@ -1129,14 +1429,17 @@ class MainWindow(QtWidgets.QMainWindow):
         line_button = self.background_mode_buttons.get("line")
         word_button = self.background_mode_buttons.get("word")
         if word_button:
-            word_button.setVisible(allow_word)
+            word_button.setVisible(True)
             word_button.setEnabled(allow_word)
+            word_button.setToolTip(
+                ""
+                if allow_word
+                else "Switch to Word highlight mode to enable Around word background."
+            )
         if none_button:
             none_button.setObjectName("SegmentedLeft")
         if line_button:
-            line_button.setObjectName(
-                "SegmentedMiddle" if allow_word else "SegmentedRight"
-            )
+            line_button.setObjectName("SegmentedMiddle")
         if word_button:
             word_button.setObjectName("SegmentedRight")
         for button in (none_button, line_button, word_button):
@@ -1152,26 +1455,105 @@ class MainWindow(QtWidgets.QMainWindow):
                 return self._sanitize_background_mode_for_mode(mode)
         return "none"
 
+    def _current_vertical_anchor(self) -> str:
+        for anchor, button in self.vertical_anchor_buttons.items():
+            if button.isChecked():
+                return anchor
+        return "bottom"
+
+    def _set_vertical_anchor_buttons(self, anchor: str) -> None:
+        for key, button in self.vertical_anchor_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(key == anchor)
+            button.blockSignals(False)
+
+    def _on_vertical_anchor_clicked(self, button: QtWidgets.QAbstractButton) -> None:
+        anchor = button.property("anchor")
+        if not isinstance(anchor, str):
+            return
+        self._update_vertical_position_controls(anchor)
+        self._on_subtitle_style_custom_changed()
+
+    def _update_vertical_position_controls(self, anchor: Optional[str] = None) -> None:
+        if anchor is None:
+            anchor = self._current_vertical_anchor()
+        is_bottom = anchor == "bottom"
+        tooltip = (
+            ""
+            if is_bottom
+            else "Bottom margin is only available when Vertical position is Bottom. "
+            "Use Vertical offset in Advanced."
+        )
+        for widget in (self.margin_slider, self.margin_spinbox):
+            widget.setEnabled(is_bottom)
+            widget.setToolTip(tooltip)
+
+    def _update_outline_shadow_controls(self) -> None:
+        outline_enabled = self.outline_enabled_checkbox.isChecked()
+        for widget in (self.outline_slider, self.outline_spinbox):
+            widget.setEnabled(outline_enabled)
+        shadow_enabled = self.shadow_enabled_checkbox.isChecked()
+        for widget in (self.shadow_slider, self.shadow_spinbox):
+            widget.setEnabled(shadow_enabled)
+
+    def _on_outline_enabled_toggled(self, checked: bool) -> None:
+        self._update_outline_shadow_controls()
+        self._on_subtitle_style_custom_changed()
+
+    def _on_shadow_enabled_toggled(self, checked: bool) -> None:
+        self._update_outline_shadow_controls()
+        self._on_subtitle_style_custom_changed()
+
+    def _sync_vertical_offset_from_margin(self, value: int) -> None:
+        if not hasattr(self, "vertical_offset_slider"):
+            return
+        self.vertical_offset_slider.blockSignals(True)
+        self.vertical_offset_slider.setValue(value)
+        self.vertical_offset_slider.blockSignals(False)
+        self.vertical_offset_spinbox.blockSignals(True)
+        self.vertical_offset_spinbox.setValue(value)
+        self.vertical_offset_spinbox.blockSignals(False)
+
+    def _sync_margin_from_vertical_offset(self, value: int) -> None:
+        if not hasattr(self, "margin_slider"):
+            return
+        self.margin_slider.blockSignals(True)
+        self.margin_slider.setValue(value)
+        self.margin_slider.blockSignals(False)
+        self.margin_spinbox.blockSignals(True)
+        self.margin_spinbox.setValue(value)
+        self.margin_spinbox.blockSignals(False)
+
     def _collect_custom_style_from_controls(self) -> SubtitleStyle:
-        outline_width = self.outline_slider.value()
-        shadow_strength = self.shadow_slider.value()
         background_mode = self._current_background_mode()
+        font_style = self.font_style_combo.currentData()
+        if not isinstance(font_style, str):
+            font_style = "regular"
         return replace(
             self._subtitle_style_custom,
+            font_family=self.font_family_combo.currentFont().family(),
             font_size=self.font_size_slider.value(),
-            outline_enabled=outline_width > 0,
-            outline_width=outline_width,
-            shadow_enabled=shadow_strength > 0,
-            shadow_strength=shadow_strength,
-            vertical_offset=self.margin_slider.value(),
+            font_style=font_style,
+            text_color=self.text_color_row.current_color,
+            text_opacity=self.text_opacity_slider.value() / 100.0,
+            letter_spacing=self.letter_spacing_spinbox.value(),
+            outline_enabled=self.outline_enabled_checkbox.isChecked(),
+            outline_width=self.outline_slider.value(),
+            outline_color=self.outline_color_row.current_color,
+            shadow_enabled=self.shadow_enabled_checkbox.isChecked(),
+            shadow_strength=self.shadow_slider.value(),
+            shadow_offset_x=self.shadow_offset_x_spinbox.value(),
+            shadow_offset_y=self.shadow_offset_y_spinbox.value(),
+            shadow_color=self.shadow_color_row.current_color,
+            shadow_opacity=self.shadow_opacity_slider.value() / 100.0,
+            vertical_anchor=self._current_vertical_anchor(),
+            vertical_offset=self.vertical_offset_spinbox.value(),
             background_mode=background_mode,
-            line_bg_color=self.line_bg_color_value.text()
-            or self._subtitle_style_custom.line_bg_color,
+            line_bg_color=self.line_bg_color_row.current_color,
             line_bg_opacity=self.line_bg_opacity_slider.value() / 100.0,
             line_bg_padding=self.line_bg_padding_slider.value(),
             line_bg_radius=self.line_bg_radius_slider.value(),
-            word_bg_color=self.word_bg_color_value.text()
-            or self._subtitle_style_custom.word_bg_color,
+            word_bg_color=self.word_bg_color_row.current_color,
             word_bg_opacity=self.word_bg_opacity_slider.value() / 100.0,
             word_bg_padding=self.word_bg_padding_slider.value(),
             word_bg_radius=self.word_bg_radius_slider.value(),
@@ -1198,14 +1580,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._invalidate_preview_playback()
         self._schedule_preview_refresh()
 
-    def _on_subtitle_style_preset_clicked(
-        self, button: QtWidgets.QAbstractButton
-    ) -> None:
-        preset = button.property("preset")
-        if not isinstance(preset, str):
-            return
-        self._on_subtitle_style_preset_changed(preset)
-
     def _on_background_mode_clicked(self, button: QtWidgets.QAbstractButton) -> None:
         mode = button.property("mode")
         if not isinstance(mode, str):
@@ -1221,7 +1595,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self._subtitle_style_preset != PRESET_CUSTOM:
             self._subtitle_style_preset = PRESET_CUSTOM
-            self._set_subtitle_style_preset_buttons(PRESET_CUSTOM)
+            self._set_subtitle_style_preset_combo(PRESET_CUSTOM)
 
         self._subtitle_style_custom = self._collect_custom_style_from_controls()
         self._style_model = self._subtitle_style_custom
@@ -1651,12 +2025,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_ui_state(idle=state != AppState.WORKING)
         if state == AppState.SUBTITLES_READY:
             self._refresh_preview_with_style()
+            self._update_subtitles_ready_layout()
         else:
             self._stop_preview_playback(clear_media=True)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._update_preview_image()
+        self._update_subtitles_ready_layout()
 
     def _update_preview_card(self) -> None:
         if not hasattr(self, "preview_image_label"):
@@ -1689,6 +2065,90 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.Qt.SmoothTransformation,
         )
         self.preview_image_label.setPixmap(scaled)
+
+    def _update_subtitles_ready_layout(self) -> None:
+        if (
+            not self.subtitles_ready_page
+            or not self.style_inspector_container
+            or not self.style_right_column
+            or not self.style_right_column_layout
+            or not self.style_drawer
+            or not self.style_drawer_scrim
+            or not self.style_drawer_body_layout
+        ):
+            return
+        available_width = self.subtitles_ready_page.width()
+        use_drawer = available_width < 1120
+        if use_drawer != self.style_drawer_mode:
+            self.style_drawer_mode = use_drawer
+            if use_drawer:
+                self._move_inspector_to_drawer()
+                self.style_right_column.setVisible(False)
+                if self.style_drawer_open_button:
+                    self.style_drawer_open_button.setVisible(True)
+                self._close_style_drawer()
+            else:
+                self._move_inspector_to_sidebar()
+                self.style_right_column.setVisible(True)
+                if self.style_drawer_open_button:
+                    self.style_drawer_open_button.setVisible(False)
+                self._close_style_drawer()
+        self._update_drawer_geometry()
+
+    def _move_inspector_to_drawer(self) -> None:
+        if not self.style_drawer_body_layout or not self.style_inspector_container:
+            return
+        self._detach_style_inspector()
+        self.style_drawer_body_layout.addWidget(self.style_inspector_container)
+
+    def _move_inspector_to_sidebar(self) -> None:
+        if not self.style_right_column_layout or not self.style_inspector_container:
+            return
+        self._detach_style_inspector()
+        self.style_right_column_layout.insertWidget(0, self.style_inspector_container)
+
+    def _detach_style_inspector(self) -> None:
+        if not self.style_inspector_container:
+            return
+        parent_layout = self.style_inspector_container.parentWidget()
+        if parent_layout and parent_layout.layout():
+            parent_layout.layout().removeWidget(self.style_inspector_container)
+
+    def _update_drawer_geometry(self) -> None:
+        if (
+            not self.subtitles_ready_page
+            or not self.style_drawer
+            or not self.style_drawer_scrim
+            or not self.style_inspector_container
+        ):
+            return
+        if not self.style_drawer_mode or not self.style_drawer_open:
+            self.style_drawer.hide()
+            self.style_drawer_scrim.hide()
+            return
+        page_rect = self.subtitles_ready_page.rect()
+        drawer_width = self.style_inspector_container.width()
+        self.style_drawer_scrim.setGeometry(page_rect)
+        self.style_drawer.setGeometry(
+            page_rect.right() - drawer_width + 1,
+            page_rect.top(),
+            drawer_width,
+            page_rect.height(),
+        )
+        self.style_drawer_scrim.raise_()
+        self.style_drawer.raise_()
+        self.style_drawer_scrim.show()
+        self.style_drawer.show()
+
+    def _open_style_drawer(self) -> None:
+        if not self.style_drawer_mode:
+            return
+        self.style_drawer_open = True
+        self._update_drawer_geometry()
+
+    def _close_style_drawer(self) -> None:
+        self.style_drawer_open = False
+        self._update_drawer_geometry()
 
     def _connect_preview_playback_controller(self) -> None:
         self._preview_playback_controller.clip_ready.connect(self._on_preview_clip_ready)
@@ -2593,9 +3053,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_saving_to_line(self) -> None:
         if not self._video_path:
             self.saving_to_line.set_path("")
+            self._update_subtitles_ready_footer()
             return
         if self._save_policy == SaveLocationPolicy.ASK_EVERY_TIME:
             self.saving_to_line.set_path("")
+            self._update_subtitles_ready_footer()
             return
         if self._save_policy == SaveLocationPolicy.SAME_FOLDER:
             path_text = str(self._video_path.parent)
@@ -2604,6 +3066,17 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             path_text = "No folder selected"
         self.saving_to_line.set_path(path_text)
+        self._update_subtitles_ready_footer()
+
+    def _update_subtitles_ready_footer(self) -> None:
+        if not self.subtitles_ready_path_label:
+            return
+        if self._state != AppState.SUBTITLES_READY or not self._video_path:
+            self.subtitles_ready_path_label.set_full_text("")
+            return
+        output_dir = self._output_dir or self._video_path.parent
+        output_path = output_dir / f"{self._video_path.stem}_subtitled.mp4"
+        self.subtitles_ready_path_label.set_full_text(str(output_path))
 
     def _resolve_output_dir_for_generate(self) -> Optional[Path]:
         if not self._video_path:
@@ -2679,8 +3152,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.drop_zone.setEnabled(idle and self._state == AppState.EMPTY)
         self.video_card.setEnabled(idle and self._state == AppState.VIDEO_SELECTED)
         self.saving_to_line.setVisible(
-            idle and has_video and self._save_policy != SaveLocationPolicy.ASK_EVERY_TIME
+            idle
+            and has_video
+            and self._save_policy != SaveLocationPolicy.ASK_EVERY_TIME
+            and self._state != AppState.SUBTITLES_READY
         )
+        if self.subtitles_ready_footer:
+            self.subtitles_ready_footer.setVisible(
+                idle and self._state == AppState.SUBTITLES_READY
+            )
+        if self.subtitles_ready_header_label:
+            self.subtitles_ready_header_label.setVisible(
+                self._state == AppState.SUBTITLES_READY
+            )
         self.generate_button.setEnabled(
             can_generate and self._state == AppState.VIDEO_SELECTED
         )
@@ -2739,6 +3223,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_output_dir(self, path: Path) -> None:
         self._output_dir = path
         self._log(f"Save folder: {path}")
+        self._update_subtitles_ready_footer()
 
     def _is_srt_ready(self, srt_path: Optional[Path]) -> bool:
         if not srt_path or not srt_path.exists():
