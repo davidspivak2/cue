@@ -52,10 +52,15 @@ from app.ui.widgets import (
     AspectRatioFrame,
     ClickableFrame,
     ClickableLabel,
-    ColorSwatchRow,
+    ColorChipPicker,
     DropZone,
     ElidedLabel,
     ElidedLineEdit,
+    NoWheelComboBox,
+    NoWheelDoubleSpinBox,
+    NoWheelFontComboBox,
+    NoWheelSlider,
+    NoWheelSpinBox,
     SavingToLine,
     VideoCard,
 )
@@ -466,6 +471,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.style_inspector_container = QtWidgets.QFrame()
         self.style_inspector_container.setObjectName("StyleInspectorContainer")
         self.style_inspector_container.setFixedWidth(420)
+        self.style_inspector_container.setSizePolicy(
+            QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Expanding
+        )
         self.style_inspector_layout = QtWidgets.QVBoxLayout(self.style_inspector_container)
         self.style_inspector_layout.setContentsMargins(0, 0, 0, 0)
         self.style_inspector_layout.setSpacing(0)
@@ -475,15 +483,21 @@ class MainWindow(QtWidgets.QMainWindow):
         style_scroll.setWidgetResizable(True)
         style_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         style_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        style_scroll.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        style_scroll.setMinimumHeight(0)
         style_scroll.setWidget(style_card)
         self.style_inspector_layout.addWidget(style_scroll)
 
         self.style_right_column = QtWidgets.QWidget()
+        self.style_right_column.setSizePolicy(
+            QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Expanding
+        )
         self.style_right_column_layout = QtWidgets.QVBoxLayout(self.style_right_column)
         self.style_right_column_layout.setSpacing(12)
         self.style_right_column_layout.setContentsMargins(0, 0, 0, 0)
         self.style_right_column_layout.addWidget(self.style_inspector_container)
-        self.style_right_column_layout.addStretch()
 
         content_layout.addWidget(preview_column, 3)
         content_layout.addWidget(self.style_right_column, 2)
@@ -599,7 +613,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.highlight_color_label = QtWidgets.QLabel("Highlight color")
         highlight_color_tooltip = "Color used for the highlighted word."
         self.highlight_color_label.setToolTip(highlight_color_tooltip)
-        self.highlight_color_row = ColorSwatchRow(
+        self.highlight_color_row = ColorChipPicker(
             ["#FFD400", "#46D9FF", "#00FF66"],
             initial_color=self._highlight_color,
             dialog_title="Pick highlight color…",
@@ -609,7 +623,7 @@ class MainWindow(QtWidgets.QMainWindow):
         preset_tooltip = (
             "Controls subtitle appearance (font size, outline, shadow, margin, box)."
         )
-        self.subtitle_style_preset_combo = QtWidgets.QComboBox()
+        self.subtitle_style_preset_combo = NoWheelComboBox()
         self.subtitle_style_preset_combo.addItems(list(PRESET_NAMES))
         self.subtitle_style_preset_combo.setToolTip(preset_tooltip)
 
@@ -733,7 +747,7 @@ class MainWindow(QtWidgets.QMainWindow):
         line_bg_grid.setHorizontalSpacing(12)
         line_bg_grid.setVerticalSpacing(8)
 
-        self.line_bg_color_row = ColorSwatchRow(
+        self.line_bg_color_row = ColorChipPicker(
             ["#000000", "#1B1E28", "#0B1F3A"],
             initial_color=self._style_model.line_bg_color,
             dialog_title="Pick line background color…",
@@ -768,7 +782,7 @@ class MainWindow(QtWidgets.QMainWindow):
         word_bg_grid.setHorizontalSpacing(12)
         word_bg_grid.setVerticalSpacing(8)
 
-        self.word_bg_color_row = ColorSwatchRow(
+        self.word_bg_color_row = ColorChipPicker(
             ["#000000", "#1B1E28", "#0B1F3A"],
             initial_color=self._style_model.word_bg_color,
             dialog_title="Pick word background color…",
@@ -809,13 +823,13 @@ class MainWindow(QtWidgets.QMainWindow):
         text_layout.setHorizontalSpacing(12)
         text_layout.setVerticalSpacing(8)
 
-        self.font_family_combo = QtWidgets.QFontComboBox()
-        self.font_style_combo = QtWidgets.QComboBox()
+        self.font_family_combo = NoWheelFontComboBox()
+        self.font_style_combo = NoWheelComboBox()
         self.font_style_combo.addItem("Regular", "regular")
         self.font_style_combo.addItem("Bold", "bold")
         self.font_style_combo.addItem("Italic", "italic")
 
-        self.text_color_row = ColorSwatchRow(
+        self.text_color_row = ColorChipPicker(
             ["#FFFFFF", "#F2F2F2", "#FFE8A3"],
             initial_color=self._style_model.text_color,
             dialog_title="Pick text color…",
@@ -849,7 +863,7 @@ class MainWindow(QtWidgets.QMainWindow):
         outline_layout.setVerticalSpacing(8)
 
         self.outline_enabled_checkbox = QtWidgets.QCheckBox("Outline enabled")
-        self.outline_color_row = ColorSwatchRow(
+        self.outline_color_row = ColorChipPicker(
             ["#000000", "#1B1E28", "#2D2D2D"],
             initial_color=self._style_model.outline_color,
             dialog_title="Pick outline color…",
@@ -867,7 +881,7 @@ class MainWindow(QtWidgets.QMainWindow):
         shadow_layout.setVerticalSpacing(8)
 
         self.shadow_enabled_checkbox = QtWidgets.QCheckBox("Shadow enabled")
-        self.shadow_color_row = ColorSwatchRow(
+        self.shadow_color_row = ColorChipPicker(
             ["#000000", "#1B1E28", "#2D2D2D"],
             initial_color=self._style_model.shadow_color,
             dialog_title="Pick shadow color…",
@@ -875,10 +889,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.shadow_opacity_slider, self.shadow_opacity_spinbox = self._build_style_control(
             0, 100
         )
-        self.shadow_offset_x_spinbox = QtWidgets.QSpinBox()
+        self.shadow_offset_x_spinbox = NoWheelSpinBox()
         self.shadow_offset_x_spinbox.setRange(-30, 30)
         self.shadow_offset_x_spinbox.setSingleStep(1)
-        self.shadow_offset_y_spinbox = QtWidgets.QSpinBox()
+        self.shadow_offset_y_spinbox = NoWheelSpinBox()
         self.shadow_offset_y_spinbox.setRange(-30, 30)
         self.shadow_offset_y_spinbox.setSingleStep(1)
 
@@ -990,12 +1004,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_style_control(
         self, minimum: int, maximum: int
     ) -> tuple[QtWidgets.QSlider, QtWidgets.QSpinBox]:
-        slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        slider = NoWheelSlider(QtCore.Qt.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setSingleStep(1)
         slider.setPageStep(1)
 
-        spinbox = QtWidgets.QSpinBox()
+        spinbox = NoWheelSpinBox()
         spinbox.setRange(minimum, maximum)
         spinbox.setSingleStep(1)
         spinbox.setMinimumWidth(56)
@@ -1027,12 +1041,12 @@ class MainWindow(QtWidgets.QMainWindow):
         decimals: int = 1,
     ) -> tuple[QtWidgets.QSlider, QtWidgets.QDoubleSpinBox]:
         scale = 10**decimals
-        slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        slider = NoWheelSlider(QtCore.Qt.Horizontal)
         slider.setRange(int(round(minimum * scale)), int(round(maximum * scale)))
         slider.setSingleStep(int(round(step * scale)))
         slider.setPageStep(int(round(step * scale)))
 
-        spinbox = QtWidgets.QDoubleSpinBox()
+        spinbox = NoWheelDoubleSpinBox()
         spinbox.setRange(minimum, maximum)
         spinbox.setSingleStep(step)
         spinbox.setDecimals(decimals)
@@ -3138,7 +3152,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.drop_zone.setEnabled(idle and self._state == AppState.EMPTY)
         self.video_card.setEnabled(idle and self._state == AppState.VIDEO_SELECTED)
         self.saving_to_line.setVisible(
-            idle and has_video and self._save_policy != SaveLocationPolicy.ASK_EVERY_TIME
+            idle
+            and has_video
+            and self._save_policy != SaveLocationPolicy.ASK_EVERY_TIME
+            and self._state != AppState.SUBTITLES_READY
         )
         if self.subtitles_ready_footer:
             self.subtitles_ready_footer.setVisible(
