@@ -230,6 +230,7 @@ Current implementation:
     - Quick tweaks: font size, outline width, shadow, bottom margin.
     - Background: none/line/word segmented control (Word disabled with helper text).
     - Line background controls: opacity + padding (visible when Line is selected).
+    - Planned: per-side background padding (Top/Right/Bottom/Left) for line/word backgrounds. Current UI uses a single padding value because SubtitleStyle currently supports only one padding field.
     - Advanced: “Show advanced options” toggle reveals extra controls and a “Reset to preset” action.
 
 ---
