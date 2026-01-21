@@ -10,12 +10,14 @@ Last updated: 2026-02-27
 
 ## B) Scope boundaries (anti-scope-explosion guardrails)
 - Static SRT pipeline remains as-is (regression-free).
-- Word highlight uses a separate ASS-based pipeline (FFmpeg `ass` filter), not inline SRT styling hacks.
+- Word highlight uses a separate ASS-based pipeline (FFmpeg `ass` filter) in the legacy/export
+  and preview playback paths; graphics-overlay export is now the default path when enabled.
 - Styling items not already supported (e.g., border radius) are deferred to Post-PR10.
 
 ## C) High-level technical approach
 - **Static mode:** existing SRT + `subtitles` filter.
-- **Word highlight mode:** generate ASS + FFmpeg `-vf ass=...`.
+- **Word highlight mode (legacy pipeline):** generate ASS + FFmpeg `-vf ass=...`
+  (graphics-overlay export is the default when enabled).
 - **Alignment:** WhisperX produces word-level timestamps keyed to the edited SRT (so edits are respected).
 - **Preview still:** same renderer as export (no divergence).
 
@@ -41,7 +43,7 @@ Last updated: 2026-02-27
   - `app/ui/state.py`
   - `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`
 - **Implementation notes:**
-  - Keep defaults as current behavior (static).
+  - Keep defaults as current behavior (static) until Task 10 is complete.
   - Ensure config migrations are backward-compatible.
 - **Acceptance criteria:**
   - Config loads/saves new keys without errors.
@@ -58,7 +60,7 @@ Last updated: 2026-02-27
   - `app/main.py`
   - `app/ui/widgets/*`
 - **Implementation notes:**
-  - Default to Static until Task 10.
+  - Default to Static until Task 10 (now complete; Word highlight is the default).
   - Provide clear explanatory labels/tooltips.
 - **Acceptance criteria:**
   - Controls render and persist selections.
@@ -261,7 +263,7 @@ Last updated: 2026-02-27
 | 7 | Done |  | Word timing JSON contract + staleness detection. |
 | 8 | Done |  | WhisperX alignment worker added. |
 | 9 | Done |  | Karaoke step-highlight ASS generation + tests. |
-| 10 | TODO |  |  |
+| 10 | Done |  | Default subtitle mode is Word highlight; docs + diagnostics updated. |
 
 ### Post-PR10 follow-up tracking
 | Item | Status | Notes |
