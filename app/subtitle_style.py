@@ -34,7 +34,7 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 @dataclass(frozen=True)
-class LegacySubtitleStyle:
+class PresetStyle:
     font_size: int
     outline: int
     shadow: int
@@ -108,9 +108,9 @@ def _coerce_str(value: object, default: str) -> str:
     return value if isinstance(value, str) and value.strip() else default
 
 
-def legacy_preset_defaults(name: str) -> LegacySubtitleStyle:
+def preset_style_defaults(name: str) -> PresetStyle:
     if name == PRESET_LARGE_OUTLINE:
-        return LegacySubtitleStyle(
+        return PresetStyle(
             font_size=34,
             outline=4,
             shadow=2,
@@ -120,7 +120,7 @@ def legacy_preset_defaults(name: str) -> LegacySubtitleStyle:
             box_padding=10,
         )
     if name == PRESET_LARGE_OUTLINE_BOX:
-        return LegacySubtitleStyle(
+        return PresetStyle(
             font_size=34,
             outline=4,
             shadow=2,
@@ -129,7 +129,7 @@ def legacy_preset_defaults(name: str) -> LegacySubtitleStyle:
             box_opacity=70,
             box_padding=10,
         )
-    return LegacySubtitleStyle(
+    return PresetStyle(
         font_size=28,
         outline=2,
         shadow=1,
@@ -140,12 +140,12 @@ def legacy_preset_defaults(name: str) -> LegacySubtitleStyle:
     )
 
 
-def legacy_style_from_custom_dict(
-    custom: object, defaults: LegacySubtitleStyle
-) -> LegacySubtitleStyle:
+def preset_style_from_custom_dict(
+    custom: object, defaults: PresetStyle
+) -> PresetStyle:
     if not isinstance(custom, dict):
         return defaults
-    return LegacySubtitleStyle(
+    return PresetStyle(
         font_size=_coerce_int(custom.get("font_size"), defaults.font_size),
         outline=_coerce_int(custom.get("outline"), defaults.outline),
         shadow=_coerce_int(custom.get("shadow"), defaults.shadow),
@@ -156,40 +156,40 @@ def legacy_style_from_custom_dict(
     )
 
 
-def style_model_from_legacy(
-    legacy: LegacySubtitleStyle,
+def style_model_from_preset(
+    preset: PresetStyle,
     *,
     subtitle_mode: str,
     highlight_color: str,
 ) -> SubtitleStyle:
-    background_mode = "line" if legacy.box_enabled else "none"
+    background_mode = "line" if preset.box_enabled else "none"
     return SubtitleStyle(
         font_family=DEFAULT_FONT_NAME,
-        font_size=legacy.font_size,
+        font_size=preset.font_size,
         font_style="regular",
         text_color=DEFAULT_TEXT_COLOR,
         text_opacity=1.0,
         letter_spacing=0.0,
-        outline_enabled=legacy.outline > 0,
-        outline_width=legacy.outline,
+        outline_enabled=preset.outline > 0,
+        outline_width=preset.outline,
         outline_color=DEFAULT_OUTLINE_COLOR,
-        shadow_enabled=legacy.shadow > 0,
-        shadow_strength=legacy.shadow,
+        shadow_enabled=preset.shadow > 0,
+        shadow_strength=preset.shadow,
         shadow_offset_x=0.0,
         shadow_offset_y=0.0,
         shadow_color=DEFAULT_SHADOW_COLOR,
         shadow_opacity=1.0,
         background_mode=background_mode,
         line_bg_color=DEFAULT_LINE_BG_COLOR,
-        line_bg_opacity=legacy.box_opacity / 100.0,
-        line_bg_padding=legacy.box_padding,
+        line_bg_opacity=preset.box_opacity / 100.0,
+        line_bg_padding=preset.box_padding,
         line_bg_radius=0.0,
         word_bg_color=DEFAULT_WORD_BG_COLOR,
         word_bg_opacity=0.4,
-        word_bg_padding=legacy.box_padding,
+        word_bg_padding=preset.box_padding,
         word_bg_radius=0.0,
         vertical_anchor="bottom",
-        vertical_offset=legacy.margin_v,
+        vertical_offset=preset.margin_v,
         subtitle_mode=subtitle_mode,
         highlight_color=highlight_color,
     )
@@ -201,9 +201,9 @@ def preset_defaults(
     subtitle_mode: str = DEFAULT_SUBTITLE_MODE,
     highlight_color: str = DEFAULT_HIGHLIGHT_COLOR,
 ) -> SubtitleStyle:
-    legacy = legacy_preset_defaults(name)
-    return style_model_from_legacy(
-        legacy,
+    preset = preset_style_defaults(name)
+    return style_model_from_preset(
+        preset,
         subtitle_mode=subtitle_mode,
         highlight_color=highlight_color,
     )
@@ -288,14 +288,14 @@ def style_model_to_dict(style: SubtitleStyle) -> dict[str, object]:
     }
 
 
-def legacy_style_from_model(style: SubtitleStyle) -> LegacySubtitleStyle:
+def preset_style_from_model(style: SubtitleStyle) -> PresetStyle:
     outline = int(round(style.outline_width)) if style.outline_enabled else 0
     shadow = int(round(style.shadow_strength)) if style.shadow_enabled else 0
     margin_v = int(round(style.vertical_offset))
     box_enabled = style.background_mode == "line"
     box_opacity = int(round(style.line_bg_opacity * 100))
     box_padding = int(round(style.line_bg_padding))
-    return LegacySubtitleStyle(
+    return PresetStyle(
         font_size=style.font_size,
         outline=outline,
         shadow=shadow,
@@ -307,116 +307,32 @@ def legacy_style_from_model(style: SubtitleStyle) -> LegacySubtitleStyle:
 
 
 def summarize_style_model(style: SubtitleStyle) -> str:
-    legacy = legacy_style_from_model(style)
+    preset = preset_style_from_model(style)
     return (
         "style_model "
         f"font={style.font_family} "
         f"size={style.font_size} "
-        f"outline={legacy.outline} "
-        f"shadow={legacy.shadow} "
-        f"margin_v={legacy.margin_v} "
+        f"outline={preset.outline} "
+        f"shadow={preset.shadow} "
+        f"margin_v={preset.margin_v} "
         f"background={style.background_mode} "
         f"line_bg_opacity={style.line_bg_opacity:.2f} "
         f"line_bg_padding={style.line_bg_padding}"
     )
 
 
-def _opacity_to_ass_alpha(opacity: int) -> int:
-    clamped = max(0, min(opacity, 100))
-    return round((100 - clamped) / 100 * 255)
-
-
-def get_box_alpha_byte(style: SubtitleStyle) -> int:
-    legacy = legacy_style_from_model(style)
-    return _opacity_to_ass_alpha(legacy.box_opacity)
-
-
-def _ass_color_from_hex(
-    hex_rgb: str,
-    *,
-    alpha: float,
-    default: str,
-    trailing_amp: bool = True,
-) -> str:
-    resolved = hex_rgb if isinstance(hex_rgb, str) and _HEX_COLOR_RE.match(hex_rgb) else default
-    try:
-        alpha_value = float(alpha)
-    except (TypeError, ValueError):
-        alpha_value = 0.0
-    alpha_value = max(0.0, min(alpha_value, 1.0))
-    alpha_byte = int(round(alpha_value * 255))
-    red = int(resolved[1:3], 16)
-    green = int(resolved[3:5], 16)
-    blue = int(resolved[5:7], 16)
-    value = f"&H{alpha_byte:02X}{blue:02X}{green:02X}{red:02X}"
-    return f"{value}&" if trailing_amp else value
-
-
-def _opacity_to_ass_alpha_float(opacity: float) -> float:
-    clamped = max(0.0, min(opacity, 1.0))
-    return 1.0 - clamped
-
-
-def format_shadow_colour(style: SubtitleStyle) -> str:
-    return _ass_color_from_hex(
-        style.shadow_color,
-        alpha=_opacity_to_ass_alpha_float(style.shadow_opacity),
-        default=DEFAULT_SHADOW_COLOR,
-    )
-
-
-def format_outline_colour(style: SubtitleStyle) -> str:
-    return _ass_color_from_hex(
-        style.outline_color,
-        alpha=0.0,
-        default=DEFAULT_OUTLINE_COLOR,
-    )
-
-
-def format_line_back_colour(style: SubtitleStyle) -> str:
-    return _ass_color_from_hex(
-        style.line_bg_color,
-        alpha=_opacity_to_ass_alpha_float(style.line_bg_opacity),
-        default=DEFAULT_LINE_BG_COLOR,
-    )
-
-
-def to_ffmpeg_force_style(style: SubtitleStyle) -> str:
-    legacy = legacy_style_from_model(style)
-    outline = legacy.outline
-    if legacy.box_enabled:
-        outline = legacy.outline + legacy.box_padding
-    border_style = 3 if legacy.box_enabled else 1
-    outline_colour = format_outline_colour(style)
-    if legacy.box_enabled:
-        outline_colour = format_line_back_colour(style)
-    back_colour = format_shadow_colour(style)
-    fields = [
-        f"FontName={style.font_family or DEFAULT_FONT_NAME}",
-        f"FontSize={legacy.font_size}",
-        f"Outline={outline}",
-        f"Shadow={legacy.shadow}",
-        f"MarginV={legacy.margin_v}",
-        "Alignment=2",
-        f"BorderStyle={border_style}",
-        f"OutlineColour={outline_colour}",
-        f"BackColour={back_colour}",
-    ]
-    return ",".join(fields)
-
-
 def to_preview_params(style: SubtitleStyle) -> dict:
-    legacy = legacy_style_from_model(style)
-    outline = legacy.outline
-    if legacy.box_enabled:
-        outline = legacy.outline + legacy.box_padding
+    preset = preset_style_from_model(style)
+    outline = preset.outline
+    if preset.box_enabled:
+        outline = preset.outline + preset.box_padding
     return {
         "font_name": style.font_family or DEFAULT_FONT_NAME,
-        "font_size": legacy.font_size,
+        "font_size": preset.font_size,
         "outline": outline,
-        "shadow": legacy.shadow,
-        "margin_v": legacy.margin_v,
-        "box_enabled": legacy.box_enabled,
-        "box_opacity": legacy.box_opacity,
-        "box_padding": legacy.box_padding,
+        "shadow": preset.shadow,
+        "margin_v": preset.margin_v,
+        "box_enabled": preset.box_enabled,
+        "box_opacity": preset.box_opacity,
+        "box_padding": preset.box_padding,
     }

@@ -88,12 +88,12 @@ from app.subtitle_style import (
     PRESET_DEFAULT,
     PRESET_NAMES,
     SubtitleStyle,
-    legacy_style_from_model,
-    legacy_preset_defaults,
-    legacy_style_from_custom_dict,
     normalize_style_model,
     preset_defaults,
-    style_model_from_legacy,
+    preset_style_defaults,
+    preset_style_from_custom_dict,
+    preset_style_from_model,
+    style_model_from_preset,
     style_model_to_dict,
     summarize_style_model,
 )
@@ -3320,10 +3320,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         subtitle_mode = self._config.get("subtitle_mode", "static")
         highlight_color = raw.get("highlight_color", DEFAULT_HIGHLIGHT_COLOR)
-        legacy_defaults = legacy_preset_defaults(PRESET_DEFAULT)
-        legacy_custom = legacy_style_from_custom_dict(raw.get("custom"), legacy_defaults)
-        custom = style_model_from_legacy(
-            legacy_custom,
+        preset_defaults_style = preset_style_defaults(PRESET_DEFAULT)
+        preset_custom = preset_style_from_custom_dict(
+            raw.get("custom"),
+            preset_defaults_style,
+        )
+        custom = style_model_from_preset(
+            preset_custom,
             subtitle_mode=subtitle_mode,
             highlight_color=highlight_color,
         )
@@ -3354,20 +3357,20 @@ class MainWindow(QtWidgets.QMainWindow):
             if isinstance(current_style, dict)
             else self._highlight_opacity
         )
-        legacy_custom = legacy_style_from_model(self._subtitle_style_custom)
+        preset_custom = preset_style_from_model(self._subtitle_style_custom)
         self._config["subtitle_style"] = {
             "preset": self._subtitle_style_preset,
             "highlight_color": highlight_color,
             "highlight_opacity": highlight_opacity,
             "appearance": style_model_to_dict(self._style_model),
             "custom": {
-                "font_size": legacy_custom.font_size,
-                "outline": legacy_custom.outline,
-                "shadow": legacy_custom.shadow,
-                "margin_v": legacy_custom.margin_v,
-                "box_enabled": legacy_custom.box_enabled,
-                "box_opacity": legacy_custom.box_opacity,
-                "box_padding": legacy_custom.box_padding,
+                "font_size": preset_custom.font_size,
+                "outline": preset_custom.outline,
+                "shadow": preset_custom.shadow,
+                "margin_v": preset_custom.margin_v,
+                "box_enabled": preset_custom.box_enabled,
+                "box_opacity": preset_custom.box_opacity,
+                "box_padding": preset_custom.box_padding,
             },
         }
         self._config["subtitle_mode"] = self._subtitle_mode
