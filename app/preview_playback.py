@@ -4,31 +4,37 @@ import hashlib
 import json
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
-from datetime import timedelta
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 from PySide6 import QtCore
 
-from .ass_karaoke import (
-    build_ass_document_with_karaoke_fallback,
-    build_style_config_from_subtitle_style,
-)
 from .config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY
-from .ass_render import build_ass_document
-from .ffmpeg_utils import (
-    build_ass_filter,
-    build_subtitles_filter,
-    ensure_ffmpeg_available,
-    get_ffprobe_json,
-    get_media_duration,
-    get_subprocess_kwargs,
+from .ffmpeg_utils import ensure_ffmpeg_available, get_ffprobe_json, get_subprocess_kwargs
+from .graphics_overlay_export import (
+    GRAPHICS_OVERLAY_PIPELINE,
+    OverlaySegment,
+    build_static_overlay_segments,
+    build_word_highlight_overlay_segments,
+    render_overlay_frame,
+    resolve_video_stream_info,
+)
+from .graphics_preview_renderer import (
+    LAYOUT_CACHE_MAX_ENTRIES,
+    LRUCache,
+    PATH_CACHE_MAX_ENTRIES,
+    RenderContext,
 )
 from .paths import get_preview_clips_dir
-from .srt_utils import parse_srt_file
+from .srt_utils import SrtCue, parse_srt_file
 from .subtitle_style import SubtitleStyle, to_preview_params
-from .word_timing_schema import word_timings_path_for_srt
+from .word_timing_schema import WordTimingValidationError, load_word_timings_json, word_timings_path_for_srt
+
+_SRT_TIMESTAMP_RE = re.compile(
+    r"(?P<start>\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(?P<end>\d{2}:\d{2}:\d{2},\d{3})"
+)
 
 
 @dataclass(frozen=True)
@@ -37,7 +43,6 @@ class PreviewClipSettings:
     srt_path: Path
     start_seconds: float
     duration_seconds: float
-    force_style: str
     subtitle_mode: str
     style: SubtitleStyle
     highlight_color: Optional[str] = None
@@ -48,21 +53,14 @@ class PreviewClipSettings:
     audio_bitrate: str = "128k"
 
 
-STATIC_SRT_PIPELINE = "static_srt"
-WORD_HIGHLIGHT_ASS_PIPELINE = "word_highlight_ass"
-
-
 @dataclass(frozen=True)
 class PreviewClipPlan:
     command: list[str]
     pipeline: str
-    subtitles_path: Path
     filter_string: str
-    ass_path: Optional[Path] = None
-    karaoke_enabled: bool = False
-    karaoke_reason: str = ""
-    karaoke_event_count: int = 0
-    karaoke_word_timings_path: Optional[Path] = None
+    width: int
+    height: int
+    fps: float
 
 
 class PreviewClipSignals(QtCore.QObject):
@@ -87,61 +85,105 @@ class PreviewClipWorker(QtCore.QObject):
             return
 
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        shifted_srt_path = self._output_path.with_suffix(".srt")
-        shift_result = _shift_srt_file(
-            self._settings.srt_path,
-            shifted_srt_path,
-            self._settings.start_seconds,
-        )
         self.signals.log.emit(
             "Preview clip timing: "
             f"start={self._settings.start_seconds:.3f}s "
             f"duration={self._settings.duration_seconds:.3f}s "
             f"output={self._output_path}"
         )
-        self.signals.log.emit(
-            "Preview clip cues: "
-            f"count={shift_result.cues_written} "
-            f"first_start={shift_result.first_start} "
-            f"first_end={shift_result.first_end}"
-        )
+
+        stream_info = resolve_video_stream_info(self._settings.video_path)
         plan = build_preview_clip_plan(
             ffmpeg_path=ffmpeg_path,
             settings=self._settings,
             output_path=self._output_path,
-            shifted_srt_path=shifted_srt_path,
+            width=stream_info.width,
+            height=stream_info.height,
+            fps=stream_info.fps,
         )
         self.signals.log.emit(f"Preview subtitle_mode={self._settings.subtitle_mode}")
         self.signals.log.emit(f"Preview pipeline={plan.pipeline}")
-        self.signals.log.emit(f"Preview subtitles path={plan.subtitles_path}")
         self.signals.log.emit(f"Preview filter={plan.filter_string}")
-        if self._settings.subtitle_mode == "word_highlight":
-            self.signals.log.emit(
-                "Preview karaoke: "
-                f"enabled={plan.karaoke_enabled} "
-                f"reason={plan.karaoke_reason} "
-                f"word_timings_path={plan.karaoke_word_timings_path} "
-                f"highlight_events={plan.karaoke_event_count}"
-            )
-        command = plan.command
-        command_text = subprocess.list2cmdline(command)
+        self.signals.log.emit(
+            f"Overlay stream: {plan.width}x{plan.height} @{plan.fps:.3f}fps"
+        )
+        command_text = subprocess.list2cmdline(plan.command)
         self.signals.log.emit(
             "Preview clip ffmpeg: "
             f"{command_text}"
         )
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=False,
-                **get_subprocess_kwargs(),
-            )
-        except Exception as exc:  # noqa: BLE001
-            self.signals.finished.emit(False, "", f"ffmpeg failed to start: {exc}", self._request_id)
-            return
 
-        if result.returncode == 0 and self._output_path.exists() and self._output_path.stat().st_size > 0:
+        cues = parse_srt_file(self._settings.srt_path)
+        clip_end = self._settings.start_seconds + self._settings.duration_seconds
+        segments = self._build_overlay_segments(cues=cues, clip_end=clip_end)
+        clip_segments = _slice_overlay_segments(
+            segments,
+            start_seconds=self._settings.start_seconds,
+            end_seconds=clip_end,
+        )
+        frame_segments, total_frames = _build_overlay_frame_segments(
+            clip_segments,
+            self._settings.duration_seconds,
+            plan.fps,
+        )
+        self.signals.log.emit(
+            f"Overlay frames: total={total_frames} segments={len(frame_segments)}"
+        )
+
+        render_cache: dict[tuple[object, ...], bytes] = {}
+        layout_cache = LRUCache(max_entries=LAYOUT_CACHE_MAX_ENTRIES)
+        path_cache = LRUCache(max_entries=PATH_CACHE_MAX_ENTRIES)
+        render_context = RenderContext(
+            layout_cache=layout_cache,
+            path_cache=path_cache,
+            perf_stats=None,
+        )
+        resolved_highlight_color = self._settings.highlight_color or DEFAULT_HIGHLIGHT_COLOR
+        resolved_highlight_opacity = (
+            self._settings.highlight_opacity
+            if self._settings.highlight_opacity is not None
+            else DEFAULT_HIGHLIGHT_OPACITY
+        )
+
+        def make_frame_generator() -> Iterable[bytes]:
+            last_state: Optional[tuple[object, ...]] = None
+            last_frame: Optional[bytes] = None
+            for text, highlight_index, frame_count in frame_segments:
+                state = (
+                    text.strip(),
+                    highlight_index,
+                    plan.width,
+                    plan.height,
+                    self._settings.style,
+                    self._settings.subtitle_mode,
+                    resolved_highlight_color,
+                    resolved_highlight_opacity,
+                )
+                if state != last_state:
+                    if state in render_cache:
+                        last_frame = render_cache[state]
+                    else:
+                        frame_bytes, _ = render_overlay_frame(
+                            width=plan.width,
+                            height=plan.height,
+                            subtitle_text=text,
+                            style=self._settings.style,
+                            subtitle_mode=self._settings.subtitle_mode,
+                            highlight_color=resolved_highlight_color,
+                            highlight_opacity=resolved_highlight_opacity,
+                            highlight_word_index=highlight_index,
+                            render_context=render_context,
+                        )
+                        render_cache[state] = frame_bytes
+                        last_frame = frame_bytes
+                    last_state = state
+                if last_frame is None:
+                    continue
+                for _ in range(frame_count):
+                    yield last_frame
+
+        success, message = _run_ffmpeg_streaming(plan.command, make_frame_generator())
+        if success and self._output_path.exists() and self._output_path.stat().st_size > 0:
             self.signals.finished.emit(True, str(self._output_path), "", self._request_id)
             return
 
@@ -150,11 +192,94 @@ class PreviewClipWorker(QtCore.QObject):
                 self._output_path.unlink()
             except OSError:
                 pass
-        stderr = (result.stderr or "").strip()
-        summary = f"ffmpeg exited with code {result.returncode}"
-        if stderr:
-            summary = f"{summary}: {stderr[:240]}"
+        summary = message or "Preview clip generation failed."
         self.signals.finished.emit(False, "", summary, self._request_id)
+
+    def _build_overlay_segments(self, *, cues: list[SrtCue], clip_end: float) -> list[OverlaySegment]:
+        if self._settings.subtitle_mode != "word_highlight":
+            return build_static_overlay_segments(cues, clip_end)
+        word_timings_path = word_timings_path_for_srt(self._settings.srt_path)
+        if not word_timings_path.exists():
+            self.signals.log.emit(
+                "Overlay word timings missing; rendering static overlay text.",
+            )
+            return build_static_overlay_segments(cues, clip_end)
+        try:
+            doc = load_word_timings_json(word_timings_path)
+        except (WordTimingValidationError, OSError) as exc:
+            self.signals.log.emit(
+                f"Overlay word timings failed to load ({exc}); using static overlay text.",
+            )
+            return build_static_overlay_segments(cues, clip_end)
+        return build_word_highlight_overlay_segments(cues, doc, clip_end)
+
+
+def _parse_srt_timestamp(value: str) -> Optional[float]:
+    parts = value.replace(",", ".").split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = float(parts[2])
+    except ValueError:
+        return None
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _format_srt_timestamp(seconds: float) -> str:
+    total_seconds = int(seconds)
+    millis = int(round((seconds - total_seconds) * 1000))
+    if millis == 1000:
+        total_seconds += 1
+        millis = 0
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
+
+def _shift_srt_text(srt_text: str, shift_seconds: float) -> str:
+    normalized = srt_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return ""
+    blocks = re.split(r"\n\s*\n", normalized)
+    output_blocks: list[str] = []
+    cue_index = 1
+    for block in blocks:
+        lines = block.split("\n")
+        timestamp_index = None
+        match = None
+        for idx, line in enumerate(lines):
+            match = _SRT_TIMESTAMP_RE.search(line)
+            if match:
+                timestamp_index = idx
+                break
+        if timestamp_index is None or not match:
+            continue
+        start_seconds = _parse_srt_timestamp(match.group("start"))
+        end_seconds = _parse_srt_timestamp(match.group("end"))
+        if start_seconds is None or end_seconds is None:
+            continue
+        shifted_start = start_seconds - shift_seconds
+        shifted_end = end_seconds - shift_seconds
+        if shifted_end <= 0:
+            continue
+        if shifted_start < 0:
+            shifted_start = 0.0
+        if shifted_end <= shifted_start:
+            continue
+        text_lines = lines[timestamp_index + 1 :]
+        output_lines = [
+            str(cue_index),
+            f"{_format_srt_timestamp(shifted_start)} --> {_format_srt_timestamp(shifted_end)}",
+            *text_lines,
+        ]
+        output_blocks.append("\n".join(output_lines).rstrip())
+        cue_index += 1
+    if not output_blocks:
+        return ""
+    return "\n\n".join(output_blocks).strip() + "\n"
 
 
 class PreviewPlaybackController(QtCore.QObject):
@@ -181,7 +306,6 @@ class PreviewPlaybackController(QtCore.QObject):
         anchor_seconds: float,
         clip_start_seconds: Optional[float],
         clip_duration_seconds: Optional[float],
-        force_style: str,
         subtitle_mode: str,
         style: SubtitleStyle,
         highlight_color: Optional[str] = None,
@@ -209,7 +333,6 @@ class PreviewPlaybackController(QtCore.QObject):
             srt_path=srt_path,
             start_seconds=start_seconds,
             duration_seconds=clip_duration,
-            force_style=force_style,
             subtitle_mode=subtitle_mode,
             style=style,
             highlight_color=highlight_color,
@@ -256,13 +379,12 @@ class PreviewPlaybackController(QtCore.QObject):
         word_timings_path = word_timings_path_for_srt(settings.srt_path)
         word_timings_stat = self._stat_payload(word_timings_path)
         payload = {
-            "version": 1,
+            "version": 2,
             "video": self._stat_payload(settings.video_path),
             "srt": self._stat_payload(settings.srt_path),
             "word_timings": word_timings_stat,
             "start_seconds": round(settings.start_seconds, 3),
             "duration_seconds": round(settings.duration_seconds, 3),
-            "force_style": settings.force_style,
             "subtitle_mode": settings.subtitle_mode,
             "style": to_preview_params(settings.style),
             "highlight_color": settings.highlight_color,
@@ -271,7 +393,6 @@ class PreviewPlaybackController(QtCore.QObject):
             "crf": settings.crf,
             "preset": settings.preset,
             "audio_bitrate": settings.audio_bitrate,
-            "shifted_subtitles": True,
         }
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(serialized.encode("utf-8")).hexdigest()
@@ -297,100 +418,41 @@ def build_preview_clip_plan(
     ffmpeg_path: Path,
     settings: PreviewClipSettings,
     output_path: Path,
-    shifted_srt_path: Path,
+    width: int,
+    height: int,
+    fps: float,
 ) -> PreviewClipPlan:
-    if settings.subtitle_mode == "word_highlight":
-        cues = parse_srt_file(settings.srt_path)
-        shifted_cues = parse_srt_file(shifted_srt_path)
-        style_config = build_style_config_from_subtitle_style(
-            settings.style,
-            highlight_color=settings.highlight_color or DEFAULT_HIGHLIGHT_COLOR,
-            highlight_opacity=(
-                settings.highlight_opacity
-                if settings.highlight_opacity is not None
-                else DEFAULT_HIGHLIGHT_OPACITY
-            ),
-        )
-        decision = build_ass_document_with_karaoke_fallback(
-            cues,
-            srt_path=settings.srt_path,
-            word_timings_path=word_timings_path_for_srt(settings.srt_path),
-            style_config=style_config,
-            time_offset_sec=settings.start_seconds,
-            time_window=(0.0, settings.duration_seconds),
-        )
-        if decision.karaoke_enabled:
-            ass_text = decision.ass_text
-        else:
-            ass_text = build_ass_document(shifted_cues, style_config=style_config)
-        ass_path = output_path.with_suffix(".ass")
-        ass_path.write_text(ass_text, encoding="utf-8")
-        filter_string = build_ass_filter(ass_path)
-        pipeline = WORD_HIGHLIGHT_ASS_PIPELINE
-        subtitles_path = ass_path
-    else:
-        filter_string = build_subtitles_filter(
-            shifted_srt_path,
-            force_style=settings.force_style,
-        )
-        pipeline = STATIC_SRT_PIPELINE
-        subtitles_path = shifted_srt_path
-        ass_path = None
-        decision = None
-
-    video_chain = (
-        f"trim=start={settings.start_seconds:.3f}:duration={settings.duration_seconds:.3f},"
-        "setpts=PTS-STARTPTS,"
-        f"{filter_string},"
+    filter_string = (
+        "[0:v][1:v]overlay=0:0:format=auto,"
         f"scale='min({settings.scale_width},iw)':-2:force_original_aspect_ratio=decrease"
+        "[v]"
     )
-    if settings.subtitle_mode == "word_highlight":
-        audio_filter_complex, audio_label = _build_audio_filter_complex(
-            settings.start_seconds,
-            settings.duration_seconds,
-            settings.video_path,
-        )
-        command = [
-            str(ffmpeg_path),
-            "-y",
-            "-hide_banner",
-            "-i",
-            str(settings.video_path),
-            "-vf",
-            video_chain,
-        ]
-        if audio_filter_complex and audio_label:
-            command += [
-                "-filter_complex",
-                audio_filter_complex,
-                "-map",
-                "0:v:0",
-                "-map",
-                audio_label,
-            ]
-        else:
-            command += ["-map", "0:v:0"]
-    else:
-        filter_complex, audio_label = _build_filter_complex(
-            video_chain,
-            settings.start_seconds,
-            settings.duration_seconds,
-            settings.video_path,
-        )
-        command = [
-            str(ffmpeg_path),
-            "-y",
-            "-hide_banner",
-            "-i",
-            str(settings.video_path),
-            "-filter_complex",
-            filter_complex,
-            "-map",
-            "[v]",
-        ]
-        if audio_label:
-            command += ["-map", audio_label]
-    command += [
+    base_command = [
+        str(ffmpeg_path),
+        "-y",
+        "-hide_banner",
+        "-ss",
+        f"{settings.start_seconds:.3f}",
+        "-t",
+        f"{settings.duration_seconds:.3f}",
+        "-i",
+        str(settings.video_path),
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgba",
+        "-s",
+        f"{width}x{height}",
+        "-r",
+        f"{fps:.3f}",
+        "-i",
+        "pipe:0",
+        "-filter_complex",
+        filter_string,
+        "-map",
+        "[v]",
+        "-map",
+        "0:a?",
         "-c:v",
         "libx264",
         "-preset",
@@ -406,145 +468,126 @@ def build_preview_clip_plan(
         "-shortest",
         str(output_path),
     ]
-
     return PreviewClipPlan(
-        command=command,
-        pipeline=pipeline,
-        subtitles_path=subtitles_path,
+        command=base_command,
+        pipeline=GRAPHICS_OVERLAY_PIPELINE,
         filter_string=filter_string,
-        ass_path=ass_path,
-        karaoke_enabled=decision.karaoke_enabled if decision else False,
-        karaoke_reason=decision.reason if decision else "static",
-        karaoke_event_count=decision.highlight_event_count if decision else 0,
-        karaoke_word_timings_path=decision.word_timings_path if decision else None,
+        width=width,
+        height=height,
+        fps=fps,
     )
 
 
-@dataclass(frozen=True)
-class ShiftedSrtResult:
-    cues_written: int
-    first_start: Optional[str]
-    first_end: Optional[str]
-
-
-_SRT_TIMESTAMP_RE = re.compile(
-    r"(?P<start>\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(?P<end>\d{2}:\d{2}:\d{2},\d{3})"
-)
-
-
-def _shift_srt_file(source_path: Path, output_path: Path, offset_seconds: float) -> ShiftedSrtResult:
-    text = source_path.read_text(encoding="utf-8", errors="replace")
-    shifted_text, result = _shift_srt_text(text, offset_seconds)
-    output_path.write_text(shifted_text, encoding="utf-8")
-    return result
-
-
-def _shift_srt_text(srt_text: str, offset_seconds: float) -> tuple[str, ShiftedSrtResult]:
-    normalized = srt_text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not normalized:
-        return "", ShiftedSrtResult(0, None, None)
-    blocks = re.split(r"\n\s*\n", normalized)
-    output_blocks: list[str] = []
-    cues_written = 0
-    first_start: Optional[str] = None
-    first_end: Optional[str] = None
-    for block in blocks:
-        lines = block.split("\n")
-        timestamp_index = None
-        match = None
-        for idx, line in enumerate(lines):
-            match = _SRT_TIMESTAMP_RE.search(line)
-            if match:
-                timestamp_index = idx
-                break
-        if timestamp_index is None or not match:
+def _slice_overlay_segments(
+    segments: Iterable[OverlaySegment],
+    *,
+    start_seconds: float,
+    end_seconds: float,
+) -> list[OverlaySegment]:
+    sliced: list[OverlaySegment] = []
+    for segment in segments:
+        if segment.end_seconds <= start_seconds:
             continue
-        start_seconds = _parse_srt_timestamp(match.group("start"))
-        end_seconds = _parse_srt_timestamp(match.group("end"))
-        if start_seconds is None or end_seconds is None:
+        if segment.start_seconds >= end_seconds:
+            break
+        start = max(segment.start_seconds, start_seconds)
+        end = min(segment.end_seconds, end_seconds)
+        if end <= start:
             continue
-        new_start = max(0.0, start_seconds - offset_seconds)
-        new_end = max(0.0, end_seconds - offset_seconds)
-        if new_end <= 0:
-            continue
-        lines[timestamp_index] = (
-            f"{_format_srt_timestamp(new_start)} --> {_format_srt_timestamp(new_end)}"
+        sliced.append(
+            OverlaySegment(
+                start_seconds=start - start_seconds,
+                end_seconds=end - start_seconds,
+                text=segment.text,
+                highlight_word_index=segment.highlight_word_index,
+            )
         )
-        output_blocks.append("\n".join(lines))
-        cues_written += 1
-        if first_start is None:
-            first_start = _format_srt_timestamp(new_start)
-            first_end = _format_srt_timestamp(new_end)
-    shifted = "\n\n".join(output_blocks)
-    if shifted:
-        shifted = shifted.strip() + "\n"
-    return shifted, ShiftedSrtResult(cues_written, first_start, first_end)
+    return sliced
 
 
-def _parse_srt_timestamp(value: str) -> Optional[float]:
-    parts = value.replace(",", ".").split(":")
-    if len(parts) != 3:
+def _build_overlay_frame_segments(
+    segments: list[OverlaySegment],
+    duration_seconds: float,
+    fps: float,
+) -> tuple[list[tuple[str, Optional[int], int]], int]:
+    total_frames = max(0, int(round(duration_seconds * fps)))
+    frame_segments: list[tuple[str, Optional[int], int]] = []
+    frame_cursor = 0
+    for segment in segments:
+        if segment.start_seconds >= duration_seconds:
+            break
+        start_frame = int(round(segment.start_seconds * fps))
+        end_frame = int(round(min(segment.end_seconds, duration_seconds) * fps))
+        start_frame = max(frame_cursor, start_frame)
+        if start_frame > frame_cursor:
+            frame_segments.append(("", None, start_frame - frame_cursor))
+        if end_frame > start_frame:
+            frame_segments.append((segment.text, segment.highlight_word_index, end_frame - start_frame))
+        frame_cursor = max(frame_cursor, end_frame)
+    if total_frames > frame_cursor:
+        frame_segments.append(("", None, total_frames - frame_cursor))
+    return frame_segments, total_frames
+
+
+def _run_ffmpeg_streaming(command: list[str], frame_iterator: Iterable[bytes]) -> tuple[bool, str]:
+    stderr_tail: list[str] = []
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            **get_subprocess_kwargs(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return False, f"ffmpeg failed to start: {exc}"
+
+    def _read_stderr() -> None:
+        assert process.stderr is not None
+        for line in process.stderr:
+            stderr_tail.append(line.rstrip())
+
+    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+    stderr_thread.start()
+
+    assert process.stdin is not None
+    try:
+        for frame in frame_iterator:
+            process.stdin.buffer.write(frame)
+        process.stdin.close()
+    except Exception as exc:  # noqa: BLE001
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        return False, f"Overlay stream failed: {exc}"
+
+    return_code = process.wait()
+    stderr_thread.join(timeout=1)
+    if return_code != 0:
+        tail_text = "\n".join(stderr_tail[-50:])
+        summary = f"ffmpeg exited with code {return_code}"
+        if tail_text:
+            summary = f"{summary}: {tail_text}"
+        return False, summary
+    return True, ""
+
+
+def get_media_duration(path: Path) -> Optional[float]:
+    ffprobe_json = get_ffprobe_json(path)
+    if not ffprobe_json:
+        return None
+    fmt = ffprobe_json.get("format")
+    if not isinstance(fmt, dict):
+        return None
+    value = fmt.get("duration")
+    if value is None:
         return None
     try:
-        hours = int(parts[0])
-        minutes = int(parts[1])
-        seconds = float(parts[2])
-    except ValueError:
+        return float(value)
+    except (TypeError, ValueError):
         return None
-    return hours * 3600 + minutes * 60 + seconds
-
-
-def _format_srt_timestamp(seconds: float) -> str:
-    delta = timedelta(seconds=max(seconds, 0))
-    total_seconds = int(delta.total_seconds())
-    millis = int(delta.microseconds / 1000)
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    secs = total_seconds % 60
-    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
-
-
-def _build_audio_filter_complex(
-    start_seconds: float,
-    duration_seconds: float,
-    video_path: Path,
-) -> tuple[str, Optional[str]]:
-    has_audio = False
-    ffprobe_json = get_ffprobe_json(video_path)
-    if ffprobe_json:
-        streams = ffprobe_json.get("streams", [])
-        has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
-    audio_label = None
-    if has_audio:
-        audio_chain = (
-            f"atrim=start={start_seconds:.3f}:duration={duration_seconds:.3f},"
-            "asetpts=PTS-STARTPTS"
-        )
-        filter_complex = f"[0:a]{audio_chain}[a]"
-        audio_label = "[a]"
-        return filter_complex, audio_label
-    return "", None
-
-
-def _build_filter_complex(
-    video_chain: str,
-    start_seconds: float,
-    duration_seconds: float,
-    video_path: Path,
-) -> tuple[str, Optional[str]]:
-    has_audio = False
-    ffprobe_json = get_ffprobe_json(video_path)
-    if ffprobe_json:
-        streams = ffprobe_json.get("streams", [])
-        has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
-    audio_label = None
-    if has_audio:
-        audio_chain = (
-            f"atrim=start={start_seconds:.3f}:duration={duration_seconds:.3f},"
-            "asetpts=PTS-STARTPTS"
-        )
-        filter_complex = f"[0:v]{video_chain}[v];[0:a]{audio_chain}[a]"
-        audio_label = "[a]"
-    else:
-        filter_complex = f"[0:v]{video_chain}[v]"
-    return filter_complex, audio_label
