@@ -71,6 +71,35 @@ QLabel#SavingToPath {{
   font-size: 12px;
 }}
 
+QLabel#SavingAsPrefix,
+QLabel#SavingAsPath {{
+  color: {MUTED_TEXT};
+  font-size: 12px;
+}}
+
+QFrame#SubtitlesReadyFooter {{
+  border-top: 1px solid {BORDER};
+  background-color: {SURFACE};
+}}
+
+QFrame#StyleDrawer {{
+  background-color: {SURFACE};
+  border-left: 1px solid {BORDER};
+}}
+
+QFrame#StyleDrawerHeader {{
+  border-bottom: 1px solid {BORDER};
+  background-color: {SURFACE_2};
+}}
+
+QLabel#StyleDrawerTitle {{
+  font-weight: 600;
+}}
+
+QFrame#StyleDrawerScrim {{
+  background-color: rgba(0, 0, 0, 0.45);
+}}
+
 QToolButton#SettingsButton {{
   background-color: transparent;
   border: none;

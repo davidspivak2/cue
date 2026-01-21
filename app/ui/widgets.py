@@ -367,6 +367,216 @@ class ClickableLabel(QtWidgets.QLabel):
         super().mousePressEvent(event)
 
 
+class ClickableFrame(QtWidgets.QFrame):
+    clicked = QtCore.Signal()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class NoWheelComboBox(QtWidgets.QComboBox):
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:  # noqa: N802
+        event.ignore()
+
+
+class NoWheelFontComboBox(QtWidgets.QFontComboBox):
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:  # noqa: N802
+        event.ignore()
+
+
+class NoWheelSpinBox(QtWidgets.QSpinBox):
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:  # noqa: N802
+        event.ignore()
+
+
+class NoWheelDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:  # noqa: N802
+        event.ignore()
+
+
+class NoWheelSlider(QtWidgets.QSlider):
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:  # noqa: N802
+        event.ignore()
+
+
+class ColorSwatch(QtWidgets.QFrame):
+    clicked = QtCore.Signal()
+
+    def __init__(
+        self,
+        color: Optional[str] = None,
+        *,
+        multicolor: bool = False,
+        parent: Optional[QtWidgets.QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._color = color
+        self._multicolor = multicolor
+        self.setFixedSize(28, 28)
+        self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.setProperty("active", False)
+
+    @property
+    def color(self) -> Optional[str]:
+        return self._color
+
+    def set_color(self, color: Optional[str]) -> None:
+        self._color = color
+        self.update()
+
+    def set_active(self, active: bool) -> None:
+        if self.property("active") == active:
+            return
+        self.setProperty("active", active)
+        self.update()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # noqa: N802
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        if self._multicolor:
+            gradient = QtGui.QLinearGradient(rect.topLeft(), rect.topRight())
+            gradient.setColorAt(0.0, QtGui.QColor("#F43F5E"))
+            gradient.setColorAt(0.33, QtGui.QColor("#F59E0B"))
+            gradient.setColorAt(0.66, QtGui.QColor("#22C55E"))
+            gradient.setColorAt(1.0, QtGui.QColor("#3B82F6"))
+            painter.setBrush(gradient)
+        else:
+            painter.setBrush(QtGui.QColor(self._color or "#000000"))
+        border_color = QtGui.QColor(ACCENT if self.property("active") else BORDER)
+        pen = QtGui.QPen(border_color, 2 if self.property("active") else 1)
+        painter.setPen(pen)
+        painter.drawRoundedRect(rect, 6, 6)
+
+
+class ColorChipPicker(QtWidgets.QWidget):
+    colorChanged = QtCore.Signal(str)
+
+    def __init__(
+        self,
+        recommended_colors: list[str],
+        *,
+        initial_color: Optional[str] = None,
+        parent: Optional[QtWidgets.QWidget] = None,
+        dialog_title: str = "Pick color…",
+    ) -> None:
+        super().__init__(parent)
+        if len(recommended_colors) != 3:
+            raise ValueError("ColorChipPicker expects exactly three recommended colors.")
+        self._recommended_colors = [color.upper() for color in recommended_colors]
+        self._dialog_title = dialog_title
+        self._current_color = (initial_color or self._recommended_colors[0]).upper()
+
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._chip_button = QtWidgets.QPushButton()
+        self._chip_button.setObjectName("ColorChip")
+        self._chip_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self._chip_button.setFixedSize(32, 28)
+        self._chip_button.clicked.connect(self._open_palette_menu)
+        layout.addWidget(self._chip_button)
+
+        self._palette_menu = QtWidgets.QMenu(self)
+        self._palette_menu.setObjectName("ColorChipMenu")
+        self._palette_container = QtWidgets.QWidget()
+        palette_layout = QtWidgets.QHBoxLayout(self._palette_container)
+        palette_layout.setContentsMargins(8, 6, 8, 6)
+        palette_layout.setSpacing(6)
+
+        self._palette_swatches: list[ColorSwatch] = []
+        for _ in range(4):
+            swatch = ColorSwatch()
+            swatch.clicked.connect(self._on_palette_swatch_clicked)
+            self._palette_swatches.append(swatch)
+            palette_layout.addWidget(swatch)
+
+        self._palette_more_swatch = ColorSwatch(multicolor=True)
+        self._palette_more_swatch.setToolTip("More colors…")
+        self._palette_more_swatch.clicked.connect(self._choose_custom_color)
+        palette_layout.addWidget(self._palette_more_swatch)
+
+        palette_action = QtWidgets.QWidgetAction(self._palette_menu)
+        palette_action.setDefaultWidget(self._palette_container)
+        self._palette_menu.addAction(palette_action)
+
+        self.set_color(self._current_color)
+
+    @property
+    def current_color(self) -> str:
+        return self._current_color
+
+    def set_color(self, color: str) -> None:
+        self._current_color = color.upper()
+        self._update_chip_style()
+        self._update_palette_swatches()
+
+    def _update_chip_style(self) -> None:
+        self._chip_button.setStyleSheet(
+            "QPushButton#ColorChip {{"
+            f"background-color: {self._current_color};"
+            f"border: 1px solid {BORDER};"
+            "border-radius: 10px;"
+            "}}"
+            "QPushButton#ColorChip:hover {{"
+            f"background-color: {self._current_color};"
+            f"border: 1px solid {BORDER};"
+            "}}"
+            "QPushButton#ColorChip:pressed {{"
+            f"background-color: {self._current_color};"
+            f"border: 1px solid {BORDER};"
+            "}}"
+        )
+
+    def _update_palette_swatches(self) -> None:
+        palette_colors = [self._current_color] + self._recommended_colors
+        for swatch, color in zip(self._palette_swatches, palette_colors, strict=False):
+            swatch.set_color(color)
+            swatch.set_active(color == self._current_color)
+
+    def _open_palette_menu(self) -> None:
+        self._update_palette_swatches()
+        origin = self._chip_button.mapToGlobal(
+            QtCore.QPoint(0, self._chip_button.height())
+        )
+        self._palette_menu.exec(origin)
+
+    def _on_palette_swatch_clicked(self) -> None:
+        swatch = self.sender()
+        if not isinstance(swatch, ColorSwatch):
+            return
+        color = swatch.color
+        if not color:
+            return
+        self._apply_color(color)
+        self._palette_menu.close()
+
+    def _choose_custom_color(self) -> None:
+        current = QtGui.QColor(self._current_color)
+        color = QtWidgets.QColorDialog.getColor(current, self, self._dialog_title)
+        if not color.isValid():
+            return
+        hex_value = color.name().upper()
+        self._apply_color(hex_value)
+        self._palette_menu.close()
+
+    def _apply_color(self, hex_value: str) -> None:
+        if hex_value == self._current_color:
+            return
+        self._current_color = hex_value
+        self._update_chip_style()
+        self.colorChanged.emit(hex_value)
+
+
 class SavingToLine(QtWidgets.QWidget):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
