@@ -632,25 +632,90 @@ class MainWindow(QtWidgets.QMainWindow):
         panel_layout.setContentsMargins(0, 0, 0, 0)
         panel_layout.setSpacing(8)
 
-        self.box_options_container = QtWidgets.QWidget()
-        box_grid = QtWidgets.QGridLayout(self.box_options_container)
-        box_grid.setColumnMinimumWidth(0, 120)
-        box_grid.setColumnStretch(1, 1)
-        box_grid.setHorizontalSpacing(12)
-        box_grid.setVerticalSpacing(8)
+        self.line_bg_options_container = QtWidgets.QWidget()
+        line_bg_grid = QtWidgets.QGridLayout(self.line_bg_options_container)
+        line_bg_grid.setColumnMinimumWidth(0, 120)
+        line_bg_grid.setColumnStretch(1, 1)
+        line_bg_grid.setHorizontalSpacing(12)
+        line_bg_grid.setVerticalSpacing(8)
 
-        self.box_opacity_slider, self.box_opacity_spinbox = self._build_style_control(0, 100)
-        self.box_padding_slider, self.box_padding_spinbox = self._build_style_control(0, 40)
+        self.line_bg_color_row = QtWidgets.QWidget()
+        line_bg_color_layout = QtWidgets.QHBoxLayout(self.line_bg_color_row)
+        line_bg_color_layout.setContentsMargins(0, 0, 0, 0)
+        self.line_bg_color_button = QtWidgets.QPushButton("Pick color…")
+        self.line_bg_color_button.setFixedHeight(32)
+        self.line_bg_color_value = QtWidgets.QLineEdit()
+        self.line_bg_color_value.setReadOnly(True)
+        self.line_bg_color_value.setFixedHeight(32)
+        self.line_bg_color_value.setMinimumWidth(110)
+        line_bg_color_layout.addWidget(self.line_bg_color_button)
+        line_bg_color_layout.addWidget(self.line_bg_color_value)
 
-        box_grid.addWidget(QtWidgets.QLabel("Box opacity"), 0, 0)
-        box_grid.addWidget(self.box_opacity_slider, 0, 1)
-        box_grid.addWidget(self.box_opacity_spinbox, 0, 2)
+        self.line_bg_opacity_slider, self.line_bg_opacity_spinbox = self._build_style_control(
+            0, 100
+        )
+        self.line_bg_padding_slider, self.line_bg_padding_spinbox = self._build_style_control(
+            0, 40
+        )
+        self.line_bg_radius_slider, self.line_bg_radius_spinbox = self._build_style_control(
+            0, 40
+        )
 
-        box_grid.addWidget(QtWidgets.QLabel("Box padding"), 1, 0)
-        box_grid.addWidget(self.box_padding_slider, 1, 1)
-        box_grid.addWidget(self.box_padding_spinbox, 1, 2)
+        line_bg_grid.addWidget(QtWidgets.QLabel("Line background color"), 0, 0)
+        line_bg_grid.addWidget(self.line_bg_color_row, 0, 1, 1, 2)
+        line_bg_grid.addWidget(QtWidgets.QLabel("Line background opacity"), 1, 0)
+        line_bg_grid.addWidget(self.line_bg_opacity_slider, 1, 1)
+        line_bg_grid.addWidget(self.line_bg_opacity_spinbox, 1, 2)
+        line_bg_grid.addWidget(QtWidgets.QLabel("Line background padding"), 2, 0)
+        line_bg_grid.addWidget(self.line_bg_padding_slider, 2, 1)
+        line_bg_grid.addWidget(self.line_bg_padding_spinbox, 2, 2)
+        line_bg_grid.addWidget(QtWidgets.QLabel("Line background corner radius"), 3, 0)
+        line_bg_grid.addWidget(self.line_bg_radius_slider, 3, 1)
+        line_bg_grid.addWidget(self.line_bg_radius_spinbox, 3, 2)
 
-        panel_layout.addWidget(self.box_options_container)
+        self.word_bg_options_container = QtWidgets.QWidget()
+        word_bg_grid = QtWidgets.QGridLayout(self.word_bg_options_container)
+        word_bg_grid.setColumnMinimumWidth(0, 120)
+        word_bg_grid.setColumnStretch(1, 1)
+        word_bg_grid.setHorizontalSpacing(12)
+        word_bg_grid.setVerticalSpacing(8)
+
+        self.word_bg_color_row = QtWidgets.QWidget()
+        word_bg_color_layout = QtWidgets.QHBoxLayout(self.word_bg_color_row)
+        word_bg_color_layout.setContentsMargins(0, 0, 0, 0)
+        self.word_bg_color_button = QtWidgets.QPushButton("Pick color…")
+        self.word_bg_color_button.setFixedHeight(32)
+        self.word_bg_color_value = QtWidgets.QLineEdit()
+        self.word_bg_color_value.setReadOnly(True)
+        self.word_bg_color_value.setFixedHeight(32)
+        self.word_bg_color_value.setMinimumWidth(110)
+        word_bg_color_layout.addWidget(self.word_bg_color_button)
+        word_bg_color_layout.addWidget(self.word_bg_color_value)
+
+        self.word_bg_opacity_slider, self.word_bg_opacity_spinbox = self._build_style_control(
+            0, 100
+        )
+        self.word_bg_padding_slider, self.word_bg_padding_spinbox = self._build_style_control(
+            0, 40
+        )
+        self.word_bg_radius_slider, self.word_bg_radius_spinbox = self._build_style_control(
+            0, 40
+        )
+
+        word_bg_grid.addWidget(QtWidgets.QLabel("Word background color"), 0, 0)
+        word_bg_grid.addWidget(self.word_bg_color_row, 0, 1, 1, 2)
+        word_bg_grid.addWidget(QtWidgets.QLabel("Word background opacity"), 1, 0)
+        word_bg_grid.addWidget(self.word_bg_opacity_slider, 1, 1)
+        word_bg_grid.addWidget(self.word_bg_opacity_spinbox, 1, 2)
+        word_bg_grid.addWidget(QtWidgets.QLabel("Word background padding"), 2, 0)
+        word_bg_grid.addWidget(self.word_bg_padding_slider, 2, 1)
+        word_bg_grid.addWidget(self.word_bg_padding_spinbox, 2, 2)
+        word_bg_grid.addWidget(QtWidgets.QLabel("Word background corner radius"), 3, 0)
+        word_bg_grid.addWidget(self.word_bg_radius_slider, 3, 1)
+        word_bg_grid.addWidget(self.word_bg_radius_spinbox, 3, 2)
+
+        panel_layout.addWidget(self.line_bg_options_container)
+        panel_layout.addWidget(self.word_bg_options_container)
 
         reset_layout = QtWidgets.QHBoxLayout()
         reset_layout.addStretch()
@@ -755,6 +820,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._on_subtitle_mode_button_clicked
             )
         self.highlight_color_button.clicked.connect(self._on_highlight_color_clicked)
+        self.line_bg_color_button.clicked.connect(self._on_line_bg_color_clicked)
+        self.word_bg_color_button.clicked.connect(self._on_word_bg_color_clicked)
         if self.subtitle_style_preset_group:
             self.subtitle_style_preset_group.buttonClicked.connect(
                 self._on_subtitle_style_preset_clicked
@@ -773,8 +840,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.outline_slider,
             self.shadow_slider,
             self.margin_slider,
-            self.box_opacity_slider,
-            self.box_padding_slider,
+            self.line_bg_opacity_slider,
+            self.line_bg_padding_slider,
+            self.line_bg_radius_slider,
+            self.word_bg_opacity_slider,
+            self.word_bg_padding_slider,
+            self.word_bg_radius_slider,
         ):
             slider.valueChanged.connect(self._on_subtitle_style_custom_changed)
 
@@ -783,8 +854,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.outline_spinbox,
             self.shadow_spinbox,
             self.margin_spinbox,
-            self.box_opacity_spinbox,
-            self.box_padding_spinbox,
+            self.line_bg_opacity_spinbox,
+            self.line_bg_padding_spinbox,
+            self.line_bg_radius_spinbox,
+            self.word_bg_opacity_spinbox,
+            self.word_bg_padding_spinbox,
+            self.word_bg_radius_spinbox,
         ):
             spinbox.valueChanged.connect(self._on_subtitle_style_custom_changed)
 
@@ -801,6 +876,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_background_mode_controls()
         self._update_highlight_color_display()
         self._update_highlight_color_visibility()
+        self._update_background_options_visibility()
 
     def _update_highlight_color_display(self) -> None:
         self.highlight_color_value.setText(self._highlight_color)
@@ -832,12 +908,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._subtitle_style_custom, background_mode="none"
             )
             self._set_background_mode_buttons("none")
-            self._update_box_options_visibility(False)
         self._config["subtitle_mode"] = mode
         self._store_subtitle_style_config()
         self._log(f"Subtitle mode set to: {mode}")
         self._update_background_mode_controls()
         self._update_highlight_color_visibility()
+        self._update_background_options_visibility()
         self._invalidate_preview_playback()
         self._schedule_preview_refresh()
 
@@ -863,6 +939,54 @@ class MainWindow(QtWidgets.QMainWindow):
         current_style["highlight_color"] = hex_value
         self._store_subtitle_style_config()
         self._update_highlight_color_display()
+        self._schedule_preview_refresh()
+
+    def _on_line_bg_color_clicked(self) -> None:
+        color = QtWidgets.QColorDialog.getColor(
+            QtGui.QColor(self._style_model.line_bg_color), self
+        )
+        if not color.isValid():
+            return
+        hex_value = color.name().upper()
+        self._apply_line_bg_color(hex_value)
+
+    def _apply_line_bg_color(self, hex_value: str) -> None:
+        if hex_value == self._subtitle_style_custom.line_bg_color:
+            return
+        if self._subtitle_style_preset != PRESET_CUSTOM:
+            self._subtitle_style_preset = PRESET_CUSTOM
+            self._set_subtitle_style_preset_buttons(PRESET_CUSTOM)
+        self._subtitle_style_custom = replace(
+            self._collect_custom_style_from_controls(), line_bg_color=hex_value
+        )
+        self._style_model = self._subtitle_style_custom
+        self._store_subtitle_style_config()
+        self._update_line_bg_color_display()
+        self._invalidate_preview_playback()
+        self._schedule_preview_refresh()
+
+    def _on_word_bg_color_clicked(self) -> None:
+        color = QtWidgets.QColorDialog.getColor(
+            QtGui.QColor(self._style_model.word_bg_color), self
+        )
+        if not color.isValid():
+            return
+        hex_value = color.name().upper()
+        self._apply_word_bg_color(hex_value)
+
+    def _apply_word_bg_color(self, hex_value: str) -> None:
+        if hex_value == self._subtitle_style_custom.word_bg_color:
+            return
+        if self._subtitle_style_preset != PRESET_CUSTOM:
+            self._subtitle_style_preset = PRESET_CUSTOM
+            self._set_subtitle_style_preset_buttons(PRESET_CUSTOM)
+        self._subtitle_style_custom = replace(
+            self._collect_custom_style_from_controls(), word_bg_color=hex_value
+        )
+        self._style_model = self._subtitle_style_custom
+        self._store_subtitle_style_config()
+        self._update_word_bg_color_display()
+        self._invalidate_preview_playback()
         self._schedule_preview_refresh()
 
     def _toggle_subtitle_style_panel(self, checked: bool) -> None:
@@ -911,14 +1035,34 @@ class MainWindow(QtWidgets.QMainWindow):
                 int(round(style.vertical_offset)),
             ),
             (
-                self.box_opacity_slider,
-                self.box_opacity_spinbox,
+                self.line_bg_opacity_slider,
+                self.line_bg_opacity_spinbox,
                 int(round(style.line_bg_opacity * 100)),
             ),
             (
-                self.box_padding_slider,
-                self.box_padding_spinbox,
+                self.line_bg_padding_slider,
+                self.line_bg_padding_spinbox,
                 int(round(style.line_bg_padding)),
+            ),
+            (
+                self.line_bg_radius_slider,
+                self.line_bg_radius_spinbox,
+                int(round(style.line_bg_radius)),
+            ),
+            (
+                self.word_bg_opacity_slider,
+                self.word_bg_opacity_spinbox,
+                int(round(style.word_bg_opacity * 100)),
+            ),
+            (
+                self.word_bg_padding_slider,
+                self.word_bg_padding_spinbox,
+                int(round(style.word_bg_padding)),
+            ),
+            (
+                self.word_bg_radius_slider,
+                self.word_bg_radius_spinbox,
+                int(round(style.word_bg_radius)),
             ),
         ]
         for slider, spinbox, value in controls:
@@ -941,11 +1085,26 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self._store_subtitle_style_config()
         self._set_background_mode_buttons(effective_background_mode)
-        self._update_box_options_visibility(effective_background_mode == "line")
+        self._update_line_bg_color_display()
+        self._update_word_bg_color_display()
+        self._update_background_options_visibility(effective_background_mode)
         self._update_background_mode_controls()
 
-    def _update_box_options_visibility(self, enabled: bool) -> None:
-        self.box_options_container.setVisible(enabled)
+    def _update_line_bg_color_display(self) -> None:
+        self.line_bg_color_value.setText(self._style_model.line_bg_color)
+
+    def _update_word_bg_color_display(self) -> None:
+        self.word_bg_color_value.setText(self._style_model.word_bg_color)
+
+    def _update_background_options_visibility(self, background_mode: str | None = None) -> None:
+        if background_mode is None:
+            background_mode = self._sanitize_background_mode_for_mode(
+                self._style_model.background_mode
+            )
+        show_line = background_mode == "line"
+        show_word = background_mode == "word" and self._subtitle_mode == "word_highlight"
+        self.line_bg_options_container.setVisible(show_line)
+        self.word_bg_options_container.setVisible(show_word)
 
     def _set_subtitle_style_preset_buttons(self, preset: str) -> None:
         for key, button in self.subtitle_style_preset_buttons.items():
@@ -1006,8 +1165,16 @@ class MainWindow(QtWidgets.QMainWindow):
             shadow_strength=shadow_strength,
             vertical_offset=self.margin_slider.value(),
             background_mode=background_mode,
-            line_bg_opacity=self.box_opacity_slider.value() / 100.0,
-            line_bg_padding=self.box_padding_slider.value(),
+            line_bg_color=self.line_bg_color_value.text()
+            or self._subtitle_style_custom.line_bg_color,
+            line_bg_opacity=self.line_bg_opacity_slider.value() / 100.0,
+            line_bg_padding=self.line_bg_padding_slider.value(),
+            line_bg_radius=self.line_bg_radius_slider.value(),
+            word_bg_color=self.word_bg_color_value.text()
+            or self._subtitle_style_custom.word_bg_color,
+            word_bg_opacity=self.word_bg_opacity_slider.value() / 100.0,
+            word_bg_padding=self.word_bg_padding_slider.value(),
+            word_bg_radius=self.word_bg_radius_slider.value(),
             subtitle_mode=self._subtitle_mode,
             highlight_color=self._highlight_color,
         )
@@ -1050,7 +1217,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_subtitle_style_custom_changed(self) -> None:
         background_mode = self._current_background_mode()
-        self._update_box_options_visibility(background_mode == "line")
+        self._update_background_options_visibility(background_mode)
 
         if self._subtitle_style_preset != PRESET_CUSTOM:
             self._subtitle_style_preset = PRESET_CUSTOM
