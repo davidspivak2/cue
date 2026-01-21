@@ -10,7 +10,7 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Subtitles-ready preview card with a subtitle still frame (click to expand).
 - Subtitle mode selector (Word highlight vs Static) and highlight color picker (Word highlight is the default).
 - Highlight color changes refresh the preview still immediately.
-- Word-highlight export uses the graphics overlay renderer (no legacy subtitle filters).
+- Export uses the graphics overlay renderer only.
 - Graphics-based preview rendering keeps subtitle styling aligned with export results.
 - Word highlighting now applies correctly on wrapped subtitle lines in the graphics overlay preview/export path.
 - Graphics overlay export pipeline streams RGBA frames to FFmpeg.
@@ -33,7 +33,7 @@ app/
   ffmpeg_utils.py         # FFmpeg invocation helpers
   graphics_preview_renderer.py # Graphics-based preview rendering
   srt_utils.py            # SRT parsing/formatting helpers
-  subtitle_style.py       # Subtitle style presets and FFmpeg style mapping
+  subtitle_style.py       # Subtitle style presets and style normalization helpers
   graphics_overlay_export.py # Graphics overlay export planning + helpers
   word_timing_schema.py   # Word timing JSON contract + validation
   ui/                     # UI components, theme, and widgets
@@ -67,4 +67,5 @@ run-from-source, testing, and packaging steps.
 ## Troubleshooting
 - **CUDA missing DLLs / GPU error**: The app automatically falls back to CPU and logs the CUDA error.
 - **FFmpeg not found**: Run `download_ffmpeg.bat` or install FFmpeg via winget.
-- **Audio copy fails during burn-in**: The app retries with AAC audio and logs the fallback.
+- **Audio copy fails during burn-in**: The app retries with AAC audio and logs the retry.
+- **Graphics overlay export debugging**: See `docs/GRAPHICS_OVERLAY_DEBUGGING.md` for renderer signals and log locations.

@@ -101,9 +101,9 @@ Running it out-of-process:
 - `app/ui/*` — widgets, state helpers, styling/theme
 - `app/ffmpeg_utils.py` — ffmpeg discovery + subprocess settings
 - `app/srt_utils.py` — SRT formatting primitives
-- `app/srt_splitter.py` — cue splitting and word alignment fallback
+- `app/srt_splitter.py` — cue splitting and word alignment recovery
 - `app/progress.py` — progress aggregation and weights
-- `app/subtitle_style.py` — subtitle style presets + FFmpeg style formatting
+- `app/subtitle_style.py` — subtitle style presets + style normalization helpers
 - `app/graphics_preview_renderer.py` — graphics-based preview rendering for still frames
 - `app/align_worker.py` — WhisperX alignment worker for word timings
 - `app/align_utils.py` — alignment planning + staleness checks
@@ -560,7 +560,7 @@ Recent updates include:
 - Word-highlight clipping and clip-rect alignment were tightened for the graphics preview renderer.
 - Outline/shadow alignment was corrected for wrapped text and glyph-run paths in graphics rendering.
 - Wrapped-line word highlight fixes now make highlight clip rects line-relative so multi-line cues highlight correctly.
-- Graphics overlay export is the only rendering path (no legacy FFmpeg subtitle filters).
+- Graphics overlay export is the only rendering path; FFmpeg subtitle filters are not used.
 - Diagnostics can optionally zip logs + outputs on exit for easier support handoffs.
 
 ---

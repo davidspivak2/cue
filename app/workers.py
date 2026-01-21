@@ -1659,6 +1659,9 @@ class Worker(QtCore.QObject):
                     "burn_in_command_used": self._burn_in_command,
                     "burn_in_audio_mode": self._burn_in_audio_mode,
                     "burn_in_subtitle_mode": self._burn_in_subtitle_mode,
+                    "burn_in_renderer": "graphics_overlay"
+                    if self._burn_in_pipeline
+                    else None,
                     "burn_in_pipeline": self._burn_in_pipeline,
                     "burn_in_subtitle_path": self._burn_in_subtitle_path,
                     "burn_in_filter": self._burn_in_filter,
