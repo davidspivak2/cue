@@ -30,7 +30,7 @@ This is intentionally opinionated. If an implementation choice conflicts with th
   - “Choose video…”
   - “Create subtitles”
   - “Open subtitles”
-  - “Create final video”
+  - “Create video with subtitles”
 
 5) **Delightful waiting / never feel stuck**
 - Even when progress is slow or coarse (e.g., long Whisper segments), the UI should communicate:
@@ -216,22 +216,54 @@ Future (PR11):
 **Goal:** Make the result feel real; allow styling adjustments before export.
 
 Current implementation:
-- Actions:
-  - Primary: “Create final video” (single CTA, inside the Style card).
-- Two-column layout:
-  - Left: Preview Card (subtitle still only)
-    - Click still frame to expand preview in a dialog.
-    - Preview stills are graphics-rendered to match export styling.
-  - Right: Style Card (grouped sections + CTA)
-    - Mode: segmented control (“Static” / “Word highlight”).
-    - Highlight color row (only visible when Subtitle mode = Word highlight).
-      - Changing the highlight color refreshes the preview still immediately.
-    - Presets: Default, Large outline, Large outline + box, Custom (text list).
-    - Quick tweaks: font size, outline width, shadow, bottom margin.
-    - Background: none/line/word segmented control (Word disabled with helper text).
-    - Line background controls: opacity + padding (visible when Line is selected).
-    - Planned: per-side background padding (Top/Right/Bottom/Left) for line/word backgrounds. Current UI uses a single padding value because SubtitleStyle currently supports only one padding field.
-    - Advanced: “Show advanced options” toggle reveals extra controls and a “Reset to preset” action.
+- Header / status:
+  - Simple header label: “Subtitles ready ✓” (with a check icon).
+  - No “Saving to:” line under the header.
+- Layout:
+  - Two-column layout:
+    - Left: Preview card showing a STILL frame (no video playback controls).
+    - Right: Style inspector (fixed width), vertically scrollable if content overflows.
+    - No horizontal scrolling in the inspector.
+  - Sticky bottom bar (SUBTITLES_READY only):
+    - Left: “Saving as: <resolved output path>” (single line; middle-ellipsis if long, tooltip can reveal full path).
+    - Right: the only CTA button labeled exactly “Create video with subtitles”.
+    - CTA is not inside the Style inspector.
+- Style inspector structure:
+  - Mode:
+    - Subtitle mode segmented control: Static / Word highlight.
+  - Highlight:
+    - Only “Highlight color” exists; visible only when Subtitle mode = Word highlight.
+    - No highlight opacity control.
+  - Preset:
+    - Preset is a dropdown: Default / Large outline / Large outline + box / Custom.
+    - “Reset to preset” is always visible outside of Advanced.
+  - Quick tweaks:
+    - Font size
+    - Outline
+    - Shadow
+    - Bottom margin
+  - Background:
+    - Segmented control labels: None / Around line / Around word.
+    - In Static mode: Around word is visible but disabled with a tooltip explaining it requires Word highlight mode.
+  - Advanced:
+    - Advanced section has a title “Advanced” and a “Show advanced options” toggle.
+    - When Advanced is open:
+      - Around line → Line background controls (only when Around line is selected).
+      - Around word → Word background controls (only in Word highlight, when Around word is selected).
+      - Advanced also contains accordions: Text / Outline / Shadow / Vertical position.
+    - Vertical position:
+      - Advanced has Vertical anchor (Bottom/Middle/Top) and Vertical offset.
+      - If Vertical anchor is not Bottom, the Quick tweaks “Bottom margin” control is disabled with a tooltip explaining it’s only for Bottom anchor.
+- Color picker UX:
+  - Color fields use a compact color chip; clicking opens a small palette/popover.
+  - Palette includes recommended colors plus a “More colors” (multicolor) entry that opens the color dialog.
+  - No hex field in the inspector; hex entry is only in the color dialog.
+  - Mouse wheel over controls does not change values inside the Style inspector; wheel scrolls the inspector instead.
+- Responsive behavior:
+  - If the window becomes too narrow:
+    - The inspector collapses into a right-side drawer opened via a “Style” button.
+    - The drawer floats above the preview with a dimmed scrim; it has an X to close; clicking the scrim closes it.
+    - When the window becomes wide again, restore side-by-side layout automatically.
 
 ---
 
@@ -447,10 +479,10 @@ Note:
 - “Creating subtitles”
 - “Preparing audio”
 - “Listening to audio”
-- “Subtitles are ready”
+- “Subtitles ready ✓”
 - “Open subtitles”
 - “Edit in Subtitle Edit”
-- “Create final video”
+- “Create video with subtitles”
 - “Exporting video”
 - “Your video is ready”
 - “Play video”
