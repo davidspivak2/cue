@@ -11,8 +11,8 @@ It explains:
 - what the app does
 - how the pipeline works (GUI → FFmpeg → faster-whisper → SRT → FFmpeg burn-in)
 - where files go (models, logs, outputs)
-- the PR1–PR13 roadmap **and current status**
-- what has been worked on since PR6 (progress + settings + diagnostics)
+- the GUI PR1–PR13 roadmap **and current status**
+- what has been worked on since GUI PR6 (progress + settings + diagnostics)
 - the current punctuation problem (what we measured, what we tried, what to do next)
 
 UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`**.
@@ -137,7 +137,8 @@ Outputs include:
 - `<video_stem>_audio_for_whisper.wav` (scratch audio)
 - `<video_stem>.srt` (subtitles)
 - `<video_stem>.word_timings.json` (word timing output; see §3.6)
-- `<video_stem>_word_highlight.ass` (ASS output used for word-highlight preview/export)
+- `<video_stem>_word_highlight.ass` (optional legacy ASS output for word-highlight preview playback
+  and fallback export; not produced when graphics-overlay export succeeds)
 - `<video_stem>_subtitled.mp4` (burned output)
 
 ### Diagnostics JSON (opt-in, **on success**)
@@ -187,9 +188,9 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `subtitle_style.preset` | Subtitle style preset buttons | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
 | `subtitle_style.custom` | “Customize...” panel controls | Object: `font_size`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
 | `subtitle_style.appearance` | (style model, internal) | Object with font, color, outline, shadow, background, and layout fields | Derived from preset/custom | Preview + export styling |
-| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects ASS (word highlight) vs SRT (static) rendering paths |
-| `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (ASS) |
-| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Word highlight styling (ASS) |
+| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects word-highlight vs static rendering; export defaults to graphics overlay with ASS/SRT fallback |
+| `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (graphics overlay + ASS fallback) |
+| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay + ASS fallback) |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”
@@ -446,28 +447,28 @@ Benchmarks must use the **exact** `<video_stem>_audio_for_whisper.wav` produced 
 
 ---
 
-## 10) Roadmap (PR1–PR13) and current status
+## 10) Roadmap (GUI PR1–PR13) and current status
 
 This repo started with a 13‑PR UX/architecture overhaul plan. The exact PR boundaries have shifted a bit (some items were combined or rescaled), but the sequence is still a good mental model.
 
 ### Status snapshot (as of 2026-02-27)
 
 Done / merged:
-- **PR1** — dark theme foundation ✅
-- **PR2** — step-based state machine shell (stacked pages) ✅
-- **PR3** — video selection UX (DropZone + thumbnail card + replace on drop) ✅
-- **PR4 (rescoped)** — Settings page + save policy (Ask / Same folder / Always) ✅
-- **PR5 (partial)** — copy polish + CTA reduction (still needs another pass later) 🟡
-- **Plan decision:** PR5 stays partial; we will **not** try to finish it in-place while features are still moving.
-- **PR6 (expanded)** — progress work ✅
+- **GUI PR1** — dark theme foundation ✅
+- **GUI PR2** — step-based state machine shell (stacked pages) ✅
+- **GUI PR3** — video selection UX (DropZone + thumbnail card + replace on drop) ✅
+- **GUI PR4 (rescoped)** — Settings page + save policy (Ask / Same folder / Always) ✅
+- **GUI PR5 (partial)** — copy polish + CTA reduction (still needs another pass later) 🟡
+- **Plan decision:** GUI PR5 stays partial; we will **not** try to finish it in-place while features are still moving.
+- **GUI PR6 (expanded)** — progress work ✅
   - burn-in/export (FFmpeg) progress: smooth and correct
   - transcription progress: improved, but can still move in coarse jumps depending on Whisper segmentation
-- **PR7** — Subtitles-ready page: auto-pick a subtitle moment and render a preview still frame ✅
-- **PR8** — style presets + customize panel + instant preview updates ✅
-- **PR9** — in-app preview playback (QtMultimedia) + caching ✅ (feature no longer surfaced in the GUI)
-- **PR10** — word highlight default mode + highlight color picker + ASS export ✅
+- **GUI PR7** — Subtitles-ready page: auto-pick a subtitle moment and render a preview still frame ✅
+- **GUI PR8** — style presets + customize panel + instant preview updates ✅
+- **GUI PR9** — in-app preview playback (QtMultimedia) + caching ✅ (feature no longer surfaced in the GUI)
+- **GUI PR10** — word highlight default mode + highlight color picker + ASS export ✅
 - **Extra (not originally in the plan)** — opt-in success diagnostics JSON + “write next to outputs” hotfix ✅
-- **PR14 — Docs refresh / handover readiness (this update)** ✅
+- **GUI PR14 — Docs refresh / handover readiness (this update)** ✅
 
 Unplanned but merged work since the original PR plan:
 - Punctuation benchmark/diagnostics tooling work
@@ -478,28 +479,28 @@ Unplanned but merged work since the original PR plan:
 - Graphics-based preview renderer for subtitle stills
 - Exit diagnostics bundle (zip logs + outputs on close)
 
-**PR15 — copy polish + CTA reduction sweep (final pass)**
+**GUI PR15 — copy polish + CTA reduction sweep (final pass)**
 - One-primary-CTA-per-state audit
 - Microcopy consistency audit
 - Remove leftover technical terms in user-facing labels
 - Align error/warning copy with UX/UI spec
 
-Not done yet (still in PR11+ territory):
-- **PR11** — “delightful waiting” visuals (waveform + thumbnail strip; cached under LocalAppData)
-- **PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
-- **PR13** — packaging hardening / smoke tests
-- **PR15** — copy polish + CTA reduction sweep (after stabilization)
+Not done yet (still in GUI PR11+ territory):
+- **GUI PR11** — “delightful waiting” visuals (waveform + thumbnail strip; cached under LocalAppData)
+- **GUI PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
+- **GUI PR13** — packaging hardening / smoke tests
+- **GUI PR15** — copy polish + CTA reduction sweep (after stabilization)
 
-PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
+GUI PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
 
 ### Where a new contributor should pick up
 Priority work items:
-1) If punctuation is acceptable: continue the UX roadmap at **PR11** (delightful waiting visuals).
+1) If punctuation is acceptable: continue the UX roadmap at **GUI PR11** (delightful waiting visuals).
 2) If punctuation regresses: use the benchmark + diagnostics to confirm whether loss happens in raw segments vs splitter; the new rescue diagnostics fields help choose.
 
 ---
 
-## 11) What changed since PR6 (summary)
+## 11) What changed since GUI PR6 (summary)
 
 ### 11.1 Progress + status text improvements
 Problem observed:
@@ -564,7 +565,8 @@ Recent updates include:
 - Word-highlight clipping and clip-rect alignment were tightened for the graphics preview renderer.
 - Outline/shadow alignment was corrected for wrapped text and glyph-run paths in graphics rendering.
 - Wrapped-line word highlight fixes now make highlight clip rects line-relative so multi-line cues highlight correctly.
-- Graphics overlay export is now the default path, with `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` as a legacy fallback.
+- Graphics overlay export is now the default path, with `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` or
+  runtime failures falling back to the legacy FFmpeg filters (ASS for word highlight, SRT for static).
 - Diagnostics can optionally zip logs + outputs on exit for easier support handoffs.
 
 ---
