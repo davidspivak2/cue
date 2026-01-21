@@ -104,12 +104,9 @@ Running it out-of-process:
 - `app/srt_splitter.py` — cue splitting and word alignment fallback
 - `app/progress.py` — progress aggregation and weights
 - `app/subtitle_style.py` — subtitle style presets + FFmpeg style formatting
-- `app/ass_render.py` — ASS subtitle document generation (static ASS groundwork)
-- `app/ass_karaoke.py` — ASS step-highlight generation (word highlight)
 - `app/graphics_preview_renderer.py` — graphics-based preview rendering for still frames
 - `app/align_worker.py` — WhisperX alignment worker for word timings
 - `app/align_utils.py` — alignment planning + staleness checks
-- `app/burn_in_export.py` — burn-in plan builder (SRT vs ASS pipelines)
 - `tools/*` — local benchmark tools
 - `docs/*` — handover + UX spec
 
@@ -137,8 +134,6 @@ Outputs include:
 - `<video_stem>_audio_for_whisper.wav` (scratch audio)
 - `<video_stem>.srt` (subtitles)
 - `<video_stem>.word_timings.json` (word timing output; see §3.6)
-- `<video_stem>_word_highlight.ass` (optional legacy ASS output for word-highlight preview playback
-  and fallback export; not produced when graphics-overlay export succeeds)
 - `<video_stem>_subtitled.mp4` (burned output)
 
 ### Diagnostics JSON (opt-in, **on success**)
@@ -153,7 +148,7 @@ If **“Zip logs and outputs on exit”** is enabled, the app creates a ZIP file
 folder as the selected video on exit. The bundle includes:
 - The current session log file.
 - Diagnostics JSON files in the output folder (if any).
-- Output artifacts (SRT, ASS, word timings JSON, output video, extracted WAV if present).
+- Output artifacts (SRT, word timings JSON, output video, extracted WAV if present).
 
 ### Local dev benchmark outputs (not committed)
 
@@ -188,9 +183,9 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `subtitle_style.preset` | Subtitle style preset buttons | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
 | `subtitle_style.custom` | “Customize...” panel controls | Object: `font_size`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
 | `subtitle_style.appearance` | (style model, internal) | Object with font, color, outline, shadow, background, and layout fields | Derived from preset/custom | Preview + export styling |
-| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects word-highlight vs static rendering; export defaults to graphics overlay with ASS/SRT fallback |
-| `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (graphics overlay + ASS fallback) |
-| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay + ASS fallback) |
+| `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects word-highlight vs static rendering; export uses graphics overlay only |
+| `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (graphics overlay only) |
+| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”
@@ -206,7 +201,7 @@ Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 
 ### Where to change what (cheat-sheet)
 - Audio extraction output path & naming (`<video>_audio_for_whisper.wav`), FFmpeg args, audio filter toggle behavior → `app/workers.py`
-- Burn-in (subtitles filter, style string, audio copy → AAC retry) → `app/workers.py` (plus `app/ffmpeg_utils.py` for escaping/discovery)
+- Burn-in (graphics overlay stream, audio copy → AAC retry) → `app/workers.py`
 - Worker launching (python `-m app.transcribe_worker` vs exe), stdout token parsing, watchdog timeout → `app/workers.py`
 - Worker internals: faster-whisper args, device/compute-type logic, punctuation stats JSON, punctuation rescue attempts + chooser gate → `app/transcribe_worker.py`
 - SRT formatting primitives → `app/srt_utils.py`
@@ -466,7 +461,7 @@ Done / merged:
 - **GUI PR7** — Subtitles-ready page: auto-pick a subtitle moment and render a preview still frame ✅
 - **GUI PR8** — style presets + customize panel + instant preview updates ✅
 - **GUI PR9** — in-app preview playback (QtMultimedia) + caching ✅ (feature no longer surfaced in the GUI)
-- **GUI PR10** — word highlight default mode + highlight color picker + ASS export ✅
+- **GUI PR10** — word highlight default mode + highlight color picker ✅
 - **Extra (not originally in the plan)** — opt-in success diagnostics JSON + “write next to outputs” hotfix ✅
 - **GUI PR14 — Docs refresh / handover readiness (this update)** ✅
 
@@ -565,8 +560,7 @@ Recent updates include:
 - Word-highlight clipping and clip-rect alignment were tightened for the graphics preview renderer.
 - Outline/shadow alignment was corrected for wrapped text and glyph-run paths in graphics rendering.
 - Wrapped-line word highlight fixes now make highlight clip rects line-relative so multi-line cues highlight correctly.
-- Graphics overlay export is now the default path, with `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` or
-  runtime failures falling back to the legacy FFmpeg filters (ASS for word highlight, SRT for static).
+- Graphics overlay export is the only rendering path (no legacy FFmpeg subtitle filters).
 - Diagnostics can optionally zip logs + outputs on exit for easier support handoffs.
 
 ---

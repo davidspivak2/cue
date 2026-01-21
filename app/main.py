@@ -24,16 +24,10 @@ from typing import Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets, QtMultimedia
 
-from app.ass_karaoke import (
-    build_ass_document_with_karaoke_fallback,
-    build_style_config_from_subtitle_style,
-)
 from app.config import DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY, apply_config_defaults
 from app.ffmpeg_utils import (
     ensure_ffmpeg_available,
-    extract_ass_frame,
     extract_raw_frame,
-    extract_subtitled_frame,
     get_ffmpeg_missing_message,
     get_runtime_mode,
     get_subprocess_kwargs,
@@ -67,8 +61,6 @@ from app.ui.widgets import (
 from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.preview_playback import (
     PreviewPlaybackController,
-    STATIC_SRT_PIPELINE,
-    WORD_HIGHLIGHT_ASS_PIPELINE,
 )
 from app.srt_utils import (
     compute_srt_sha256,
@@ -104,8 +96,6 @@ from app.subtitle_style import (
     style_model_from_legacy,
     style_model_to_dict,
     summarize_style_model,
-    get_box_alpha_byte,
-    to_ffmpeg_force_style,
 )
 
 VIDEO_FILTER = "Video Files (*.mp4 *.mkv *.mov *.m4v);;All Files (*.*)"
@@ -1736,77 +1726,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 except OSError:
                     pass
             self._log(
-                f"Graphics preview failed: {exc}; falling back to legacy preview",
+                f"Graphics preview failed: {exc}",
                 True,
             )
-
-        word_timings_path = word_timings_path_for_srt(srt_path)
-        if self._subtitle_mode == "word_highlight":
-            pipeline = WORD_HIGHLIGHT_ASS_PIPELINE
-            subtitles_path = output_path.with_suffix(".ass")
-            filter_name = "ass"
-        else:
-            pipeline = STATIC_SRT_PIPELINE
-            subtitles_path = srt_path
-            filter_name = "subtitles"
-        self._log(
-            "Preview still render: "
-            f"subtitle_mode={self._subtitle_mode} "
-            f"pipeline={pipeline} "
-            f"subtitles_path={subtitles_path} "
-            f"filter={filter_name}",
-            True,
-        )
-        if self._subtitle_mode == "word_highlight":
-            style_config = build_style_config_from_subtitle_style(
-                style,
-                highlight_color=resolved_highlight_color,
-                highlight_opacity=resolved_highlight_opacity,
-            )
-            cues = parse_srt_file(srt_path)
-            decision = build_ass_document_with_karaoke_fallback(
-                cues,
-                srt_path=srt_path,
-                word_timings_path=word_timings_path,
-                style_config=style_config,
-            )
-            self._log(
-                "Preview karaoke: "
-                f"enabled={decision.karaoke_enabled} "
-                f"reason={decision.reason} "
-                f"word_timings_path={decision.word_timings_path} "
-                f"highlight_events={decision.highlight_event_count}",
-                True,
-            )
-            subtitles_path.write_text(decision.ass_text, encoding="utf-8")
-            success = extract_ass_frame(
-                self._video_path,
-                subtitles_path,
-                self._preview_timestamp_seconds,
-                output_path,
-                width=preview_width,
-            )
-        else:
-            force_style = to_ffmpeg_force_style(style)
-            alpha_byte = get_box_alpha_byte(style)
-            legacy = legacy_style_from_model(style)
-            self._log(
-                "Preview style: "
-                f"box_enabled={legacy.box_enabled} "
-                f"box_opacity={legacy.box_opacity} "
-                f"alpha={alpha_byte} "
-                f"force_style={force_style}",
-                True,
-            )
-            success = extract_subtitled_frame(
-                self._video_path,
-                srt_path,
-                self._preview_timestamp_seconds,
-                output_path,
-                width=preview_width,
-                force_style=force_style,
-            )
-        return output_path if success else None
+            return None
 
     def _build_settings_page(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
@@ -2203,7 +2126,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._log_word_timing_status(srt_path)
         self._run_alignment_if_needed(srt_path, context="preview")
         style = self._resolve_effective_subtitle_style()
-        force_style = to_ffmpeg_force_style(style)
         self._preview_play_request_pending = True
         self._set_preview_status_message("")
         self._preview_playback_controller.request_clip(
@@ -2212,7 +2134,6 @@ class MainWindow(QtWidgets.QMainWindow):
             anchor_seconds=self._preview_timestamp_seconds,
             clip_start_seconds=self._preview_clip_start_seconds,
             clip_duration_seconds=self._preview_clip_duration_seconds,
-            force_style=force_style,
             subtitle_mode=self._subtitle_mode,
             style=style,
             highlight_color=self._highlight_color,
