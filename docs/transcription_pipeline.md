@@ -80,10 +80,17 @@ model cache paths, or parameter settings.
 
 ## Notes on segmentation and formatting
 
-SRT segmentation is determined by `faster-whisper` output segments. The worker
-does not re-segment or post-process text beyond trimming whitespace and formatting
-timestamps. If segmentation differs between machines, focus on differences in the
-config dump, device selection, or library versions.
+SRT segmentation starts from `faster-whisper` output segments, but the worker
+**does** apply a splitter (`app/srt_splitter.py`) when segments are long. A segment
+is split into multiple cues if it exceeds any of these thresholds:
+- **Apply-if thresholds:** >12.0s duration, >160 characters, or >26 words.
+- **Max cue targets when splitting:** 8.0s, 90 characters, or 14 words per cue.
+
+When splitting, the worker prefers boundaries at punctuation, then large gaps
+(`gap_sec=0.4`) between words. If word timings cannot be aligned to the original
+segment text, the splitter falls back to time-based chunking and reconstructs text
+from words. If segmentation differs between machines, compare the config dump,
+device selection, model versions, and splitter thresholds.
 
 ## VAD gap rescue
 
@@ -96,8 +103,9 @@ main transcript. Limits are enforced on the number of gaps and total rescued dur
 
 When subtitles are ready, the GUI prepares a preview moment:
 
-1. **SRT parsing + cue selection.** The GUI parses the generated SRT file and selects
-   the first non-empty cue to anchor a preview moment.
+1. **SRT parsing + cue selection.** The GUI parses the generated SRT file, picks the
+   first non-empty cue, and anchors the preview moment at ~25% into that cue
+   (clamped to the cue bounds).
 2. **Preview still frame.** The GUI extracts a raw video frame via FFmpeg and renders
    subtitles with the graphics preview renderer (draws text directly onto the image).
    The graphics preview renderer computes highlight clip rects line-relative so wrapped
@@ -106,3 +114,5 @@ When subtitles are ready, the GUI prepares a preview moment:
    mtimes so word-highlight previews update when alignment data changes. Highlight
    color changes force an immediate preview refresh. Frames are cached under
    `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`.
+   In Word highlight mode, the still preview highlights the **second word** when no
+   explicit word index is supplied (preview-only behavior; not time-accurate).

@@ -1,9 +1,9 @@
 # Caption Graphics Overlay Plan
 
-## Status update (2025-02-14)
-- PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
-- PR6 is complete (performance pass landed).
-- PR7 is complete (word background rendering, mutual exclusivity, and UI controls for line/word background color, opacity, padding, and corner radius are in place).
+## Status update (snapshot from 2025-02-14; see GUI context for current status)
+- Overlay PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
+- Overlay PR6 is complete (performance pass landed).
+- Overlay PR7 is complete (word background rendering, mutual exclusivity, and UI controls for line/word background color, opacity, padding, and corner radius are in place).
 - Wrapped-line word-highlight clip rects now use line-relative cursor offsets in the graphics overlay renderer.
 - Graphics overlay export now handles QImage bit-buffer variants for RGBA streaming.
 - Overlay render caching keys are normalized to the expected text + highlight index format.
@@ -91,7 +91,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
 ### Preview behavior
 - Still preview only.
 - No play buttons.
-- No “auto-picked moment”.
+- Preview moment is auto-picked (first non-empty cue; preview anchors ~25% into the cue).
 - Header shows “Subtitles ready ✓”.
 
 ### Line vs word background controls
@@ -104,14 +104,15 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
 
 ## Progressive multi-PR implementation plan
 
-### PR1 — SUBTITLES_READY UI overhaul (no rendering changes)
+### Overlay PR1 — SUBTITLES_READY UI overhaul (no rendering changes)
 - Purpose: Implement the new UI layout and controls without touching rendering or export logic.
 - Scope:
   - Rework the SUBTITLES_READY screen layout to the two-column design.
   - Update CTA label to “Create video with subtitles” in the sticky bottom bar.
   - Replace mode dropdown with segmented control.
   - Convert presets to a dropdown.
-  - Remove playback-related elements (play buttons, auto-picked moment).
+  - Keep the auto-picked preview moment (first non-empty cue; preview anchors ~25% into the cue).
+  - Remove playback-related elements (play buttons).
   - Add mutually exclusive line vs word background UI controls (logic can be visual-only for now).
 - Likely files/modules:
   - UI components for the SUBTITLES_READY screen.
@@ -123,10 +124,10 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Verify two-column layout and still preview on the left.
   - Verify CTA text matches exactly.
   - Confirm segmented control and preset dropdown appear.
-  - Confirm no playback controls or auto-picked moment are present.
+  - Confirm no playback controls are present.
   - Toggle line vs word background and ensure only one can be enabled.
 
-### PR2 — Style/config schema foundation
+### Overlay PR2 — Style/config schema foundation
 - Purpose: Create a unified style schema that supports both legacy and graphics overlay rendering paths.
 - Scope:
   - Define or extend a style/config model for caption graphics overlay options.
@@ -142,7 +143,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Load existing projects without schema errors.
   - Create a new preset and confirm it serializes and reloads.
 
-### PR3 — Graphics renderer for preview still (no export integration yet)
+### Overlay PR3 — Graphics renderer for preview still (no export integration yet)
 - Purpose: Implement the graphics overlay renderer and wire it to still preview only.
 - Scope:
   - Add a graphics renderer that can draw a single frame overlay.
@@ -159,7 +160,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Word highlight preview uses 2nd word, not time-based alignment.
   - Rounded corners and line background render correctly in still preview.
 
-### PR4 — RTL/mixed text word rectangle correctness hardening
+### Overlay PR4 — RTL/mixed text word rectangle correctness hardening
 - Purpose: Ensure word bounding boxes are correct for RTL and mixed-direction text.
 - Scope:
   - Implement robust text measurement for word rectangles.
@@ -174,7 +175,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Verify word highlights align with Arabic/Hebrew samples.
   - Verify mixed RTL/LTR sentences render correct word rectangles.
 
-### PR5 — Export integration with streaming overlay frames (no disk)
+### Overlay PR5 — Export integration with streaming overlay frames (no disk)
 - Purpose: Stream overlay frames to FFmpeg during export without creating PNGs.
 - Scope:
   - Add a state-driven render loop that emits frames only when caption state changes.
@@ -192,7 +193,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Verify progress bar and worker behavior unchanged.
   - Confirm output matches the preview styling.
 
-### PR6 — Performance pass
+### Overlay PR6 — Performance pass
 - Purpose: Optimize renderer and export performance for long videos.
 - Scope:
   - Cache static layout results across frames with identical state.
@@ -208,7 +209,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Export a longer clip and confirm runtime improves or stays stable.
   - Confirm output matches previous visual results.
 
-### PR7 — Word background controls + rendering with mutual exclusivity
+### Overlay PR7 — Word background controls + rendering with mutual exclusivity
 - Status: ✅ Complete (merged).
 - Purpose: Implemented word background rendering and enforced mutual exclusivity in logic.
 - Scope (delivered):
@@ -226,7 +227,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Switch back to line background and verify word background turns off.
   - Export a short clip and confirm the correct background mode renders.
 
-### PR8 — Flip default to graphics renderer while keeping legacy fallback
+### Overlay PR8 — Flip default to graphics renderer while keeping legacy fallback
 - Purpose: Make graphics renderer the default path with a legacy fallback option preserved.
 - Scope:
   - Switch default renderer selection to graphics overlay.
@@ -242,7 +243,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Verify default uses graphics renderer.
   - Toggle fallback and confirm legacy output is produced.
 
-### PR9 — Optional cleanup and follow-ups
+### Overlay PR9 — Optional cleanup and follow-ups
 - Purpose: Remove dead code and document new renderer usage after stability is confirmed.
 - Scope:
   - Remove unused helpers left behind by the transition.
