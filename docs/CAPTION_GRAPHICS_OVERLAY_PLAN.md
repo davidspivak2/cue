@@ -32,7 +32,7 @@
 
 ## Critical constraints (must follow)
 - Must not create thousands of PNGs on disk; no “PNG per state” for full exports.
-- Must preserve the current main behavior as a fallback restore point.
+- Rollback is via the annotated Git tag (no runtime fallback).
 - Must keep export progress UI behavior unchanged (reuse existing progress bar/worker UX).
 - CTA label must be exactly: “Create video with subtitles”.
 - No live preview playback; preview is always a still frame.
@@ -154,7 +154,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Preview rendering integration.
 - Key implementation notes and risks:
   - Do not change export behavior in this PR.
-  - Confirm fallback to legacy preview if renderer fails.
+  - Confirm preview failures surface errors without switching renderers.
 - Manual test checklist:
   - Toggle Static and Word highlight; preview updates accordingly.
   - Word highlight preview uses 2nd word, not time-based alignment.
@@ -181,13 +181,13 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Add a state-driven render loop that emits frames only when caption state changes.
   - Pipe raw RGBA frames to FFmpeg stdin and composite via overlay filter.
   - Preserve existing progress bar and worker UX.
-  - Keep the new pipeline gated (default on; allow legacy fallback).
+  - Use the graphics overlay pipeline for all exports.
 - Likely files/modules:
   - Export pipeline and FFmpeg invocation logic.
   - Renderer integration points.
 - Key implementation notes and risks:
   - Ensure the export progress UI behaves exactly as before.
-  - Keep legacy path intact as a fallback switch (env flag: `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` disables).
+  - No legacy export path or runtime toggle remains.
 - Manual test checklist:
   - Export a short clip and confirm no PNGs are written.
   - Verify progress bar and worker behavior unchanged.
@@ -227,21 +227,18 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Switch back to line background and verify word background turns off.
   - Export a short clip and confirm the correct background mode renders.
 
-### Overlay PR8 — Flip default to graphics renderer while keeping legacy fallback
-- Purpose: Make graphics renderer the default path with a legacy fallback option preserved.
+### Overlay PR8 — Graphics-only export (legacy removed)
+- Purpose: Make graphics overlay the only export renderer and remove legacy paths.
 - Scope:
-  - Switch default renderer selection to graphics overlay.
-  - Maintain a config or runtime toggle to revert to legacy rendering if needed.
-  - Add logging to indicate which renderer is used during export.
+  - Remove legacy export paths and runtime toggles.
+  - Log the renderer choice at export start.
 - Likely files/modules:
   - Renderer selection logic.
   - Logging utility.
 - Key implementation notes and risks:
-  - Ensure legacy path remains fully functional.
-  - Make it easy to diagnose renderer choice in logs.
+  - Ensure export failures surface clearly without fallback.
 - Manual test checklist:
-  - Verify default uses graphics renderer.
-  - Toggle fallback and confirm legacy output is produced.
+  - Verify export uses graphics overlay renderer.
 
 ### Overlay PR9 — Optional cleanup and follow-ups
 - Purpose: Remove dead code and document new renderer usage after stability is confirmed.

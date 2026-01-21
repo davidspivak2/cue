@@ -19,32 +19,21 @@ from typing import Iterable, Optional
 
 from PySide6 import QtCore, QtGui
 from .progress import ProgressStep
-from .ass_karaoke import (
-    build_ass_document_with_karaoke_fallback,
-    build_style_config_from_subtitle_style,
-)
 from .config import (
     DEFAULT_HIGHLIGHT_COLOR,
     DEFAULT_HIGHLIGHT_OPACITY,
-    GRAPHICS_OVERLAY_EXPORT_ENABLED,
 )
 from .ffmpeg_utils import (
     ensure_ffmpeg_available,
-    extract_ass_frame,
     extract_raw_frame,
-    extract_subtitled_frame,
     get_ffprobe_json,
     get_media_duration,
     get_runtime_mode,
     get_subprocess_kwargs,
     resolve_ffmpeg_paths,
 )
-from .burn_in_export import build_burn_in_plan
 from .subtitle_style import (
     SubtitleStyle,
-    get_box_alpha_byte,
-    legacy_style_from_model,
-    to_ffmpeg_force_style,
 )
 from .graphics_preview_renderer import (
     LAYOUT_CACHE_MAX_ENTRIES,
@@ -579,62 +568,10 @@ class Worker(QtCore.QObject):
                 except OSError:
                     pass
             self.signals.log.emit(
-                f"Graphics preview failed: {exc}; falling back to legacy preview",
+                f"Graphics preview failed: {exc}",
                 True,
             )
-
-        word_timings_path = word_timings_path_for_srt(srt_path)
-        if self.subtitle_mode == "word_highlight":
-            style_config = build_style_config_from_subtitle_style(
-                style,
-                highlight_color=resolved_highlight_color,
-                highlight_opacity=resolved_highlight_opacity,
-            )
-            cues = parse_srt_file(srt_path)
-            decision = build_ass_document_with_karaoke_fallback(
-                cues,
-                srt_path=srt_path,
-                word_timings_path=word_timings_path,
-                style_config=style_config,
-            )
-            self.signals.log.emit(
-                "Preview karaoke: "
-                f"enabled={decision.karaoke_enabled} "
-                f"reason={decision.reason} "
-                f"word_timings_path={decision.word_timings_path} "
-                f"highlight_events={decision.highlight_event_count}",
-                True,
-            )
-            ass_path = output_path.with_suffix(".ass")
-            ass_path.write_text(decision.ass_text, encoding="utf-8")
-            success = extract_ass_frame(
-                self.video_path,
-                ass_path,
-                timestamp_seconds,
-                output_path,
-                width=preview_width,
-            )
-        else:
-            force_style = to_ffmpeg_force_style(style)
-            alpha_byte = get_box_alpha_byte(style)
-            legacy = legacy_style_from_model(style)
-            self.signals.log.emit(
-                "Preview style: "
-                f"box_enabled={legacy.box_enabled} "
-                f"box_opacity={legacy.box_opacity} "
-                f"alpha={alpha_byte} "
-                f"force_style={force_style}",
-                True,
-            )
-            success = extract_subtitled_frame(
-                self.video_path,
-                srt_path,
-                timestamp_seconds,
-                output_path,
-                width=preview_width,
-                force_style=force_style,
-            )
-        return output_path if success else None
+            return None
 
     def _run_burn_in(self) -> dict:
         settings = self.subtitle_style
@@ -663,96 +600,20 @@ class Worker(QtCore.QObject):
                 True,
             )
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
-
-        force_style = to_ffmpeg_force_style(settings)
-        alpha_byte = get_box_alpha_byte(settings)
-        legacy = legacy_style_from_model(settings)
-        self.signals.log.emit(
-            "Export style: "
-            f"box_enabled={legacy.box_enabled} "
-            f"box_opacity={legacy.box_opacity} "
-            f"alpha={alpha_byte} "
-            f"force_style={force_style}",
-            True,
-        )
-
-        if GRAPHICS_OVERLAY_EXPORT_ENABLED:
-            try:
-                return self._run_graphics_overlay_export(
-                    ffmpeg_path=ffmpeg_path,
-                    settings=settings,
-                    srt_path=srt_path,
-                    cues=cues,
-                    output_path=output_path,
-                    video_duration=video_duration,
-                )
-            except Exception as exc:  # noqa: BLE001
-                self.signals.log.emit(
-                    "Graphics overlay export failed; falling back to legacy export.",
-                    True,
-                )
-                self.signals.log.emit(str(exc), True)
-
-        plan = build_burn_in_plan(
-            ffmpeg_path=ffmpeg_path,
-            video_path=self.video_path,
-            output_path=output_path,
-            srt_path=srt_path,
-            subtitle_mode=self.subtitle_mode,
-            style=settings,
-            word_timings_path=self._word_timings_path,
-            highlight_color=self.highlight_color,
-            highlight_opacity=self.highlight_opacity,
-        )
-        base_command = plan.base_command
-        self._burn_in_subtitle_mode = self.subtitle_mode
-        self._burn_in_pipeline = plan.pipeline
-        self._burn_in_subtitle_path = str(plan.subtitles_path)
-        self._burn_in_filter = plan.filter_string
-        self.signals.log.emit(f"Export subtitle_mode={self.subtitle_mode}", True)
-        self.signals.log.emit(f"Export pipeline={plan.pipeline}", True)
-        self.signals.log.emit(f"Export subtitles path={plan.subtitles_path}", True)
-        self.signals.log.emit(f"Export filter={plan.filter_string}", True)
-        if self.subtitle_mode == "word_highlight":
-            self.signals.log.emit(
-                "Export karaoke: "
-                f"enabled={plan.karaoke_enabled} "
-                f"reason={plan.karaoke_reason} "
-                f"word_timings_path={plan.karaoke_word_timings_path} "
-                f"highlight_events={plan.karaoke_event_count}",
-                True,
-            )
-
-        self.signals.log.emit("Adding subtitles to the video...", True)
-        self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
-        copy_command = base_command + ["-c:a", "copy", str(output_path)]
-        self._burn_in_command = subprocess.list2cmdline(copy_command)
-        self._burn_in_audio_mode = "copy"
-        burn_start = time.monotonic()
+        self.signals.log.emit("Export renderer=graphics_overlay", True)
         try:
-            self._run_ffmpeg_with_progress(
-                copy_command,
-                video_duration,
-                ProgressStep.EXPORT,
-                "Encoding",
+            return self._run_graphics_overlay_export(
+                ffmpeg_path=ffmpeg_path,
+                settings=settings,
+                srt_path=srt_path,
+                cues=cues,
+                output_path=output_path,
+                video_duration=video_duration,
             )
-            self._burn_in_seconds = time.monotonic() - burn_start
-            return {"output_path": str(output_path)}
-        except RuntimeError as exc:
-            self.signals.log.emit("Audio copy failed, trying another format...", True)
+        except Exception as exc:  # noqa: BLE001
+            self.signals.log.emit("Graphics overlay export failed.", True)
             self.signals.log.emit(str(exc), True)
-
-        aac_command = base_command + ["-c:a", "aac", "-b:a", "192k", str(output_path)]
-        self._burn_in_command = subprocess.list2cmdline(aac_command)
-        self._burn_in_audio_mode = "aac"
-        self._run_ffmpeg_with_progress(
-            aac_command,
-            video_duration,
-            ProgressStep.EXPORT,
-            "Encoding",
-        )
-        self._burn_in_seconds = time.monotonic() - burn_start
-        return {"output_path": str(output_path)}
+            raise RuntimeError("Graphics overlay export failed.") from exc
 
     def _run_graphics_overlay_export(
         self,

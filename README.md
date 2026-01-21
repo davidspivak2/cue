@@ -10,10 +10,10 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Subtitles-ready preview card with a subtitle still frame (click to expand).
 - Subtitle mode selector (Word highlight vs Static) and highlight color picker (Word highlight is the default).
 - Highlight color changes refresh the preview still immediately.
-- Word-highlight export defaults to graphics overlay rendering when enabled; legacy ASS is used only as a fallback if graphics overlay export is disabled or fails.
+- Word-highlight export uses the graphics overlay renderer (no legacy subtitle filters).
 - Graphics-based preview rendering keeps subtitle styling aligned with export results.
 - Word highlighting now applies correctly on wrapped subtitle lines in the graphics overlay preview/export path.
-- Graphics overlay export pipeline streams RGBA frames to FFmpeg (default on; set `SUBTITLES_GRAPHICS_OVERLAY_EXPORT=0` to force legacy export).
+- Graphics overlay export pipeline streams RGBA frames to FFmpeg.
 - Uses GPU (CUDA) when available, auto-falls back to CPU with clear logs.
 - Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`.
 - Optional diagnostics bundle: zip logs + outputs automatically on exit.
@@ -34,9 +34,7 @@ app/
   graphics_preview_renderer.py # Graphics-based preview rendering
   srt_utils.py            # SRT parsing/formatting helpers
   subtitle_style.py       # Subtitle style presets and FFmpeg style mapping
-  ass_render.py           # ASS subtitle document generation (static rendering)
-  ass_karaoke.py          # ASS step-highlight generation (word highlight mode)
-  burn_in_export.py       # Burn-in/export planning for SRT + ASS pipelines
+  graphics_overlay_export.py # Graphics overlay export planning + helpers
   word_timing_schema.py   # Word timing JSON contract + validation
   ui/                     # UI components, theme, and widgets
 bin/
