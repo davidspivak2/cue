@@ -3,7 +3,7 @@
 ## Status update (2025-02-14)
 - PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
 - PR6 has not started.
-- PR7 is complete (word background rendering, mutual exclusivity, and UI controls for line/word backgrounds are in place).
+- PR7 is complete (word background rendering, mutual exclusivity, and UI controls for line/word background color, opacity, padding, and corner radius are in place).
 - Wrapped-line word-highlight clip rects now use line-relative cursor offsets in the graphics overlay renderer.
 - Graphics overlay export now handles QImage bit-buffer variants for RGBA streaming.
 - Overlay render caching keys are normalized to the expected text + highlight index format.
