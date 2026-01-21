@@ -28,7 +28,7 @@
 ### Non-goals
 - No animations.
 - No live preview playback.
-- No extra actions like “Open folder”.
+- Non-goal (SUBTITLES_READY): No extra actions like “Open folder” on the Subtitles Ready screen.
 
 ## Critical constraints (must follow)
 - Must not create thousands of PNGs on disk; no “PNG per state” for full exports.
