@@ -256,7 +256,7 @@ The UI aggregates progress without regression (percent should not go backwards).
 7) Confirm `<video_stem>_audio_for_whisper.wav` is created during processing.
 8) Confirm `<video_stem>.srt` is created in the expected output folder.
 9) Open the SRT in Subtitle Edit (via the UI or file association).
-10) In the app, click **Create final video**.
+10) In the app, click **Create video with subtitles** (in the sticky bottom bar).
 11) Confirm `<video_stem>_subtitled.mp4` is created.
 12) Play the exported MP4 and verify subtitles display and audio plays.
 13) Toggle **Clean up audio before transcription** ON, re-run on the same clip, confirm it still completes.
