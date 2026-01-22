@@ -159,7 +159,12 @@ class ChecklistRow(QtWidgets.QWidget):
         self._spinner_index += 1
         self.icon_label.setText(frame)
 
-    def set_state(self, state: str, reason_text: Optional[str] = None) -> None:
+    def set_state(
+        self,
+        state: str,
+        reason_text: Optional[str] = None,
+        detail_text: Optional[str] = None,
+    ) -> None:
         self._state = state
         self._spinner_timer.stop()
         if state == "pending":
@@ -171,7 +176,11 @@ class ChecklistRow(QtWidgets.QWidget):
             self.icon_label.setStyleSheet("color: #6fa8ff;")
             self._advance_spinner()
             self._spinner_timer.start()
-            self.status_label.setText("")
+            if detail_text:
+                self.status_label.setText(detail_text)
+                self.status_label.setStyleSheet("color: #999;")
+            else:
+                self.status_label.setText("")
         elif state == "done":
             self.icon_label.setText("✅")
             self.icon_label.setStyleSheet("")
@@ -188,6 +197,15 @@ class ChecklistRow(QtWidgets.QWidget):
             reason = reason_text or "unknown"
             self.status_label.setText(f"Failed ({reason})")
             self.status_label.setStyleSheet("color: #d9534f;")
+
+    def set_active_detail(self, detail_text: Optional[str]) -> None:
+        if self._state != "active":
+            return
+        if detail_text:
+            self.status_label.setText(detail_text)
+            self.status_label.setStyleSheet("color: #999;")
+        else:
+            self.status_label.setText("")
 
 
 MISSING_SUBTITLES_REASON_TEXT = {
@@ -272,6 +290,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.checklist_widget: Optional[QtWidgets.QWidget] = None
         self.checklist_layout: Optional[QtWidgets.QVBoxLayout] = None
         self._checklist_rows: dict[str, ChecklistRow] = {}
+        self._checklist_order: list[str] = []
+        self._checklist_state: dict[str, str] = {}
+        self._active_checklist_step: Optional[str] = None
         self._worker_start_time: Optional[float] = None
         self._elapsed_timer = QtCore.QTimer(self)
         self._elapsed_timer.setInterval(500)
@@ -2479,6 +2500,7 @@ class MainWindow(QtWidgets.QMainWindow):
             compute_type=compute_type,
             quality=self._transcription_quality.value,
             punctuation_rescue_fallback_enabled=self._punctuation_rescue_fallback_enabled,
+            vad_gap_rescue_enabled=True,
         )
         style = self._resolve_effective_subtitle_style()
         self._start_worker(
@@ -2753,11 +2775,12 @@ class MainWindow(QtWidgets.QMainWindow):
         subtitle_mode: str,
     ) -> list[tuple[str, str]]:
         if task_type == TaskType.GENERATE_SRT:
-            steps: list[tuple[str, str]] = [
-                (ChecklistStep.EXTRACT_AUDIO, "Extracting audio"),
-            ]
+            audio_label = "Extracting audio"
             if transcription_settings and transcription_settings.apply_audio_filter:
-                steps.append((ChecklistStep.CLEANUP_AUDIO, "Cleaning up audio"))
+                audio_label = "Extracting and cleaning up audio"
+            steps: list[tuple[str, str]] = [
+                (ChecklistStep.EXTRACT_AUDIO, audio_label),
+            ]
             steps.extend(
                 [
                     (ChecklistStep.LOAD_MODEL, "Loading AI model"),
@@ -2766,8 +2789,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 ]
             )
             if transcription_settings and transcription_settings.punctuation_rescue_fallback_enabled:
-                steps.append((ChecklistStep.FIX_PUNCTUATION, "Fixing punctuation"))
-            steps.append((ChecklistStep.FIX_MISSING_SUBTITLES, "Fixing missing subtitles"))
+                steps.append(
+                    (ChecklistStep.FIX_PUNCTUATION, "Making sure punctuation looks good")
+                )
+            if not transcription_settings or transcription_settings.vad_gap_rescue_enabled:
+                steps.append(
+                    (ChecklistStep.FIX_MISSING_SUBTITLES, "Making sure no subtitles are missing")
+                )
             return steps
         if task_type == TaskType.BURN_IN:
             steps = [(ChecklistStep.GET_VIDEO_INFO, "Getting video info")]
@@ -2783,6 +2811,9 @@ class MainWindow(QtWidgets.QMainWindow):
         return []
 
     def _reset_checklist(self, steps: list[tuple[str, str]]) -> None:
+        self._checklist_order = [step_id for step_id, _ in steps]
+        self._checklist_state = {step_id: "pending" for step_id in self._checklist_order}
+        self._active_checklist_step = None
         self._checklist_rows = {}
         if not self.checklist_layout:
             return
@@ -2797,17 +2828,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.checklist_layout.addWidget(row)
 
     def _on_worker_step_event(self, event: StepEvent) -> None:
-        row = self._checklist_rows.get(event.step_id)
-        if not row:
+        if event.step_id not in self._checklist_rows:
             return
         if event.state == StepState.START:
-            row.set_state("active")
+            self._handle_checklist_start(event)
         elif event.state == StepState.DONE:
-            row.set_state("done")
+            self._handle_checklist_finish(event, "done")
         elif event.state == StepState.SKIPPED:
-            row.set_state("skipped", self._resolve_reason_text(event))
+            self._handle_checklist_finish(event, "skipped")
         elif event.state == StepState.FAILED:
-            row.set_state("failed", self._resolve_reason_text(event))
+            self._handle_checklist_finish(event, "failed")
 
     def _resolve_reason_text(self, event: StepEvent) -> Optional[str]:
         if event.reason_text:
@@ -2817,6 +2847,68 @@ class MainWindow(QtWidgets.QMainWindow):
         if event.reason_code in WORD_HIGHLIGHT_REASON_TEXT:
             return WORD_HIGHLIGHT_REASON_TEXT[event.reason_code]
         return None
+
+    def _handle_checklist_start(self, event: StepEvent) -> None:
+        step_id = event.step_id
+        detail_text = event.reason_text
+        self._complete_prerequisites(step_id)
+        if self._active_checklist_step and self._active_checklist_step != step_id:
+            self._finalize_step(self._active_checklist_step, "done")
+            self._active_checklist_step = None
+        current_state = self._checklist_state.get(step_id, "pending")
+        row = self._checklist_rows[step_id]
+        if current_state == "active":
+            row.set_active_detail(detail_text)
+            return
+        if current_state in ("done", "failed", "skipped"):
+            return
+        row.set_state("active", detail_text=detail_text)
+        self._checklist_state[step_id] = "active"
+        self._active_checklist_step = step_id
+
+    def _handle_checklist_finish(self, event: StepEvent, state: str) -> None:
+        step_id = event.step_id
+        self._complete_prerequisites(step_id)
+        if self._active_checklist_step != step_id:
+            self._finalize_step(step_id, "active")
+        reason_text = self._resolve_reason_text(event)
+        self._finalize_step(step_id, state, reason_text)
+        if self._active_checklist_step == step_id:
+            self._active_checklist_step = None
+
+    def _complete_prerequisites(self, step_id: str) -> None:
+        if step_id not in self._checklist_order:
+            return
+        target_index = self._checklist_order.index(step_id)
+        for prior_step in self._checklist_order[:target_index]:
+            state = self._checklist_state.get(prior_step, "pending")
+            if state in ("done", "failed", "skipped"):
+                continue
+            self._finalize_step(prior_step, "done")
+            if self._active_checklist_step == prior_step:
+                self._active_checklist_step = None
+
+    def _finalize_step(
+        self,
+        step_id: str,
+        state: str,
+        reason_text: Optional[str] = None,
+    ) -> None:
+        row = self._checklist_rows.get(step_id)
+        if not row:
+            return
+        if state == "active":
+            row.set_state("active")
+            self._checklist_state[step_id] = "active"
+            self._active_checklist_step = step_id
+            return
+        if state == "done":
+            row.set_state("done")
+        elif state == "skipped":
+            row.set_state("skipped", reason_text)
+        elif state == "failed":
+            row.set_state("failed", reason_text)
+        self._checklist_state[step_id] = state
 
     def _update_elapsed_label(self) -> None:
         if self._worker_start_time is None or self._state != AppState.WORKING:

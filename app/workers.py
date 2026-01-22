@@ -109,6 +109,7 @@ class TranscriptionSettings:
     compute_type: str
     quality: str
     punctuation_rescue_fallback_enabled: bool
+    vad_gap_rescue_enabled: bool = True
 
 
 @dataclass
@@ -256,15 +257,11 @@ class Worker(QtCore.QObject):
             )
         self.signals.log.emit("Preparing audio...", True)
         self._emit_step_event(ChecklistStep.EXTRACT_AUDIO, StepState.START)
-        if settings.apply_audio_filter:
-            self._emit_step_event(ChecklistStep.CLEANUP_AUDIO, StepState.START)
         self._emit_step_progress(ProgressStep.PREPARE_AUDIO, 0.0, "Extracting audio", force=True)
         prepare_start = time.monotonic()
         self._extract_audio(audio_path, settings.apply_audio_filter, video_duration)
         self._prepare_audio_seconds = time.monotonic() - prepare_start
         self._emit_step_event(ChecklistStep.EXTRACT_AUDIO, StepState.DONE)
-        if settings.apply_audio_filter:
-            self._emit_step_event(ChecklistStep.CLEANUP_AUDIO, StepState.DONE)
 
         if self._cancelled.is_set():
             raise CancelledError()
@@ -447,45 +444,14 @@ class Worker(QtCore.QObject):
             return
         stats = self._transcribe_stats or {}
         if settings.punctuation_rescue_fallback_enabled:
-            triggered = bool(stats.get("punctuation_rescue_triggered"))
-            gate_passed = bool(stats.get("punctuation_rescue_gate_passed"))
-            chosen_attempt = stats.get("punctuation_rescue_chosen_attempt")
-            if triggered and gate_passed and chosen_attempt not in (None, 0):
-                self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
-            else:
-                self._emit_step_event(
-                    ChecklistStep.FIX_PUNCTUATION,
-                    StepState.SKIPPED,
-                    reason_text="punctuation looks good",
-                )
+            self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
 
         vad_stats = stats.get("vad_gap_rescue") if isinstance(stats, dict) else None
+        if not settings.vad_gap_rescue_enabled:
+            return
         if isinstance(vad_stats, dict) and not vad_stats.get("enabled", True):
             return
-        if isinstance(vad_stats, dict):
-            gaps_found = int(vad_stats.get("gaps_found", 0) or 0)
-            gaps_restored = int(vad_stats.get("gaps_restored", 0) or 0)
-            if gaps_found == 0:
-                self._emit_step_event(
-                    ChecklistStep.FIX_MISSING_SUBTITLES,
-                    StepState.SKIPPED,
-                    reason_text="no missing subtitles found",
-                )
-            elif gaps_restored > 0:
-                self._emit_step_event(ChecklistStep.FIX_MISSING_SUBTITLES, StepState.DONE)
-            else:
-                reason_code = self._select_missing_subtitles_reason_code(vad_stats)
-                self._emit_step_event(
-                    ChecklistStep.FIX_MISSING_SUBTITLES,
-                    StepState.SKIPPED,
-                    reason_code=reason_code,
-                )
-        else:
-            self._emit_step_event(
-                ChecklistStep.FIX_MISSING_SUBTITLES,
-                StepState.SKIPPED,
-                reason_text="no missing subtitles found",
-            )
+        self._emit_step_event(ChecklistStep.FIX_MISSING_SUBTITLES, StepState.DONE)
 
     def _select_missing_subtitles_reason_code(self, vad_stats: dict[str, object]) -> str:
         gaps = vad_stats.get("gaps")
@@ -663,32 +629,6 @@ class Worker(QtCore.QObject):
         cues = parse_srt_file(srt_path)
         self._ensure_word_timings_file(srt_path, cues)
         self._log_word_timing_status(srt_path)
-        if self.subtitle_mode == "word_highlight":
-            self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.START)
-            try:
-                timing_state, timing_reason = self._run_alignment_if_needed(
-                    srt_path,
-                    audio_path_for_srt(srt_path),
-                    context="export",
-                )
-            except AlignmentError as exc:
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.FAILED,
-                    reason_code=exc.reason_code,
-                )
-                raise RuntimeError(
-                    "Word highlighting couldn’t be synced to the audio. "
-                    "Try generating subtitles again. If it still fails, switch to Static mode."
-                ) from exc
-            if timing_state == StepState.SKIPPED:
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.SKIPPED,
-                    reason_text=timing_reason or "already timed",
-                )
-            else:
-                self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.DONE)
 
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
         self._output_video_path = output_path
@@ -713,18 +653,14 @@ class Worker(QtCore.QObject):
                 output_path=output_path,
                 video_duration=video_duration,
             )
-        except AlignmentError as exc:
-            if self.subtitle_mode == "word_highlight":
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.FAILED,
-                    reason_code=exc.reason_code,
-                )
-                raise RuntimeError(
-                    "Word highlighting couldn’t be synced to the audio. "
-                    "Try generating subtitles again. If it still fails, switch to Static mode."
-                ) from exc
-            raise
+        except RuntimeError as exc:
+            if str(exc).startswith(
+                "Word highlighting couldn’t be synced to the audio."
+            ):
+                raise
+            self.signals.log.emit("Graphics overlay export failed.", True)
+            self.signals.log.emit(str(exc), True)
+            raise RuntimeError("Graphics overlay export failed.") from exc
         except Exception as exc:  # noqa: BLE001
             self.signals.log.emit("Graphics overlay export failed.", True)
             self.signals.log.emit(str(exc), True)
@@ -740,14 +676,54 @@ class Worker(QtCore.QObject):
         output_path: Path,
         video_duration: Optional[float],
     ) -> dict:
+        self._emit_step_progress(ProgressStep.EXPORT, 0.01, "Preparing export", force=True)
         self._emit_step_event(ChecklistStep.GET_VIDEO_INFO, StepState.START)
         stream_info = resolve_video_stream_info(self.video_path)
         self._emit_step_event(ChecklistStep.GET_VIDEO_INFO, StepState.DONE)
+        self._emit_step_progress(ProgressStep.EXPORT, 0.04, "Preparing export", force=True)
         duration_seconds = video_duration
         if duration_seconds is None:
             duration_seconds = max((cue.end_seconds for cue in cues), default=0.0)
         if not duration_seconds or duration_seconds <= 0:
             raise ValueError("Unable to determine video duration for overlay export")
+
+        if self.subtitle_mode == "word_highlight":
+            self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.START)
+            self._start_smooth_progress(
+                ProgressStep.EXPORT,
+                "Preparing export",
+                start=0.04,
+                cap=0.10,
+                increment=0.003,
+                interval=0.4,
+            )
+            try:
+                timing_state, timing_reason = self._run_alignment_if_needed(
+                    srt_path,
+                    audio_path_for_srt(srt_path),
+                    context="export",
+                )
+            except AlignmentError as exc:
+                self._stop_smooth_progress()
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.FAILED,
+                    reason_code=exc.reason_code,
+                )
+                raise RuntimeError(
+                    "Word highlighting couldn’t be synced to the audio. "
+                    "Try generating subtitles again. If it still fails, switch to Static mode."
+                ) from exc
+            self._stop_smooth_progress()
+            if timing_state == StepState.SKIPPED:
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.SKIPPED,
+                    reason_text=timing_reason or "already timed",
+                )
+            else:
+                self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.DONE)
+        self._emit_step_progress(ProgressStep.EXPORT, 0.10, "Preparing export", force=True)
 
         plan = build_graphics_overlay_plan(
             ffmpeg_path=ffmpeg_path,
@@ -770,7 +746,6 @@ class Worker(QtCore.QObject):
             True,
         )
 
-        self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.START)
         segments = self._build_overlay_segments(
             cues=cues,
             duration_seconds=duration_seconds,
@@ -780,7 +755,6 @@ class Worker(QtCore.QObject):
             duration_seconds,
             plan.fps,
         )
-        self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE)
         self.signals.log.emit(
             f"Overlay frames: total={total_frames} segments={len(frame_segments)}",
             True,
@@ -845,8 +819,8 @@ class Worker(QtCore.QObject):
                         return
                     yield last_frame
 
+        self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.START)
         self.signals.log.emit("Adding subtitles to the video...", True)
-        self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
         self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
         burn_start = time.monotonic()
         copy_command = plan.base_command + ["-c:a", "copy", str(output_path)]
@@ -859,8 +833,12 @@ class Worker(QtCore.QObject):
                 ProgressStep.EXPORT,
                 "Encoding",
                 make_frame_generator(),
+                progress_offset=0.10,
+                progress_scale=0.90,
             )
             self._burn_in_seconds = time.monotonic() - burn_start
+            self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE)
+            self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
             self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
             if perf_stats:
                 self.signals.log.emit(perf_stats.summary_line(), True)
@@ -878,8 +856,12 @@ class Worker(QtCore.QObject):
             ProgressStep.EXPORT,
             "Encoding",
             make_frame_generator(),
+            progress_offset=0.10,
+            progress_scale=0.90,
         )
         self._burn_in_seconds = time.monotonic() - burn_start
+        self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE)
+        self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
         self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
         if perf_stats:
             self.signals.log.emit(perf_stats.summary_line(), True)
@@ -972,6 +954,9 @@ class Worker(QtCore.QObject):
         duration_seconds: Optional[float],
         step_id: str,
         status_label: str,
+        *,
+        progress_offset: float = 0.0,
+        progress_scale: float = 1.0,
     ) -> None:
         if self._cancelled.is_set():
             raise CancelledError()
@@ -1024,7 +1009,8 @@ class Worker(QtCore.QObject):
                     continue
                 progress = out_time_ms / (duration_seconds * 1_000_000)
                 progress = max(0.0, min(progress, 1.0))
-                self._emit_step_progress(step_id, progress, status_label)
+                mapped_progress = progress_offset + progress_scale * progress
+                self._emit_step_progress(step_id, mapped_progress, status_label)
                 now = time.monotonic()
                 if now - last_log_time >= 0.25:
                     self.signals.log.emit(
@@ -1033,7 +1019,12 @@ class Worker(QtCore.QObject):
                     )
                     last_log_time = now
             elif text == "progress=end":
-                self._emit_step_progress(step_id, 1.0, status_label, force=True)
+                self._emit_step_progress(
+                    step_id,
+                    progress_offset + progress_scale,
+                    status_label,
+                    force=True,
+                )
                 end_emitted = True
 
         return_code = process.wait()
@@ -1042,7 +1033,12 @@ class Worker(QtCore.QObject):
 
         if return_code == 0:
             if not end_emitted:
-                self._emit_step_progress(step_id, 1.0, status_label, force=True)
+                self._emit_step_progress(
+                    step_id,
+                    progress_offset + progress_scale,
+                    status_label,
+                    force=True,
+                )
         self._stop_smooth_progress()
 
         if return_code != 0:
@@ -1056,6 +1052,9 @@ class Worker(QtCore.QObject):
         step_id: str,
         status_label: str,
         frame_iterator: Iterable[bytes],
+        *,
+        progress_offset: float = 0.0,
+        progress_scale: float = 1.0,
     ) -> None:
         if self._cancelled.is_set():
             raise CancelledError()
@@ -1121,7 +1120,8 @@ class Worker(QtCore.QObject):
                     continue
                 progress = out_time_ms / (duration_seconds * 1_000_000)
                 progress = max(0.0, min(progress, 1.0))
-                self._emit_step_progress(step_id, progress, status_label)
+                mapped_progress = progress_offset + progress_scale * progress
+                self._emit_step_progress(step_id, mapped_progress, status_label)
                 now = time.monotonic()
                 if now - last_log_time >= 0.25:
                     self.signals.log.emit(
@@ -1130,7 +1130,12 @@ class Worker(QtCore.QObject):
                     )
                     last_log_time = now
             elif text == "progress=end":
-                self._emit_step_progress(step_id, 1.0, status_label, force=True)
+                self._emit_step_progress(
+                    step_id,
+                    progress_offset + progress_scale,
+                    status_label,
+                    force=True,
+                )
                 end_emitted = True
 
         return_code = process.wait()
@@ -1140,7 +1145,12 @@ class Worker(QtCore.QObject):
 
         if return_code == 0:
             if not end_emitted:
-                self._emit_step_progress(step_id, 1.0, status_label, force=True)
+                self._emit_step_progress(
+                    step_id,
+                    progress_offset + progress_scale,
+                    status_label,
+                    force=True,
+                )
         self._stop_smooth_progress()
 
         if return_code != 0:
@@ -1286,6 +1296,9 @@ class Worker(QtCore.QObject):
         load_model_done = False
         detect_language_done = False
         write_started = False
+        punctuation_active = False
+        missing_active = False
+        last_punct_attempt = 0
         transcribe_config_json: Optional[str] = None
         watchdog_triggered = False
         watchdog_elapsed = 0.0
@@ -1422,6 +1435,9 @@ class Worker(QtCore.QObject):
                 if not load_model_done:
                     load_model_done = True
                     self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                if not write_started:
+                    write_started = True
+                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
                 now = time.monotonic()
                 if now - last_progress_log >= 2.0:
                     _emit_log("Listening progress update received.", True)
@@ -1429,6 +1445,45 @@ class Worker(QtCore.QObject):
                 continue
 
             _emit_log(text, show_in_ui)
+            if text.startswith("PUNCT_RESCUE "):
+                if (
+                    self.transcription_settings
+                    and self.transcription_settings.punctuation_rescue_fallback_enabled
+                ):
+                    match = re.search(r"attempt=(\d+)", text)
+                    if match:
+                        attempt = int(match.group(1))
+                        if attempt < 1:
+                            continue
+                        detail = "Improving punctuation"
+                        if attempt >= 2:
+                            detail = f"Improving punctuation (attempt {attempt})"
+                        if not punctuation_active:
+                            punctuation_active = True
+                            last_punct_attempt = attempt
+                            self._emit_step_event(
+                                ChecklistStep.FIX_PUNCTUATION,
+                                StepState.START,
+                                reason_text=detail,
+                            )
+                        elif attempt != last_punct_attempt:
+                            last_punct_attempt = attempt
+                            self._emit_step_event(
+                                ChecklistStep.FIX_PUNCTUATION,
+                                StepState.START,
+                                reason_text=detail,
+                            )
+            if text.startswith("VAD_GAP_RESCUE"):
+                if (
+                    self.transcription_settings
+                    and self.transcription_settings.vad_gap_rescue_enabled
+                ):
+                    if not missing_active:
+                        missing_active = True
+                        self._emit_step_event(
+                            ChecklistStep.FIX_MISSING_SUBTITLES,
+                            StepState.START,
+                        )
             if text.startswith("MODE"):
                 continue
             if text.startswith("HEARTBEAT MODEL_LOAD") or text.startswith("Loading model"):
@@ -1444,6 +1499,9 @@ class Worker(QtCore.QObject):
                 if not load_model_done:
                     load_model_done = True
                     self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                if not write_started:
+                    write_started = True
+                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
                 if duration_seconds is None and not smooth_transcribe_started:
                     smooth_transcribe_started = True
                     self._start_smooth_progress(
@@ -1468,6 +1526,9 @@ class Worker(QtCore.QObject):
             if text.startswith("Detected language:"):
                 if not detect_language_done:
                     detect_language_done = True
+                    if not load_model_done:
+                        load_model_done = True
+                        self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
                     self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
                     self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.DONE)
                 continue

@@ -6,7 +6,6 @@ from typing import Optional
 
 class ChecklistStep:
     EXTRACT_AUDIO = "extract_audio"
-    CLEANUP_AUDIO = "cleanup_audio"
     LOAD_MODEL = "load_model"
     DETECT_LANGUAGE = "detect_language"
     WRITE_SUBTITLES = "write_subtitles"
