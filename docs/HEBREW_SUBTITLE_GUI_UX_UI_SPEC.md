@@ -196,6 +196,7 @@ Layout:
     - “Writing subtitles”
     - “Making sure punctuation looks good” (only if the setting is enabled)
     - “Checking for gaps in subtitles”
+    - “Preparing preview”
   - Determinate progress bar + elapsed time
     - **Only the progress bar shows the %**.
   - Cancel button
@@ -478,6 +479,7 @@ Note:
 - “Writing subtitles”
 - “Making sure punctuation looks good”
 - “Checking for gaps in subtitles”
+- “Preparing preview”
 - “Subtitles ready ✓”
 - “Open subtitles”
 - “Edit in Subtitle Edit”

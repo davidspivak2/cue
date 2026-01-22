@@ -123,6 +123,7 @@ class TranscriptionQuality(Enum):
 
 class ChecklistRow(QtWidgets.QWidget):
     _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    skip_clicked = QtCore.Signal(str)
 
     def __init__(self, step_id: str, label_text: str) -> None:
         super().__init__()
@@ -142,13 +143,36 @@ class ChecklistRow(QtWidgets.QWidget):
         self.icon_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
 
         self.text_label = QtWidgets.QLabel(label_text)
-        self.status_label = QtWidgets.QLabel("")
-        self.status_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.bullet_label = QtWidgets.QLabel("•")
+        self.bullet_label.setVisible(False)
+        self.detail_label = QtWidgets.QLabel("")
+        self.detail_label.setVisible(False)
+        self.skip_label = QtWidgets.QLabel('<a href="skip">Skip</a>')
+        self.skip_label.setObjectName("SkipLink")
+        self.skip_label.setTextFormat(QtCore.Qt.RichText)
+        self.skip_label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
+        self.skip_label.setOpenExternalLinks(False)
+        self.skip_label.setVisible(False)
+        self.skip_label.linkActivated.connect(lambda _: self.skip_clicked.emit(self.step_id))
+        accent = QtWidgets.QApplication.palette().color(QtGui.QPalette.Highlight).name()
+        self.skip_label.setStyleSheet(
+            "QLabel#SkipLink {"
+            f" color: {accent};"
+            " text-decoration: underline;"
+            "}"
+            "QLabel#SkipLink a {"
+            f" color: {accent};"
+            " text-decoration: underline;"
+            "}"
+        )
 
         layout.addWidget(self.icon_label)
         layout.addWidget(self.text_label)
         layout.addStretch()
-        layout.addWidget(self.status_label)
+        layout.addWidget(self.bullet_label)
+        layout.addWidget(self.detail_label)
+        layout.addWidget(self.skip_label)
+        layout.addStretch()
 
         self.set_state("pending")
 
@@ -170,42 +194,54 @@ class ChecklistRow(QtWidgets.QWidget):
         if state == "pending":
             self.icon_label.setText("○")
             self.icon_label.setStyleSheet("color: #777;")
-            self.status_label.setText("")
+            self._set_detail(None)
+            self.set_skip_visible(False)
         elif state == "active":
             self._spinner_index = 0
             self.icon_label.setStyleSheet("color: #6fa8ff;")
             self._advance_spinner()
             self._spinner_timer.start()
-            if detail_text:
-                self.status_label.setText(detail_text)
-                self.status_label.setStyleSheet("color: #999;")
-            else:
-                self.status_label.setText("")
+            self._set_detail(detail_text, "#999")
         elif state == "done":
             self.icon_label.setText("✅")
             self.icon_label.setStyleSheet("")
-            self.status_label.setText("")
+            self._set_detail(detail_text, "#999")
+            self.set_skip_visible(False)
         elif state == "skipped":
             self.icon_label.setText("↩")
             self.icon_label.setStyleSheet("color: #999;")
             reason = reason_text or "unknown"
-            self.status_label.setText(f"Skipped ({reason})")
-            self.status_label.setStyleSheet("color: #999;")
+            self._set_detail(f"Skipped ({reason})", "#999")
+            self.set_skip_visible(False)
         elif state == "failed":
             self.icon_label.setText("❌")
             self.icon_label.setStyleSheet("")
             reason = reason_text or "unknown"
-            self.status_label.setText(f"Failed ({reason})")
-            self.status_label.setStyleSheet("color: #d9534f;")
+            self._set_detail(f"Failed ({reason})", "#d9534f")
+            self.set_skip_visible(False)
 
     def set_active_detail(self, detail_text: Optional[str]) -> None:
         if self._state != "active":
             return
+        self._set_detail(detail_text, "#999")
+
+    def set_skip_visible(self, visible: bool) -> None:
+        if self._state != "active":
+            self.skip_label.setVisible(False)
+            return
+        self.skip_label.setVisible(visible)
+
+    def _set_detail(self, detail_text: Optional[str], color: Optional[str] = None) -> None:
         if detail_text:
-            self.status_label.setText(detail_text)
-            self.status_label.setStyleSheet("color: #999;")
+            self.detail_label.setText(detail_text)
+            if color:
+                self.detail_label.setStyleSheet(f"color: {color};")
+                self.bullet_label.setStyleSheet(f"color: {color};")
+            self.detail_label.setVisible(True)
+            self.bullet_label.setVisible(True)
         else:
-            self.status_label.setText("")
+            self.detail_label.setVisible(False)
+            self.bullet_label.setVisible(False)
 
 
 MISSING_SUBTITLES_REASON_TEXT = {
@@ -294,6 +330,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._checklist_state: dict[str, str] = {}
         self._active_checklist_step: Optional[str] = None
         self._worker_start_time: Optional[float] = None
+        self._preparing_preview_active = False
+        self._preparing_preview_timer: Optional[QtCore.QTimer] = None
+        self._pending_subtitles_payload: Optional[dict] = None
         self._elapsed_timer = QtCore.QTimer(self)
         self._elapsed_timer.setInterval(500)
         self._elapsed_timer.timeout.connect(self._update_elapsed_label)
@@ -2630,9 +2669,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_worker_finished(self, success: bool, message: str, payload: dict) -> None:
         task_type = self._worker.task_type if self._worker else None
         if success:
-            self.progress_bar.setValue(100)
-            self.status_label.setText("Done")
-            self.elapsed_label.setText("")
+            if task_type == TaskType.GENERATE_SRT:
+                self.progress_bar.setValue(99)
+                self.progress_bar.setFormat("99%")
+                self.status_label.setText("Creating subtitles")
+                self.elapsed_label.setText("")
+            else:
+                self.progress_bar.setValue(100)
+                self.status_label.setText("Done")
+                self.elapsed_label.setText("")
         elif message == "Operation cancelled.":
             self.progress_bar.setValue(0)
             self.status_label.setText("Cancelled")
@@ -2672,9 +2717,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if success:
             if task_type == TaskType.GENERATE_SRT:
-                self._subtitles_reviewed = False
-                self.set_state(AppState.SUBTITLES_READY)
-                self._update_preview_card()
+                self._start_preparing_preview(payload)
             else:
                 self.set_state(AppState.EXPORT_DONE)
         else:
@@ -2693,6 +2736,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.set_state(AppState.VIDEO_SELECTED if self._video_path else AppState.EMPTY)
 
     def _on_cancel(self) -> None:
+        if self._preparing_preview_active:
+            self._complete_preparing_preview()
+            return
         if self._worker:
             self._log("Cancelling task...")
             self._worker.cancel()
@@ -2756,6 +2802,8 @@ class MainWindow(QtWidgets.QMainWindow):
         global_progress = self._progress_controller.update(step_id, step_progress)
         percent = int(round(global_progress * 100))
         percent = max(0, min(percent, 100))
+        if self._preparing_preview_active:
+            percent = min(percent, 99)
         self.progress_bar.setValue(percent)
         self.progress_bar.setFormat(f"{percent}%")
 
@@ -2796,6 +2844,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 steps.append(
                     (ChecklistStep.FIX_MISSING_SUBTITLES, "Checking for gaps in subtitles")
                 )
+            steps.append((ChecklistStep.PREPARING_PREVIEW, "Preparing preview"))
             return steps
         if task_type == TaskType.BURN_IN:
             steps = [(ChecklistStep.GET_VIDEO_INFO, "Getting video info")]
@@ -2825,6 +2874,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for step_id, label in steps:
             row = ChecklistRow(step_id, label)
             self._checklist_rows[step_id] = row
+            row.skip_clicked.connect(self._on_checklist_skip_clicked)
             self.checklist_layout.addWidget(row)
 
     def _on_worker_step_event(self, event: StepEvent) -> None:
@@ -2863,11 +2913,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if current_state in ("done", "failed", "skipped"):
             return
         row.set_state("active", detail_text=detail_text)
+        row.set_skip_visible(step_id in {ChecklistStep.FIX_PUNCTUATION, ChecklistStep.FIX_MISSING_SUBTITLES})
         self._checklist_state[step_id] = "active"
         self._active_checklist_step = step_id
 
     def _handle_checklist_finish(self, event: StepEvent, state: str) -> None:
         step_id = event.step_id
+        existing_state = self._checklist_state.get(step_id, "pending")
+        if existing_state in ("done", "failed", "skipped") and state != "active":
+            return
         self._complete_prerequisites(step_id)
         if self._active_checklist_step != step_id:
             self._finalize_step(step_id, "active")
@@ -2903,12 +2957,68 @@ class MainWindow(QtWidgets.QMainWindow):
             self._active_checklist_step = step_id
             return
         if state == "done":
-            row.set_state("done")
+            row.set_state("done", detail_text=reason_text)
         elif state == "skipped":
             row.set_state("skipped", reason_text)
         elif state == "failed":
             row.set_state("failed", reason_text)
         self._checklist_state[step_id] = state
+
+    def _start_preparing_preview(self, payload: dict) -> None:
+        self._pending_subtitles_payload = payload
+        self._preparing_preview_active = True
+        self._handle_checklist_start(
+            StepEvent(step_id=ChecklistStep.PREPARING_PREVIEW, state=StepState.START)
+        )
+        self.progress_bar.setValue(99)
+        self.progress_bar.setFormat("99%")
+        if self._preparing_preview_timer is None:
+            self._preparing_preview_timer = QtCore.QTimer(self)
+            self._preparing_preview_timer.setSingleShot(True)
+            self._preparing_preview_timer.timeout.connect(self._complete_preparing_preview)
+        self._preparing_preview_timer.start(5000)
+
+    def _complete_preparing_preview(self) -> None:
+        if not self._preparing_preview_active:
+            return
+        self._preparing_preview_active = False
+        if self._preparing_preview_timer:
+            self._preparing_preview_timer.stop()
+        self._handle_checklist_finish(
+            StepEvent(step_id=ChecklistStep.PREPARING_PREVIEW, state=StepState.DONE),
+            "done",
+        )
+        self.progress_bar.setValue(100)
+        self.progress_bar.setFormat("100%")
+        if self._pending_subtitles_payload is not None:
+            self._subtitles_reviewed = False
+            self.set_state(AppState.SUBTITLES_READY)
+            self._update_preview_card()
+            self._pending_subtitles_payload = None
+
+    def _on_checklist_skip_clicked(self, step_id: str) -> None:
+        if not self._worker:
+            return
+        if step_id == ChecklistStep.FIX_PUNCTUATION:
+            QtCore.QMetaObject.invokeMethod(
+                self._worker,
+                "request_skip_punctuation",
+                QtCore.Qt.QueuedConnection,
+            )
+        elif step_id == ChecklistStep.FIX_MISSING_SUBTITLES:
+            QtCore.QMetaObject.invokeMethod(
+                self._worker,
+                "request_skip_gaps",
+                QtCore.Qt.QueuedConnection,
+            )
+        self._handle_checklist_finish(
+            StepEvent(
+                step_id=step_id,
+                state=StepState.SKIPPED,
+                reason_text="skipped by you",
+            ),
+            "skipped",
+        )
 
     def _update_elapsed_label(self) -> None:
         if self._worker_start_time is None or self._state != AppState.WORKING:

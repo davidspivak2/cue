@@ -11,6 +11,7 @@ class ChecklistStep:
     WRITE_SUBTITLES = "write_subtitles"
     FIX_PUNCTUATION = "fix_punctuation"
     FIX_MISSING_SUBTITLES = "fix_missing_subtitles"
+    PREPARING_PREVIEW = "preparing_preview"
     GET_VIDEO_INFO = "get_video_info"
     ADD_SUBTITLES = "add_subtitles"
     SAVE_VIDEO = "save_video"
