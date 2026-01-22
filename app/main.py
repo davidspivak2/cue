@@ -37,7 +37,13 @@ from app.graphics_preview_renderer import (
     build_preview_cache_key,
     render_graphics_preview,
 )
-from app.progress import ProgressController, ProgressStep
+from app.progress import (
+    ChecklistStep,
+    ProgressController,
+    ProgressStep,
+    StepEvent,
+    StepState,
+)
 from app.transcription_device import gpu_available
 from app.ui.state import AppState
 from app.ui.theme import apply_theme
@@ -115,6 +121,92 @@ class TranscriptionQuality(Enum):
     ULTRA = "ultra"
 
 
+class ChecklistRow(QtWidgets.QWidget):
+    _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self, step_id: str, label_text: str) -> None:
+        super().__init__()
+        self.step_id = step_id
+        self._spinner_index = 0
+        self._state = StepState.START
+        self._spinner_timer = QtCore.QTimer(self)
+        self._spinner_timer.setInterval(120)
+        self._spinner_timer.timeout.connect(self._advance_spinner)
+
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.icon_label = QtWidgets.QLabel("○")
+        self.icon_label.setFixedWidth(20)
+        self.icon_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+
+        self.text_label = QtWidgets.QLabel(label_text)
+        self.status_label = QtWidgets.QLabel("")
+        self.status_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+
+        layout.addWidget(self.icon_label)
+        layout.addWidget(self.text_label)
+        layout.addStretch()
+        layout.addWidget(self.status_label)
+
+        self.set_state("pending")
+
+    def _advance_spinner(self) -> None:
+        if self._state != "active":
+            return
+        frame = self._SPINNER_FRAMES[self._spinner_index % len(self._SPINNER_FRAMES)]
+        self._spinner_index += 1
+        self.icon_label.setText(frame)
+
+    def set_state(self, state: str, reason_text: Optional[str] = None) -> None:
+        self._state = state
+        self._spinner_timer.stop()
+        if state == "pending":
+            self.icon_label.setText("○")
+            self.icon_label.setStyleSheet("color: #777;")
+            self.status_label.setText("")
+        elif state == "active":
+            self._spinner_index = 0
+            self.icon_label.setStyleSheet("color: #6fa8ff;")
+            self._advance_spinner()
+            self._spinner_timer.start()
+            self.status_label.setText("")
+        elif state == "done":
+            self.icon_label.setText("✅")
+            self.icon_label.setStyleSheet("")
+            self.status_label.setText("")
+        elif state == "skipped":
+            self.icon_label.setText("↩")
+            self.icon_label.setStyleSheet("color: #999;")
+            reason = reason_text or "unknown"
+            self.status_label.setText(f"Skipped ({reason})")
+            self.status_label.setStyleSheet("color: #999;")
+        elif state == "failed":
+            self.icon_label.setText("❌")
+            self.icon_label.setStyleSheet("")
+            reason = reason_text or "unknown"
+            self.status_label.setText(f"Failed ({reason})")
+            self.status_label.setStyleSheet("color: #d9534f;")
+
+
+MISSING_SUBTITLES_REASON_TEXT = {
+    "no_speech_in_gaps": "no speech in the missing part",
+    "rescue_transcribe_empty": "couldn’t recover any text",
+    "merge_rejected": "couldn’t merge the fix",
+    "limits_reached": "hit a safety limit",
+    "rescue_error": "something went wrong",
+}
+
+WORD_HIGHLIGHT_REASON_TEXT = {
+    "audio_missing": "audio missing",
+    "srt_missing": "subtitles file missing",
+    "align_process_failed": "couldn’t sync to the audio",
+    "align_output_empty": "no timing data produced",
+    "align_output_invalid": "timing data was invalid",
+}
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, logger: logging.Logger, log_path: Path, log_dir: Path) -> None:
         super().__init__()
@@ -177,6 +269,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.style_right_column: Optional[QtWidgets.QWidget] = None
         self.style_right_column_layout: Optional[QtWidgets.QVBoxLayout] = None
         self._progress_controller: Optional[ProgressController] = None
+        self.checklist_widget: Optional[QtWidgets.QWidget] = None
+        self.checklist_layout: Optional[QtWidgets.QVBoxLayout] = None
+        self._checklist_rows: dict[str, ChecklistRow] = {}
         self._worker_start_time: Optional[float] = None
         self._elapsed_timer = QtCore.QTimer(self)
         self._elapsed_timer.setInterval(500)
@@ -396,9 +491,13 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addStretch()
         self.status_label.setAlignment(QtCore.Qt.AlignCenter)
         layout.addWidget(self.status_label)
-        layout.addWidget(self.substatus_label)
-        layout.addWidget(self.elapsed_label)
+        self.checklist_widget = QtWidgets.QWidget()
+        self.checklist_layout = QtWidgets.QVBoxLayout(self.checklist_widget)
+        self.checklist_layout.setContentsMargins(0, 0, 0, 0)
+        self.checklist_layout.setSpacing(6)
+        layout.addWidget(self.checklist_widget)
         layout.addWidget(self.progress_bar)
+        layout.addWidget(self.elapsed_label)
         cancel_layout = QtWidgets.QHBoxLayout()
         cancel_layout.addStretch()
         cancel_layout.addWidget(self.cancel_button)
@@ -2483,37 +2582,42 @@ class MainWindow(QtWidgets.QMainWindow):
         self._worker.signals.log.connect(self._log)
         self._worker.signals.progress.connect(self._on_worker_progress)
         self._worker.signals.started.connect(self._on_worker_started)
+        self._worker.signals.step_event.connect(self._on_worker_step_event)
         self._worker.signals.finished.connect(self._on_worker_finished)
         self._progress_controller = self._build_progress_controller(task_type)
+        self._configure_checklist(task_type, transcription_settings, subtitle_mode)
         self._worker_thread.start()
         self._update_ui_state(idle=False)
 
     def _on_worker_started(self, status: str) -> None:
-        self.status_label.setText(status)
-        self.substatus_label.setText("")
-        self.elapsed_label.setText("")
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat("0%")
-        self._worker_start_time = time.monotonic()
-        self._elapsed_timer.start()
-        self.set_state(AppState.WORKING)
+        if self._worker_start_time is None:
+            self.elapsed_label.setText("")
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat("0%")
+            self._worker_start_time = time.monotonic()
+            self._elapsed_timer.start()
+            self.set_state(AppState.WORKING)
+        heading = status
+        if self._worker:
+            if self._worker.task_type == TaskType.GENERATE_SRT:
+                heading = "Creating subtitles"
+            elif self._worker.task_type == TaskType.BURN_IN:
+                heading = "Creating video with subtitles"
+        self.status_label.setText(heading)
 
     def _on_worker_finished(self, success: bool, message: str, payload: dict) -> None:
         task_type = self._worker.task_type if self._worker else None
         if success:
             self.progress_bar.setValue(100)
             self.status_label.setText("Done")
-            self.substatus_label.setText("")
             self.elapsed_label.setText("")
         elif message == "Operation cancelled.":
             self.progress_bar.setValue(0)
             self.status_label.setText("Cancelled")
-            self.substatus_label.setText("")
             self.elapsed_label.setText("")
         else:
             self.progress_bar.setValue(0)
             self.status_label.setText("Ready")
-            self.substatus_label.setText("")
             self.elapsed_label.setText("")
 
         self._elapsed_timer.stop()
@@ -2623,7 +2727,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self,
         step_id: str,
         step_progress: Optional[float],
-        status: str,
+        _status: str,
     ) -> None:
         if not self._progress_controller:
             return
@@ -2632,7 +2736,87 @@ class MainWindow(QtWidgets.QMainWindow):
         percent = max(0, min(percent, 100))
         self.progress_bar.setValue(percent)
         self.progress_bar.setFormat(f"{percent}%")
-        self.substatus_label.setText(status)
+
+    def _configure_checklist(
+        self,
+        task_type: str,
+        transcription_settings: Optional[TranscriptionSettings],
+        subtitle_mode: str,
+    ) -> None:
+        steps = self._build_checklist_steps(task_type, transcription_settings, subtitle_mode)
+        self._reset_checklist(steps)
+
+    def _build_checklist_steps(
+        self,
+        task_type: str,
+        transcription_settings: Optional[TranscriptionSettings],
+        subtitle_mode: str,
+    ) -> list[tuple[str, str]]:
+        if task_type == TaskType.GENERATE_SRT:
+            steps: list[tuple[str, str]] = [
+                (ChecklistStep.EXTRACT_AUDIO, "Extracting audio"),
+            ]
+            if transcription_settings and transcription_settings.apply_audio_filter:
+                steps.append((ChecklistStep.CLEANUP_AUDIO, "Cleaning up audio"))
+            steps.extend(
+                [
+                    (ChecklistStep.LOAD_MODEL, "Loading AI model"),
+                    (ChecklistStep.DETECT_LANGUAGE, "Detecting language"),
+                    (ChecklistStep.WRITE_SUBTITLES, "Writing subtitles"),
+                ]
+            )
+            if transcription_settings and transcription_settings.punctuation_rescue_fallback_enabled:
+                steps.append((ChecklistStep.FIX_PUNCTUATION, "Fixing punctuation"))
+            steps.append((ChecklistStep.FIX_MISSING_SUBTITLES, "Fixing missing subtitles"))
+            return steps
+        if task_type == TaskType.BURN_IN:
+            steps = [(ChecklistStep.GET_VIDEO_INFO, "Getting video info")]
+            if subtitle_mode == "word_highlight":
+                steps.append((ChecklistStep.TIMING_WORD_HIGHLIGHTS, "Timing word highlights"))
+            steps.extend(
+                [
+                    (ChecklistStep.ADD_SUBTITLES, "Adding subtitles to video"),
+                    (ChecklistStep.SAVE_VIDEO, "Saving video"),
+                ]
+            )
+            return steps
+        return []
+
+    def _reset_checklist(self, steps: list[tuple[str, str]]) -> None:
+        self._checklist_rows = {}
+        if not self.checklist_layout:
+            return
+        while self.checklist_layout.count():
+            item = self.checklist_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        for step_id, label in steps:
+            row = ChecklistRow(step_id, label)
+            self._checklist_rows[step_id] = row
+            self.checklist_layout.addWidget(row)
+
+    def _on_worker_step_event(self, event: StepEvent) -> None:
+        row = self._checklist_rows.get(event.step_id)
+        if not row:
+            return
+        if event.state == StepState.START:
+            row.set_state("active")
+        elif event.state == StepState.DONE:
+            row.set_state("done")
+        elif event.state == StepState.SKIPPED:
+            row.set_state("skipped", self._resolve_reason_text(event))
+        elif event.state == StepState.FAILED:
+            row.set_state("failed", self._resolve_reason_text(event))
+
+    def _resolve_reason_text(self, event: StepEvent) -> Optional[str]:
+        if event.reason_text:
+            return event.reason_text
+        if event.reason_code in MISSING_SUBTITLES_REASON_TEXT:
+            return MISSING_SUBTITLES_REASON_TEXT[event.reason_code]
+        if event.reason_code in WORD_HIGHLIGHT_REASON_TEXT:
+            return WORD_HIGHLIGHT_REASON_TEXT[event.reason_code]
+        return None
 
     def _update_elapsed_label(self) -> None:
         if self._worker_start_time is None or self._state != AppState.WORKING:
@@ -3116,7 +3300,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.video_card.clear()
         self.progress_bar.setValue(0)
         self.status_label.setText("Ready")
-        self.substatus_label.setText("")
         self.set_state(AppState.EMPTY)
 
     def _reset_video_state(self) -> None:
