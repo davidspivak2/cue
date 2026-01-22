@@ -195,7 +195,7 @@ Layout:
     - “Detecting language”
     - “Writing subtitles”
     - “Making sure punctuation looks good” (only if the setting is enabled)
-    - “Making sure no subtitles are missing”
+    - “Checking for gaps in subtitles”
   - Determinate progress bar + elapsed time
     - **Only the progress bar shows the %**.
   - Cancel button
@@ -477,7 +477,7 @@ Note:
 - “Detecting language”
 - “Writing subtitles”
 - “Making sure punctuation looks good”
-- “Making sure no subtitles are missing”
+- “Checking for gaps in subtitles”
 - “Subtitles ready ✓”
 - “Open subtitles”
 - “Edit in Subtitle Edit”

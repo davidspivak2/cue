@@ -876,6 +876,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 rescue_reason = "comma_density_low"
         if rescue_triggered:
             if int(punctuation_rescue.get("max_attempts", 2)) >= 1:
+                _print("PUNCT_RESCUE_START attempt=1")
                 attempt_vad = not args.vad_filter
                 attempt_kwargs = _build_transcribe_kwargs(
                     language=args.lang,
@@ -909,6 +910,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     }
                 )
             if int(punctuation_rescue.get("max_attempts", 2)) >= 2:
+                _print("PUNCT_RESCUE_START attempt=2")
                 attempt_device = "cpu"
                 attempt_compute_type = "float32"
                 heartbeat_stop = threading.Event()
@@ -991,6 +993,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 f"density={attempt['punctuation_density_raw']:.4f} "
                 f"chosen={attempt is chosen_attempt}"
             )
+        if rescue_triggered:
+            _print(
+                "PUNCT_RESCUE_DONE "
+                f"chosen_attempt={chosen_attempt['attempt']} attempts_ran={len(attempts)}"
+            )
 
         vad_gap_segments = chosen_attempt["segments"]
         vad_gap_stats = {
@@ -1006,6 +1013,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             "gaps": [],
         }
         if vad_gap_rescue_enabled and bool(attempts[0]["vad_filter"]):
+            _print("VAD_GAP_RESCUE_START")
             vad_gap_segments, vad_gap_stats = _apply_vad_gap_rescue(
                 model=model,
                 wav_path=wav_path,
@@ -1015,6 +1023,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 splitter_config=splitter_config,
                 duration_seconds=duration_seconds,
                 enabled=vad_gap_rescue_enabled,
+            )
+            _print(
+                "VAD_GAP_RESCUE_DONE "
+                f"gaps_found={vad_gap_stats['gaps_found']} "
+                f"gaps_restored={vad_gap_stats['gaps_restored']}"
             )
         transcribe_stats = build_transcription_stats(
             raw_segments=chosen_attempt["raw_segments"],
