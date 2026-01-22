@@ -1,6 +1,36 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
+
+
+class ChecklistStep:
+    EXTRACT_AUDIO = "extract_audio"
+    CLEANUP_AUDIO = "cleanup_audio"
+    LOAD_MODEL = "load_model"
+    DETECT_LANGUAGE = "detect_language"
+    WRITE_SUBTITLES = "write_subtitles"
+    FIX_PUNCTUATION = "fix_punctuation"
+    FIX_MISSING_SUBTITLES = "fix_missing_subtitles"
+    GET_VIDEO_INFO = "get_video_info"
+    ADD_SUBTITLES = "add_subtitles"
+    SAVE_VIDEO = "save_video"
+    TIMING_WORD_HIGHLIGHTS = "timing_word_highlights"
+
+
+class StepState:
+    START = "start"
+    DONE = "done"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class StepEvent:
+    step_id: str
+    state: str
+    reason_code: Optional[str] = None
+    reason_text: Optional[str] = None
 
 
 class ProgressStep:

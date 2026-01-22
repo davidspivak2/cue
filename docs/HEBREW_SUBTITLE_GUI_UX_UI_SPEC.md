@@ -174,15 +174,12 @@ Layout:
 - Compact video card remains visible.
 - Progress Card:
   - Title: “Preparing audio”
-  - Sub-status line: “Extracting audio”
-  - Determinate progress bar
+  - Checklist (above the progress bar):
+    - “Extracting audio”
+    - “Cleaning up audio” (only if the setting is enabled)
+  - Determinate progress bar + elapsed time
     - **Only the progress bar shows the %** (e.g., “18%”).
-    - The sub-status text must not include “— 18%”.
   - Cancel button (single CTA)
-
-“Not stuck” rule:
-- If the numeric % doesn’t change for >10 seconds, show a subtle activity indicator:
-  - e.g., pulsing dot after the sub-status: “Extracting audio ···”
 
 ---
 
@@ -194,20 +191,15 @@ Layout:
 - Compact video card remains visible.
 - Progress Card:
   - Title: “Creating subtitles”
-  - Sub-status line: “Listening to audio”
-  - Determinate progress bar
+  - Checklist (above the progress bar):
+    - “Loading AI model”
+    - “Detecting language”
+    - “Writing subtitles”
+    - “Fixing punctuation” (only if the setting is enabled)
+    - “Fixing missing subtitles”
+  - Determinate progress bar + elapsed time
     - **Only the progress bar shows the %**.
   - Cancel button
-
-“Not stuck” rules (mandatory):
-- Always show an activity indicator while transcribing (even if % holds):
-  - Example: “Listening to audio ···” (animated)
-- If progress updates are coarse, the app should:
-  - show occasional small % movement (estimator/smoothing), **without lying** (do not exceed a safe ceiling until real progress arrives)
-  - never jump from 20% to 100% without intermediate movement
-
-Future (PR11):
-- A thumbnail strip showing “subtitle moments” updated periodically (throttled).
 
 ---
 
@@ -275,11 +267,13 @@ Layout:
 - Compact video card remains visible.
 - Progress Card:
   - Title: “Exporting video”
-  - Determinate progress bar (real FFmpeg progress)
+  - Checklist (above the progress bar):
+    - “Getting video info”
+    - “Timing word highlights” (only when Word highlight mode is selected)
+    - “Adding subtitles to video”
+    - “Saving video”
+  - Determinate progress bar (real FFmpeg progress) + elapsed time
   - Cancel button
-
-Future (PR11):
-- Slideshow preview frames with final subtitle style.
 
 ---
 
@@ -478,12 +472,22 @@ Note:
 - “Create subtitles”
 - “Creating subtitles”
 - “Preparing audio”
-- “Listening to audio”
+- “Extracting audio”
+- “Cleaning up audio”
+- “Loading AI model”
+- “Detecting language”
+- “Writing subtitles”
+- “Fixing punctuation”
+- “Fixing missing subtitles”
 - “Subtitles ready ✓”
 - “Open subtitles”
 - “Edit in Subtitle Edit”
 - “Create video with subtitles”
 - “Exporting video”
+- “Getting video info”
+- “Adding subtitles to video”
+- “Saving video”
+- “Timing word highlights”
 - “Your video is ready”
 - “Play video”
 - “Open folder”

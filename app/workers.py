@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from PySide6 import QtCore, QtGui
-from .progress import ProgressStep
+from .progress import ChecklistStep, ProgressStep, StepEvent, StepState
 from .config import (
     DEFAULT_HIGHLIGHT_COLOR,
     DEFAULT_HIGHLIGHT_OPACITY,
@@ -95,6 +95,12 @@ class TranscriptionError(RuntimeError):
         self.srt_size = srt_size
 
 
+class AlignmentError(RuntimeError):
+    def __init__(self, message: str, reason_code: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
 @dataclass
 class TranscriptionSettings:
     apply_audio_filter: bool
@@ -119,6 +125,7 @@ class WorkerSignals(QtCore.QObject):
     finished = QtCore.Signal(bool, str, dict)
     started = QtCore.Signal(str)
     progress = QtCore.Signal(str, object, str)
+    step_event = QtCore.Signal(object)
 
 
 class TaskType:
@@ -248,10 +255,16 @@ class Worker(QtCore.QObject):
                 True,
             )
         self.signals.log.emit("Preparing audio...", True)
+        self._emit_step_event(ChecklistStep.EXTRACT_AUDIO, StepState.START)
+        if settings.apply_audio_filter:
+            self._emit_step_event(ChecklistStep.CLEANUP_AUDIO, StepState.START)
         self._emit_step_progress(ProgressStep.PREPARE_AUDIO, 0.0, "Extracting audio", force=True)
         prepare_start = time.monotonic()
         self._extract_audio(audio_path, settings.apply_audio_filter, video_duration)
         self._prepare_audio_seconds = time.monotonic() - prepare_start
+        self._emit_step_event(ChecklistStep.EXTRACT_AUDIO, StepState.DONE)
+        if settings.apply_audio_filter:
+            self._emit_step_event(ChecklistStep.CLEANUP_AUDIO, StepState.DONE)
 
         if self._cancelled.is_set():
             raise CancelledError()
@@ -331,6 +344,7 @@ class Worker(QtCore.QObject):
 
         cues = parse_srt_file(srt_path)
         self._ensure_word_timings_file(srt_path, cues)
+        self._emit_transcription_post_steps()
 
         preview_frame_path: Optional[Path] = None
         preview_subtitle_text: Optional[str] = None
@@ -426,6 +440,70 @@ class Worker(QtCore.QObject):
             "preview_clip_start_seconds": preview_clip_start_seconds,
             "preview_clip_duration_seconds": preview_clip_duration_seconds,
         }
+
+    def _emit_transcription_post_steps(self) -> None:
+        settings = self.transcription_settings
+        if settings is None:
+            return
+        stats = self._transcribe_stats or {}
+        if settings.punctuation_rescue_fallback_enabled:
+            triggered = bool(stats.get("punctuation_rescue_triggered"))
+            gate_passed = bool(stats.get("punctuation_rescue_gate_passed"))
+            chosen_attempt = stats.get("punctuation_rescue_chosen_attempt")
+            if triggered and gate_passed and chosen_attempt not in (None, 0):
+                self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
+            else:
+                self._emit_step_event(
+                    ChecklistStep.FIX_PUNCTUATION,
+                    StepState.SKIPPED,
+                    reason_text="punctuation looks good",
+                )
+
+        vad_stats = stats.get("vad_gap_rescue") if isinstance(stats, dict) else None
+        if isinstance(vad_stats, dict) and not vad_stats.get("enabled", True):
+            return
+        if isinstance(vad_stats, dict):
+            gaps_found = int(vad_stats.get("gaps_found", 0) or 0)
+            gaps_restored = int(vad_stats.get("gaps_restored", 0) or 0)
+            if gaps_found == 0:
+                self._emit_step_event(
+                    ChecklistStep.FIX_MISSING_SUBTITLES,
+                    StepState.SKIPPED,
+                    reason_text="no missing subtitles found",
+                )
+            elif gaps_restored > 0:
+                self._emit_step_event(ChecklistStep.FIX_MISSING_SUBTITLES, StepState.DONE)
+            else:
+                reason_code = self._select_missing_subtitles_reason_code(vad_stats)
+                self._emit_step_event(
+                    ChecklistStep.FIX_MISSING_SUBTITLES,
+                    StepState.SKIPPED,
+                    reason_code=reason_code,
+                )
+        else:
+            self._emit_step_event(
+                ChecklistStep.FIX_MISSING_SUBTITLES,
+                StepState.SKIPPED,
+                reason_text="no missing subtitles found",
+            )
+
+    def _select_missing_subtitles_reason_code(self, vad_stats: dict[str, object]) -> str:
+        gaps = vad_stats.get("gaps")
+        if not isinstance(gaps, list):
+            return "rescue_error"
+        if any(gap.get("status") == "error" for gap in gaps if isinstance(gap, dict)):
+            return "rescue_error"
+        if any(
+            gap.get("reason") in ("max_gaps", "max_total_duration")
+            for gap in gaps
+            if isinstance(gap, dict)
+        ):
+            return "limits_reached"
+        if any(gap.get("status") == "no_speech" for gap in gaps if isinstance(gap, dict)):
+            return "no_speech_in_gaps"
+        if any(gap.get("status") == "rejected" for gap in gaps if isinstance(gap, dict)):
+            return "rescue_transcribe_empty"
+        return "merge_rejected"
 
     def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
@@ -585,7 +663,32 @@ class Worker(QtCore.QObject):
         cues = parse_srt_file(srt_path)
         self._ensure_word_timings_file(srt_path, cues)
         self._log_word_timing_status(srt_path)
-        self._run_alignment_if_needed(srt_path, audio_path_for_srt(srt_path), context="export")
+        if self.subtitle_mode == "word_highlight":
+            self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.START)
+            try:
+                timing_state, timing_reason = self._run_alignment_if_needed(
+                    srt_path,
+                    audio_path_for_srt(srt_path),
+                    context="export",
+                )
+            except AlignmentError as exc:
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.FAILED,
+                    reason_code=exc.reason_code,
+                )
+                raise RuntimeError(
+                    "Word highlighting couldn’t be synced to the audio. "
+                    "Try generating subtitles again. If it still fails, switch to Static mode."
+                ) from exc
+            if timing_state == StepState.SKIPPED:
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.SKIPPED,
+                    reason_text=timing_reason or "already timed",
+                )
+            else:
+                self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.DONE)
 
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
         self._output_video_path = output_path
@@ -610,6 +713,18 @@ class Worker(QtCore.QObject):
                 output_path=output_path,
                 video_duration=video_duration,
             )
+        except AlignmentError as exc:
+            if self.subtitle_mode == "word_highlight":
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.FAILED,
+                    reason_code=exc.reason_code,
+                )
+                raise RuntimeError(
+                    "Word highlighting couldn’t be synced to the audio. "
+                    "Try generating subtitles again. If it still fails, switch to Static mode."
+                ) from exc
+            raise
         except Exception as exc:  # noqa: BLE001
             self.signals.log.emit("Graphics overlay export failed.", True)
             self.signals.log.emit(str(exc), True)
@@ -625,7 +740,9 @@ class Worker(QtCore.QObject):
         output_path: Path,
         video_duration: Optional[float],
     ) -> dict:
+        self._emit_step_event(ChecklistStep.GET_VIDEO_INFO, StepState.START)
         stream_info = resolve_video_stream_info(self.video_path)
+        self._emit_step_event(ChecklistStep.GET_VIDEO_INFO, StepState.DONE)
         duration_seconds = video_duration
         if duration_seconds is None:
             duration_seconds = max((cue.end_seconds for cue in cues), default=0.0)
@@ -653,6 +770,7 @@ class Worker(QtCore.QObject):
             True,
         )
 
+        self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.START)
         segments = self._build_overlay_segments(
             cues=cues,
             duration_seconds=duration_seconds,
@@ -662,6 +780,7 @@ class Worker(QtCore.QObject):
             duration_seconds,
             plan.fps,
         )
+        self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE)
         self.signals.log.emit(
             f"Overlay frames: total={total_frames} segments={len(frame_segments)}",
             True,
@@ -727,6 +846,7 @@ class Worker(QtCore.QObject):
                     yield last_frame
 
         self.signals.log.emit("Adding subtitles to the video...", True)
+        self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
         self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
         burn_start = time.monotonic()
         copy_command = plan.base_command + ["-c:a", "copy", str(output_path)]
@@ -741,6 +861,7 @@ class Worker(QtCore.QObject):
                 make_frame_generator(),
             )
             self._burn_in_seconds = time.monotonic() - burn_start
+            self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
             if perf_stats:
                 self.signals.log.emit(perf_stats.summary_line(), True)
             return {"output_path": str(output_path)}
@@ -759,6 +880,7 @@ class Worker(QtCore.QObject):
             make_frame_generator(),
         )
         self._burn_in_seconds = time.monotonic() - burn_start
+        self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
         if perf_stats:
             self.signals.log.emit(perf_stats.summary_line(), True)
         return {"output_path": str(output_path)}
@@ -773,19 +895,17 @@ class Worker(QtCore.QObject):
             return build_static_overlay_segments(cues, duration_seconds)
         word_timings_path = self._word_timings_path
         if not word_timings_path or not word_timings_path.exists():
-            self.signals.log.emit(
-                "Overlay word timings missing; rendering static overlay text.",
-                True,
-            )
-            return build_static_overlay_segments(cues, duration_seconds)
+            raise AlignmentError("Overlay word timings missing.", "align_output_empty")
         try:
             doc = load_word_timings_json(word_timings_path)
         except (WordTimingValidationError, OSError) as exc:
-            self.signals.log.emit(
-                f"Overlay word timings failed to load ({exc}); using static overlay text.",
-                True,
-            )
-            return build_static_overlay_segments(cues, duration_seconds)
+            raise AlignmentError(
+                f"Overlay word timings failed to load ({exc}).",
+                "align_output_invalid",
+            ) from exc
+        total_words = sum(len(cue.words) for cue in doc.cues)
+        if total_words == 0:
+            raise AlignmentError("Overlay word timings empty.", "align_output_empty")
         return build_word_highlight_overlay_segments(cues, doc, duration_seconds)
 
     def _build_overlay_frame_segments(
@@ -1048,6 +1168,7 @@ class Worker(QtCore.QObject):
         force_cpu_flag = force_cpu or device == "cpu"
         self.signals.started.emit("Creating subtitles")
         self.signals.log.emit("Starting subtitles worker...", True)
+        self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.START)
         self._emit_step_progress(
             ProgressStep.TRANSCRIBE,
             0.0,
@@ -1162,6 +1283,9 @@ class Worker(QtCore.QObject):
         last_progress_log = 0.0
         done_seen = False
         done_srt_path: Optional[Path] = None
+        load_model_done = False
+        detect_language_done = False
+        write_started = False
         transcribe_config_json: Optional[str] = None
         watchdog_triggered = False
         watchdog_elapsed = 0.0
@@ -1295,6 +1419,9 @@ class Worker(QtCore.QObject):
                             "Listening to audio",
                             start=self._step_progress.get(ProgressStep.TRANSCRIBE, 0.0),
                         )
+                if not load_model_done:
+                    load_model_done = True
+                    self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
                 now = time.monotonic()
                 if now - last_progress_log >= 2.0:
                     _emit_log("Listening progress update received.", True)
@@ -1314,6 +1441,9 @@ class Worker(QtCore.QObject):
             if text.startswith("HEARTBEAT TRANSCRIBE"):
                 with progress_lock:
                     transcribe_started = True
+                if not load_model_done:
+                    load_model_done = True
+                    self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
                 if duration_seconds is None and not smooth_transcribe_started:
                     smooth_transcribe_started = True
                     self._start_smooth_progress(
@@ -1335,6 +1465,12 @@ class Worker(QtCore.QObject):
                     force=True,
                 )
                 continue
+            if text.startswith("Detected language:"):
+                if not detect_language_done:
+                    detect_language_done = True
+                    self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
+                    self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.DONE)
+                continue
             if text.startswith("DONE"):
                 done_seen = True
                 watchdog_stop.set()
@@ -1343,6 +1479,9 @@ class Worker(QtCore.QObject):
                     done_srt_path = Path(parts[1].strip())
                 self._stop_smooth_progress()
                 self._stop_transcribe_estimator()
+                if not write_started:
+                    write_started = True
+                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
                 self._emit_step_progress(
                     ProgressStep.TRANSCRIBE,
                     1.0,
@@ -1369,6 +1508,10 @@ class Worker(QtCore.QObject):
                     f"subtitles file exists; continuing.",
                     True,
                 )
+            if not load_model_done:
+                self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+            if write_started:
+                self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.DONE)
             return
 
         diagnostics = [
@@ -1464,7 +1607,7 @@ class Worker(QtCore.QObject):
         audio_path: Path,
         *,
         context: str,
-    ) -> None:
+    ) -> tuple[str, Optional[str]]:
         plan = build_alignment_plan(
             subtitle_mode=self.subtitle_mode,
             srt_path=srt_path,
@@ -1478,18 +1621,28 @@ class Worker(QtCore.QObject):
             True,
         )
         if not plan.should_run:
-            return
+            return StepState.SKIPPED, "already timed"
         if plan.reason == "word_timings_has_no_words":
             self.signals.log.emit(
                 "Alignment needed: word_timings_has_no_words",
                 True,
+            )
+        if not srt_path.exists():
+            raise AlignmentError(
+                f"Alignment failed: subtitles file missing ({srt_path})",
+                "srt_missing",
             )
         if not audio_path.exists():
             self.signals.log.emit(
                 f"Alignment skipped: audio not found ({audio_path})",
                 True,
             )
-            return
+            raise AlignmentError(
+                f"Alignment failed: audio missing ({audio_path})",
+                "audio_missing",
+            )
+        if not plan.output_path.parent.exists():
+            plan.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.signals.log.emit(
             "Alignment starting: "
             f"wav={audio_path} srt={srt_path} output={plan.output_path} "
@@ -1520,10 +1673,20 @@ class Worker(QtCore.QObject):
             True,
         )
         if result.returncode != 0:
-            self.signals.log.emit(
-                "Alignment failed; continuing with static rendering.",
-                True,
-            )
+            raise AlignmentError("Alignment failed: process returned error.", "align_process_failed")
+        if not plan.output_path.exists() or plan.output_path.stat().st_size == 0:
+            raise AlignmentError("Alignment failed: no output produced.", "align_output_empty")
+        try:
+            doc = load_word_timings_json(plan.output_path)
+        except (WordTimingValidationError, OSError) as exc:
+            raise AlignmentError(
+                f"Alignment failed: invalid output ({exc}).",
+                "align_output_invalid",
+            ) from exc
+        total_words = sum(len(cue.words) for cue in doc.cues)
+        if total_words == 0:
+            raise AlignmentError("Alignment failed: output had no timings.", "align_output_empty")
+        return StepState.DONE, None
 
     def _maybe_write_diagnostics(
         self,
@@ -1803,6 +1966,23 @@ class Worker(QtCore.QObject):
         self._progress_label = status
         self._last_progress_emit = now
         self.signals.progress.emit(step_id, step_progress, status)
+
+    def _emit_step_event(
+        self,
+        step_id: str,
+        state: str,
+        *,
+        reason_code: Optional[str] = None,
+        reason_text: Optional[str] = None,
+    ) -> None:
+        self.signals.step_event.emit(
+            StepEvent(
+                step_id=step_id,
+                state=state,
+                reason_code=reason_code,
+                reason_text=reason_text,
+            )
+        )
 
     def _start_smooth_progress(
         self,
