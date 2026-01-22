@@ -143,16 +143,28 @@ class ChecklistRow(QtWidgets.QWidget):
         self.icon_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
 
         self.text_label = QtWidgets.QLabel(label_text)
+        self.text_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred
+        )
         self.bullet_label = QtWidgets.QLabel("•")
         self.bullet_label.setVisible(False)
+        self.bullet_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred
+        )
         self.detail_label = QtWidgets.QLabel("")
         self.detail_label.setVisible(False)
+        self.detail_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred
+        )
         self.skip_label = QtWidgets.QLabel('<a href="skip">Skip</a>')
         self.skip_label.setObjectName("SkipLink")
         self.skip_label.setTextFormat(QtCore.Qt.RichText)
         self.skip_label.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
         self.skip_label.setOpenExternalLinks(False)
         self.skip_label.setVisible(False)
+        self.skip_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred
+        )
         self.skip_label.linkActivated.connect(lambda _: self.skip_clicked.emit(self.step_id))
         accent = QtWidgets.QApplication.palette().color(QtGui.QPalette.Highlight).name()
         self.skip_label.setStyleSheet(
@@ -168,7 +180,6 @@ class ChecklistRow(QtWidgets.QWidget):
 
         layout.addWidget(self.icon_label)
         layout.addWidget(self.text_label)
-        layout.addStretch()
         layout.addWidget(self.bullet_label)
         layout.addWidget(self.detail_label)
         layout.addWidget(self.skip_label)
@@ -210,8 +221,10 @@ class ChecklistRow(QtWidgets.QWidget):
         elif state == "skipped":
             self.icon_label.setText("↩")
             self.icon_label.setStyleSheet("color: #999;")
-            reason = reason_text or "unknown"
-            self._set_detail(f"Skipped ({reason})", "#999")
+            if reason_text in (None, "Skipped"):
+                self._set_detail("Skipped", "#999")
+            else:
+                self._set_detail(f"Skipped ({reason_text})", "#999")
             self.set_skip_visible(False)
         elif state == "failed":
             self.icon_label.setText("❌")
@@ -3015,7 +3028,7 @@ class MainWindow(QtWidgets.QMainWindow):
             StepEvent(
                 step_id=step_id,
                 state=StepState.SKIPPED,
-                reason_text="skipped by you",
+                reason_text="Skipped",
             ),
             "skipped",
         )
