@@ -2794,7 +2794,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
             if not transcription_settings or transcription_settings.vad_gap_rescue_enabled:
                 steps.append(
-                    (ChecklistStep.FIX_MISSING_SUBTITLES, "Making sure no subtitles are missing")
+                    (ChecklistStep.FIX_MISSING_SUBTITLES, "Checking for gaps in subtitles")
                 )
             return steps
         if task_type == TaskType.BURN_IN:

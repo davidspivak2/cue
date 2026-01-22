@@ -444,14 +444,16 @@ class Worker(QtCore.QObject):
             return
         stats = self._transcribe_stats or {}
         if settings.punctuation_rescue_fallback_enabled:
-            self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
+            if not punctuation_active:
+                self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
 
         vad_stats = stats.get("vad_gap_rescue") if isinstance(stats, dict) else None
         if not settings.vad_gap_rescue_enabled:
             return
         if isinstance(vad_stats, dict) and not vad_stats.get("enabled", True):
             return
-        self._emit_step_event(ChecklistStep.FIX_MISSING_SUBTITLES, StepState.DONE)
+        if not missing_active:
+            self._emit_step_event(ChecklistStep.FIX_MISSING_SUBTITLES, StepState.DONE)
 
     def _select_missing_subtitles_reason_code(self, vad_stats: dict[str, object]) -> str:
         gaps = vad_stats.get("gaps")
@@ -1445,7 +1447,7 @@ class Worker(QtCore.QObject):
                 continue
 
             _emit_log(text, show_in_ui)
-            if text.startswith("PUNCT_RESCUE "):
+            if text.startswith("PUNCT_RESCUE_START"):
                 if (
                     self.transcription_settings
                     and self.transcription_settings.punctuation_rescue_fallback_enabled
@@ -1458,22 +1460,21 @@ class Worker(QtCore.QObject):
                         detail = "Improving punctuation"
                         if attempt >= 2:
                             detail = f"Improving punctuation (attempt {attempt})"
-                        if not punctuation_active:
-                            punctuation_active = True
-                            last_punct_attempt = attempt
-                            self._emit_step_event(
-                                ChecklistStep.FIX_PUNCTUATION,
-                                StepState.START,
-                                reason_text=detail,
-                            )
-                        elif attempt != last_punct_attempt:
-                            last_punct_attempt = attempt
-                            self._emit_step_event(
-                                ChecklistStep.FIX_PUNCTUATION,
-                                StepState.START,
-                                reason_text=detail,
-                            )
-            if text.startswith("VAD_GAP_RESCUE"):
+                        punctuation_active = True
+                        last_punct_attempt = attempt
+                        self._emit_step_event(
+                            ChecklistStep.FIX_PUNCTUATION,
+                            StepState.START,
+                            reason_text=detail,
+                        )
+            if text.startswith("PUNCT_RESCUE_DONE"):
+                if (
+                    self.transcription_settings
+                    and self.transcription_settings.punctuation_rescue_fallback_enabled
+                ):
+                    punctuation_active = False
+                    self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
+            if text.startswith("VAD_GAP_RESCUE_START"):
                 if (
                     self.transcription_settings
                     and self.transcription_settings.vad_gap_rescue_enabled
@@ -1484,6 +1485,13 @@ class Worker(QtCore.QObject):
                             ChecklistStep.FIX_MISSING_SUBTITLES,
                             StepState.START,
                         )
+            if text.startswith("VAD_GAP_RESCUE_DONE"):
+                if (
+                    self.transcription_settings
+                    and self.transcription_settings.vad_gap_rescue_enabled
+                ):
+                    missing_active = False
+                    self._emit_step_event(ChecklistStep.FIX_MISSING_SUBTITLES, StepState.DONE)
             if text.startswith("MODE"):
                 continue
             if text.startswith("HEARTBEAT MODEL_LOAD") or text.startswith("Loading model"):
