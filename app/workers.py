@@ -15,7 +15,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from PySide6 import QtCore, QtGui
 from .progress import ChecklistStep, ProgressStep, StepEvent, StepState
@@ -201,7 +201,10 @@ class Worker(QtCore.QObject):
         self._gap_found_count = 0
         self._skip_punctuation = False
         self._skip_gaps = False
-        self._skip_control_path: Optional[Path] = None
+        self._control_dir: Optional[Path] = None
+        self._alignment_words_current = 0
+        self._alignment_words_total = 0
+        self._alignment_last_emit = 0.0
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -213,36 +216,27 @@ class Worker(QtCore.QObject):
     @QtCore.Slot()
     def request_skip_punctuation(self) -> None:
         self._skip_punctuation = True
-        self._write_skip_control()
+        self._write_skip_flag("skip_punct.flag")
 
     @QtCore.Slot()
     def request_skip_gaps(self) -> None:
         self._skip_gaps = True
-        self._write_skip_control()
+        self._write_skip_flag("skip_gaps.flag")
 
-    def _write_skip_control(self) -> None:
-        if not self._skip_control_path:
+    def _write_skip_flag(self, filename: str) -> None:
+        if not self._control_dir:
             return
-        payload = {
-            "punctuation": self._skip_punctuation,
-            "gaps": self._skip_gaps,
-        }
+        flag_path = self._control_dir / filename
         try:
-            self._skip_control_path.write_text(
-                json.dumps(payload, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            flag_path.write_text("1", encoding="utf-8")
         except Exception:  # noqa: BLE001
             pass
 
-    def _cleanup_skip_control(self) -> None:
-        if not self._skip_control_path:
+    def _cleanup_control_dir(self) -> None:
+        if not self._control_dir:
             return
-        try:
-            self._skip_control_path.unlink()
-        except OSError:
-            pass
-        self._skip_control_path = None
+        shutil.rmtree(self._control_dir, ignore_errors=True)
+        self._control_dir = None
 
     @QtCore.Slot()
     def run(self) -> None:
@@ -485,7 +479,7 @@ class Worker(QtCore.QObject):
             return
         stats = self._transcribe_stats or {}
         if settings.punctuation_rescue_fallback_enabled:
-            if not self._punctuation_active:
+            if not self._punctuation_active and not self._skip_punctuation:
                 rescue_triggered = bool(stats.get("punctuation_rescue_triggered"))
                 if rescue_triggered:
                     attempts_ran = int(stats.get("punctuation_rescue_attempts_ran", 1) or 1)
@@ -507,7 +501,7 @@ class Worker(QtCore.QObject):
             return
         if isinstance(vad_stats, dict) and not vad_stats.get("enabled", True):
             return
-        if not self._gap_active:
+        if not self._gap_active and not self._skip_gaps:
             gaps_found = int(vad_stats.get("gaps_found", 0) or 0) if isinstance(vad_stats, dict) else 0
             gaps_restored = (
                 int(vad_stats.get("gaps_restored", 0) or 0) if isinstance(vad_stats, dict) else 0
@@ -1237,513 +1231,519 @@ class Worker(QtCore.QObject):
         duration_seconds: Optional[float],
         force_cpu: bool,
     ) -> None:
-        if not self.transcription_settings:
-            raise ValueError("Missing transcription settings")
-        device = self.transcription_settings.device
-        compute_type = self.transcription_settings.compute_type
-        if force_cpu and device != "cpu":
-            device = "cpu"
-            if compute_type == "float16":
-                compute_type = "int16"
-        prefer_gpu = device == "cuda" and not force_cpu
-        force_cpu_flag = force_cpu or device == "cpu"
-        self.signals.started.emit("Creating subtitles")
-        self.signals.log.emit("Starting subtitles worker...", True)
-        self._punctuation_active = False
-        self._punctuation_attempt = 0
-        self._gap_active = False
-        self._gap_found_count = 0
-        self._skip_punctuation = False
-        self._skip_gaps = False
-        self._skip_control_path = None
-        self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.START)
-        self._emit_step_progress(
-            ProgressStep.TRANSCRIBE,
-            0.0,
-            "Loading model",
-            force=True,
-        )
-        runtime_mode = get_runtime_mode()
-        if runtime_mode == "source":
-            command = [
-                sys.executable,
-                "-m",
-                "app.transcribe_worker",
-            ]
-        else:
-            worker_exe = Path(sys.executable).with_name("HebrewSubtitleWorker.exe")
-            if worker_exe.exists():
-                command = [str(worker_exe)]
-            else:
+        try:
+            if not self.transcription_settings:
+                raise ValueError("Missing transcription settings")
+            device = self.transcription_settings.device
+            compute_type = self.transcription_settings.compute_type
+            if force_cpu and device != "cpu":
+                device = "cpu"
+                if compute_type == "float16":
+                    compute_type = "int16"
+            prefer_gpu = device == "cuda" and not force_cpu
+            force_cpu_flag = force_cpu or device == "cpu"
+            self.signals.started.emit("Creating subtitles")
+            self.signals.log.emit("Starting subtitles worker...", True)
+            self._punctuation_active = False
+            self._punctuation_attempt = 0
+            self._gap_active = False
+            self._gap_found_count = 0
+            self._skip_punctuation = False
+            self._skip_gaps = False
+            self._control_dir = None
+            self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.START)
+            self._emit_step_progress(
+                ProgressStep.TRANSCRIBE,
+                0.0,
+                "Loading model",
+                force=True,
+            )
+            runtime_mode = get_runtime_mode()
+            if runtime_mode == "source":
                 command = [
                     sys.executable,
-                    "--run-transcribe-worker",
+                    "-m",
+                    "app.transcribe_worker",
                 ]
-        command += [
-            "--wav",
-            str(audio_path),
-            "--srt",
-            str(srt_path),
-            "--lang",
-            "he",
-        ]
-        if force_cpu_flag:
-            command.append("--force-cpu")
-        else:
-            command.append("--prefer-gpu")
-        command += ["--device", device, "--compute-type", compute_type]
-        if duration_seconds:
-            command += ["--duration-seconds", f"{duration_seconds:.2f}"]
-        if self._last_audio_extract_command:
+            else:
+                worker_exe = Path(sys.executable).with_name("HebrewSubtitleWorker.exe")
+                if worker_exe.exists():
+                    command = [str(worker_exe)]
+                else:
+                    command = [
+                        sys.executable,
+                        "--run-transcribe-worker",
+                    ]
             command += [
-                "--ffmpeg-args-json",
-                json.dumps(self._last_audio_extract_command),
+                "--wav",
+                str(audio_path),
+                "--srt",
+                str(srt_path),
+                "--lang",
+                "he",
             ]
-        command += [
-            "--punctuation-rescue",
-            "on" if self.transcription_settings.punctuation_rescue_fallback_enabled else "off",
-        ]
-        skip_control = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                dir=self.output_dir, suffix=".json", delete=False
-            ) as tmp:
-                skip_control = Path(tmp.name)
-            self._skip_control_path = skip_control
-            self._write_skip_control()
-            command += ["--skip-control", str(skip_control)]
-        except Exception:  # noqa: BLE001
-            self._skip_control_path = None
+            if force_cpu_flag:
+                command.append("--force-cpu")
+            else:
+                command.append("--prefer-gpu")
+            command += ["--device", device, "--compute-type", compute_type]
+            if duration_seconds:
+                command += ["--duration-seconds", f"{duration_seconds:.2f}"]
+            if self._last_audio_extract_command:
+                command += [
+                    "--ffmpeg-args-json",
+                    json.dumps(self._last_audio_extract_command),
+                ]
+            command += [
+                "--punctuation-rescue",
+                "on" if self.transcription_settings.punctuation_rescue_fallback_enabled else "off",
+            ]
+            try:
+                self._control_dir = Path(
+                    tempfile.mkdtemp(dir=self.output_dir, prefix="transcribe_control_")
+                )
+                command += ["--control-dir", str(self._control_dir)]
+            except Exception:  # noqa: BLE001
+                self._control_dir = None
 
-        parent_config = {
-            "model_name": TRANSCRIBE_MODEL_NAME,
-            "models_dir": str(get_models_dir()),
-            "prefer_gpu": prefer_gpu,
-            "force_cpu": force_cpu_flag,
-            "device": device,
-            "compute_type": compute_type,
-            "ffmpeg_args": self._last_audio_extract_command,
-            "punctuation_rescue_fallback_enabled": (
-                self.transcription_settings.punctuation_rescue_fallback_enabled
-            ),
-        }
-        self.signals.log.emit(
-            f"TRANSCRIBE_PARENT_CONFIG {json.dumps(parent_config, sort_keys=True)}",
-            True,
-        )
-        self._transcribe_parent_config = parent_config
-        self._transcribe_command = subprocess.list2cmdline(command)
-        self.signals.log.emit(f"Subtitles command: {subprocess.list2cmdline(command)}", True)
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            **get_subprocess_kwargs(),
-        )
-        self._process = process
-
-        stderr_tail: deque[str] = deque(maxlen=50)
-        stdout_tail: deque[str] = deque(maxlen=50)
-        log_lock = threading.Lock()
-        output_lock = threading.Lock()
-        last_output_time = time.monotonic()
-
-        def _emit_log(message: str, show_in_ui: bool = True) -> None:
-            with log_lock:
-                self.signals.log.emit(message, show_in_ui)
-
-        def _mark_output() -> None:
-            nonlocal last_output_time
-            with output_lock:
-                last_output_time = time.monotonic()
-
-        def _read_stderr() -> None:
-            assert process.stderr is not None
-            for line in process.stderr:
-                text = line.rstrip()
-                if text:
-                    stderr_tail.append(text)
-                    _mark_output()
-                    _emit_log(text, True)
-                if self._cancelled.is_set():
-                    break
-
-        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
-        stderr_thread.start()
-
-        max_end_seconds = 0.0
-        progress_lock = threading.Lock()
-        real_progress = 0.0
-        real_progress_seen = False
-        transcribe_started = False
-        last_progress_log = 0.0
-        done_seen = False
-        done_srt_path: Optional[Path] = None
-        load_model_done = False
-        detect_language_done = False
-        write_started = False
-        transcribe_config_json: Optional[str] = None
-        watchdog_triggered = False
-        watchdog_elapsed = 0.0
-        watchdog_stop = threading.Event()
-        no_output_timeout = 60.0
-        smooth_transcribe_started = False
-        if duration_seconds is None:
-            self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Loading model")
-        else:
-            rtf_est = self._resolve_transcribe_rtf_est(
-                self.transcription_settings,
-                device,
-                compute_type,
+            parent_config = {
+                "model_name": TRANSCRIBE_MODEL_NAME,
+                "models_dir": str(get_models_dir()),
+                "prefer_gpu": prefer_gpu,
+                "force_cpu": force_cpu_flag,
+                "device": device,
+                "compute_type": compute_type,
+                "ffmpeg_args": self._last_audio_extract_command,
+                "punctuation_rescue_fallback_enabled": (
+                    self.transcription_settings.punctuation_rescue_fallback_enabled
+                ),
+            }
+            self.signals.log.emit(
+                f"TRANSCRIBE_PARENT_CONFIG {json.dumps(parent_config, sort_keys=True)}",
+                True,
             )
-            estimator_stop = threading.Event()
-            self._transcribe_estimator_stop = estimator_stop
+            self._transcribe_parent_config = parent_config
+            self._transcribe_command = subprocess.list2cmdline(command)
+            self.signals.log.emit(
+                f"Subtitles command: {subprocess.list2cmdline(command)}",
+                True,
+            )
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                **get_subprocess_kwargs(),
+            )
+            self._process = process
 
-            def _estimate_progress() -> None:
-                start_time = time.monotonic()
-                while not estimator_stop.wait(0.5):
+            stderr_tail: deque[str] = deque(maxlen=50)
+            stdout_tail: deque[str] = deque(maxlen=50)
+            log_lock = threading.Lock()
+            output_lock = threading.Lock()
+            last_output_time = time.monotonic()
+
+            def _emit_log(message: str, show_in_ui: bool = True) -> None:
+                with log_lock:
+                    self.signals.log.emit(message, show_in_ui)
+
+            def _mark_output() -> None:
+                nonlocal last_output_time
+                with output_lock:
+                    last_output_time = time.monotonic()
+
+            def _read_stderr() -> None:
+                assert process.stderr is not None
+                for line in process.stderr:
+                    text = line.rstrip()
+                    if text:
+                        stderr_tail.append(text)
+                        _mark_output()
+                        _emit_log(text, True)
                     if self._cancelled.is_set():
                         break
-                    elapsed = time.monotonic() - start_time
-                    processed_seconds_est = elapsed / rtf_est
-                    step_progress_est = processed_seconds_est / duration_seconds
-                    with progress_lock:
-                        current_real = real_progress
-                        has_real = real_progress_seen
-                        has_started = transcribe_started
-                    if not has_real:
-                        step_progress_est = min(step_progress_est, 0.85)
-                    else:
-                        step_progress_est = min(
-                            step_progress_est,
-                            min(0.99, current_real + 0.02),
-                        )
-                    step_progress = max(current_real, step_progress_est)
-                    label = "Listening to audio" if has_started else "Loading model"
-                    self._emit_step_progress(
-                        ProgressStep.TRANSCRIBE,
-                        step_progress,
-                        label,
-                    )
 
-            self._transcribe_estimator_thread = threading.Thread(
-                target=_estimate_progress, daemon=True
-            )
-            self._transcribe_estimator_thread.start()
+            stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+            stderr_thread.start()
 
-        def _watchdog() -> None:
-            nonlocal watchdog_triggered, watchdog_elapsed
-            while not watchdog_stop.is_set():
-                time.sleep(1.0)
-                if done_seen:
-                    continue
-                with output_lock:
-                    elapsed = time.monotonic() - last_output_time
-                if elapsed > no_output_timeout and process.poll() is None:
-                    watchdog_triggered = True
-                    watchdog_elapsed = elapsed
-                    _emit_log(
-                        f"No updates for {elapsed:.1f}s; stopping subtitles worker.",
-                        True,
-                    )
-                    process.terminate()
-                    break
+            max_end_seconds = 0.0
+            progress_lock = threading.Lock()
+            real_progress = 0.0
+            real_progress_seen = False
+            transcribe_started = False
+            last_progress_log = 0.0
+            done_seen = False
+            done_srt_path: Optional[Path] = None
+            load_model_done = False
+            detect_language_done = False
+            write_started = False
+            transcribe_config_json: Optional[str] = None
+            watchdog_triggered = False
+            watchdog_elapsed = 0.0
+            watchdog_stop = threading.Event()
+            no_output_timeout = 60.0
+            smooth_transcribe_started = False
+            if duration_seconds is None:
+                self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Loading model")
+            else:
+                rtf_est = self._resolve_transcribe_rtf_est(
+                    self.transcription_settings,
+                    device,
+                    compute_type,
+                )
+                estimator_stop = threading.Event()
+                self._transcribe_estimator_stop = estimator_stop
 
-        watchdog_thread = threading.Thread(target=_watchdog, daemon=True)
-        watchdog_thread.start()
-
-        assert process.stdout is not None
-        for line in process.stdout:
-            if self._cancelled.is_set():
-                process.terminate()
-                raise CancelledError()
-            text = line.strip()
-            if not text:
-                continue
-            stdout_tail.append(text)
-            _mark_output()
-            show_in_ui = True
-            if text.startswith("TRANSCRIBE_CONFIG_JSON "):
-                transcribe_config_json = text
-                config_payload = text.split(" ", 1)[1] if " " in text else ""
-                if config_payload:
-                    try:
-                        self._transcribe_worker_config = json.loads(config_payload)
-                    except json.JSONDecodeError:
-                        self._transcribe_worker_config = None
-                        self._transcribe_worker_note = (
-                            "TRANSCRIBE_CONFIG_JSON was present but could not be parsed."
-                        )
-                else:
-                    self._transcribe_worker_config = None
-                    self._transcribe_worker_note = (
-                        "TRANSCRIBE_CONFIG_JSON was present but empty."
-                    )
-            if text.startswith("TRANSCRIBE_STATS_JSON "):
-                show_in_ui = False
-                stats_payload = text.split(" ", 1)[1] if " " in text else ""
-                if stats_payload:
-                    try:
-                        self._transcribe_stats = json.loads(stats_payload)
-                    except json.JSONDecodeError:
-                        self._transcribe_stats = None
-            if text.startswith("PROGRESS_END"):
-                _emit_log(text, False)
-                if duration_seconds:
-                    try:
-                        end_value = float(text.split(" ", 1)[1])
-                    except (IndexError, ValueError):
-                        continue
-                    if end_value > max_end_seconds:
-                        max_end_seconds = end_value
-                        progress = min(0.99, max_end_seconds / duration_seconds)
+                def _estimate_progress() -> None:
+                    start_time = time.monotonic()
+                    while not estimator_stop.wait(0.5):
+                        if self._cancelled.is_set():
+                            break
+                        elapsed = time.monotonic() - start_time
+                        processed_seconds_est = elapsed / rtf_est
+                        step_progress_est = processed_seconds_est / duration_seconds
                         with progress_lock:
-                            real_progress = progress
-                            real_progress_seen = True
-                            transcribe_started = True
+                            current_real = real_progress
+                            has_real = real_progress_seen
+                            has_started = transcribe_started
+                        if not has_real:
+                            step_progress_est = min(step_progress_est, 0.85)
+                        else:
+                            step_progress_est = min(
+                                step_progress_est,
+                                min(0.99, current_real + 0.02),
+                            )
+                        step_progress = max(current_real, step_progress_est)
+                        label = "Listening to audio" if has_started else "Loading model"
                         self._emit_step_progress(
                             ProgressStep.TRANSCRIBE,
-                            progress,
-                            "Listening to audio",
+                            step_progress,
+                            label,
                         )
-                else:
-                    transcribe_started = True
-                    if not smooth_transcribe_started:
+
+                self._transcribe_estimator_thread = threading.Thread(
+                    target=_estimate_progress, daemon=True
+                )
+                self._transcribe_estimator_thread.start()
+
+            def _watchdog() -> None:
+                nonlocal watchdog_triggered, watchdog_elapsed
+                while not watchdog_stop.is_set():
+                    time.sleep(1.0)
+                    if done_seen:
+                        continue
+                    with output_lock:
+                        elapsed = time.monotonic() - last_output_time
+                    if elapsed > no_output_timeout and process.poll() is None:
+                        watchdog_triggered = True
+                        watchdog_elapsed = elapsed
+                        _emit_log(
+                            f"No updates for {elapsed:.1f}s; stopping subtitles worker.",
+                            True,
+                        )
+                        process.terminate()
+                        break
+
+            watchdog_thread = threading.Thread(target=_watchdog, daemon=True)
+            watchdog_thread.start()
+
+            assert process.stdout is not None
+            for line in process.stdout:
+                if self._cancelled.is_set():
+                    process.terminate()
+                    raise CancelledError()
+                text = line.strip()
+                if not text:
+                    continue
+                stdout_tail.append(text)
+                _mark_output()
+                show_in_ui = True
+                if text.startswith("TRANSCRIBE_CONFIG_JSON "):
+                    transcribe_config_json = text
+                    config_payload = text.split(" ", 1)[1] if " " in text else ""
+                    if config_payload:
+                        try:
+                            self._transcribe_worker_config = json.loads(config_payload)
+                        except json.JSONDecodeError:
+                            self._transcribe_worker_config = None
+                            self._transcribe_worker_note = (
+                                "TRANSCRIBE_CONFIG_JSON was present but could not be parsed."
+                            )
+                    else:
+                        self._transcribe_worker_config = None
+                        self._transcribe_worker_note = (
+                            "TRANSCRIBE_CONFIG_JSON was present but empty."
+                        )
+                if text.startswith("TRANSCRIBE_STATS_JSON "):
+                    show_in_ui = False
+                    stats_payload = text.split(" ", 1)[1] if " " in text else ""
+                    if stats_payload:
+                        try:
+                            self._transcribe_stats = json.loads(stats_payload)
+                        except json.JSONDecodeError:
+                            self._transcribe_stats = None
+                if text.startswith("PROGRESS_END"):
+                    _emit_log(text, False)
+                    if duration_seconds:
+                        try:
+                            end_value = float(text.split(" ", 1)[1])
+                        except (IndexError, ValueError):
+                            continue
+                        if end_value > max_end_seconds:
+                            max_end_seconds = end_value
+                            progress = min(0.99, max_end_seconds / duration_seconds)
+                            with progress_lock:
+                                real_progress = progress
+                                real_progress_seen = True
+                                transcribe_started = True
+                            self._emit_step_progress(
+                                ProgressStep.TRANSCRIBE,
+                                progress,
+                                "Listening to audio",
+                            )
+                    else:
+                        transcribe_started = True
+                        if not smooth_transcribe_started:
+                            smooth_transcribe_started = True
+                            self._start_smooth_progress(
+                                ProgressStep.TRANSCRIBE,
+                                "Listening to audio",
+                                start=self._step_progress.get(ProgressStep.TRANSCRIBE, 0.0),
+                            )
+                    if not load_model_done:
+                        load_model_done = True
+                        self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                    if not write_started:
+                        write_started = True
+                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                    now = time.monotonic()
+                    if now - last_progress_log >= 2.0:
+                        _emit_log("Listening progress update received.", True)
+                        last_progress_log = now
+                    continue
+
+                _emit_log(text, show_in_ui)
+                if text.startswith("PUNCT_RESCUE_START"):
+                    if (
+                        self.transcription_settings
+                        and self.transcription_settings.punctuation_rescue_fallback_enabled
+                    ):
+                        match = re.search(r"attempt=(\d+)", text)
+                        if match:
+                            attempt = int(match.group(1))
+                            if attempt < 1:
+                                continue
+                            detail = "Improving punctuation..."
+                            if attempt >= 2:
+                                detail = f"Improving punctuation (attempt {attempt})..."
+                            self._punctuation_active = True
+                            self._punctuation_attempt = attempt
+                            self._emit_step_event(
+                                ChecklistStep.FIX_PUNCTUATION,
+                                StepState.START,
+                                reason_text=detail,
+                            )
+                if text.startswith("PUNCT_RESCUE_DONE"):
+                    if (
+                        self.transcription_settings
+                        and self.transcription_settings.punctuation_rescue_fallback_enabled
+                    ):
+                        self._punctuation_active = False
+                        match = re.search(r"attempts_ran=(\d+)", text)
+                        attempts_ran = int(match.group(1)) if match else 1
+                        rescue_attempts = max(attempts_ran - 1, 1)
+                        if rescue_attempts == 1:
+                            detail = "Improved punctuation"
+                        else:
+                            detail = f"Improved punctuation ({rescue_attempts} attempts)"
+                        self._emit_step_event(
+                            ChecklistStep.FIX_PUNCTUATION,
+                            StepState.DONE,
+                            reason_text=detail,
+                        )
+                if text.startswith("VAD_GAP_RESCUE_START"):
+                    if (
+                        self.transcription_settings
+                        and self.transcription_settings.vad_gap_rescue_enabled
+                    ):
+                        self._gap_found_count = 0
+                        if not self._gap_active:
+                            self._gap_active = True
+                            self._emit_step_event(
+                                ChecklistStep.FIX_MISSING_SUBTITLES,
+                                StepState.START,
+                                reason_text="Scanning...",
+                            )
+                if text.startswith("VAD_GAP_RESCUE_DONE"):
+                    if (
+                        self.transcription_settings
+                        and self.transcription_settings.vad_gap_rescue_enabled
+                    ):
+                        self._gap_active = False
+                        match_found = re.search(r"gaps_found=(\d+)", text)
+                        match_restored = re.search(r"gaps_restored=(\d+)", text)
+                        gaps_found = int(match_found.group(1)) if match_found else 0
+                        gaps_restored = int(match_restored.group(1)) if match_restored else 0
+                        if gaps_found == 0:
+                            detail = "No gaps found"
+                        elif gaps_restored > 0:
+                            detail = f"Found {gaps_found} gaps, filled {gaps_restored}"
+                        else:
+                            detail = f"Found {gaps_found} gaps"
+                        self._emit_step_event(
+                            ChecklistStep.FIX_MISSING_SUBTITLES,
+                            StepState.DONE,
+                            reason_text=detail,
+                        )
+                if text.startswith("VAD_GAP_DETECTED") and self._gap_active:
+                    self._gap_found_count += 1
+                    detail = f"Scanning... (found {self._gap_found_count} gaps)"
+                    self._emit_step_event(
+                        ChecklistStep.FIX_MISSING_SUBTITLES,
+                        StepState.START,
+                        reason_text=detail,
+                    )
+                if text.startswith("PUNCT_RESCUE_SKIPPED"):
+                    self._punctuation_active = False
+                    continue
+                if text == "VAD_GAP_RESCUE_SKIPPED":
+                    self._gap_active = False
+                    continue
+                if text.startswith("MODE"):
+                    continue
+                if text.startswith("HEARTBEAT MODEL_LOAD") or text.startswith("Loading model"):
+                    self._emit_step_progress(
+                        ProgressStep.TRANSCRIBE,
+                        None,
+                        "Loading model",
+                    )
+                    continue
+                if text.startswith("HEARTBEAT TRANSCRIBE"):
+                    with progress_lock:
+                        transcribe_started = True
+                    if not load_model_done:
+                        load_model_done = True
+                        self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                    if not write_started:
+                        write_started = True
+                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                    if duration_seconds is None and not smooth_transcribe_started:
                         smooth_transcribe_started = True
                         self._start_smooth_progress(
                             ProgressStep.TRANSCRIBE,
                             "Listening to audio",
                             start=self._step_progress.get(ProgressStep.TRANSCRIBE, 0.0),
                         )
-                if not load_model_done:
-                    load_model_done = True
-                    self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
-                if not write_started:
-                    write_started = True
-                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
-                now = time.monotonic()
-                if now - last_progress_log >= 2.0:
-                    _emit_log("Listening progress update received.", True)
-                    last_progress_log = now
-                continue
-
-            _emit_log(text, show_in_ui)
-            if text.startswith("PUNCT_RESCUE_START"):
-                if (
-                    self.transcription_settings
-                    and self.transcription_settings.punctuation_rescue_fallback_enabled
-                ):
-                    match = re.search(r"attempt=(\d+)", text)
-                    if match:
-                        attempt = int(match.group(1))
-                        if attempt < 1:
-                            continue
-                        detail = "Improving punctuation..."
-                        if attempt >= 2:
-                            detail = f"Improving punctuation (attempt {attempt})..."
-                        self._punctuation_active = True
-                        self._punctuation_attempt = attempt
-                        self._emit_step_event(
-                            ChecklistStep.FIX_PUNCTUATION,
-                            StepState.START,
-                            reason_text=detail,
-                        )
-            if text.startswith("PUNCT_RESCUE_DONE"):
-                if (
-                    self.transcription_settings
-                    and self.transcription_settings.punctuation_rescue_fallback_enabled
-                ):
-                    self._punctuation_active = False
-                    match = re.search(r"attempts_ran=(\d+)", text)
-                    attempts_ran = int(match.group(1)) if match else 1
-                    rescue_attempts = max(attempts_ran - 1, 1)
-                    if rescue_attempts == 1:
-                        detail = "Improved punctuation"
-                    else:
-                        detail = f"Improved punctuation ({rescue_attempts} attempts)"
-                    self._emit_step_event(
-                        ChecklistStep.FIX_PUNCTUATION,
-                        StepState.DONE,
-                        reason_text=detail,
-                    )
-            if text.startswith("VAD_GAP_RESCUE_START"):
-                if (
-                    self.transcription_settings
-                    and self.transcription_settings.vad_gap_rescue_enabled
-                ):
-                    self._gap_found_count = 0
-                    if not self._gap_active:
-                        self._gap_active = True
-                        self._emit_step_event(
-                            ChecklistStep.FIX_MISSING_SUBTITLES,
-                            StepState.START,
-                            reason_text="Scanning...",
-                        )
-            if text.startswith("VAD_GAP_RESCUE_DONE"):
-                if (
-                    self.transcription_settings
-                    and self.transcription_settings.vad_gap_rescue_enabled
-                ):
-                    self._gap_active = False
-                    match_found = re.search(r"gaps_found=(\d+)", text)
-                    match_restored = re.search(r"gaps_restored=(\d+)", text)
-                    gaps_found = int(match_found.group(1)) if match_found else 0
-                    gaps_restored = int(match_restored.group(1)) if match_restored else 0
-                    if gaps_found == 0:
-                        detail = "No gaps found"
-                    elif gaps_restored > 0:
-                        detail = f"Found {gaps_found} gaps, filled {gaps_restored}"
-                    else:
-                        detail = f"Found {gaps_found} gaps"
-                    self._emit_step_event(
-                        ChecklistStep.FIX_MISSING_SUBTITLES,
-                        StepState.DONE,
-                        reason_text=detail,
-                    )
-            if text.startswith("VAD_GAP_DETECTED") and self._gap_active:
-                self._gap_found_count += 1
-                detail = f"Scanning... (found {self._gap_found_count} gaps)"
-                self._emit_step_event(
-                    ChecklistStep.FIX_MISSING_SUBTITLES,
-                    StepState.START,
-                    reason_text=detail,
-                )
-            if text.startswith("MODE"):
-                continue
-            if text.startswith("HEARTBEAT MODEL_LOAD") or text.startswith("Loading model"):
-                self._emit_step_progress(
-                    ProgressStep.TRANSCRIBE,
-                    None,
-                    "Loading model",
-                )
-                continue
-            if text.startswith("HEARTBEAT TRANSCRIBE"):
-                with progress_lock:
-                    transcribe_started = True
-                if not load_model_done:
-                    load_model_done = True
-                    self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
-                if not write_started:
-                    write_started = True
-                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
-                if duration_seconds is None and not smooth_transcribe_started:
-                    smooth_transcribe_started = True
-                    self._start_smooth_progress(
+                    self._emit_step_progress(
                         ProgressStep.TRANSCRIBE,
+                        None,
                         "Listening to audio",
-                        start=self._step_progress.get(ProgressStep.TRANSCRIBE, 0.0),
                     )
-                self._emit_step_progress(
-                    ProgressStep.TRANSCRIBE,
-                    None,
-                    "Listening to audio",
-                )
-                continue
-            if text.startswith("READY"):
-                self._emit_step_progress(
-                    ProgressStep.TRANSCRIBE,
-                    0.0,
-                    "Loading model",
-                    force=True,
-                )
-                continue
-            if text.startswith("Detected language:"):
-                if not detect_language_done:
-                    detect_language_done = True
-                    if not load_model_done:
-                        load_model_done = True
-                        self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
-                    language_match = re.search(r"Detected language:\s*([a-zA-Z-]+)", text)
-                    language_code = (
-                        language_match.group(1).lower() if language_match else "unknown"
+                    continue
+                if text.startswith("READY"):
+                    self._emit_step_progress(
+                        ProgressStep.TRANSCRIBE,
+                        0.0,
+                        "Loading model",
+                        force=True,
                     )
-                    language_name = self._describe_language(language_code)
-                    self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
-                    self._emit_step_event(
-                        ChecklistStep.DETECT_LANGUAGE,
-                        StepState.DONE,
-                        reason_text=f"{language_name} detected",
+                    continue
+                if text.startswith("Detected language:"):
+                    if not detect_language_done:
+                        detect_language_done = True
+                        if not load_model_done:
+                            load_model_done = True
+                            self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                        language_match = re.search(r"Detected language:\s*([a-zA-Z-]+)", text)
+                        language_code = (
+                            language_match.group(1).lower() if language_match else "unknown"
+                        )
+                        language_name = self._describe_language(language_code)
+                        self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
+                        self._emit_step_event(
+                            ChecklistStep.DETECT_LANGUAGE,
+                            StepState.DONE,
+                            reason_text=f"{language_name} detected",
+                        )
+                    continue
+                if text.startswith("DONE"):
+                    done_seen = True
+                    watchdog_stop.set()
+                    parts = text.split(" ", 1)
+                    if len(parts) == 2:
+                        done_srt_path = Path(parts[1].strip())
+                    self._stop_smooth_progress()
+                    self._stop_transcribe_estimator()
+                    if not write_started:
+                        write_started = True
+                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                    self._emit_step_progress(
+                        ProgressStep.TRANSCRIBE,
+                        1.0,
+                        "Writing subtitles",
+                        force=True,
                     )
-                continue
-            if text.startswith("DONE"):
-                done_seen = True
-                watchdog_stop.set()
-                parts = text.split(" ", 1)
-                if len(parts) == 2:
-                    done_srt_path = Path(parts[1].strip())
-                self._stop_smooth_progress()
-                self._stop_transcribe_estimator()
-                if not write_started:
-                    write_started = True
-                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
-                self._emit_step_progress(
-                    ProgressStep.TRANSCRIBE,
-                    1.0,
-                    "Writing subtitles",
-                    force=True,
+
+            return_code = process.wait()
+            watchdog_stop.set()
+            watchdog_thread.join(timeout=1)
+            stderr_thread.join(timeout=1)
+            self._process = None
+            self._stop_smooth_progress()
+            self._stop_transcribe_estimator()
+
+            srt_candidate = done_srt_path or srt_path
+            srt_exists = srt_candidate.exists()
+            srt_size = srt_candidate.stat().st_size if srt_exists else 0
+
+            if done_seen and srt_exists and srt_size > 0:
+                if return_code != 0:
+                    _emit_log(
+                        f"Subtitles worker exited with code {return_code}, but DONE was received and "
+                        f"subtitles file exists; continuing.",
+                        True,
+                    )
+                if not load_model_done:
+                    self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                if write_started:
+                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.DONE)
+                return
+
+            diagnostics = [
+                f"Return code: {return_code}",
+                f"DONE seen: {done_seen}",
+                f"Subtitles path: {srt_candidate}",
+                f"Subtitles file exists: {srt_exists}",
+                f"Subtitles file size: {srt_size}",
+            ]
+            if watchdog_triggered:
+                diagnostics.append(
+                    f"Watchdog timeout after {watchdog_elapsed:.1f}s since the last update."
                 )
 
-        return_code = process.wait()
-        watchdog_stop.set()
-        watchdog_thread.join(timeout=1)
-        stderr_thread.join(timeout=1)
-        self._process = None
-        self._stop_smooth_progress()
-        self._stop_transcribe_estimator()
-
-        srt_candidate = done_srt_path or srt_path
-        srt_exists = srt_candidate.exists()
-        srt_size = srt_candidate.stat().st_size if srt_exists else 0
-
-        if done_seen and srt_exists and srt_size > 0:
-            if return_code != 0:
-                _emit_log(
-                    f"Subtitles worker exited with code {return_code}, but DONE was received and "
-                    f"subtitles file exists; continuing.",
-                    True,
-                )
-            if not load_model_done:
-                self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
-            if write_started:
-                self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.DONE)
-            self._cleanup_skip_control()
-            return
-
-        diagnostics = [
-            f"Return code: {return_code}",
-            f"DONE seen: {done_seen}",
-            f"Subtitles path: {srt_candidate}",
-            f"Subtitles file exists: {srt_exists}",
-            f"Subtitles file size: {srt_size}",
-        ]
-        if watchdog_triggered:
-            diagnostics.append(
-                f"Watchdog timeout after {watchdog_elapsed:.1f}s since the last update."
+            stdout_tail_text = "\n".join(stdout_tail) or "(empty)"
+            if transcribe_config_json and transcribe_config_json not in stdout_tail_text:
+                stdout_tail_text = f"{transcribe_config_json}\n{stdout_tail_text}"
+            stderr_tail_text = "\n".join(stderr_tail) or "(empty)"
+            error_message = (
+                "Couldn't create subtitles.\n"
+                + "\n".join(diagnostics)
+                + "\n\n--- stdout tail ---\n"
+                + stdout_tail_text
+                + "\n\n--- stderr tail ---\n"
+                + stderr_tail_text
             )
-
-        stdout_tail_text = "\n".join(stdout_tail) or "(empty)"
-        if transcribe_config_json and transcribe_config_json not in stdout_tail_text:
-            stdout_tail_text = f"{transcribe_config_json}\n{stdout_tail_text}"
-        stderr_tail_text = "\n".join(stderr_tail) or "(empty)"
-        error_message = (
-            "Couldn't create subtitles.\n"
-            + "\n".join(diagnostics)
-            + "\n\n--- stdout tail ---\n"
-            + stdout_tail_text
-            + "\n\n--- stderr tail ---\n"
-            + stderr_tail_text
-        )
-        self._cleanup_skip_control()
-        raise TranscriptionError(
-            error_message,
-            return_code=return_code,
-            watchdog_triggered=watchdog_triggered,
-            srt_exists=srt_exists,
-            srt_size=srt_size,
-        )
+            raise TranscriptionError(
+                error_message,
+                return_code=return_code,
+                watchdog_triggered=watchdog_triggered,
+                srt_exists=srt_exists,
+                srt_size=srt_size,
+            )
+        finally:
+            self._cleanup_control_dir()
 
     def _capture_audio_info_if_needed(self, audio_path: Path) -> None:
         if not self._diagnostics_category_enabled("audio_info"):
@@ -1842,6 +1842,18 @@ class Worker(QtCore.QObject):
             )
         if not plan.output_path.parent.exists():
             plan.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._alignment_words_total = self._count_words_in_cues(srt_path)
+        self._alignment_words_current = 0
+        self._alignment_last_emit = 0.0
+        if self._alignment_words_total:
+            self._emit_step_event(
+                ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                StepState.START,
+                reason_text=self._format_alignment_detail(
+                    self._alignment_words_current,
+                    self._alignment_words_total,
+                ),
+            )
         self.signals.log.emit(
             "Alignment starting: "
             f"wav={audio_path} srt={srt_path} output={plan.output_path} "
@@ -1852,26 +1864,75 @@ class Worker(QtCore.QObject):
             f"Alignment command: {subprocess.list2cmdline(plan.command)}",
             True,
         )
-        result = subprocess.run(
+        process = subprocess.Popen(
             plan.command,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            check=False,
             **get_subprocess_kwargs(),
         )
-        if result.stdout:
-            for line in result.stdout.splitlines():
-                self.signals.log.emit(line, True)
-        if result.stderr:
-            for line in result.stderr.splitlines():
-                self.signals.log.emit(line, True)
+        stdout_tail: deque[str] = deque(maxlen=50)
+        stderr_tail: deque[str] = deque(maxlen=50)
+
+        def _handle_alignment_line(line: str) -> None:
+            stripped = line.strip()
+            if not stripped:
+                return
+            stdout_tail.append(stripped)
+            self.signals.log.emit(stripped, True)
+            match = re.search(
+                r"ALIGN_WORDS_TIMED\s+current=(\d+)\s+total=(\d+)",
+                stripped,
+            )
+            if not match:
+                return
+            current = int(match.group(1))
+            total = int(match.group(2))
+            self._alignment_words_current = current
+            self._alignment_words_total = total
+            self._maybe_emit_alignment_progress(current, total)
+
+        def _read_stream(
+            stream: Optional[Iterable[str]],
+            target: deque[str],
+            handler: Optional[Callable[[str], None]] = None,
+        ) -> None:
+            if stream is None:
+                return
+            for line in stream:
+                stripped = line.strip()
+                if stripped:
+                    if handler:
+                        handler(line)
+                    else:
+                        target.append(stripped)
+                        self.signals.log.emit(stripped, True)
+
+        stdout_thread = threading.Thread(
+            target=_read_stream,
+            args=(process.stdout, stdout_tail, _handle_alignment_line),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=_read_stream,
+            args=(process.stderr, stderr_tail, None),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+        return_code = process.wait()
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+        stderr_text = "\n".join(stderr_tail)
+        if stderr_text:
+            self.signals.log.emit(stderr_text, True)
         self.signals.log.emit(
-            f"Alignment finished: exit_code={result.returncode} output={plan.output_path}",
+            f"Alignment finished: exit_code={return_code} output={plan.output_path}",
             True,
         )
-        if result.returncode != 0:
+        if return_code != 0:
             raise AlignmentError("Alignment failed: process returned error.", "align_process_failed")
         if not plan.output_path.exists() or plan.output_path.stat().st_size == 0:
             raise AlignmentError("Alignment failed: no output produced.", "align_output_empty")
@@ -1885,6 +1946,7 @@ class Worker(QtCore.QObject):
         total_words = sum(len(cue.words) for cue in doc.cues)
         if total_words == 0:
             raise AlignmentError("Alignment failed: output had no timings.", "align_output_empty")
+        self._maybe_emit_alignment_progress(total_words, total_words)
         return StepState.DONE, None
 
     def _maybe_write_diagnostics(
@@ -2200,6 +2262,31 @@ class Worker(QtCore.QObject):
         }
         base_code = language_code.split("-", 1)[0]
         return language_map.get(base_code, base_code.upper())
+
+    def _count_words_in_cues(self, srt_path: Path) -> int:
+        try:
+            cues = parse_srt_file(srt_path)
+        except Exception:  # noqa: BLE001
+            return 0
+        total = 0
+        for cue in cues:
+            total += len(re.findall(r"\w+", cue.text, flags=re.UNICODE))
+        return total
+
+    def _format_alignment_detail(self, current: int, total: int) -> str:
+        return f"Words timed: {current:,}/{total:,}"
+
+    def _maybe_emit_alignment_progress(self, current: int, total: int) -> None:
+        if total <= 0:
+            return
+        now = time.monotonic()
+        if current >= total or now - self._alignment_last_emit >= 0.1:
+            self._alignment_last_emit = now
+            self._emit_step_event(
+                ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                StepState.START,
+                reason_text=self._format_alignment_detail(current, total),
+            )
 
     def _start_smooth_progress(
         self,
