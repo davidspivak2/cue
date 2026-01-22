@@ -195,6 +195,13 @@ class Worker(QtCore.QObject):
         self._burn_in_seconds: Optional[float] = None
         self._total_seconds: Optional[float] = None
         self._graphics_overlay_render_perf: Optional[RenderPerfStats] = None
+        self._punctuation_active = False
+        self._punctuation_attempt = 0
+        self._gap_active = False
+        self._gap_found_count = 0
+        self._skip_punctuation = False
+        self._skip_gaps = False
+        self._skip_control_path: Optional[Path] = None
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -202,6 +209,40 @@ class Worker(QtCore.QObject):
         self._stop_transcribe_estimator()
         if self._process and self._process.poll() is None:
             self._process.terminate()
+
+    @QtCore.Slot()
+    def request_skip_punctuation(self) -> None:
+        self._skip_punctuation = True
+        self._write_skip_control()
+
+    @QtCore.Slot()
+    def request_skip_gaps(self) -> None:
+        self._skip_gaps = True
+        self._write_skip_control()
+
+    def _write_skip_control(self) -> None:
+        if not self._skip_control_path:
+            return
+        payload = {
+            "punctuation": self._skip_punctuation,
+            "gaps": self._skip_gaps,
+        }
+        try:
+            self._skip_control_path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _cleanup_skip_control(self) -> None:
+        if not self._skip_control_path:
+            return
+        try:
+            self._skip_control_path.unlink()
+        except OSError:
+            pass
+        self._skip_control_path = None
 
     @QtCore.Slot()
     def run(self) -> None:
@@ -444,16 +485,44 @@ class Worker(QtCore.QObject):
             return
         stats = self._transcribe_stats or {}
         if settings.punctuation_rescue_fallback_enabled:
-            if not punctuation_active:
-                self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
+            if not self._punctuation_active:
+                rescue_triggered = bool(stats.get("punctuation_rescue_triggered"))
+                if rescue_triggered:
+                    attempts_ran = int(stats.get("punctuation_rescue_attempts_ran", 1) or 1)
+                    rescue_attempts = max(attempts_ran - 1, 1)
+                    if rescue_attempts == 1:
+                        detail = "Improved punctuation"
+                    else:
+                        detail = f"Improved punctuation ({rescue_attempts} attempts)"
+                    self._emit_step_event(
+                        ChecklistStep.FIX_PUNCTUATION,
+                        StepState.DONE,
+                        reason_text=detail,
+                    )
+                else:
+                    self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
 
         vad_stats = stats.get("vad_gap_rescue") if isinstance(stats, dict) else None
         if not settings.vad_gap_rescue_enabled:
             return
         if isinstance(vad_stats, dict) and not vad_stats.get("enabled", True):
             return
-        if not missing_active:
-            self._emit_step_event(ChecklistStep.FIX_MISSING_SUBTITLES, StepState.DONE)
+        if not self._gap_active:
+            gaps_found = int(vad_stats.get("gaps_found", 0) or 0) if isinstance(vad_stats, dict) else 0
+            gaps_restored = (
+                int(vad_stats.get("gaps_restored", 0) or 0) if isinstance(vad_stats, dict) else 0
+            )
+            if gaps_found == 0:
+                detail = "No gaps found"
+            elif gaps_restored > 0:
+                detail = f"Found {gaps_found} gaps, filled {gaps_restored}"
+            else:
+                detail = f"Found {gaps_found} gaps"
+            self._emit_step_event(
+                ChecklistStep.FIX_MISSING_SUBTITLES,
+                StepState.DONE,
+                reason_text=detail,
+            )
 
     def _select_missing_subtitles_reason_code(self, vad_stats: dict[str, object]) -> str:
         gaps = vad_stats.get("gaps")
@@ -1180,6 +1249,13 @@ class Worker(QtCore.QObject):
         force_cpu_flag = force_cpu or device == "cpu"
         self.signals.started.emit("Creating subtitles")
         self.signals.log.emit("Starting subtitles worker...", True)
+        self._punctuation_active = False
+        self._punctuation_attempt = 0
+        self._gap_active = False
+        self._gap_found_count = 0
+        self._skip_punctuation = False
+        self._skip_gaps = False
+        self._skip_control_path = None
         self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.START)
         self._emit_step_progress(
             ProgressStep.TRANSCRIBE,
@@ -1227,6 +1303,17 @@ class Worker(QtCore.QObject):
             "--punctuation-rescue",
             "on" if self.transcription_settings.punctuation_rescue_fallback_enabled else "off",
         ]
+        skip_control = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=self.output_dir, suffix=".json", delete=False
+            ) as tmp:
+                skip_control = Path(tmp.name)
+            self._skip_control_path = skip_control
+            self._write_skip_control()
+            command += ["--skip-control", str(skip_control)]
+        except Exception:  # noqa: BLE001
+            self._skip_control_path = None
 
         parent_config = {
             "model_name": TRANSCRIBE_MODEL_NAME,
@@ -1298,9 +1385,6 @@ class Worker(QtCore.QObject):
         load_model_done = False
         detect_language_done = False
         write_started = False
-        punctuation_active = False
-        missing_active = False
-        last_punct_attempt = 0
         transcribe_config_json: Optional[str] = None
         watchdog_triggered = False
         watchdog_elapsed = 0.0
@@ -1457,11 +1541,11 @@ class Worker(QtCore.QObject):
                         attempt = int(match.group(1))
                         if attempt < 1:
                             continue
-                        detail = "Improving punctuation"
+                        detail = "Improving punctuation..."
                         if attempt >= 2:
-                            detail = f"Improving punctuation (attempt {attempt})"
-                        punctuation_active = True
-                        last_punct_attempt = attempt
+                            detail = f"Improving punctuation (attempt {attempt})..."
+                        self._punctuation_active = True
+                        self._punctuation_attempt = attempt
                         self._emit_step_event(
                             ChecklistStep.FIX_PUNCTUATION,
                             StepState.START,
@@ -1472,26 +1556,61 @@ class Worker(QtCore.QObject):
                     self.transcription_settings
                     and self.transcription_settings.punctuation_rescue_fallback_enabled
                 ):
-                    punctuation_active = False
-                    self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
+                    self._punctuation_active = False
+                    match = re.search(r"attempts_ran=(\d+)", text)
+                    attempts_ran = int(match.group(1)) if match else 1
+                    rescue_attempts = max(attempts_ran - 1, 1)
+                    if rescue_attempts == 1:
+                        detail = "Improved punctuation"
+                    else:
+                        detail = f"Improved punctuation ({rescue_attempts} attempts)"
+                    self._emit_step_event(
+                        ChecklistStep.FIX_PUNCTUATION,
+                        StepState.DONE,
+                        reason_text=detail,
+                    )
             if text.startswith("VAD_GAP_RESCUE_START"):
                 if (
                     self.transcription_settings
                     and self.transcription_settings.vad_gap_rescue_enabled
                 ):
-                    if not missing_active:
-                        missing_active = True
+                    self._gap_found_count = 0
+                    if not self._gap_active:
+                        self._gap_active = True
                         self._emit_step_event(
                             ChecklistStep.FIX_MISSING_SUBTITLES,
                             StepState.START,
+                            reason_text="Scanning...",
                         )
             if text.startswith("VAD_GAP_RESCUE_DONE"):
                 if (
                     self.transcription_settings
                     and self.transcription_settings.vad_gap_rescue_enabled
                 ):
-                    missing_active = False
-                    self._emit_step_event(ChecklistStep.FIX_MISSING_SUBTITLES, StepState.DONE)
+                    self._gap_active = False
+                    match_found = re.search(r"gaps_found=(\d+)", text)
+                    match_restored = re.search(r"gaps_restored=(\d+)", text)
+                    gaps_found = int(match_found.group(1)) if match_found else 0
+                    gaps_restored = int(match_restored.group(1)) if match_restored else 0
+                    if gaps_found == 0:
+                        detail = "No gaps found"
+                    elif gaps_restored > 0:
+                        detail = f"Found {gaps_found} gaps, filled {gaps_restored}"
+                    else:
+                        detail = f"Found {gaps_found} gaps"
+                    self._emit_step_event(
+                        ChecklistStep.FIX_MISSING_SUBTITLES,
+                        StepState.DONE,
+                        reason_text=detail,
+                    )
+            if text.startswith("VAD_GAP_DETECTED") and self._gap_active:
+                self._gap_found_count += 1
+                detail = f"Scanning... (found {self._gap_found_count} gaps)"
+                self._emit_step_event(
+                    ChecklistStep.FIX_MISSING_SUBTITLES,
+                    StepState.START,
+                    reason_text=detail,
+                )
             if text.startswith("MODE"):
                 continue
             if text.startswith("HEARTBEAT MODEL_LOAD") or text.startswith("Loading model"):
@@ -1537,8 +1656,17 @@ class Worker(QtCore.QObject):
                     if not load_model_done:
                         load_model_done = True
                         self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                    language_match = re.search(r"Detected language:\s*([a-zA-Z-]+)", text)
+                    language_code = (
+                        language_match.group(1).lower() if language_match else "unknown"
+                    )
+                    language_name = self._describe_language(language_code)
                     self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
-                    self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.DONE)
+                    self._emit_step_event(
+                        ChecklistStep.DETECT_LANGUAGE,
+                        StepState.DONE,
+                        reason_text=f"{language_name} detected",
+                    )
                 continue
             if text.startswith("DONE"):
                 done_seen = True
@@ -1581,6 +1709,7 @@ class Worker(QtCore.QObject):
                 self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
             if write_started:
                 self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.DONE)
+            self._cleanup_skip_control()
             return
 
         diagnostics = [
@@ -1607,6 +1736,7 @@ class Worker(QtCore.QObject):
             + "\n\n--- stderr tail ---\n"
             + stderr_tail_text
         )
+        self._cleanup_skip_control()
         raise TranscriptionError(
             error_message,
             return_code=return_code,
@@ -2052,6 +2182,24 @@ class Worker(QtCore.QObject):
                 reason_text=reason_text,
             )
         )
+
+    def _describe_language(self, language_code: str) -> str:
+        language_map = {
+            "he": "Hebrew",
+            "en": "English",
+            "es": "Spanish",
+            "fr": "French",
+            "de": "German",
+            "it": "Italian",
+            "pt": "Portuguese",
+            "ru": "Russian",
+            "zh": "Chinese",
+            "ja": "Japanese",
+            "ko": "Korean",
+            "ar": "Arabic",
+        }
+        base_code = language_code.split("-", 1)[0]
+        return language_map.get(base_code, base_code.upper())
 
     def _start_smooth_progress(
         self,
