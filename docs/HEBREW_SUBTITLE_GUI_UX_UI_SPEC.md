@@ -175,8 +175,7 @@ Layout:
 - Progress Card:
   - Title: “Preparing audio”
   - Checklist (above the progress bar):
-    - “Extracting audio”
-    - “Cleaning up audio” (only if the setting is enabled)
+    - “Extracting audio” (or “Extracting and cleaning up audio” when cleanup is enabled)
   - Determinate progress bar + elapsed time
     - **Only the progress bar shows the %** (e.g., “18%”).
   - Cancel button (single CTA)
@@ -195,8 +194,8 @@ Layout:
     - “Loading AI model”
     - “Detecting language”
     - “Writing subtitles”
-    - “Fixing punctuation” (only if the setting is enabled)
-    - “Fixing missing subtitles”
+    - “Making sure punctuation looks good” (only if the setting is enabled)
+    - “Making sure no subtitles are missing”
   - Determinate progress bar + elapsed time
     - **Only the progress bar shows the %**.
   - Cancel button
@@ -473,12 +472,12 @@ Note:
 - “Creating subtitles”
 - “Preparing audio”
 - “Extracting audio”
-- “Cleaning up audio”
+- “Extracting and cleaning up audio”
 - “Loading AI model”
 - “Detecting language”
 - “Writing subtitles”
-- “Fixing punctuation”
-- “Fixing missing subtitles”
+- “Making sure punctuation looks good”
+- “Making sure no subtitles are missing”
 - “Subtitles ready ✓”
 - “Open subtitles”
 - “Edit in Subtitle Edit”
