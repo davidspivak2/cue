@@ -66,6 +66,14 @@ To compare machines without running a transcription or downloading models, run:
 python -m app.transcribe_worker --print-transcribe-config --prefer-gpu
 ```
 
+```cmd
+python -m app.transcribe_worker --print-transcribe-config --prefer-gpu
+```
+
+```powershell
+python -m app.transcribe_worker --print-transcribe-config --prefer-gpu
+```
+
 This prints:
 
 - `TRANSCRIBE_CONFIG_JSON ...` (single-line JSON for diffing)
