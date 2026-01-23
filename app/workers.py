@@ -1563,9 +1563,12 @@ class Worker(QtCore.QObject):
                             attempt = int(match.group(1))
                             if attempt < 1:
                                 continue
-                            detail = "Improving punctuation..."
-                            if attempt >= 2:
-                                detail = f"Improving punctuation (attempt {attempt})..."
+                            if attempt == 2:
+                                detail = "Quick polish pass..."
+                            elif attempt == 3:
+                                detail = "Final touch-ups..."
+                            else:
+                                detail = "Improving punctuation..."
                             self._punctuation_active = True
                             self._punctuation_attempt = attempt
                             self._emit_step_event(
@@ -1955,9 +1958,10 @@ class Worker(QtCore.QObject):
             )
             if not match:
                 return
-            alignment_real_progress.set()
             current = int(match.group(1))
             total = int(match.group(2))
+            if current > 0:
+                alignment_real_progress.set()
             self._alignment_words_current = max(current, self._alignment_words_current)
             self._alignment_words_total = total
             self._maybe_emit_alignment_progress(self._alignment_words_current, total)
