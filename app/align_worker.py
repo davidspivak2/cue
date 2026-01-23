@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sys
+import time
 from typing import Any, Optional
 
 from .srt_utils import compute_srt_sha256, parse_srt_file, SrtCue
@@ -124,8 +125,12 @@ def _count_words_in_cues(cues: list[SrtCue]) -> int:
     return total
 
 
-def _emit_words_timed(current: int, total: int) -> None:
-    _print(f"ALIGN_WORDS_TIMED current={current} total={total}")
+def _emit_words_total(total: int) -> None:
+    _print(f"ALIGN_WORDS_TOTAL {total}")
+
+
+def _emit_words_timed(current: int) -> None:
+    _print(f"ALIGN_WORDS_TIMED {current}")
 
 
 def _build_document(
@@ -141,6 +146,8 @@ def _build_document(
     clamp_count = 0
     skipped_words_total = 0
     words_timed = 0
+    last_emit_time = time.monotonic()
+    last_emit_count = 0
     for index, cue in enumerate(cues):
         aligned = aligned_segments[index] if index < len(aligned_segments) else None
         words: list[WordSpan] = []
@@ -180,7 +187,16 @@ def _build_document(
         )
         words_timed += _count_words(cue.text)
         if total_words:
-            _emit_words_timed(min(words_timed, total_words), total_words)
+            now = time.monotonic()
+            should_emit = (
+                words_timed >= total_words
+                or words_timed - last_emit_count >= 50
+                or now - last_emit_time >= 0.2
+            )
+            if should_emit:
+                _emit_words_timed(min(words_timed, total_words))
+                last_emit_time = now
+                last_emit_count = words_timed
     if clamp_count:
         _print(f"ALIGN_CLAMPED_WORDS {clamp_count}")
     if skipped_words_total:
@@ -205,8 +221,7 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     if len(segments) != len(cues):
         raise ValueError("Mismatch between segments and SRT cues.")
     total_words = _count_words_in_cues(cues)
-    if total_words:
-        _emit_words_timed(0, total_words)
+    _emit_words_total(total_words)
 
     device = _resolve_device(config.prefer_gpu, config.device)
     import whisperx

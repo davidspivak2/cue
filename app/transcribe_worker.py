@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import traceback
+import time
 from pathlib import Path
 from dataclasses import dataclass
 from tempfile import TemporaryDirectory
@@ -72,6 +73,13 @@ def _log_transcribe_config(config_json: str, config_text: str) -> None:
     _print(f"TRANSCRIBE_CONFIG_JSON {config_json}")
     for line in config_text.splitlines():
         _print(f"TRANSCRIBE_CONFIG_TEXT {line}")
+
+
+def _format_preview_text(text: object, max_length: int = 100) -> str:
+    preview = " ".join(str(text).replace("\r\n", "\n").replace("\r", "\n").splitlines()).strip()
+    if len(preview) > max_length:
+        preview = preview[:max_length].rstrip()
+    return preview
 
 
 def _stabilize_runtime() -> None:
@@ -599,9 +607,20 @@ def _run_transcription_attempt(
         max_end = 0.0
         last_reported_end = 0.0
         last_reported_percent = 0.0
+        last_preview_emit = 0.0
         for segment in segments_iter:
             if should_abort and should_abort():
                 raise SkipRequested()
+            preview_text = ""
+            if isinstance(segment, dict):
+                preview_text = _format_preview_text(segment.get("text", ""))
+            else:
+                preview_text = _format_preview_text(getattr(segment, "text", ""))
+            if preview_text:
+                now = time.monotonic()
+                if now - last_preview_emit >= 0.25:
+                    _print(f"SRT_PREVIEW {preview_text}")
+                    last_preview_emit = now
             raw_segments.append(segment)
             if segment.end > max_end:
                 max_end = segment.end
@@ -851,10 +870,22 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             heartbeat_thread.join(timeout=1)
         duration_seconds = args.duration_seconds
 
+        skip_cache: dict[str, dict[str, float | bool]] = {
+            "skip_punct.flag": {"last_check": 0.0, "value": False},
+            "skip_gaps.flag": {"last_check": 0.0, "value": False},
+        }
+
         def _should_skip(control_root: Optional[Path], filename: str) -> bool:
             if not control_root:
                 return False
-            return (control_root / filename).exists()
+            cache = skip_cache[filename]
+            now = time.monotonic()
+            if now - float(cache["last_check"]) < 0.1:
+                return bool(cache["value"])
+            value = (control_root / filename).exists()
+            cache["last_check"] = now
+            cache["value"] = value
+            return bool(value)
 
         def _should_skip_punctuation() -> bool:
             return _should_skip(control_dir, "skip_punct.flag")
@@ -887,6 +918,15 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             }
         )
 
+        punct_skip_logged = False
+
+        def _mark_punct_skip() -> None:
+            nonlocal punct_skip_logged
+            if punct_skip_logged:
+                return
+            punct_skip_logged = True
+            _print("PUNCT_RESCUE_SKIPPED (flag detected)")
+
         rescue_triggered = False
         rescue_reason = "disabled"
         rescue_enabled = punctuation_rescue.get("enabled", True)
@@ -911,7 +951,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             if _should_skip_punctuation():
                 rescue_triggered = False
                 rescue_reason = "skipped_by_user"
-                _print("PUNCT_RESCUE_SKIPPED")
+                _mark_punct_skip()
             elif int(punctuation_rescue.get("max_attempts", 2)) >= 1:
                 _print("PUNCT_RESCUE_START attempt=1")
                 attempt_vad = not args.vad_filter
@@ -934,7 +974,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 except SkipRequested:
                     rescue_triggered = False
                     rescue_reason = "skipped_by_user"
-                    _print("PUNCT_RESCUE_SKIPPED")
+                    _mark_punct_skip()
                 else:
                     raw_summary = _build_raw_punctuation_summary(raw_segments)
                     attempts.append(
@@ -957,7 +997,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 if _should_skip_punctuation():
                     rescue_triggered = False
                     rescue_reason = "skipped_by_user"
-                    _print("PUNCT_RESCUE_SKIPPED")
+                    _mark_punct_skip()
                 else:
                     _print("PUNCT_RESCUE_START attempt=2")
                     attempt_device = "cpu"
@@ -995,7 +1035,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     except SkipRequested:
                         rescue_triggered = False
                         rescue_reason = "skipped_by_user"
-                        _print("PUNCT_RESCUE_SKIPPED")
+                        _mark_punct_skip()
                     else:
                         raw_summary = _build_raw_punctuation_summary(raw_segments)
                         attempts.append(

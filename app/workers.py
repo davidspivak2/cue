@@ -200,11 +200,13 @@ class Worker(QtCore.QObject):
         self._gap_active = False
         self._gap_found_count = 0
         self._skip_punctuation = False
+        self._skip_punct_requested = False
         self._skip_gaps = False
         self._control_dir: Optional[Path] = None
         self._alignment_words_current = 0
         self._alignment_words_total = 0
         self._alignment_last_emit = 0.0
+        self._alignment_total_known = False
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -216,6 +218,7 @@ class Worker(QtCore.QObject):
     @QtCore.Slot()
     def request_skip_punctuation(self) -> None:
         self._skip_punctuation = True
+        self._skip_punct_requested = True
         self._write_skip_flag("skip_punct.flag")
 
     @QtCore.Slot()
@@ -494,7 +497,11 @@ class Worker(QtCore.QObject):
                         reason_text=detail,
                     )
                 else:
-                    self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
+                    self._emit_step_event(
+                        ChecklistStep.FIX_PUNCTUATION,
+                        StepState.DONE,
+                        reason_text="Looks good!",
+                    )
 
         vad_stats = stats.get("vad_gap_rescue") if isinstance(stats, dict) else None
         if not settings.vad_gap_rescue_enabled:
@@ -741,11 +748,11 @@ class Worker(QtCore.QObject):
         output_path: Path,
         video_duration: Optional[float],
     ) -> dict:
-        self._emit_step_progress(ProgressStep.EXPORT, 0.01, "Preparing export", force=True)
+        self._emit_step_progress(ProgressStep.EXPORT, 0.02, "Preparing export", force=True)
         self._emit_step_event(ChecklistStep.GET_VIDEO_INFO, StepState.START)
         stream_info = resolve_video_stream_info(self.video_path)
         self._emit_step_event(ChecklistStep.GET_VIDEO_INFO, StepState.DONE)
-        self._emit_step_progress(ProgressStep.EXPORT, 0.04, "Preparing export", force=True)
+        self._emit_step_progress(ProgressStep.EXPORT, 0.02, "Preparing export", force=True)
         duration_seconds = video_duration
         if duration_seconds is None:
             duration_seconds = max((cue.end_seconds for cue in cues), default=0.0)
@@ -754,12 +761,15 @@ class Worker(QtCore.QObject):
 
         if self.subtitle_mode == "word_highlight":
             self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.START)
+            self._alignment_words_current = 0
+            self._alignment_words_total = 0
+            self._alignment_total_known = False
             self._start_smooth_progress(
                 ProgressStep.EXPORT,
-                "Preparing export",
-                start=0.04,
-                cap=0.10,
-                increment=0.003,
+                "Timing word highlights",
+                start=0.02,
+                cap=0.05,
+                increment=0.002,
                 interval=0.4,
             )
             try:
@@ -787,8 +797,18 @@ class Worker(QtCore.QObject):
                     reason_text=timing_reason or "already timed",
                 )
             else:
-                self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.DONE)
-        self._emit_step_progress(ProgressStep.EXPORT, 0.10, "Preparing export", force=True)
+                timing_detail = None
+                if self._alignment_words_total > 0:
+                    timing_detail = self._format_alignment_detail(
+                        self._alignment_words_current,
+                        self._alignment_words_total,
+                    )
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.DONE,
+                    reason_text=timing_detail,
+                )
+        self._emit_step_progress(ProgressStep.EXPORT, 0.20, "Preparing export", force=True)
 
         plan = build_graphics_overlay_plan(
             ffmpeg_path=ffmpeg_path,
@@ -1249,6 +1269,7 @@ class Worker(QtCore.QObject):
             self._gap_active = False
             self._gap_found_count = 0
             self._skip_punctuation = False
+            self._skip_punct_requested = False
             self._skip_gaps = False
             self._control_dir = None
             self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.START)
@@ -1300,7 +1321,7 @@ class Worker(QtCore.QObject):
             ]
             try:
                 self._control_dir = Path(
-                    tempfile.mkdtemp(dir=self.output_dir, prefix="transcribe_control_")
+                    tempfile.mkdtemp(prefix="transcribe_control_")
                 )
                 command += ["--control-dir", str(self._control_dir)]
             except Exception:  # noqa: BLE001
@@ -1484,6 +1505,10 @@ class Worker(QtCore.QObject):
                             self._transcribe_stats = json.loads(stats_payload)
                         except json.JSONDecodeError:
                             self._transcribe_stats = None
+                if text.startswith("PUNCT_RESCUE_SKIPPED"):
+                    show_in_ui = False
+                if text.startswith("SRT_PREVIEW"):
+                    show_in_ui = False
                 if text.startswith("PROGRESS_END"):
                     _emit_log(text, False)
                     if duration_seconds:
@@ -1526,6 +1551,8 @@ class Worker(QtCore.QObject):
 
                 _emit_log(text, show_in_ui)
                 if text.startswith("PUNCT_RESCUE_START"):
+                    if self._skip_punct_requested:
+                        continue
                     if (
                         self.transcription_settings
                         and self.transcription_settings.punctuation_rescue_fallback_enabled
@@ -1546,6 +1573,8 @@ class Worker(QtCore.QObject):
                                 reason_text=detail,
                             )
                 if text.startswith("PUNCT_RESCUE_DONE"):
+                    if self._skip_punct_requested:
+                        continue
                     if (
                         self.transcription_settings
                         and self.transcription_settings.punctuation_rescue_fallback_enabled
@@ -1563,6 +1592,15 @@ class Worker(QtCore.QObject):
                             StepState.DONE,
                             reason_text=detail,
                         )
+                if text.startswith("SRT_PREVIEW"):
+                    if write_started:
+                        preview_text = text.split(" ", 1)[1] if " " in text else ""
+                        self._emit_step_event(
+                            ChecklistStep.WRITE_SUBTITLES,
+                            StepState.START,
+                            reason_text=preview_text,
+                        )
+                    continue
                 if text.startswith("VAD_GAP_RESCUE_START"):
                     if (
                         self.transcription_settings
@@ -1842,18 +1880,9 @@ class Worker(QtCore.QObject):
             )
         if not plan.output_path.parent.exists():
             plan.output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._alignment_words_total = self._count_words_in_cues(srt_path)
+        self._alignment_words_total = 0
         self._alignment_words_current = 0
         self._alignment_last_emit = 0.0
-        if self._alignment_words_total:
-            self._emit_step_event(
-                ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                StepState.START,
-                reason_text=self._format_alignment_detail(
-                    self._alignment_words_current,
-                    self._alignment_words_total,
-                ),
-            )
         self.signals.log.emit(
             "Alignment starting: "
             f"wav={audio_path} srt={srt_path} output={plan.output_path} "
@@ -1882,14 +1911,40 @@ class Worker(QtCore.QObject):
                 return
             stdout_tail.append(stripped)
             self.signals.log.emit(stripped, True)
+            total_match = re.search(r"ALIGN_WORDS_TOTAL\s+(\d+)", stripped)
+            if total_match:
+                total = int(total_match.group(1))
+                self._alignment_words_total = total
+                self._alignment_words_current = 0
+                self._alignment_total_known = True
+                self._stop_smooth_progress()
+                if total > 0:
+                    self._emit_step_event(
+                        ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                        StepState.START,
+                        reason_text=self._format_alignment_detail(0, total),
+                    )
+                    self._emit_step_progress(
+                        ProgressStep.EXPORT,
+                        self._alignment_progress_value(0, total),
+                        "Timing word highlights",
+                    )
+                return
             match = re.search(
                 r"ALIGN_WORDS_TIMED\s+current=(\d+)\s+total=(\d+)",
                 stripped,
             )
-            if not match:
+            if match:
+                current = int(match.group(1))
+                total = int(match.group(2))
+            else:
+                timed_match = re.search(r"ALIGN_WORDS_TIMED\s+(\d+)", stripped)
+                if not timed_match:
+                    return
+                current = int(timed_match.group(1))
+                total = self._alignment_words_total
+            if total <= 0:
                 return
-            current = int(match.group(1))
-            total = int(match.group(2))
             self._alignment_words_current = current
             self._alignment_words_total = total
             self._maybe_emit_alignment_progress(current, total)
@@ -1946,6 +2001,8 @@ class Worker(QtCore.QObject):
         total_words = sum(len(cue.words) for cue in doc.cues)
         if total_words == 0:
             raise AlignmentError("Alignment failed: output had no timings.", "align_output_empty")
+        self._alignment_words_current = total_words
+        self._alignment_words_total = total_words
         self._maybe_emit_alignment_progress(total_words, total_words)
         return StepState.DONE, None
 
@@ -2276,6 +2333,12 @@ class Worker(QtCore.QObject):
     def _format_alignment_detail(self, current: int, total: int) -> str:
         return f"Words timed: {current:,}/{total:,}"
 
+    def _alignment_progress_value(self, current: int, total: int) -> float:
+        if total <= 0:
+            return 0.02
+        ratio = min(max(current / total, 0.0), 1.0)
+        return 0.02 + 0.18 * ratio
+
     def _maybe_emit_alignment_progress(self, current: int, total: int) -> None:
         if total <= 0:
             return
@@ -2286,6 +2349,11 @@ class Worker(QtCore.QObject):
                 ChecklistStep.TIMING_WORD_HIGHLIGHTS,
                 StepState.START,
                 reason_text=self._format_alignment_detail(current, total),
+            )
+            self._emit_step_progress(
+                ProgressStep.EXPORT,
+                self._alignment_progress_value(current, total),
+                "Timing word highlights",
             )
 
     def _start_smooth_progress(

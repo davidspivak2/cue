@@ -3013,6 +3013,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._worker:
             return
         if step_id == ChecklistStep.FIX_PUNCTUATION:
+            self._log("UI_SKIP_PUNCT_REQUESTED", show_in_ui=False)
             QtCore.QMetaObject.invokeMethod(
                 self._worker,
                 "request_skip_punctuation",
