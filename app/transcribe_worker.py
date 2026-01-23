@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 from dataclasses import dataclass
@@ -836,58 +837,75 @@ def _run_punctuation_child_process(
             command += ["--duration-seconds", f"{duration_seconds:.2f}"]
 
         stdout_tail: list[str] = []
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            **get_subprocess_kwargs(),
-        )
+        process: Optional[subprocess.Popen[str]] = None
+        stdout_thread: Optional[threading.Thread] = None
 
-        def _drain_stdout() -> None:
-            if process.stdout is None:
-                return
-            for line in process.stdout:
-                if len(stdout_tail) < 50:
-                    stdout_tail.append(line.strip())
-                else:
-                    stdout_tail.pop(0)
-                    stdout_tail.append(line.strip())
-
-        stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
-        stdout_thread.start()
-
-        while process.poll() is None:
-            if should_abort():
+        def _terminate_child() -> None:
+            if process and process.poll() is None:
                 process.terminate()
                 try:
-                    process.wait(timeout=0.4)
+                    process.wait(timeout=0.2)
                 except subprocess.TimeoutExpired:
                     process.kill()
-                    process.wait(timeout=1)
-                stdout_thread.join(timeout=1)
-                return None, True
-            time.sleep(0.05)
+                    try:
+                        process.wait(timeout=0.2)
+                    except subprocess.TimeoutExpired:
+                        pass
 
-        stdout_thread.join(timeout=1)
-        if process.returncode != 0:
-            _print(
-                f"PUNCT_RESCUE_CHILD_FAILED attempt={attempt_number} "
-                f"code={process.returncode}"
-            )
-            return None, False
-
-        if not output_path.exists():
-            _print(f"PUNCT_RESCUE_CHILD_FAILED attempt={attempt_number} code=missing_output")
-            return None, False
         try:
-            payload = json.loads(output_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            _print(f"PUNCT_RESCUE_CHILD_FAILED attempt={attempt_number} code=invalid_output")
-            return None, False
-        return _load_punctuation_child_output(payload), False
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                **get_subprocess_kwargs(),
+            )
+
+            def _drain_stdout() -> None:
+                if process.stdout is None:
+                    return
+                for line in process.stdout:
+                    if len(stdout_tail) < 50:
+                        stdout_tail.append(line.strip())
+                    else:
+                        stdout_tail.pop(0)
+                        stdout_tail.append(line.strip())
+
+            stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
+            stdout_thread.start()
+
+            while process.poll() is None:
+                if should_abort():
+                    _terminate_child()
+                    return None, True
+                time.sleep(0.05)
+
+            if process.returncode != 0:
+                _print(
+                    f"PUNCT_RESCUE_CHILD_FAILED attempt={attempt_number} "
+                    f"code={process.returncode}"
+                )
+                return None, False
+
+            if not output_path.exists():
+                _print(f"PUNCT_RESCUE_CHILD_FAILED attempt={attempt_number} code=missing_output")
+                return None, False
+            try:
+                payload = json.loads(output_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                _print(f"PUNCT_RESCUE_CHILD_FAILED attempt={attempt_number} code=invalid_output")
+                return None, False
+            return _load_punctuation_child_output(payload), False
+        finally:
+            if process and process.poll() is None:
+                _terminate_child()
+            if process and process.stdout:
+                try:
+                    process.stdout.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def _hard_exit(code: int) -> NoReturn:
@@ -1199,44 +1217,27 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             elif max_attempts >= 1:
                 _print("PUNCT_RESCUE_START attempt=1")
                 attempt_vad = not args.vad_filter
-                attempt_kwargs = _build_transcribe_kwargs(
-                    language=args.lang,
-                    language_auto=language_auto,
+                child_payload, skipped = _run_punctuation_child_process(
+                    attempt_number=1,
+                    wav_path=wav_path,
+                    srt_path=srt_path,
+                    lang=args.lang,
+                    model_name=args.model,
+                    device=device,
+                    compute_type=compute_type,
                     vad_filter=attempt_vad,
                     vad_min_silence_ms=args.vad_min_silence_ms,
                     initial_prompt=args.initial_prompt,
+                    duration_seconds=duration_seconds,
+                    should_abort=_should_skip_punctuation,
+                    force_cpu=args.force_cpu,
                 )
-                try:
-                    raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
-                        model=model,
-                        wav_path=wav_path,
-                        transcribe_kwargs=attempt_kwargs,
-                        splitter_config=splitter_config,
-                        duration_seconds=duration_seconds,
-                        should_abort=_should_skip_punctuation,
-                    )
-                except SkipRequested:
+                if skipped:
                     rescue_triggered = False
                     rescue_reason = "skipped_by_user"
                     _print("PUNCT_RESCUE_SKIPPED")
-                else:
-                    raw_summary = _build_raw_punctuation_summary(raw_segments)
-                    attempts.append(
-                        {
-                            "attempt": 1,
-                            "model": args.model,
-                            "device": device,
-                            "compute_type": compute_type,
-                            "force_cpu": args.force_cpu,
-                            "vad_filter": attempt_kwargs.get("vad_filter"),
-                            "transcribe_kwargs": attempt_kwargs,
-                            "raw_segments": raw_segments,
-                            "cues": cues,
-                            "segments": segments,
-                            "splitter_stats": splitter_stats,
-                            **raw_summary,
-                        }
-                    )
+                elif child_payload:
+                    attempts.append(child_payload)
             for attempt_number in range(2, max_attempts + 1):
                 if not rescue_triggered:
                     break
