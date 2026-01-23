@@ -64,7 +64,7 @@ See [`docs/README.md`](docs/README.md) for the full documentation index and star
 
 ## Quick start (Windows EXE)
 1. Double-click `HebrewSubtitleGUI.exe` (or create a shortcut and launch it).
-2. Drop a video in the window and click **Transcribe**.
+2. Drop a video in the window and click **Create subtitles**.
 3. Expect outputs next to your video: `<video_stem>_audio_for_whisper.wav`, `<video_stem>.srt`, and `<video_stem>_subtitled.mp4`.
 4. Logs and cache live under `%LOCALAPPDATA%\HebrewSubtitleGUI\...`.
 
