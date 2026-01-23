@@ -4,6 +4,7 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import sys
 from typing import Any, Optional
 
@@ -112,17 +113,34 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
     return min(max(value, minimum), maximum)
 
 
+def _count_words(text: str) -> int:
+    return len(re.findall(r"\w+", text, flags=re.UNICODE))
+
+
+def _count_words_in_cues(cues: list[SrtCue]) -> int:
+    total = 0
+    for cue in cues:
+        total += _count_words(cue.text)
+    return total
+
+
+def _emit_words_timed(current: int, total: int) -> None:
+    _print(f"ALIGN_WORDS_TIMED current={current} total={total}")
+
+
 def _build_document(
     *,
     cues: list[SrtCue],
     aligned_segments: list[Optional[dict[str, Any]]],
     language: str,
     srt_hash: str,
+    total_words: int,
 ) -> WordTimingDocument:
     created_utc = datetime.now(timezone.utc).isoformat()
     cue_entries: list[CueWordTimings] = []
     clamp_count = 0
     skipped_words_total = 0
+    words_timed = 0
     for index, cue in enumerate(cues):
         aligned = aligned_segments[index] if index < len(aligned_segments) else None
         words: list[WordSpan] = []
@@ -160,6 +178,9 @@ def _build_document(
                 words=words,
             )
         )
+        words_timed += _count_words(cue.text)
+        if total_words:
+            _emit_words_timed(min(words_timed, total_words), total_words)
     if clamp_count:
         _print(f"ALIGN_CLAMPED_WORDS {clamp_count}")
     if skipped_words_total:
@@ -183,6 +204,9 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     cues = parse_srt_file(config.srt_path)
     if len(segments) != len(cues):
         raise ValueError("Mismatch between segments and SRT cues.")
+    total_words = _count_words_in_cues(cues)
+    if total_words:
+        _emit_words_timed(0, total_words)
 
     device = _resolve_device(config.prefer_gpu, config.device)
     import whisperx
@@ -210,6 +234,7 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
         aligned_segments=mapped_segments,
         language=config.language,
         srt_hash=srt_hash,
+        total_words=total_words,
     )
     save_word_timings_json(config.output_path, document)
     total_words = sum(len(cue.words) for cue in document.cues)
