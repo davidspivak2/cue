@@ -56,7 +56,7 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the canonical Windows set
 run-from-source, testing, and packaging steps.
 
 ## Documentation
-See [`docs/README.md`](docs/README.md) for the full documentation index and start-here pointers.
+See [`docs/DOCUMENTATION_INDEX.md`](docs/DOCUMENTATION_INDEX.md) for the full documentation index and start-here pointers.
 
 ## Portable install
 1. Copy the `dist\HebrewSubtitleGUI\` folder to `C:\Program Files\HebrewSubtitleGUI` (or any folder).
