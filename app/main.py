@@ -3014,7 +3014,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         row = self._checklist_rows.get(step_id)
         if row and self._checklist_state.get(step_id) == "active":
-            row.set_active_detail("Skip requested...")
+            row.set_active_detail("Skipping...")
             row.set_skip_visible(False)
         if step_id == ChecklistStep.FIX_PUNCTUATION:
             self._worker.request_skip_punctuation()
