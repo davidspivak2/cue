@@ -1567,6 +1567,8 @@ class Worker(QtCore.QObject):
                                 detail = "Quick polish pass..."
                             elif attempt == 3:
                                 detail = "Final touch-ups..."
+                            elif attempt > 3:
+                                detail = "More touch-ups..."
                             else:
                                 detail = "Improving punctuation..."
                             self._punctuation_active = True
@@ -1892,7 +1894,14 @@ class Worker(QtCore.QObject):
         self._alignment_last_emit = 0.0
         alignment_real_progress = threading.Event()
         estimator_stop = threading.Event()
+        smoother_stop = threading.Event()
         estimator_thread: Optional[threading.Thread] = None
+        smoother_thread: Optional[threading.Thread] = None
+        alignment_lock = threading.Lock()
+        alignment_target = {
+            "current": 0,
+            "total": self._alignment_words_total,
+        }
         if self._alignment_words_total:
             self._emit_step_event(
                 ChecklistStep.TIMING_WORD_HIGHLIGHTS,
@@ -1911,12 +1920,9 @@ class Worker(QtCore.QObject):
                     elapsed = time.monotonic() - start_time
                     fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
                     estimated_current = int(self._alignment_words_total * fraction)
-                    if estimated_current > self._alignment_words_current:
-                        self._alignment_words_current = estimated_current
-                        self._maybe_emit_alignment_progress(
-                            self._alignment_words_current,
-                            self._alignment_words_total,
-                        )
+                    with alignment_lock:
+                        if estimated_current > alignment_target["current"]:
+                            alignment_target["current"] = estimated_current
                     estimator_stop.wait(0.5)
 
             estimator_thread = threading.Thread(
@@ -1924,6 +1930,31 @@ class Worker(QtCore.QObject):
                 daemon=True,
             )
             estimator_thread.start()
+
+            def _smooth_alignment_progress() -> None:
+                display_current = 0
+                while not smoother_stop.is_set():
+                    with alignment_lock:
+                        current_target = alignment_target["current"]
+                        current_total = alignment_target["total"]
+                    if current_total <= 0:
+                        smoother_stop.wait(0.2)
+                        continue
+                    if display_current < current_target:
+                        step = max(1, int(current_total * 0.01))
+                        display_current = min(current_target, display_current + step)
+                        self._alignment_words_current = display_current
+                        self._alignment_words_total = current_total
+                        self._maybe_emit_alignment_progress(display_current, current_total)
+                        smoother_stop.wait(0.1)
+                    else:
+                        smoother_stop.wait(0.2)
+
+            smoother_thread = threading.Thread(
+                target=_smooth_alignment_progress,
+                daemon=True,
+            )
+            smoother_thread.start()
         self.signals.log.emit(
             "Alignment starting: "
             f"wav={audio_path} srt={srt_path} output={plan.output_path} "
@@ -1962,9 +1993,10 @@ class Worker(QtCore.QObject):
             total = int(match.group(2))
             if current > 0:
                 alignment_real_progress.set()
-            self._alignment_words_current = max(current, self._alignment_words_current)
-            self._alignment_words_total = total
-            self._maybe_emit_alignment_progress(self._alignment_words_current, total)
+            with alignment_lock:
+                alignment_target["total"] = total
+                if current > alignment_target["current"]:
+                    alignment_target["current"] = current
 
         def _read_stream(
             stream: Optional[Iterable[str]],
@@ -1998,6 +2030,9 @@ class Worker(QtCore.QObject):
         estimator_stop.set()
         if estimator_thread:
             estimator_thread.join(timeout=1)
+        smoother_stop.set()
+        if smoother_thread:
+            smoother_thread.join(timeout=1)
         stdout_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
         stderr_text = "\n".join(stderr_tail)
@@ -2021,6 +2056,11 @@ class Worker(QtCore.QObject):
         total_words = sum(len(cue.words) for cue in doc.cues)
         if total_words == 0:
             raise AlignmentError("Alignment failed: output had no timings.", "align_output_empty")
+        with alignment_lock:
+            alignment_target["total"] = total_words
+            alignment_target["current"] = total_words
+        self._alignment_words_current = total_words
+        self._alignment_words_total = total_words
         self._maybe_emit_alignment_progress(total_words, total_words)
         return StepState.DONE, self._format_alignment_detail(total_words, total_words)
 
