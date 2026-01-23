@@ -90,7 +90,7 @@ Last updated: 2026-02-27
 - **Depends on:** Task 4.
 
 ### Codex Task 6 — Preview playback renderer alignment
-- **Goal:** Preview playback uses the graphics overlay renderer for both modes.
+- **Goal:** Preview playback uses the graphics overlay renderer for both modes. ✅ Done.
 - **Scope:**
   - Update preview playback generator to stream overlay frames (no subtitle filters).
   - Add/update tests for overlay clip planning.

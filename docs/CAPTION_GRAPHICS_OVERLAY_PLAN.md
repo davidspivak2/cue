@@ -4,6 +4,7 @@
 - Overlay PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
 - Overlay PR6 is complete (performance pass landed).
 - Overlay PR7 is complete (word background rendering, mutual exclusivity, and UI controls for line/word background color, opacity, padding, and corner radius are in place).
+- Overlay PR8 is complete (graphics overlay is the only export renderer; subtitle-filter paths are removed).
 - Wrapped-line word-highlight clip rects now use line-relative cursor offsets in the graphics overlay renderer.
 - Graphics overlay export now handles QImage bit-buffer variants for RGBA streaming.
 - Overlay render caching keys are normalized to the expected text + highlight index format.
@@ -228,14 +229,15 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Export a short clip and confirm the correct background mode renders.
 
 ### Overlay PR8 — Graphics-only export (graphics overlay only)
+- Status: ✅ Complete.
 - Purpose: Make graphics overlay the only export renderer and remove subtitle-filter paths.
-- Scope:
-  - Remove subtitle-filter export paths and runtime toggles.
+- Scope (delivered):
+  - Removed subtitle-filter export paths and runtime toggles.
   - Log the renderer choice at export start.
 - Likely files/modules:
   - Renderer selection logic.
   - Logging utility.
-- Key implementation notes and risks:
+- Key implementation notes and risks (resolved):
   - Ensure export failures surface clearly without fallback.
 - Manual test checklist:
   - Verify export uses graphics overlay renderer.
