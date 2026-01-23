@@ -462,6 +462,7 @@ Done / merged:
 - **GUI PR8** — style presets + customize panel + instant preview updates ✅
 - **GUI PR9** — in-app preview playback (QtMultimedia) + caching ✅ (feature no longer surfaced in the GUI)
 - **GUI PR10** — word highlight default mode + highlight color picker ✅
+- **GUI PR11** — delightful waiting checklist ✅
 - **Extra (not originally in the plan)** — opt-in success diagnostics JSON + “write next to outputs” hotfix ✅
 - **GUI PR14 — Docs refresh / handover readiness (this update)** ✅
 
@@ -480,17 +481,19 @@ Unplanned but merged work since the original PR plan:
 - Remove leftover technical terms in user-facing labels
 - Align error/warning copy with UX/UI spec
 
-Not done yet (still in GUI PR11+ territory):
-- **GUI PR11** — “delightful waiting” visuals (waveform + thumbnail strip; cached under LocalAppData)
+Not done yet (still in GUI PR12+ territory):
 - **GUI PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
+  - Future: if no audio track is found, stop and show “No audio found… can’t create subtitles.”
+  - Future: if audio exists but no speech detected, stop and show “No speech detected… can’t create subtitles.”
 - **GUI PR13** — packaging hardening / smoke tests
 - **GUI PR15** — copy polish + CTA reduction sweep (after stabilization)
+- Export optimization (future): cache video stream info at VIDEO_SELECTED, revalidate cheaply in export, and consider removing the “Getting video info” checklist row once implemented.
 
 GUI PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
 
 ### Where a new contributor should pick up
 Priority work items:
-1) If punctuation is acceptable: continue the UX roadmap at **GUI PR11** (delightful waiting visuals).
+1) If punctuation is acceptable: continue the UX roadmap at **GUI PR12** (error UX + diagnostics).
 2) If punctuation regresses: use the benchmark + diagnostics to confirm whether loss happens in raw segments vs splitter; the new rescue diagnostics fields help choose.
 
 ---

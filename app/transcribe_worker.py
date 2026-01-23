@@ -13,7 +13,7 @@ import traceback
 from pathlib import Path
 from dataclasses import dataclass
 from tempfile import TemporaryDirectory
-from typing import NoReturn
+from typing import Callable, NoReturn, Optional
 
 from .srt_utils import SrtSegment, segments_to_srt
 from .punctuation_stats import (
@@ -415,6 +415,7 @@ def _apply_vad_gap_rescue(
     splitter_config: SplitterConfig,
     duration_seconds: float | None,
     enabled: bool,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> tuple[list[SrtSegment], dict[str, object]]:
     stats = {
         "enabled": enabled,
@@ -429,6 +430,9 @@ def _apply_vad_gap_rescue(
         "gaps": [],
     }
     if not enabled:
+        return merge_segments, stats
+    if should_abort and should_abort():
+        _print("VAD_GAP_RESCUE_SKIPPED")
         return merge_segments, stats
 
     gaps = _detect_vad_gaps(
@@ -455,6 +459,7 @@ def _apply_vad_gap_rescue(
     rescued_segments_total = 0
     gaps_attempted = 0
     gaps_restored = 0
+    original_segments = list(merge_segments)
     merged_segments = list(merge_segments)
     rescue_kwargs = dict(transcribe_kwargs)
     rescue_kwargs["vad_filter"] = False
@@ -462,6 +467,9 @@ def _apply_vad_gap_rescue(
     with TemporaryDirectory() as tmp_dir:
         tmp_root = Path(tmp_dir)
         for gap in gaps:
+            if should_abort and should_abort():
+                _print("VAD_GAP_RESCUE_SKIPPED")
+                return original_segments, stats
             entry = {
                 "idx": gap.idx,
                 "start_sec": gap.start_sec,
@@ -504,13 +512,18 @@ def _apply_vad_gap_rescue(
             try:
                 temp_wav = tmp_root / f"vad_gap_{gap.idx}.wav"
                 _extract_gap_wav(wav_path, gap.start_sec, gap.dur_sec, temp_wav)
-                raw_segments, _, rescue_segments, _ = _run_transcription_attempt(
-                    model=model,
-                    wav_path=temp_wav,
-                    transcribe_kwargs=rescue_kwargs,
-                    splitter_config=splitter_config,
-                    duration_seconds=gap.dur_sec,
-                )
+                try:
+                    raw_segments, _, rescue_segments, _ = _run_transcription_attempt(
+                        model=model,
+                        wav_path=temp_wav,
+                        transcribe_kwargs=rescue_kwargs,
+                        splitter_config=splitter_config,
+                        duration_seconds=gap.dur_sec,
+                        should_abort=should_abort,
+                    )
+                except SkipRequested:
+                    _print("VAD_GAP_RESCUE_SKIPPED")
+                    return original_segments, stats
                 entry["rescued_segments"] = len(rescue_segments)
                 kept = [
                     segment
@@ -563,6 +576,10 @@ def _apply_vad_gap_rescue(
     return merged_segments, stats
 
 
+class SkipRequested(Exception):
+    pass
+
+
 def _run_transcription_attempt(
     *,
     model,
@@ -570,6 +587,7 @@ def _run_transcription_attempt(
     transcribe_kwargs: dict[str, object],
     splitter_config: SplitterConfig,
     duration_seconds: float | None,
+    should_abort: Optional[Callable[[], bool]] = None,
 ) -> tuple[list[object], list[object], list[SrtSegment], SplitterStats]:
     segments_iter, info = model.transcribe(str(wav_path), **transcribe_kwargs)
     _print(f"Detected language: {info.language} (prob={info.language_probability:.2f})")
@@ -582,6 +600,8 @@ def _run_transcription_attempt(
         last_reported_end = 0.0
         last_reported_percent = 0.0
         for segment in segments_iter:
+            if should_abort and should_abort():
+                raise SkipRequested()
             raw_segments.append(segment)
             if segment.end > max_end:
                 max_end = segment.end
@@ -675,6 +695,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         choices=["on", "off"],
         default="on",
     )
+    parser.add_argument("--control-dir")
     args = parser.parse_args(argv)
 
     if not args.print_transcribe_config and (not args.wav or not args.srt):
@@ -682,6 +703,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
 
     wav_path = Path(args.wav) if args.wav else None
     srt_path = Path(args.srt) if args.srt else None
+    control_dir = Path(args.control_dir) if args.control_dir else None
 
     try:
         _stabilize_runtime()
@@ -828,6 +850,17 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=1)
         duration_seconds = args.duration_seconds
+
+        def _should_skip(control_root: Optional[Path], filename: str) -> bool:
+            if not control_root:
+                return False
+            return (control_root / filename).exists()
+
+        def _should_skip_punctuation() -> bool:
+            return _should_skip(control_dir, "skip_punct.flag")
+
+        def _should_skip_gaps() -> bool:
+            return _should_skip(control_dir, "skip_gaps.flag")
         attempts: list[dict[str, object]] = []
         raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
             model=model,
@@ -875,7 +908,12 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 rescue_triggered = True
                 rescue_reason = "comma_density_low"
         if rescue_triggered:
-            if int(punctuation_rescue.get("max_attempts", 2)) >= 1:
+            if _should_skip_punctuation():
+                rescue_triggered = False
+                rescue_reason = "skipped_by_user"
+                _print("PUNCT_RESCUE_SKIPPED")
+            elif int(punctuation_rescue.get("max_attempts", 2)) >= 1:
+                _print("PUNCT_RESCUE_START attempt=1")
                 attempt_vad = not args.vad_filter
                 attempt_kwargs = _build_transcribe_kwargs(
                     language=args.lang,
@@ -884,78 +922,98 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                     vad_min_silence_ms=args.vad_min_silence_ms,
                     initial_prompt=args.initial_prompt,
                 )
-                raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
-                    model=model,
-                    wav_path=wav_path,
-                    transcribe_kwargs=attempt_kwargs,
-                    splitter_config=splitter_config,
-                    duration_seconds=duration_seconds,
-                )
-                raw_summary = _build_raw_punctuation_summary(raw_segments)
-                attempts.append(
-                    {
-                        "attempt": 1,
-                        "model": args.model,
-                        "device": device,
-                        "compute_type": compute_type,
-                        "force_cpu": args.force_cpu,
-                        "vad_filter": attempt_kwargs.get("vad_filter"),
-                        "transcribe_kwargs": attempt_kwargs,
-                        "raw_segments": raw_segments,
-                        "cues": cues,
-                        "segments": segments,
-                        "splitter_stats": splitter_stats,
-                        **raw_summary,
-                    }
-                )
-            if int(punctuation_rescue.get("max_attempts", 2)) >= 2:
-                attempt_device = "cpu"
-                attempt_compute_type = "float32"
-                heartbeat_stop = threading.Event()
-                heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
                 try:
-                    rescue_model = _load_model(
-                        "large-v2",
-                        attempt_device,
-                        attempt_compute_type,
-                        models_dir=models_dir,
-                        cpu_threads_cpu=cpu_threads_cpu,
-                        cpu_threads_active=cpu_threads_cpu,
+                    raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
+                        model=model,
+                        wav_path=wav_path,
+                        transcribe_kwargs=attempt_kwargs,
+                        splitter_config=splitter_config,
+                        duration_seconds=duration_seconds,
+                        should_abort=_should_skip_punctuation,
                     )
-                finally:
-                    heartbeat_stop.set()
-                    heartbeat_thread.join(timeout=1)
-                attempt_kwargs = _build_transcribe_kwargs(
-                    language=args.lang,
-                    language_auto=language_auto,
-                    vad_filter=True,
-                    vad_min_silence_ms=400,
-                    initial_prompt=args.initial_prompt,
-                )
-                raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
-                    model=rescue_model,
-                    wav_path=wav_path,
-                    transcribe_kwargs=attempt_kwargs,
-                    splitter_config=splitter_config,
-                    duration_seconds=duration_seconds,
-                )
-                raw_summary = _build_raw_punctuation_summary(raw_segments)
-                attempts.append(
-                    {
-                        "attempt": 2,
-                        "model": "large-v2",
-                        "device": attempt_device,
-                        "compute_type": attempt_compute_type,
-                        "force_cpu": True,
-                        "vad_filter": attempt_kwargs.get("vad_filter"),
-                        "transcribe_kwargs": attempt_kwargs,
-                        "raw_segments": raw_segments,
-                        "cues": cues,
-                        "segments": segments,
-                        "splitter_stats": splitter_stats,
-                        **raw_summary,
-                    }
-                )
+                except SkipRequested:
+                    rescue_triggered = False
+                    rescue_reason = "skipped_by_user"
+                    _print("PUNCT_RESCUE_SKIPPED")
+                else:
+                    raw_summary = _build_raw_punctuation_summary(raw_segments)
+                    attempts.append(
+                        {
+                            "attempt": 1,
+                            "model": args.model,
+                            "device": device,
+                            "compute_type": compute_type,
+                            "force_cpu": args.force_cpu,
+                            "vad_filter": attempt_kwargs.get("vad_filter"),
+                            "transcribe_kwargs": attempt_kwargs,
+                            "raw_segments": raw_segments,
+                            "cues": cues,
+                            "segments": segments,
+                            "splitter_stats": splitter_stats,
+                            **raw_summary,
+                        }
+                    )
+            if rescue_triggered and int(punctuation_rescue.get("max_attempts", 2)) >= 2:
+                if _should_skip_punctuation():
+                    rescue_triggered = False
+                    rescue_reason = "skipped_by_user"
+                    _print("PUNCT_RESCUE_SKIPPED")
+                else:
+                    _print("PUNCT_RESCUE_START attempt=2")
+                    attempt_device = "cpu"
+                    attempt_compute_type = "float32"
+                    heartbeat_stop = threading.Event()
+                    heartbeat_thread = _start_heartbeat("MODEL_LOAD", heartbeat_stop)
+                    try:
+                        rescue_model = _load_model(
+                            "large-v2",
+                            attempt_device,
+                            attempt_compute_type,
+                            models_dir=models_dir,
+                            cpu_threads_cpu=cpu_threads_cpu,
+                            cpu_threads_active=cpu_threads_cpu,
+                        )
+                    finally:
+                        heartbeat_stop.set()
+                        heartbeat_thread.join(timeout=1)
+                    attempt_kwargs = _build_transcribe_kwargs(
+                        language=args.lang,
+                        language_auto=language_auto,
+                        vad_filter=True,
+                        vad_min_silence_ms=400,
+                        initial_prompt=args.initial_prompt,
+                    )
+                    try:
+                        raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
+                            model=rescue_model,
+                            wav_path=wav_path,
+                            transcribe_kwargs=attempt_kwargs,
+                            splitter_config=splitter_config,
+                            duration_seconds=duration_seconds,
+                            should_abort=_should_skip_punctuation,
+                        )
+                    except SkipRequested:
+                        rescue_triggered = False
+                        rescue_reason = "skipped_by_user"
+                        _print("PUNCT_RESCUE_SKIPPED")
+                    else:
+                        raw_summary = _build_raw_punctuation_summary(raw_segments)
+                        attempts.append(
+                            {
+                                "attempt": 2,
+                                "model": "large-v2",
+                                "device": attempt_device,
+                                "compute_type": attempt_compute_type,
+                                "force_cpu": True,
+                                "vad_filter": attempt_kwargs.get("vad_filter"),
+                                "transcribe_kwargs": attempt_kwargs,
+                                "raw_segments": raw_segments,
+                                "cues": cues,
+                                "segments": segments,
+                                "splitter_stats": splitter_stats,
+                                **raw_summary,
+                            }
+                        )
 
         baseline_commas = int(attempts[0]["comma_count_raw"])
         baseline_total_punct = int(attempts[0]["total_punctuation_count_raw"])
@@ -991,6 +1049,11 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 f"density={attempt['punctuation_density_raw']:.4f} "
                 f"chosen={attempt is chosen_attempt}"
             )
+        if rescue_triggered:
+            _print(
+                "PUNCT_RESCUE_DONE "
+                f"chosen_attempt={chosen_attempt['attempt']} attempts_ran={len(attempts)}"
+            )
 
         vad_gap_segments = chosen_attempt["segments"]
         vad_gap_stats = {
@@ -1006,16 +1069,26 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             "gaps": [],
         }
         if vad_gap_rescue_enabled and bool(attempts[0]["vad_filter"]):
-            vad_gap_segments, vad_gap_stats = _apply_vad_gap_rescue(
-                model=model,
-                wav_path=wav_path,
-                detection_segments=attempts[0]["segments"],
-                merge_segments=vad_gap_segments,
-                transcribe_kwargs=chosen_attempt["transcribe_kwargs"],
-                splitter_config=splitter_config,
-                duration_seconds=duration_seconds,
-                enabled=vad_gap_rescue_enabled,
-            )
+            if not _should_skip_gaps():
+                _print("VAD_GAP_RESCUE_START")
+                vad_gap_segments, vad_gap_stats = _apply_vad_gap_rescue(
+                    model=model,
+                    wav_path=wav_path,
+                    detection_segments=attempts[0]["segments"],
+                    merge_segments=vad_gap_segments,
+                    transcribe_kwargs=chosen_attempt["transcribe_kwargs"],
+                    splitter_config=splitter_config,
+                    duration_seconds=duration_seconds,
+                    enabled=vad_gap_rescue_enabled,
+                    should_abort=_should_skip_gaps,
+                )
+                _print(
+                    "VAD_GAP_RESCUE_DONE "
+                    f"gaps_found={vad_gap_stats['gaps_found']} "
+                    f"gaps_restored={vad_gap_stats['gaps_restored']}"
+                )
+            else:
+                _print("VAD_GAP_RESCUE_SKIPPED")
         transcribe_stats = build_transcription_stats(
             raw_segments=chosen_attempt["raw_segments"],
             cues=chosen_attempt["cues"],
