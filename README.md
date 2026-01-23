@@ -16,6 +16,7 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Graphics overlay export pipeline streams RGBA frames to FFmpeg.
 - Uses GPU (CUDA) when available, auto-falls back to CPU with clear logs.
 - Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`.
+- Checklist above the progress bar shows in-progress/completed statuses during subtitle creation and export.
 - Optional diagnostics bundle: zip logs + outputs automatically on exit.
 - Transcription includes VAD gap rescue to recover missed speech in large silent gaps.
 - Export is available immediately after subtitle creation (Subtitle Edit is optional).
