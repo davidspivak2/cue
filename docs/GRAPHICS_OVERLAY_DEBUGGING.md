@@ -12,6 +12,18 @@ The graphics overlay renderer draws subtitle text into RGBA frames (using the sa
 - When diagnostics logging is enabled, JSON files named `diag_*.json` are written **next to the export outputs** (same folder as the selected save location).
 - If “Zip logs and outputs on exit” is enabled, the app writes `hebrew_subtitles_bundle_*.zip` next to the selected video; it includes logs, diagnostics JSON, and output artifacts.
 
+## How to enable diagnostics
+See the Diagnostics section in `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md` (Section 6) for the full settings reference. The exact checkbox labels you should look for are:
+- “Enable diagnostics logging”
+- “Write diagnostics on successful completion”
+- “Zip logs and outputs on exit”
+- “App + system info”
+- “Video info”
+- “Audio (WAV) info”
+- “Transcription config”
+- “SRT stats”
+- “Commands + timings”
+
 ## Most important debug signals
 1. **Renderer line at export start**
    - Look for `Export renderer=graphics_overlay` in the log to confirm the pipeline.
