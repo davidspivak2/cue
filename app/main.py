@@ -3012,26 +3012,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_checklist_skip_clicked(self, step_id: str) -> None:
         if not self._worker:
             return
+        row = self._checklist_rows.get(step_id)
+        if row and self._checklist_state.get(step_id) == "active":
+            row.set_active_detail("Skip requested...")
+            row.set_skip_visible(False)
         if step_id == ChecklistStep.FIX_PUNCTUATION:
-            QtCore.QMetaObject.invokeMethod(
-                self._worker,
-                "request_skip_punctuation",
-                QtCore.Qt.QueuedConnection,
-            )
+            self._worker.request_skip_punctuation()
         elif step_id == ChecklistStep.FIX_MISSING_SUBTITLES:
-            QtCore.QMetaObject.invokeMethod(
-                self._worker,
-                "request_skip_gaps",
-                QtCore.Qt.QueuedConnection,
-            )
-        self._handle_checklist_finish(
-            StepEvent(
-                step_id=step_id,
-                state=StepState.SKIPPED,
-                reason_text="Skipped",
-            ),
-            "skipped",
-        )
+            self._worker.request_skip_gaps()
 
     def _update_elapsed_label(self) -> None:
         if self._worker_start_time is None or self._state != AppState.WORKING:
