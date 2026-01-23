@@ -462,7 +462,7 @@ Done / merged:
 - **GUI PR8** — style presets + customize panel + instant preview updates ✅
 - **GUI PR9** — in-app preview playback (QtMultimedia) + caching ✅ (feature no longer surfaced in the GUI)
 - **GUI PR10** — word highlight default mode + highlight color picker ✅
-- **GUI PR11** — delightful waiting checklist ✅
+- **GUI PR11** — delightful waiting checklist ✅ (adds a three-step checklist UI above the progress bar that updates across C1/C2/E states)
 - **Extra (not originally in the plan)** — opt-in success diagnostics JSON + “write next to outputs” hotfix ✅
 - **GUI PR14 — Docs refresh / handover readiness (this update)** ✅
 
@@ -508,6 +508,7 @@ Changes implemented:
 - Progress is now **step-weighted** (audio extract → transcription → burn-in) into one global percent.
 - Transcription emits “heartbeat” style signals so the UI can keep moving even when Whisper only reports progress in large segment jumps.
 - Status text was clarified (e.g., “Listening to audio”).
+- A waiting checklist sits above the progress bar in C1/C2/E states to make the extract → transcribe → burn-in sequence visible.
 
 Current reality:
 - Burn-in progress is solid.
