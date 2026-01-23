@@ -59,6 +59,14 @@ run-from-source, testing, and packaging steps.
 2. Right-click `HebrewSubtitleGUI.exe` → **Create shortcut** → move shortcut to Desktop.
 3. Double-click the shortcut to launch (no Command Prompt needed).
 
+## Quick start (Windows EXE)
+1. Double-click `HebrewSubtitleGUI.exe` (or create a shortcut and launch it).
+2. Drop a video in the window and click **Transcribe**.
+3. Expect outputs next to your video: `<video_stem>_audio_for_whisper.wav`, `<video_stem>.srt`, and `<video_stem>_subtitled.mp4`.
+4. Logs and cache live under `%LOCALAPPDATA%\HebrewSubtitleGUI\...`.
+
+For more detail, see [`docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`](docs/HEBREW_SUBTITLE_GUI_CONTEXT.md).
+
 ## Notes on model downloads
 - The first transcription run downloads the `large-v3` model from Hugging Face.
 - This can take time and will be logged in the app.
