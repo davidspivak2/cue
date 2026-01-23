@@ -662,12 +662,11 @@ def _run_transcription_attempt(
     duration_seconds: float | None,
     should_abort: Optional[Callable[[], bool]] = None,
 ) -> tuple[list[object], list[object], list[SrtSegment], SplitterStats]:
-    segments_iter, info = model.transcribe(str(wav_path), **transcribe_kwargs)
-    _print(f"Detected language: {info.language} (prob={info.language_probability:.2f})")
-
     transcribe_heartbeat_stop = threading.Event()
     transcribe_heartbeat_thread = _start_heartbeat("TRANSCRIBE", transcribe_heartbeat_stop)
     try:
+        segments_iter, info = model.transcribe(str(wav_path), **transcribe_kwargs)
+        _print(f"Detected language: {info.language} (prob={info.language_probability:.2f})")
         raw_segments = []
         max_end = 0.0
         last_reported_end = 0.0

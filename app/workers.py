@@ -1411,7 +1411,7 @@ class Worker(QtCore.QObject):
             watchdog_triggered = False
             watchdog_elapsed = 0.0
             watchdog_stop = threading.Event()
-            no_output_timeout = 60.0
+            no_output_timeout_ref = {"value": 60.0}
             smooth_transcribe_started = False
             if duration_seconds is None:
                 self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Loading model")
@@ -1464,7 +1464,8 @@ class Worker(QtCore.QObject):
                         continue
                     with output_lock:
                         elapsed = time.monotonic() - last_output_time
-                    if elapsed > no_output_timeout and process.poll() is None:
+                    timeout = no_output_timeout_ref["value"]
+                    if elapsed > timeout and process.poll() is None:
                         watchdog_triggered = True
                         watchdog_elapsed = elapsed
                         _emit_log(
@@ -1563,6 +1564,7 @@ class Worker(QtCore.QObject):
                             attempt = int(match.group(1))
                             if attempt < 1:
                                 continue
+                            no_output_timeout_ref["value"] = 600.0
                             if attempt == 2:
                                 detail = "Quick polish pass..."
                             elif attempt == 3:
@@ -1584,6 +1586,7 @@ class Worker(QtCore.QObject):
                         and self.transcription_settings.punctuation_rescue_fallback_enabled
                     ):
                         self._punctuation_active = False
+                        no_output_timeout_ref["value"] = 60.0
                         match = re.search(r"attempts_ran=(\d+)", text)
                         attempts_ran = int(match.group(1)) if match else 1
                         rescue_attempts = max(attempts_ran - 1, 1)
@@ -1641,6 +1644,7 @@ class Worker(QtCore.QObject):
                 if text.startswith("PUNCT_RESCUE_SKIPPED"):
                     self._punctuation_active = False
                     self._skip_punctuation = True
+                    no_output_timeout_ref["value"] = 60.0
                     self.signals.log.emit("Skip punctuation confirmed by worker.", True)
                     self._emit_step_event(
                         ChecklistStep.FIX_PUNCTUATION,
