@@ -2,7 +2,6 @@
 
 ## Now / Next
 - GUI PR12: error UX with details drawer + copy diagnostics (continue the UX roadmap).
-- TBD: Secondary item.
 
 ## Backlog (Ideas / Later)
 - GUI PR13: packaging hardening / smoke tests.
