@@ -1146,6 +1146,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 cpu_threads_cpu=cpu_threads_cpu,
                 cpu_threads_active=cpu_threads_active,
             )
+            _print(f"MODEL_LOADED {args.model}")
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=1)
