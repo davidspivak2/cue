@@ -1429,10 +1429,10 @@ class Worker(QtCore.QObject):
 
             def _friendly_model_name(model_id: Optional[str]) -> str:
                 if model_id == "large-v3":
-                    return "OpenAI Whisper Large v3"
+                    return "OpenAI Whisper Large v3 loaded"
                 if model_id == "large-v2":
-                    return "OpenAI Whisper Large v2"
-                return "OpenAI Whisper"
+                    return "OpenAI Whisper Large v2 loaded"
+                return "OpenAI Whisper loaded"
 
             def _record_model_detail(model_id: Optional[str], rank: int) -> None:
                 nonlocal model_detail_rank, model_detail_id
