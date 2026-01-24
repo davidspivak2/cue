@@ -197,6 +197,7 @@ class Worker(QtCore.QObject):
         self._graphics_overlay_render_perf: Optional[RenderPerfStats] = None
         self._punctuation_active = False
         self._punctuation_attempt = 0
+        self._punctuation_final_emitted = False
         self._gap_active = False
         self._gap_found_count = 0
         self._skip_punctuation = False
@@ -206,6 +207,8 @@ class Worker(QtCore.QObject):
         self._alignment_words_current = 0
         self._alignment_words_total = 0
         self._alignment_last_emit = 0.0
+        self._alignment_progress_context: Optional[str] = None
+        self._export_alignment_progress = 0.0
 
     def cancel(self) -> None:
         with self._skip_lock:
@@ -499,7 +502,11 @@ class Worker(QtCore.QObject):
             return
         stats = self._transcribe_stats or {}
         if settings.punctuation_rescue_fallback_enabled:
-            if not self._punctuation_active and not self._skip_punctuation:
+            if (
+                not self._punctuation_final_emitted
+                and not self._punctuation_active
+                and not self._skip_punctuation
+            ):
                 rescue_triggered = bool(stats.get("punctuation_rescue_triggered"))
                 if rescue_triggered:
                     attempts_ran = int(stats.get("punctuation_rescue_attempts_ran", 1) or 1)
@@ -513,12 +520,14 @@ class Worker(QtCore.QObject):
                         StepState.DONE,
                         reason_text=detail,
                     )
+                    self._punctuation_final_emitted = True
                 else:
                     self._emit_step_event(
                         ChecklistStep.FIX_PUNCTUATION,
                         StepState.DONE,
                         reason_text="Looks good!",
                     )
+                    self._punctuation_final_emitted = True
 
         vad_stats = stats.get("vad_gap_rescue") if isinstance(stats, dict) else None
         if not settings.vad_gap_rescue_enabled:
@@ -765,11 +774,17 @@ class Worker(QtCore.QObject):
         output_path: Path,
         video_duration: Optional[float],
     ) -> dict:
-        self._emit_step_progress(ProgressStep.EXPORT, 0.01, "Preparing export", force=True)
+        if self.subtitle_mode == "word_highlight":
+            self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Preparing export", force=True)
+        else:
+            self._emit_step_progress(ProgressStep.EXPORT, 0.01, "Preparing export", force=True)
         self._emit_step_event(ChecklistStep.GET_VIDEO_INFO, StepState.START)
         stream_info = resolve_video_stream_info(self.video_path)
         self._emit_step_event(ChecklistStep.GET_VIDEO_INFO, StepState.DONE)
-        self._emit_step_progress(ProgressStep.EXPORT, 0.04, "Preparing export", force=True)
+        if self.subtitle_mode == "word_highlight":
+            self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Preparing export", force=True)
+        else:
+            self._emit_step_progress(ProgressStep.EXPORT, 0.04, "Preparing export", force=True)
         duration_seconds = video_duration
         if duration_seconds is None:
             duration_seconds = max((cue.end_seconds for cue in cues), default=0.0)
@@ -778,14 +793,9 @@ class Worker(QtCore.QObject):
 
         if self.subtitle_mode == "word_highlight":
             self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.START)
-            self._start_smooth_progress(
-                ProgressStep.EXPORT,
-                "Preparing export",
-                start=0.04,
-                cap=0.10,
-                increment=0.003,
-                interval=0.4,
-            )
+            self._alignment_progress_context = "export"
+            self._export_alignment_progress = 0.0
+            self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Preparing export", force=True)
             try:
                 timing_state, timing_reason = self._run_alignment_if_needed(
                     srt_path,
@@ -793,7 +803,7 @@ class Worker(QtCore.QObject):
                     context="export",
                 )
             except AlignmentError as exc:
-                self._stop_smooth_progress()
+                self._alignment_progress_context = None
                 self._emit_step_event(
                     ChecklistStep.TIMING_WORD_HIGHLIGHTS,
                     StepState.FAILED,
@@ -803,7 +813,7 @@ class Worker(QtCore.QObject):
                     "Word highlighting couldn’t be synced to the audio. "
                     "Try generating subtitles again. If it still fails, switch to Static mode."
                 ) from exc
-            self._stop_smooth_progress()
+            self._alignment_progress_context = None
             if timing_state == StepState.SKIPPED:
                 self._emit_step_event(
                     ChecklistStep.TIMING_WORD_HIGHLIGHTS,
@@ -1274,6 +1284,7 @@ class Worker(QtCore.QObject):
             self.signals.log.emit("Starting subtitles worker...", True)
             self._punctuation_active = False
             self._punctuation_attempt = 0
+            self._punctuation_final_emitted = False
             self._gap_active = False
             self._gap_found_count = 0
             self._skip_punctuation = False
@@ -1554,6 +1565,25 @@ class Worker(QtCore.QObject):
                     continue
 
                 _emit_log(text, show_in_ui)
+                if text.startswith("PUNCT_RESCUE "):
+                    if (
+                        self.transcription_settings
+                        and self.transcription_settings.punctuation_rescue_fallback_enabled
+                        and not self._skip_punctuation
+                        and not self._punctuation_final_emitted
+                    ):
+                        attempt_match = re.search(r"attempt=(\d+)", text)
+                        chosen_match = re.search(r"chosen=(True|False)", text)
+                        if attempt_match and chosen_match:
+                            attempt = int(attempt_match.group(1))
+                            chosen = chosen_match.group(1) == "True"
+                            if attempt == 0 and chosen:
+                                self._emit_step_event(
+                                    ChecklistStep.FIX_PUNCTUATION,
+                                    StepState.DONE,
+                                    reason_text="Looks good!",
+                                )
+                                self._punctuation_final_emitted = True
                 if text.startswith("PUNCT_RESCUE_START"):
                     if (
                         self.transcription_settings
@@ -1566,11 +1596,9 @@ class Worker(QtCore.QObject):
                                 continue
                             no_output_timeout_ref["value"] = 600.0
                             if attempt == 2:
-                                detail = "Quick polish pass..."
+                                detail = "Improving punctuation... (attempt 2)"
                             elif attempt == 3:
-                                detail = "Final touch-ups..."
-                            elif attempt > 3:
-                                detail = "More touch-ups..."
+                                detail = "Improving punctuation... (attempt 3)"
                             else:
                                 detail = "Improving punctuation..."
                             self._punctuation_active = True
@@ -1599,6 +1627,7 @@ class Worker(QtCore.QObject):
                             StepState.DONE,
                             reason_text=detail,
                         )
+                        self._punctuation_final_emitted = True
                 if text.startswith("VAD_GAP_RESCUE_START"):
                     if (
                         self.transcription_settings
@@ -1858,215 +1887,227 @@ class Worker(QtCore.QObject):
         *,
         context: str,
     ) -> tuple[str, Optional[str]]:
-        plan = build_alignment_plan(
-            subtitle_mode=self.subtitle_mode,
-            srt_path=srt_path,
-            audio_path=audio_path,
-            language="he",
-            prefer_gpu=True,
-        )
-        self.signals.log.emit(
-            "Alignment needed? "
-            f"{str(plan.should_run).lower()} reason={plan.reason} (context={context})",
-            True,
-        )
-        if not plan.should_run:
-            return StepState.SKIPPED, "already timed"
-        if plan.reason == "word_timings_has_no_words":
+        self._alignment_progress_context = context
+        try:
+            plan = build_alignment_plan(
+                subtitle_mode=self.subtitle_mode,
+                srt_path=srt_path,
+                audio_path=audio_path,
+                language="he",
+                prefer_gpu=True,
+            )
             self.signals.log.emit(
-                "Alignment needed: word_timings_has_no_words",
+                "Alignment needed? "
+                f"{str(plan.should_run).lower()} reason={plan.reason} (context={context})",
                 True,
             )
-        if not srt_path.exists():
-            raise AlignmentError(
-                f"Alignment failed: subtitles file missing ({srt_path})",
-                "srt_missing",
-            )
-        if not audio_path.exists():
-            self.signals.log.emit(
-                f"Alignment skipped: audio not found ({audio_path})",
-                True,
-            )
-            raise AlignmentError(
-                f"Alignment failed: audio missing ({audio_path})",
-                "audio_missing",
-            )
-        if not plan.output_path.parent.exists():
-            plan.output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._alignment_words_total = self._count_words_in_cues(srt_path)
-        self._alignment_words_current = 0
-        self._alignment_last_emit = 0.0
-        alignment_real_progress = threading.Event()
-        estimator_stop = threading.Event()
-        smoother_stop = threading.Event()
-        estimator_thread: Optional[threading.Thread] = None
-        smoother_thread: Optional[threading.Thread] = None
-        alignment_lock = threading.Lock()
-        alignment_target = {
-            "current": 0,
-            "total": self._alignment_words_total,
-        }
-        if self._alignment_words_total:
-            self._emit_step_event(
-                ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                StepState.START,
-                reason_text=self._format_alignment_detail(
+            if not plan.should_run:
+                return StepState.SKIPPED, "already timed"
+            if plan.reason == "word_timings_has_no_words":
+                self.signals.log.emit(
+                    "Alignment needed: word_timings_has_no_words",
+                    True,
+                )
+            if not srt_path.exists():
+                raise AlignmentError(
+                    f"Alignment failed: subtitles file missing ({srt_path})",
+                    "srt_missing",
+                )
+            if not audio_path.exists():
+                self.signals.log.emit(
+                    f"Alignment skipped: audio not found ({audio_path})",
+                    True,
+                )
+                raise AlignmentError(
+                    f"Alignment failed: audio missing ({audio_path})",
+                    "audio_missing",
+                )
+            if not plan.output_path.parent.exists():
+                plan.output_path.parent.mkdir(parents=True, exist_ok=True)
+            self._alignment_words_total = self._count_words_in_cues(srt_path)
+            self._alignment_words_current = 0
+            self._alignment_last_emit = 0.0
+            if self._alignment_words_total == 0:
+                self._update_export_alignment_progress(
                     self._alignment_words_current,
                     self._alignment_words_total,
-                ),
+                )
+            alignment_real_progress = threading.Event()
+            estimator_stop = threading.Event()
+            smoother_stop = threading.Event()
+            estimator_thread: Optional[threading.Thread] = None
+            smoother_thread: Optional[threading.Thread] = None
+            alignment_lock = threading.Lock()
+            alignment_target = {
+                "current": 0,
+                "total": self._alignment_words_total,
+            }
+            if self._alignment_words_total:
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.START,
+                    reason_text=self._format_alignment_detail(
+                        self._alignment_words_current,
+                        self._alignment_words_total,
+                    ),
+                )
+                start_time = time.monotonic()
+
+                def _estimate_alignment_progress() -> None:
+                    ramp_seconds = 40.0
+                    cap_ratio = 0.9
+                    while not estimator_stop.is_set() and not alignment_real_progress.is_set():
+                        elapsed = time.monotonic() - start_time
+                        fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
+                        estimated_current = int(self._alignment_words_total * fraction)
+                        with alignment_lock:
+                            if estimated_current > alignment_target["current"]:
+                                alignment_target["current"] = estimated_current
+                        estimator_stop.wait(0.5)
+
+                estimator_thread = threading.Thread(
+                    target=_estimate_alignment_progress,
+                    daemon=True,
+                )
+                estimator_thread.start()
+
+                def _smooth_alignment_progress() -> None:
+                    display_current = 0
+                    while not smoother_stop.is_set():
+                        with alignment_lock:
+                            current_target = alignment_target["current"]
+                            current_total = alignment_target["total"]
+                        if current_total <= 0:
+                            smoother_stop.wait(0.2)
+                            continue
+                        if display_current < current_target:
+                            step = max(1, int(current_total * 0.01))
+                            display_current = min(current_target, display_current + step)
+                            self._alignment_words_current = display_current
+                            self._alignment_words_total = current_total
+                            self._maybe_emit_alignment_progress(display_current, current_total)
+                            smoother_stop.wait(0.1)
+                        else:
+                            smoother_stop.wait(0.2)
+
+                smoother_thread = threading.Thread(
+                    target=_smooth_alignment_progress,
+                    daemon=True,
+                )
+                smoother_thread.start()
+            self.signals.log.emit(
+                "Alignment starting: "
+                f"wav={audio_path} srt={srt_path} output={plan.output_path} "
+                f"device={plan.device or 'auto'} model={plan.align_model or 'default'}",
+                True,
             )
-            start_time = time.monotonic()
-
-            def _estimate_alignment_progress() -> None:
-                ramp_seconds = 40.0
-                cap_ratio = 0.9
-                while not estimator_stop.is_set() and not alignment_real_progress.is_set():
-                    elapsed = time.monotonic() - start_time
-                    fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
-                    estimated_current = int(self._alignment_words_total * fraction)
-                    with alignment_lock:
-                        if estimated_current > alignment_target["current"]:
-                            alignment_target["current"] = estimated_current
-                    estimator_stop.wait(0.5)
-
-            estimator_thread = threading.Thread(
-                target=_estimate_alignment_progress,
-                daemon=True,
+            self.signals.log.emit(
+                f"Alignment command: {subprocess.list2cmdline(plan.command)}",
+                True,
             )
-            estimator_thread.start()
-
-            def _smooth_alignment_progress() -> None:
-                display_current = 0
-                while not smoother_stop.is_set():
-                    with alignment_lock:
-                        current_target = alignment_target["current"]
-                        current_total = alignment_target["total"]
-                    if current_total <= 0:
-                        smoother_stop.wait(0.2)
-                        continue
-                    if display_current < current_target:
-                        step = max(1, int(current_total * 0.01))
-                        display_current = min(current_target, display_current + step)
-                        self._alignment_words_current = display_current
-                        self._alignment_words_total = current_total
-                        self._maybe_emit_alignment_progress(display_current, current_total)
-                        smoother_stop.wait(0.1)
-                    else:
-                        smoother_stop.wait(0.2)
-
-            smoother_thread = threading.Thread(
-                target=_smooth_alignment_progress,
-                daemon=True,
+            process = subprocess.Popen(
+                plan.command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                **get_subprocess_kwargs(),
             )
-            smoother_thread.start()
-        self.signals.log.emit(
-            "Alignment starting: "
-            f"wav={audio_path} srt={srt_path} output={plan.output_path} "
-            f"device={plan.device or 'auto'} model={plan.align_model or 'default'}",
-            True,
-        )
-        self.signals.log.emit(
-            f"Alignment command: {subprocess.list2cmdline(plan.command)}",
-            True,
-        )
-        process = subprocess.Popen(
-            plan.command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            **get_subprocess_kwargs(),
-        )
-        stdout_tail: deque[str] = deque(maxlen=50)
-        stderr_tail: deque[str] = deque(maxlen=50)
+            stdout_tail: deque[str] = deque(maxlen=50)
+            stderr_tail: deque[str] = deque(maxlen=50)
 
-        def _handle_alignment_line(line: str) -> None:
-            stripped = line.strip()
-            if not stripped:
-                return
-            stdout_tail.append(stripped)
-            self.signals.log.emit(stripped, True)
-            match = re.search(
-                r"ALIGN_WORDS_TIMED\s+current=(\d+)\s+total=(\d+)",
-                stripped,
-            )
-            if not match:
-                return
-            current = int(match.group(1))
-            total = int(match.group(2))
-            if current > 0:
-                alignment_real_progress.set()
-            with alignment_lock:
-                alignment_target["total"] = total
-                if current > alignment_target["current"]:
-                    alignment_target["current"] = current
-
-        def _read_stream(
-            stream: Optional[Iterable[str]],
-            target: deque[str],
-            handler: Optional[Callable[[str], None]] = None,
-        ) -> None:
-            if stream is None:
-                return
-            for line in stream:
+            def _handle_alignment_line(line: str) -> None:
                 stripped = line.strip()
-                if stripped:
-                    if handler:
-                        handler(line)
-                    else:
-                        target.append(stripped)
-                        self.signals.log.emit(stripped, True)
+                if not stripped:
+                    return
+                stdout_tail.append(stripped)
+                self.signals.log.emit(stripped, True)
+                match = re.search(
+                    r"ALIGN_WORDS_TIMED\s+current=(\d+)\s+total=(\d+)",
+                    stripped,
+                )
+                if not match:
+                    return
+                current = int(match.group(1))
+                total = int(match.group(2))
+                if current > 0:
+                    alignment_real_progress.set()
+                with alignment_lock:
+                    alignment_target["total"] = total
+                    if current > alignment_target["current"]:
+                        alignment_target["current"] = current
 
-        stdout_thread = threading.Thread(
-            target=_read_stream,
-            args=(process.stdout, stdout_tail, _handle_alignment_line),
-            daemon=True,
-        )
-        stderr_thread = threading.Thread(
-            target=_read_stream,
-            args=(process.stderr, stderr_tail, None),
-            daemon=True,
-        )
-        stdout_thread.start()
-        stderr_thread.start()
-        return_code = process.wait()
-        estimator_stop.set()
-        if estimator_thread:
-            estimator_thread.join(timeout=1)
-        smoother_stop.set()
-        if smoother_thread:
-            smoother_thread.join(timeout=1)
-        stdout_thread.join(timeout=1)
-        stderr_thread.join(timeout=1)
-        stderr_text = "\n".join(stderr_tail)
-        if stderr_text:
-            self.signals.log.emit(stderr_text, True)
-        self.signals.log.emit(
-            f"Alignment finished: exit_code={return_code} output={plan.output_path}",
-            True,
-        )
-        if return_code != 0:
-            raise AlignmentError("Alignment failed: process returned error.", "align_process_failed")
-        if not plan.output_path.exists() or plan.output_path.stat().st_size == 0:
-            raise AlignmentError("Alignment failed: no output produced.", "align_output_empty")
-        try:
-            doc = load_word_timings_json(plan.output_path)
-        except (WordTimingValidationError, OSError) as exc:
-            raise AlignmentError(
-                f"Alignment failed: invalid output ({exc}).",
-                "align_output_invalid",
-            ) from exc
-        total_words = sum(len(cue.words) for cue in doc.cues)
-        if total_words == 0:
-            raise AlignmentError("Alignment failed: output had no timings.", "align_output_empty")
-        with alignment_lock:
-            alignment_target["total"] = total_words
-            alignment_target["current"] = total_words
-        self._alignment_words_current = total_words
-        self._alignment_words_total = total_words
-        self._maybe_emit_alignment_progress(total_words, total_words)
-        return StepState.DONE, self._format_alignment_detail(total_words, total_words)
+            def _read_stream(
+                stream: Optional[Iterable[str]],
+                target: deque[str],
+                handler: Optional[Callable[[str], None]] = None,
+            ) -> None:
+                if stream is None:
+                    return
+                for line in stream:
+                    stripped = line.strip()
+                    if stripped:
+                        if handler:
+                            handler(line)
+                        else:
+                            target.append(stripped)
+                            self.signals.log.emit(stripped, True)
+
+            stdout_thread = threading.Thread(
+                target=_read_stream,
+                args=(process.stdout, stdout_tail, _handle_alignment_line),
+                daemon=True,
+            )
+            stderr_thread = threading.Thread(
+                target=_read_stream,
+                args=(process.stderr, stderr_tail, None),
+                daemon=True,
+            )
+            stdout_thread.start()
+            stderr_thread.start()
+            return_code = process.wait()
+            estimator_stop.set()
+            if estimator_thread:
+                estimator_thread.join(timeout=1)
+            smoother_stop.set()
+            if smoother_thread:
+                smoother_thread.join(timeout=1)
+            stdout_thread.join(timeout=1)
+            stderr_thread.join(timeout=1)
+            stderr_text = "\n".join(stderr_tail)
+            if stderr_text:
+                self.signals.log.emit(stderr_text, True)
+            self.signals.log.emit(
+                f"Alignment finished: exit_code={return_code} output={plan.output_path}",
+                True,
+            )
+            if return_code != 0:
+                raise AlignmentError(
+                    "Alignment failed: process returned error.",
+                    "align_process_failed",
+                )
+            if not plan.output_path.exists() or plan.output_path.stat().st_size == 0:
+                raise AlignmentError("Alignment failed: no output produced.", "align_output_empty")
+            try:
+                doc = load_word_timings_json(plan.output_path)
+            except (WordTimingValidationError, OSError) as exc:
+                raise AlignmentError(
+                    f"Alignment failed: invalid output ({exc}).",
+                    "align_output_invalid",
+                ) from exc
+            total_words = sum(len(cue.words) for cue in doc.cues)
+            if total_words == 0:
+                raise AlignmentError("Alignment failed: output had no timings.", "align_output_empty")
+            with alignment_lock:
+                alignment_target["total"] = total_words
+                alignment_target["current"] = total_words
+            self._alignment_words_current = total_words
+            self._alignment_words_total = total_words
+            self._maybe_emit_alignment_progress(total_words, total_words)
+            return StepState.DONE, self._format_alignment_detail(total_words, total_words)
+        finally:
+            self._alignment_progress_context = None
 
     def _maybe_write_diagnostics(
         self,
@@ -2406,6 +2447,19 @@ class Worker(QtCore.QObject):
                 StepState.START,
                 reason_text=self._format_alignment_detail(current, total),
             )
+            self._update_export_alignment_progress(current, total)
+
+    def _update_export_alignment_progress(self, current: int, total: int) -> None:
+        if self._alignment_progress_context != "export":
+            return
+        if total <= 0:
+            progress = 0.10
+        else:
+            progress = 0.10 * (current / total)
+        progress = max(0.0, min(progress, 0.10))
+        progress = max(progress, self._export_alignment_progress)
+        self._export_alignment_progress = progress
+        self._emit_step_progress(ProgressStep.EXPORT, progress, "Preparing export")
 
     def _start_smooth_progress(
         self,
