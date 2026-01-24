@@ -1820,18 +1820,18 @@ class Worker(QtCore.QObject):
             srt_exists = srt_candidate.exists()
             srt_size = srt_candidate.stat().st_size if srt_exists else 0
 
-                if done_seen and srt_exists and srt_size > 0:
-                    if return_code != 0:
-                        _emit_log(
-                            f"Subtitles worker exited with code {return_code}, but DONE was received and "
-                            f"subtitles file exists; continuing.",
-                            True,
-                        )
-                    if not load_model_done:
-                        _mark_load_model_done()
-                    if write_started:
-                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.DONE)
-                    return
+            if done_seen and srt_exists and srt_size > 0:
+                if return_code != 0:
+                    _emit_log(
+                        f"Subtitles worker exited with code {return_code}, but DONE was received and "
+                        f"subtitles file exists; continuing.",
+                        True,
+                    )
+                if not load_model_done:
+                    _mark_load_model_done()
+                if write_started:
+                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.DONE)
+                return
 
             diagnostics = [
                 f"Return code: {return_code}",
