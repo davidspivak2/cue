@@ -107,6 +107,10 @@ If a gap exceeds the rescue threshold, the worker extracts each gap audio slice 
 re-transcribes it with VAD disabled, then merges any usable segments back into the
 main transcript. Limits are enforced on the number of gaps and total rescued duration.
 
+## Punctuation rescue
+
+When **Improve punctuation automatically (recommended)** is enabled, the pipeline can run an optional punctuation rescue after the initial transcription. This happens in the Create Subtitles flow before/alongside gap rescue, and it only triggers when punctuation quality appears poor. The rescue may run multiple passes; the UI reflects this with “Improving punctuation...” on attempt 1 and “Improving punctuation... (attempt 2/3)” on later attempts. The UI also supports skipping punctuation rescue: clicking Skip shows “Skipping...”, the step only becomes Skipped after confirmation, and the pipeline continues forward without waiting on punctuation rescue to finish.
+
 ## Subtitle preview generation (GUI)
 
 When subtitles are ready, the GUI prepares a preview moment:
