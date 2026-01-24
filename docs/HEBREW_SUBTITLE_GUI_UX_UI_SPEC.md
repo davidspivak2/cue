@@ -224,13 +224,14 @@ Current implementation:
   - Mode:
     - Subtitle mode segmented control: Static / Word highlight.
   - Highlight:
-    - Only “Highlight color” exists; visible only when Subtitle mode = Word highlight.
-    - No highlight opacity control.
+    - “Highlight color” and “Highlight opacity” (slider), visible only when Subtitle mode = Word highlight.
   - Preset:
     - Preset is a dropdown: Default / Large outline / Large outline + box / Custom.
     - “Reset to preset” is always visible outside of Advanced.
   - Quick tweaks:
+    - Font family (picker)
     - Font size
+    - Base text color
     - Outline
     - Shadow
     - Bottom margin
