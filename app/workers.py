@@ -197,6 +197,7 @@ class Worker(QtCore.QObject):
         self._graphics_overlay_render_perf: Optional[RenderPerfStats] = None
         self._punctuation_active = False
         self._punctuation_attempt = 0
+        self._punctuation_final_emitted = False
         self._gap_active = False
         self._gap_found_count = 0
         self._skip_punctuation = False
@@ -501,7 +502,11 @@ class Worker(QtCore.QObject):
             return
         stats = self._transcribe_stats or {}
         if settings.punctuation_rescue_fallback_enabled:
-            if not self._punctuation_active and not self._skip_punctuation:
+            if (
+                not self._punctuation_final_emitted
+                and not self._punctuation_active
+                and not self._skip_punctuation
+            ):
                 rescue_triggered = bool(stats.get("punctuation_rescue_triggered"))
                 if rescue_triggered:
                     attempts_ran = int(stats.get("punctuation_rescue_attempts_ran", 1) or 1)
@@ -515,12 +520,14 @@ class Worker(QtCore.QObject):
                         StepState.DONE,
                         reason_text=detail,
                     )
+                    self._punctuation_final_emitted = True
                 else:
                     self._emit_step_event(
                         ChecklistStep.FIX_PUNCTUATION,
                         StepState.DONE,
                         reason_text="Looks good!",
                     )
+                    self._punctuation_final_emitted = True
 
         vad_stats = stats.get("vad_gap_rescue") if isinstance(stats, dict) else None
         if not settings.vad_gap_rescue_enabled:
@@ -1277,6 +1284,7 @@ class Worker(QtCore.QObject):
             self.signals.log.emit("Starting subtitles worker...", True)
             self._punctuation_active = False
             self._punctuation_attempt = 0
+            self._punctuation_final_emitted = False
             self._gap_active = False
             self._gap_found_count = 0
             self._skip_punctuation = False
@@ -1557,6 +1565,25 @@ class Worker(QtCore.QObject):
                     continue
 
                 _emit_log(text, show_in_ui)
+                if text.startswith("PUNCT_RESCUE "):
+                    if (
+                        self.transcription_settings
+                        and self.transcription_settings.punctuation_rescue_fallback_enabled
+                        and not self._skip_punctuation
+                        and not self._punctuation_final_emitted
+                    ):
+                        attempt_match = re.search(r"attempt=(\d+)", text)
+                        chosen_match = re.search(r"chosen=(True|False)", text)
+                        if attempt_match and chosen_match:
+                            attempt = int(attempt_match.group(1))
+                            chosen = chosen_match.group(1) == "True"
+                            if attempt == 0 and chosen:
+                                self._emit_step_event(
+                                    ChecklistStep.FIX_PUNCTUATION,
+                                    StepState.DONE,
+                                    reason_text="Looks good!",
+                                )
+                                self._punctuation_final_emitted = True
                 if text.startswith("PUNCT_RESCUE_START"):
                     if (
                         self.transcription_settings
@@ -1600,6 +1627,7 @@ class Worker(QtCore.QObject):
                             StepState.DONE,
                             reason_text=detail,
                         )
+                        self._punctuation_final_emitted = True
                 if text.startswith("VAD_GAP_RESCUE_START"):
                     if (
                         self.transcription_settings
