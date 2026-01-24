@@ -224,6 +224,7 @@ Create Subtitles must output:
 ### F5) Export pipeline rule
 - Export **must not** run WhisperX in the normal success path.
 - Export uses the **already-generated artifacts** to burn subtitles (Static or Word highlight) and saves the MP4.
+- **Export precondition (Word highlight):** if Word highlight mode is selected and required word-timing artifacts are missing or stale, export **must block** and instruct the user to rerun **Create Subtitles** (or a clearly labeled retry action if exposed). Do not fall back to running WhisperX during export.
 
 ---
 
@@ -289,6 +290,10 @@ Create Subtitles must output:
 ## J) Settings page (restyled; behavior preserved)
 
 Settings is a **full page** that replaces the current view. It uses the new design system but retains the existing controls and behaviors, with updated layout consistency only.
+
+### J0) Legacy removal requirement (Subtitle Edit)
+- Subtitle Edit integration must be **removed entirely** from the application code (UI + settings + config + launcher code).
+- Remove the persisted config key **`subtitle_edit_path`** and any related logic.
 
 ### J1) Performance
 - “Transcription quality” combo: Auto / Fast (int8) / Accurate (int16) / Ultra accurate (float32)
