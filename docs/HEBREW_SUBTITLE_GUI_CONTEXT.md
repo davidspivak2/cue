@@ -17,6 +17,18 @@ It explains:
 
 UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`**.
 
+## Current behavior vs target redesign
+
+**Current (main today):**
+- Single-flow UI without a Project Hub.
+- Subtitle editing is limited; no in-app text-only editing for every subtitle.
+- Word-timing alignment may not be guaranteed during Create Subtitles.
+
+**Target (per UX spec):**
+- Project Hub launch screen with multi-project tabs in a single window.
+- In-app subtitle **text-only** editing in the Workbench; timestamps visible but **read-only**.
+- Create Subtitles **always** includes WhisperX alignment; SUBTITLES_READY requires non-empty timed words.
+
 ## Roadmap / What’s next
 
 For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
@@ -28,10 +40,10 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 **What this app is:** a Windows desktop GUI built with **PySide6** that generates Hebrew subtitles and (optionally) burns them into a new MP4.
 
 **Core workflow:**
-1) Select a video
-2) Extract audio (FFmpeg)
-3) Transcribe to Hebrew SRT (faster‑whisper)
-4) Optionally burn subtitles into an MP4 (FFmpeg)
+1) Create or open a project from **Project Hub**
+2) Create subtitles (extract audio → transcribe → WhisperX alignment)
+3) Edit text + style in **Workbench**
+4) Export a subtitled MP4 (FFmpeg)
 
 **Primary outputs (exact naming):**
 - `<video_stem>_audio_for_whisper.wav`
@@ -56,11 +68,12 @@ Goal: turn a single video into:
 2) a new subtitled video (`*_subtitled.mp4`) with the subtitles burned-in.
 
 Typical flow:
-1) Choose or drag & drop a video.
+1) Create a new project from Project Hub (or open an existing one).
 2) App extracts a mono 16 kHz WAV using FFmpeg (optional cleanup filter).
 3) App runs faster‑whisper (Whisper) to transcribe Hebrew and write an `.srt`.
-4) User optionally reviews/edits in Subtitle Edit.
-5) App burns subtitles into a new MP4 using FFmpeg.
+4) App runs WhisperX alignment to generate word timings for Word highlight mode.
+5) User edits subtitle text in the Workbench (timestamps are visible but read-only).
+6) App burns subtitles into a new MP4 using FFmpeg.
 
 ---
 
@@ -68,7 +81,7 @@ Typical flow:
 
 ### Main moving parts
 - **GUI (PySide6)**: `app/main.py`
-  - state machine / stacked pages (Home + Settings)
+  - state machine / stacked pages (Project Hub + Workbench + Settings)
   - launches workers and updates UI
 - **Worker thread (PySide6 QRunnable/QThread)**: `app/workers.py`
   - runs FFmpeg extraction
@@ -179,7 +192,6 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `punctuation_rescue_fallback_enabled` | “Improve punctuation automatically (recommended)” | `true` / `false` | `true` | Transcription (comma-rescue attempts) |
 | `apply_audio_filter` | “Clean up audio before transcription” | `true` / `false` | `false` | Audio extraction filter chain |
 | `keep_extracted_audio` | “Keep extracted WAV file” | `true` / `false` | `false` | Audio extraction output retention |
-| `subtitle_edit_path` | “Choose Subtitle Edit…” (path picker) | String path | unset (falls back to default install path) | External tool integration |
 | `diagnostics.enabled` | “Enable diagnostics logging” | `true` / `false` | `false` | Diagnostics output |
 | `diagnostics.write_on_success` | “Write diagnostics on successful completion” | `true` / `false` | `false` | Diagnostics output |
 | `diagnostics.archive_on_exit` | “Zip logs and outputs on exit” | `true` / `false` | `false` | Diagnostics bundle |
@@ -217,15 +229,17 @@ Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 
 ## 3.6) Word-timing JSON artifact (Task 7)
 
-To support future per-word alignment (Task 8), the app now creates a **word-timing JSON**
-artifact next to each SRT:
+The app creates a **word-timing JSON** artifact next to each SRT during **Create Subtitles**:
 
 - **Naming convention:** `<video_stem>.word_timings.json` (same folder as the SRT).
 - **Schema:** validated JSON with `schema_version=1`, SRT hash, and cue metadata.
 - **Staleness rule:** if the SRT file changes, the word-timing JSON is **stale** when its
   stored `srt_sha256` no longer matches the current SRT hash.
-- **Lifecycle:** a stub JSON file is created when an SRT is generated or loaded, and WhisperX
-  alignment populates word-level timings on demand for word-highlight mode.
+- **Lifecycle (target contract):** WhisperX alignment runs **during Create Subtitles** and
+  must produce **non-empty timed words** for success. SUBTITLES_READY is allowed only after
+  this succeeds.
+- **Export rule:** Export uses the existing artifacts and **does not** run WhisperX in the
+  normal success path.
 
 ### Working with Codex branches (project-critical workflow rule)
 - If a branch is actively being worked on by Codex, **do not push additional local commits to that same branch** if you expect Codex to keep pushing hotfixes (risk of conflicts / Codex push failures).
@@ -253,7 +267,7 @@ The UI aggregates progress without regression (percent should not go backwards).
   - Clicking Skip immediately shows “Skipping...” and disables/hides the Skip control.
   - The step becomes Skipped only after backend confirmation (not immediately on click).
   - The pipeline continues to the next step without waiting for punctuation rescue to finish.
-- Export progress: the “Timing word highlights” stage advances the bar from 0% to 10% based on word timing progress (timed words current/total), then later stages continue beyond 10% as normal.
+- Export progress: stages cover video info, subtitle rendering/burn-in, and saving output (no WhisperX timing stage during export in the redesign contract).
 
 ### “Golden path” manual smoke test checklist (10–15 steps)
 1) Launch the app from source (`python -m app.main`).
@@ -264,10 +278,9 @@ The UI aggregates progress without regression (percent should not go backwards).
 6) Click **Create subtitles**.
 7) Confirm `<video_stem>_audio_for_whisper.wav` is created during processing.
 8) Confirm `<video_stem>.srt` is created in the expected output folder.
-9) Open the SRT in Subtitle Edit (via the UI or file association).
-10) In the app, click **Create video with subtitles** (in the sticky bottom bar).
-11) Confirm `<video_stem>_subtitled.mp4` is created.
-12) Play the exported MP4 and verify subtitles display and audio plays.
+9) In the app, click **Create video with subtitles** (in the sticky bottom bar).
+10) Confirm `<video_stem>_subtitled.mp4` is created.
+11) Play the exported MP4 and verify subtitles display and audio plays.
 13) Toggle **Clean up audio before transcription** ON, re-run on the same clip, confirm it still completes.
 14) Toggle **Improve punctuation automatically (recommended)** OFF, re-run on the same clip, confirm it still completes.
 15) (Optional) Enable diagnostics and verify a `diag_generate_srt_*.json` appears next to outputs.
