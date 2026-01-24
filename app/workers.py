@@ -1424,6 +1424,43 @@ class Worker(QtCore.QObject):
             watchdog_stop = threading.Event()
             no_output_timeout_ref = {"value": 60.0}
             smooth_transcribe_started = False
+            model_detail_rank = 0
+            model_detail_id = TRANSCRIBE_MODEL_NAME
+
+            def _friendly_model_name(model_id: Optional[str]) -> str:
+                if model_id == "large-v3":
+                    return "OpenAI Whisper Large v3 loaded"
+                if model_id == "large-v2":
+                    return "OpenAI Whisper Large v2 loaded"
+                return "OpenAI Whisper loaded"
+
+            def _record_model_detail(model_id: Optional[str], rank: int) -> None:
+                nonlocal model_detail_rank, model_detail_id
+                if not model_id:
+                    return
+                if rank >= model_detail_rank:
+                    model_detail_rank = rank
+                    model_detail_id = model_id
+
+            def _emit_load_model_start_detail() -> None:
+                if load_model_done:
+                    return
+                self._emit_step_event(
+                    ChecklistStep.LOAD_MODEL,
+                    StepState.START,
+                    reason_text=_friendly_model_name(model_detail_id),
+                )
+
+            def _mark_load_model_done() -> None:
+                nonlocal load_model_done
+                if load_model_done:
+                    return
+                load_model_done = True
+                self._emit_step_event(
+                    ChecklistStep.LOAD_MODEL,
+                    StepState.DONE,
+                    reason_text=_friendly_model_name(model_detail_id),
+                )
             if duration_seconds is None:
                 self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Loading model")
             else:
@@ -1524,6 +1561,14 @@ class Worker(QtCore.QObject):
                             self._transcribe_stats = json.loads(stats_payload)
                         except json.JSONDecodeError:
                             self._transcribe_stats = None
+                if text.startswith("MODEL_NAME "):
+                    model_id = text.split(" ", 1)[1] if " " in text else ""
+                    _record_model_detail(model_id.strip(), 1)
+                    _emit_load_model_start_detail()
+                if text.startswith("MODEL_LOADED "):
+                    model_id = text.split(" ", 1)[1] if " " in text else ""
+                    _record_model_detail(model_id.strip(), 2)
+                    _emit_load_model_start_detail()
                 if text.startswith("PROGRESS_END"):
                     _emit_log(text, False)
                     if duration_seconds:
@@ -1553,8 +1598,7 @@ class Worker(QtCore.QObject):
                                 start=self._step_progress.get(ProgressStep.TRANSCRIBE, 0.0),
                             )
                     if not load_model_done:
-                        load_model_done = True
-                        self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                        _mark_load_model_done()
                     if not write_started:
                         write_started = True
                         self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
@@ -1704,8 +1748,7 @@ class Worker(QtCore.QObject):
                     with progress_lock:
                         transcribe_started = True
                     if not load_model_done:
-                        load_model_done = True
-                        self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                        _mark_load_model_done()
                     if not write_started:
                         write_started = True
                         self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
@@ -1734,8 +1777,7 @@ class Worker(QtCore.QObject):
                     if not detect_language_done:
                         detect_language_done = True
                         if not load_model_done:
-                            load_model_done = True
-                            self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                            _mark_load_model_done()
                         language_match = re.search(r"Detected language:\s*([a-zA-Z-]+)", text)
                         language_code = (
                             language_match.group(1).lower() if language_match else "unknown"
@@ -1786,7 +1828,7 @@ class Worker(QtCore.QObject):
                         True,
                     )
                 if not load_model_done:
-                    self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.DONE)
+                    _mark_load_model_done()
                 if write_started:
                     self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.DONE)
                 return
