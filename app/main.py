@@ -2934,6 +2934,10 @@ class MainWindow(QtWidgets.QMainWindow):
         step_id = event.step_id
         existing_state = self._checklist_state.get(step_id, "pending")
         if existing_state in ("done", "failed", "skipped") and state != "active":
+            if existing_state == "done" and state == "done":
+                reason_text = self._resolve_reason_text(event)
+                if reason_text:
+                    self._finalize_step(step_id, "done", reason_text)
             return
         self._complete_prerequisites(step_id)
         if self._active_checklist_step != step_id:
