@@ -17,6 +17,10 @@ It explains:
 
 UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`**.
 
+## Roadmap / What’s next
+
+For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
+
 ---
 
 ## 0) One-page overview (for new maintainers)
@@ -180,12 +184,12 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `diagnostics.write_on_success` | “Write diagnostics on successful completion” | `true` / `false` | `false` | Diagnostics output |
 | `diagnostics.archive_on_exit` | “Zip logs and outputs on exit” | `true` / `false` | `false` | Diagnostics bundle |
 | `diagnostics.categories` | Category checkboxes (see below) | Object of booleans | all `true` | Diagnostics output |
-| `subtitle_style.preset` | Subtitle style preset buttons | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
-| `subtitle_style.custom` | “Customize...” panel controls | Object: `font_size`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
+| `subtitle_style.preset` | Subtitle style preset dropdown | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
+| `subtitle_style.custom` | “Customize...” panel controls | Object: `font_family`, `font_size`, `text_color`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
 | `subtitle_style.appearance` | (style model, internal) | Object with font, color, outline, shadow, background, and layout fields | Derived from preset/custom | Preview + export styling |
 | `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects word-highlight vs static rendering; export uses graphics overlay only |
 | `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (graphics overlay only) |
-| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
+| `subtitle_style.highlight_opacity` | “Highlight opacity” (slider in Subtitles Ready style pane) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”
@@ -484,26 +488,9 @@ Unplanned but merged work since the original PR plan:
 - Graphics-based preview renderer for subtitle stills
 - Exit diagnostics bundle (zip logs + outputs on close)
 
-**GUI PR15 — copy polish + CTA reduction sweep (final pass)**
-- One-primary-CTA-per-state audit
-- Microcopy consistency audit
-- Remove leftover technical terms in user-facing labels
-- Align error/warning copy with UX/UI spec
-
-Not done yet (still in GUI PR12+ territory):
-- **GUI PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
-  - Future: if no audio track is found, stop and show “No audio found… can’t create subtitles.”
-  - Future: if audio exists but no speech detected, stop and show “No speech detected… can’t create subtitles.”
-- **GUI PR13** — packaging hardening / smoke tests
-- **GUI PR15** — copy polish + CTA reduction sweep (after stabilization)
-- Export optimization (future): cache video stream info at VIDEO_SELECTED, revalidate cheaply in export, and consider removing the “Getting video info” checklist row once implemented.
-
 GUI PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
 
-### Where a new contributor should pick up
-Priority work items:
-1) If punctuation is acceptable: continue the UX roadmap at **GUI PR12** (error UX + diagnostics).
-2) If punctuation regresses: use the benchmark + diagnostics to confirm whether loss happens in raw segments vs splitter; the new rescue diagnostics fields help choose.
+For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
@@ -624,8 +611,8 @@ Conclusion (current best hypothesis):
 - Keep timing behavior stable:
   - punctuation restoration should ideally modify text only, not timestamps.
 
-### 12.6 Recommended next steps (current priority)
-Punctuation is no longer the active blocker. Move priority back to PR7+.
+### 12.6 Recommended investigation steps if punctuation regresses (reference only)
+This is troubleshooting guidance, not a roadmap.
 
 If punctuation regresses, re-open investigation like this:
 1) **Confirm the loss location** (raw segments vs splitter output)

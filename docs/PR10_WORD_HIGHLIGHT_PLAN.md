@@ -1,5 +1,7 @@
 # PR10 — Word Highlight Subtitles (Karaoke-Style) — Implementation Plan
 
+Status: Completed. This plan is kept for historical reference. For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
+
 Last updated: 2026-02-27
 
 ## A) Goal and user-visible outcomes
@@ -191,13 +193,8 @@ Last updated: 2026-02-27
 ## Post-merge fixes
 - Wrapped-line highlight fix: graphics overlay clip rects are now line-relative.
 
-## G) Post-PR10 follow-ups (not required for PR10 merge)
-- A) Highlight opacity control.
-- B) Base text color control.
-- C) Font family picker with Hebrew-safe defaults.
-- D) Line/word background controls (including opacity/padding/radius) are implemented in the Subtitles Ready UI and used by the graphics renderer for preview stills and graphics overlay export.
-- J) Alignment/performance optimizations (caching, preview-window-only alignment improvements).
-- K) Packaging hardening for WhisperX deps (tie to packaging work).
+## G) Post-PR10 follow-ups
+Post-PR10 follow-ups: implemented (see the SUBTITLES_READY style pane).
 
 ## H) Tracking tables
 
@@ -214,12 +211,3 @@ Last updated: 2026-02-27
 | 8 | Done |  | WhisperX alignment worker added. |
 | 9 | Done |  | Word highlight overlay states driven by aligned word timings. |
 | 10 | Done |  | Default subtitle mode is Word highlight; docs + diagnostics updated. |
-
-### Post-PR10 follow-up tracking
-| Item | Status | Notes |
-| --- | --- | --- |
-| Highlight opacity control | TODO |  |
-| Base text color control | TODO |  |
-| Font family picker | TODO |  |
-| Alignment/performance optimizations | TODO |  |
-| WhisperX packaging hardening | TODO |  |
