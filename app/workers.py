@@ -202,41 +202,61 @@ class Worker(QtCore.QObject):
         self._skip_punctuation = False
         self._skip_gaps = False
         self._control_dir: Optional[Path] = None
+        self._skip_lock = threading.Lock()
         self._alignment_words_current = 0
         self._alignment_words_total = 0
         self._alignment_last_emit = 0.0
 
     def cancel(self) -> None:
-        self._cancelled.set()
-        self._stop_smooth_progress()
-        self._stop_transcribe_estimator()
-        if self._process and self._process.poll() is None:
-            self._process.terminate()
+        with self._skip_lock:
+            self._cancelled.set()
+            self._stop_smooth_progress()
+            self._stop_transcribe_estimator()
+            if self._process and self._process.poll() is None:
+                self._process.terminate()
 
     @QtCore.Slot()
     def request_skip_punctuation(self) -> None:
-        self._skip_punctuation = True
-        self._write_skip_flag("skip_punct.flag")
+        with self._skip_lock:
+            self._skip_punctuation = True
+            flag_path = self._write_skip_flag("skip_punct.flag")
+        if flag_path:
+            self.signals.log.emit(f"Skip punctuation requested; wrote {flag_path}", True)
+        else:
+            self.signals.log.emit(
+                "Skip punctuation requested, but control dir unavailable; cannot signal worker",
+                True,
+            )
 
     @QtCore.Slot()
     def request_skip_gaps(self) -> None:
-        self._skip_gaps = True
-        self._write_skip_flag("skip_gaps.flag")
+        with self._skip_lock:
+            self._skip_gaps = True
+            flag_path = self._write_skip_flag("skip_gaps.flag")
+        if flag_path:
+            self.signals.log.emit(f"Skip gaps requested; wrote {flag_path}", True)
+        else:
+            self.signals.log.emit(
+                "Skip gaps requested, but control dir unavailable; cannot signal worker",
+                True,
+            )
 
-    def _write_skip_flag(self, filename: str) -> None:
+    def _write_skip_flag(self, filename: str) -> Optional[Path]:
         if not self._control_dir:
-            return
+            return None
         flag_path = self._control_dir / filename
         try:
             flag_path.write_text("1", encoding="utf-8")
         except Exception:  # noqa: BLE001
-            pass
+            return None
+        return flag_path
 
     def _cleanup_control_dir(self) -> None:
-        if not self._control_dir:
-            return
-        shutil.rmtree(self._control_dir, ignore_errors=True)
-        self._control_dir = None
+        with self._skip_lock:
+            if not self._control_dir:
+                return
+            shutil.rmtree(self._control_dir, ignore_errors=True)
+            self._control_dir = None
 
     @QtCore.Slot()
     def run(self) -> None:
@@ -494,7 +514,11 @@ class Worker(QtCore.QObject):
                         reason_text=detail,
                     )
                 else:
-                    self._emit_step_event(ChecklistStep.FIX_PUNCTUATION, StepState.DONE)
+                    self._emit_step_event(
+                        ChecklistStep.FIX_PUNCTUATION,
+                        StepState.DONE,
+                        reason_text="Looks good!",
+                    )
 
         vad_stats = stats.get("vad_gap_rescue") if isinstance(stats, dict) else None
         if not settings.vad_gap_rescue_enabled:
@@ -787,7 +811,11 @@ class Worker(QtCore.QObject):
                     reason_text=timing_reason or "already timed",
                 )
             else:
-                self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.DONE)
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.DONE,
+                    reason_text=timing_reason,
+                )
         self._emit_step_progress(ProgressStep.EXPORT, 0.10, "Preparing export", force=True)
 
         plan = build_graphics_overlay_plan(
@@ -1383,7 +1411,7 @@ class Worker(QtCore.QObject):
             watchdog_triggered = False
             watchdog_elapsed = 0.0
             watchdog_stop = threading.Event()
-            no_output_timeout = 60.0
+            no_output_timeout_ref = {"value": 60.0}
             smooth_transcribe_started = False
             if duration_seconds is None:
                 self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Loading model")
@@ -1436,7 +1464,8 @@ class Worker(QtCore.QObject):
                         continue
                     with output_lock:
                         elapsed = time.monotonic() - last_output_time
-                    if elapsed > no_output_timeout and process.poll() is None:
+                    timeout = no_output_timeout_ref["value"]
+                    if elapsed > timeout and process.poll() is None:
                         watchdog_triggered = True
                         watchdog_elapsed = elapsed
                         _emit_log(
@@ -1535,9 +1564,15 @@ class Worker(QtCore.QObject):
                             attempt = int(match.group(1))
                             if attempt < 1:
                                 continue
-                            detail = "Improving punctuation..."
-                            if attempt >= 2:
-                                detail = f"Improving punctuation (attempt {attempt})..."
+                            no_output_timeout_ref["value"] = 600.0
+                            if attempt == 2:
+                                detail = "Quick polish pass..."
+                            elif attempt == 3:
+                                detail = "Final touch-ups..."
+                            elif attempt > 3:
+                                detail = "More touch-ups..."
+                            else:
+                                detail = "Improving punctuation..."
                             self._punctuation_active = True
                             self._punctuation_attempt = attempt
                             self._emit_step_event(
@@ -1551,6 +1586,7 @@ class Worker(QtCore.QObject):
                         and self.transcription_settings.punctuation_rescue_fallback_enabled
                     ):
                         self._punctuation_active = False
+                        no_output_timeout_ref["value"] = 60.0
                         match = re.search(r"attempts_ran=(\d+)", text)
                         attempts_ran = int(match.group(1)) if match else 1
                         rescue_attempts = max(attempts_ran - 1, 1)
@@ -1607,9 +1643,24 @@ class Worker(QtCore.QObject):
                     )
                 if text.startswith("PUNCT_RESCUE_SKIPPED"):
                     self._punctuation_active = False
+                    self._skip_punctuation = True
+                    no_output_timeout_ref["value"] = 60.0
+                    self.signals.log.emit("Skip punctuation confirmed by worker.", True)
+                    self._emit_step_event(
+                        ChecklistStep.FIX_PUNCTUATION,
+                        StepState.SKIPPED,
+                        reason_text="Skipped",
+                    )
                     continue
                 if text == "VAD_GAP_RESCUE_SKIPPED":
                     self._gap_active = False
+                    self._skip_gaps = True
+                    self.signals.log.emit("Skip gaps confirmed by worker.", True)
+                    self._emit_step_event(
+                        ChecklistStep.FIX_MISSING_SUBTITLES,
+                        StepState.SKIPPED,
+                        reason_text="Skipped",
+                    )
                     continue
                 if text.startswith("MODE"):
                     continue
@@ -1845,6 +1896,16 @@ class Worker(QtCore.QObject):
         self._alignment_words_total = self._count_words_in_cues(srt_path)
         self._alignment_words_current = 0
         self._alignment_last_emit = 0.0
+        alignment_real_progress = threading.Event()
+        estimator_stop = threading.Event()
+        smoother_stop = threading.Event()
+        estimator_thread: Optional[threading.Thread] = None
+        smoother_thread: Optional[threading.Thread] = None
+        alignment_lock = threading.Lock()
+        alignment_target = {
+            "current": 0,
+            "total": self._alignment_words_total,
+        }
         if self._alignment_words_total:
             self._emit_step_event(
                 ChecklistStep.TIMING_WORD_HIGHLIGHTS,
@@ -1854,6 +1915,50 @@ class Worker(QtCore.QObject):
                     self._alignment_words_total,
                 ),
             )
+            start_time = time.monotonic()
+
+            def _estimate_alignment_progress() -> None:
+                ramp_seconds = 40.0
+                cap_ratio = 0.9
+                while not estimator_stop.is_set() and not alignment_real_progress.is_set():
+                    elapsed = time.monotonic() - start_time
+                    fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
+                    estimated_current = int(self._alignment_words_total * fraction)
+                    with alignment_lock:
+                        if estimated_current > alignment_target["current"]:
+                            alignment_target["current"] = estimated_current
+                    estimator_stop.wait(0.5)
+
+            estimator_thread = threading.Thread(
+                target=_estimate_alignment_progress,
+                daemon=True,
+            )
+            estimator_thread.start()
+
+            def _smooth_alignment_progress() -> None:
+                display_current = 0
+                while not smoother_stop.is_set():
+                    with alignment_lock:
+                        current_target = alignment_target["current"]
+                        current_total = alignment_target["total"]
+                    if current_total <= 0:
+                        smoother_stop.wait(0.2)
+                        continue
+                    if display_current < current_target:
+                        step = max(1, int(current_total * 0.01))
+                        display_current = min(current_target, display_current + step)
+                        self._alignment_words_current = display_current
+                        self._alignment_words_total = current_total
+                        self._maybe_emit_alignment_progress(display_current, current_total)
+                        smoother_stop.wait(0.1)
+                    else:
+                        smoother_stop.wait(0.2)
+
+            smoother_thread = threading.Thread(
+                target=_smooth_alignment_progress,
+                daemon=True,
+            )
+            smoother_thread.start()
         self.signals.log.emit(
             "Alignment starting: "
             f"wav={audio_path} srt={srt_path} output={plan.output_path} "
@@ -1890,9 +1995,12 @@ class Worker(QtCore.QObject):
                 return
             current = int(match.group(1))
             total = int(match.group(2))
-            self._alignment_words_current = current
-            self._alignment_words_total = total
-            self._maybe_emit_alignment_progress(current, total)
+            if current > 0:
+                alignment_real_progress.set()
+            with alignment_lock:
+                alignment_target["total"] = total
+                if current > alignment_target["current"]:
+                    alignment_target["current"] = current
 
         def _read_stream(
             stream: Optional[Iterable[str]],
@@ -1923,6 +2031,12 @@ class Worker(QtCore.QObject):
         stdout_thread.start()
         stderr_thread.start()
         return_code = process.wait()
+        estimator_stop.set()
+        if estimator_thread:
+            estimator_thread.join(timeout=1)
+        smoother_stop.set()
+        if smoother_thread:
+            smoother_thread.join(timeout=1)
         stdout_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
         stderr_text = "\n".join(stderr_tail)
@@ -1946,8 +2060,13 @@ class Worker(QtCore.QObject):
         total_words = sum(len(cue.words) for cue in doc.cues)
         if total_words == 0:
             raise AlignmentError("Alignment failed: output had no timings.", "align_output_empty")
+        with alignment_lock:
+            alignment_target["total"] = total_words
+            alignment_target["current"] = total_words
+        self._alignment_words_current = total_words
+        self._alignment_words_total = total_words
         self._maybe_emit_alignment_progress(total_words, total_words)
-        return StepState.DONE, None
+        return StepState.DONE, self._format_alignment_detail(total_words, total_words)
 
     def _maybe_write_diagnostics(
         self,
