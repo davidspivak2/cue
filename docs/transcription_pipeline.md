@@ -62,11 +62,13 @@ The worker also enumerates the defaults it relies on (for example, parameters li
 
 To compare machines without running a transcription or downloading models, run:
 
-```bash
+```cmd
 python -m app.transcribe_worker --print-transcribe-config --prefer-gpu
 ```
 
-```cmd
+### Optional alternatives (non-primary)
+
+```bash
 python -m app.transcribe_worker --print-transcribe-config --prefer-gpu
 ```
 
