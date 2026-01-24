@@ -184,12 +184,12 @@ Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are lo
 | `diagnostics.write_on_success` | “Write diagnostics on successful completion” | `true` / `false` | `false` | Diagnostics output |
 | `diagnostics.archive_on_exit` | “Zip logs and outputs on exit” | `true` / `false` | `false` | Diagnostics bundle |
 | `diagnostics.categories` | Category checkboxes (see below) | Object of booleans | all `true` | Diagnostics output |
-| `subtitle_style.preset` | Subtitle style preset buttons | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
-| `subtitle_style.custom` | “Customize...” panel controls | Object: `font_size`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
+| `subtitle_style.preset` | Subtitle style preset dropdown | `Default`, `Large outline`, `Large outline + box`, `Custom` | `Default` | Preview + export styling |
+| `subtitle_style.custom` | “Customize...” panel controls | Object: `font_family`, `font_size`, `text_color`, `outline`, `shadow`, `margin_v`, `box_enabled`, `box_opacity`, `box_padding` | Defaults per preset | Preview + export styling |
 | `subtitle_style.appearance` | (style model, internal) | Object with font, color, outline, shadow, background, and layout fields | Derived from preset/custom | Preview + export styling |
 | `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects word-highlight vs static rendering; export uses graphics overlay only |
 | `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (graphics overlay only) |
-| `subtitle_style.highlight_opacity` | (no UI control yet) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
+| `subtitle_style.highlight_opacity` | “Highlight opacity” (slider in Subtitles Ready style pane) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”
