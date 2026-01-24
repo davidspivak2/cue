@@ -2851,7 +2851,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             if transcription_settings and transcription_settings.punctuation_rescue_fallback_enabled:
                 steps.append(
-                    (ChecklistStep.FIX_PUNCTUATION, "Making sure punctuation looks good")
+                    (ChecklistStep.FIX_PUNCTUATION, "Reviewing punctuation")
                 )
             if not transcription_settings or transcription_settings.vad_gap_rescue_enabled:
                 steps.append(
