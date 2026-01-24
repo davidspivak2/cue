@@ -242,6 +242,15 @@ Current weights:
 
 The UI aggregates progress without regression (percent should not go backwards). Retry-style operations should **not** reset or jump backward; they should continue forward from the current aggregate progress.
 
+### Current progress UI behavior
+- Punctuation step label is **“Reviewing punctuation”**.
+- If punctuation rescue is enabled but not needed, the step completes with inline detail “Looks good!”, and the detail remains visible after completion.
+- Skip semantics for punctuation rescue:
+  - Clicking Skip immediately shows “Skipping...” and disables/hides the Skip control.
+  - The step becomes Skipped only after backend confirmation (not immediately on click).
+  - The pipeline continues to the next step without waiting for punctuation rescue to finish.
+- Export progress: the “Timing word highlights” stage advances the bar from 0% to 10% based on word timing progress (timed words current/total), then later stages continue beyond 10% as normal.
+
 ### “Golden path” manual smoke test checklist (10–15 steps)
 1) Launch the app from source (`python -m app.main`).
 2) In Settings, set Save policy to **Same folder as the video**.

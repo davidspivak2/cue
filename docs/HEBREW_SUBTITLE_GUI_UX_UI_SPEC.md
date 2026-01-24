@@ -194,7 +194,7 @@ Layout:
     - “Loading AI model”
     - “Detecting language”
     - “Writing subtitles”
-    - “Making sure punctuation looks good” (only if the setting is enabled)
+    - “Reviewing punctuation” (only if the setting is enabled)
     - “Checking for gaps in subtitles”
     - “Preparing preview”
   - Determinate progress bar + elapsed time
@@ -274,6 +274,9 @@ Layout:
     - “Saving video”
   - Determinate progress bar (real FFmpeg progress) + elapsed time
   - Cancel button
+
+Progress behavior note:
+- During “Timing word highlights,” the progress bar increases gradually from 0% up to 10% proportional to word-timing progress (timed words current/total). When word timing completes, progress is 10%, and subsequent export stages continue beyond 10% as normal.
 
 ---
 
@@ -420,6 +423,16 @@ Behavior:
   - Status text:
     - Baseline transcription → normal “Creating subtitles…”
     - If rescue triggers → sub-status changes to “Improving punctuation…” while attempts run
+  - Checklist step label is **“Reviewing punctuation.”**
+  - Inline detail while running can be:
+    - “Improving punctuation...” (attempt 1)
+    - “Improving punctuation... (attempt 2)”
+    - “Improving punctuation... (attempt 3)”
+  - If rescue is enabled but not needed, the step completes with inline detail “Looks good!” and the detail remains visible after completion (same detail style and bullet separator as other steps).
+  - Skip behavior during **Create subtitles**:
+    - Clicking Skip changes the inline detail immediately to “Skipping...” and disables/hides the Skip control.
+    - The UI only marks the step as “Skipped” after the backend confirms the skip (not immediately on click).
+    - After skipping, the flow proceeds to the next step (gap rescue) without waiting for punctuation rescue to finish.
   - Cancel stays available and cancels the entire operation (including rescue attempts).
 - **When OFF:**
   - Baseline transcription only; no rescue attempts.
@@ -477,7 +490,7 @@ Note:
 - “Loading AI model”
 - “Detecting language”
 - “Writing subtitles”
-- “Making sure punctuation looks good”
+- “Reviewing punctuation”
 - “Checking for gaps in subtitles”
 - “Preparing preview”
 - “Subtitles ready ✓”
