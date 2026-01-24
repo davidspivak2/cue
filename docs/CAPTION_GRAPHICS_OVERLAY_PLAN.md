@@ -34,7 +34,7 @@
 ## Critical constraints (must follow)
 - Must not create thousands of PNGs on disk; no “PNG per state” for full exports.
 - Rollback is via the annotated Git tag (no runtime fallback).
-- Must keep export progress UI behavior unchanged (reuse existing progress bar/worker UX).
+- Must keep export progress UI behavior unchanged (reuse existing progress bar/worker UX). Note: export progress now ties 0–10% to word timing progress so the bar does not hang at 10% during timing.
 - CTA label must be exactly: “Create video with subtitles”.
 - No live preview playback; preview is always a still frame.
 - Presets must be a dropdown (no tiny preview tiles).
