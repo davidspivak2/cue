@@ -1,6 +1,6 @@
 # PR10 — Word Highlight Subtitles (Karaoke-Style) — Implementation Plan
 
-Status: Completed. This plan is kept for historical reference. For upcoming work, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Status: Completed. This plan is kept for historical reference. For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
 
 Last updated: 2026-02-27
 

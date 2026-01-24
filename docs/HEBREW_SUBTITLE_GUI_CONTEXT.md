@@ -19,7 +19,7 @@ UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`
 
 ## Roadmap / What’s next
 
-For all upcoming tasks, see [`docs/ROADMAP.md`](ROADMAP.md) (single source of truth).
+For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 
 ---
 
@@ -490,7 +490,7 @@ Unplanned but merged work since the original PR plan:
 
 GUI PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
 
-For upcoming work, see [`docs/ROADMAP.md`](ROADMAP.md).
+For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
