@@ -1,5 +1,7 @@
 # Caption Graphics Overlay Plan
 
+Status: Completed. This plan is kept for historical reference. For upcoming work, see [`docs/ROADMAP.md`](ROADMAP.md).
+
 ## Status update (snapshot from 2025-02-14; see GUI context for current status)
 - Overlay PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
 - Overlay PR6 is complete (performance pass landed).
@@ -103,7 +105,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Enabling one must disable the other.
   - The UI must make the enable/disable behavior clear.
 
-## Progressive multi-PR implementation plan
+## Progressive multi-PR implementation plan (historical; all PRs completed)
 
 ### Overlay PR1 — SUBTITLES_READY UI overhaul (no rendering changes)
 - Purpose: Implement the new UI layout and controls without touching rendering or export logic.
@@ -242,7 +244,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
 - Manual test checklist:
   - Verify export uses graphics overlay renderer.
 
-### Overlay PR9 — Optional cleanup and follow-ups
+### Overlay PR9 — Optional cleanup and follow-ups (completed)
 - Status: ✅ Complete.
 - Purpose: Remove dead code and document graphics overlay renderer usage.
 - Scope (delivered):
