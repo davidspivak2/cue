@@ -28,10 +28,10 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 **What this app is:** a Windows desktop GUI built with **PySide6** that generates Hebrew subtitles and (optionally) burns them into a new MP4.
 
 **Core workflow:**
-1) Select a video
-2) Extract audio (FFmpeg)
-3) Transcribe to Hebrew SRT (faster‑whisper)
-4) Optionally burn subtitles into an MP4 (FFmpeg)
+1) Create or open a project from **Project Hub**
+2) Create subtitles (extract audio → transcribe → WhisperX alignment)
+3) Edit text + style in **Workbench**
+4) Export a subtitled MP4 (FFmpeg)
 
 **Primary outputs (exact naming):**
 - `<video_stem>_audio_for_whisper.wav`
@@ -56,11 +56,12 @@ Goal: turn a single video into:
 2) a new subtitled video (`*_subtitled.mp4`) with the subtitles burned-in.
 
 Typical flow:
-1) Choose or drag & drop a video.
+1) Create a new project from Project Hub (or open an existing one).
 2) App extracts a mono 16 kHz WAV using FFmpeg (optional cleanup filter).
 3) App runs faster‑whisper (Whisper) to transcribe Hebrew and write an `.srt`.
-4) User optionally reviews/edits in Subtitle Edit.
-5) App burns subtitles into a new MP4 using FFmpeg.
+4) App runs WhisperX alignment to generate word timings for Word highlight mode.
+5) User optionally reviews/edits in Subtitle Edit or in-app Workbench text editing.
+6) App burns subtitles into a new MP4 using FFmpeg.
 
 ---
 
@@ -68,7 +69,7 @@ Typical flow:
 
 ### Main moving parts
 - **GUI (PySide6)**: `app/main.py`
-  - state machine / stacked pages (Home + Settings)
+  - state machine / stacked pages (Project Hub + Workbench + Settings)
   - launches workers and updates UI
 - **Worker thread (PySide6 QRunnable/QThread)**: `app/workers.py`
   - runs FFmpeg extraction
