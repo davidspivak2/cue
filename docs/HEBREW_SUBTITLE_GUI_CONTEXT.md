@@ -17,6 +17,10 @@ It explains:
 
 UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`**.
 
+## Roadmap / What’s next
+
+For all upcoming tasks, see [`docs/ROADMAP.md`](ROADMAP.md) (single source of truth).
+
 ---
 
 ## 0) One-page overview (for new maintainers)
@@ -484,26 +488,9 @@ Unplanned but merged work since the original PR plan:
 - Graphics-based preview renderer for subtitle stills
 - Exit diagnostics bundle (zip logs + outputs on close)
 
-**GUI PR15 — copy polish + CTA reduction sweep (final pass)**
-- One-primary-CTA-per-state audit
-- Microcopy consistency audit
-- Remove leftover technical terms in user-facing labels
-- Align error/warning copy with UX/UI spec
-
-Not done yet (still in GUI PR12+ territory):
-- **GUI PR12** — error UX with details drawer + copy diagnostics (complement the existing diagnostics JSON)
-  - Future: if no audio track is found, stop and show “No audio found… can’t create subtitles.”
-  - Future: if audio exists but no speech detected, stop and show “No speech detected… can’t create subtitles.”
-- **GUI PR13** — packaging hardening / smoke tests
-- **GUI PR15** — copy polish + CTA reduction sweep (after stabilization)
-- Export optimization (future): cache video stream info at VIDEO_SELECTED, revalidate cheaply in export, and consider removing the “Getting video info” checklist row once implemented.
-
 GUI PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
 
-### Where a new contributor should pick up
-Priority work items:
-1) If punctuation is acceptable: continue the UX roadmap at **GUI PR12** (error UX + diagnostics).
-2) If punctuation regresses: use the benchmark + diagnostics to confirm whether loss happens in raw segments vs splitter; the new rescue diagnostics fields help choose.
+For upcoming work, see [`docs/ROADMAP.md`](ROADMAP.md).
 
 ---
 
@@ -624,8 +611,8 @@ Conclusion (current best hypothesis):
 - Keep timing behavior stable:
   - punctuation restoration should ideally modify text only, not timestamps.
 
-### 12.6 Recommended next steps (current priority)
-Punctuation is no longer the active blocker. Move priority back to PR7+.
+### 12.6 Recommended investigation steps if punctuation regresses (reference only)
+This is troubleshooting guidance, not a roadmap.
 
 If punctuation regresses, re-open investigation like this:
 1) **Confirm the loss location** (raw segments vs splitter output)
