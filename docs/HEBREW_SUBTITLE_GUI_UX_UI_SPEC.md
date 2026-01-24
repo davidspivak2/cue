@@ -81,6 +81,10 @@ This is a **strict design contract**. Implementation must follow it exactly. If 
 - Multiple projects can be open **simultaneously as tabs** within the same app window (no multiple windows).
 - **Settings** is reachable from **Project Hub** and **Workbench** via a gear icon.
 - **Settings navigation is disabled** while long-running tasks are active (Create Subtitles / Export).
+- **Project tabs during long-running tasks (v1):**
+  - Users **may switch** to other project tabs while any project is running Create Subtitles or Export.
+  - All **other** project tabs are **read-only** during that time (no create/export/edit actions). Tabs are viewable with actions disabled and a clear “Busy” reason.
+  - **Future (out of scope for v1):** allow concurrent Create Subtitles / Export across multiple projects simultaneously.
 
 ### B3) Back navigation rules
 - **Settings:** top-left “Back” returns to the previous page (Project Hub or Workbench).
@@ -162,6 +166,7 @@ The Workbench is a **single unified** edit + style + preview + export surface fo
 
 ### E4) Subtitle editing requirements (explicit)
 Users can **edit subtitle text only**. Timestamps are visible but **not editable**.
+The redesign workflow is **in-app subtitle text editing only** (no external subtitle editor).
 
 **Entry points:**
 1) **All subtitles list**
@@ -178,9 +183,10 @@ Users can **edit subtitle text only**. Timestamps are visible but **not editable
 - This highlight **must never** affect export styling.
 
 ### E5) Primary CTA and export rules
-- **Bottom action bar exists on Workbench.**
+- **Bottom action bar exists on Workbench** only in **WB_SUBTITLES_READY** and **WB_EXPORT_SUCCESS**.
 - Bottom bar contains **only** the primary CTA labeled exactly:
   - **“Create video with subtitles”**
+- In earlier states (e.g., **WB_VIDEO_LINKED_READY**), the primary CTA is a **normal primary button** in the main content area labeled **“Create subtitles”** (no bottom bar).
 - **No export settings** in Workbench. If export settings exist, they live in **Settings only**.
 - Export progress is shown as an **in-Workbench** state (not a separate page).
 
@@ -295,21 +301,16 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 - Path field + Browse enabled only when policy = “Always save to this folder”.
 - Placeholder when unset: “No folder selected”.
 
-### J3) Subtitle Edit
-- Path field + “Browse...” button.
-- Field is read-only; browse selects `SubtitleEdit.exe`.
-- If missing on launch, show “Subtitle Edit not found” modal with actions.
-
-### J4) Punctuation
+### J3) Punctuation
 - Checkbox: “Improve punctuation automatically (recommended)”
 - Behavior and rescue logic remain the same as current requirements.
 
-### J5) Audio
+### J4) Audio
 - Checkbox: “Clean up audio before transcription”
 - Checkbox: “Keep extracted WAV file”
 - Helper text always visible.
 
-### J6) Diagnostics (Settings only)
+### J5) Diagnostics (Settings only)
 - Master checkbox: “Enable diagnostics logging” (default OFF)
 - Secondary checkbox: “Write diagnostics on successful completion” (default OFF)
 - Include checkboxes for diagnostics categories.
