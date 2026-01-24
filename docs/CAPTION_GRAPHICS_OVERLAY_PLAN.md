@@ -1,6 +1,6 @@
 # Caption Graphics Overlay Plan
 
-Status: Completed. This plan is kept for historical reference. For upcoming work, see [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Status: Completed. This plan is kept for historical reference. For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
 
 ## Status update (snapshot from 2025-02-14; see GUI context for current status)
 - Overlay PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
