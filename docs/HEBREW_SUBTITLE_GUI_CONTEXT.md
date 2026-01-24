@@ -267,7 +267,7 @@ The UI aggregates progress without regression (percent should not go backwards).
   - Clicking Skip immediately shows “Skipping...” and disables/hides the Skip control.
   - The step becomes Skipped only after backend confirmation (not immediately on click).
   - The pipeline continues to the next step without waiting for punctuation rescue to finish.
-- Export progress: the “Timing word highlights” stage advances the bar from 0% to 10% based on word timing progress (timed words current/total), then later stages continue beyond 10% as normal.
+- Export progress: stages cover video info, subtitle rendering/burn-in, and saving output (no WhisperX timing stage during export in the redesign contract).
 
 ### “Golden path” manual smoke test checklist (10–15 steps)
 1) Launch the app from source (`python -m app.main`).
