@@ -347,7 +347,7 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 - “Input”, “Output”, “SRT” in button text
 - “Encode”, “Burn-in”, “Hardcode”
 
-## Appendix: Archived HEBREW_SUBTITLE_GUI_CONTEXT.md (verbatim)
+## Appendix: Archived — Project context (original)
 # Hebrew Subtitle GUI — Project Context (Read This First)
 
 **Last updated:** 2026-03-10
@@ -851,7 +851,7 @@ Unplanned but merged work since the original PR plan:
 - Graphics-based preview renderer for subtitle stills
 - Exit diagnostics bundle (zip logs + outputs on close)
 
-GUI PR10 tracking doc: /docs/PR10_WORD_HIGHLIGHT_PLAN.md
+GUI PR10 tracking doc: see the ROADMAP appendix for the Word highlight plan (PR10).
 
 For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
 
