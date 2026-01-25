@@ -17,13 +17,12 @@ from .word_timing_schema import (
     save_word_timings_json,
 )
 
+ALIGN_CHUNK_SECONDS = 600.0
+
 
 def _print(message: str) -> None:
-    try:
-        print(message, flush=True)
-    except UnicodeEncodeError:
-        sys.stdout.buffer.write((message + "\n").encode("utf-8", errors="backslashreplace"))
-        sys.stdout.buffer.flush()
+    sys.stdout.buffer.write((message + "\n").encode("utf-8", errors="backslashreplace"))
+    sys.stdout.buffer.flush()
 
 
 @dataclass(frozen=True)
@@ -124,6 +123,125 @@ def _count_words_in_cues(cues: list[SrtCue]) -> int:
     return total
 
 
+def _count_tokens_in_cues(cues: list[SrtCue]) -> int:
+    total = 0
+    for cue in cues:
+        total += len(re.findall(r"\S+", cue.text))
+    return total
+
+
+def _segment_has_usable_words(segment: dict[str, Any]) -> bool:
+    words = segment.get("words")
+    if not isinstance(words, list) or not words:
+        return False
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        if word.get("start") is None or word.get("end") is None:
+            continue
+        return True
+    return False
+
+
+def _has_usable_word_timings(aligned_segments: list[dict[str, Any]]) -> bool:
+    return any(_segment_has_usable_words(segment) for segment in aligned_segments)
+
+
+def _chunk_segments(
+    segments: list[dict[str, Any]],
+    max_seconds: float,
+) -> list[tuple[float, float, list[int]]]:
+    if not segments:
+        return []
+    chunks: list[tuple[float, float, list[int]]] = []
+    chunk_start = float(segments[0].get("start", 0.0))
+    chunk_end_limit = chunk_start + max_seconds
+    current_indices: list[int] = []
+    current_end = chunk_start
+    for idx, segment in enumerate(segments):
+        seg_start = float(segment.get("start", 0.0))
+        seg_end = float(segment.get("end", seg_start))
+        if current_indices and seg_start >= chunk_end_limit:
+            chunks.append(
+                (
+                    chunk_start,
+                    max(current_end, chunk_start + 0.001),
+                    current_indices,
+                )
+            )
+            chunk_start = seg_start
+            chunk_end_limit = chunk_start + max_seconds
+            current_indices = []
+            current_end = seg_end
+        current_indices.append(idx)
+        current_end = max(current_end, seg_end)
+    if current_indices:
+        chunks.append(
+            (
+                chunk_start,
+                max(current_end, chunk_start + 0.001),
+                current_indices,
+            )
+        )
+    return chunks
+
+
+def _offset_aligned_segment(segment: dict[str, Any], offset: float) -> dict[str, Any]:
+    adjusted = dict(segment)
+    words = segment.get("words")
+    if isinstance(words, list):
+        adjusted_words = []
+        for word in words:
+            if not isinstance(word, dict):
+                continue
+            adjusted_word = dict(word)
+            if adjusted_word.get("start") is not None:
+                adjusted_word["start"] = float(adjusted_word["start"]) + offset
+            if adjusted_word.get("end") is not None:
+                adjusted_word["end"] = float(adjusted_word["end"]) + offset
+            adjusted_words.append(adjusted_word)
+        adjusted["words"] = adjusted_words
+    return adjusted
+
+
+def _build_estimated_segments(cues: list[SrtCue]) -> list[dict[str, Any]]:
+    estimated_segments: list[dict[str, Any]] = []
+    for cue in cues:
+        tokens = re.findall(r"\S+", cue.text)
+        words: list[dict[str, Any]] = []
+        duration = max(0.0, cue.end_seconds - cue.start_seconds)
+        if tokens:
+            if duration > 0:
+                weights = [max(len(token), 1) for token in tokens]
+                total_weight = sum(weights)
+                cursor = cue.start_seconds
+                for token, weight in zip(tokens, weights):
+                    span = duration * (weight / total_weight)
+                    start = cursor
+                    end = min(cue.end_seconds, cursor + span)
+                    words.append({"word": token, "start": start, "end": end, "score": None})
+                    cursor = end
+            else:
+                for token in tokens:
+                    words.append(
+                        {
+                            "word": token,
+                            "start": cue.start_seconds,
+                            "end": cue.start_seconds,
+                            "score": None,
+                        }
+                    )
+        estimated_segments.append(
+            {
+                "start": cue.start_seconds,
+                "end": cue.end_seconds,
+                "text": _normalize_cue_text(cue.text),
+                "words": words,
+            }
+        )
+    return estimated_segments
+
+
 def _emit_words_timed(current: int, total: int) -> None:
     _print(f"ALIGN_WORDS_TIMED current={current} total={total}")
 
@@ -212,7 +330,9 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     import whisperx
 
     audio = whisperx.load_audio(str(config.wav_path))
+    sample_rate = whisperx.audio.SAMPLE_RATE
     model_a, metadata = _load_align_model(config.language, device, config.align_model)
+    _print("ALIGN_STAGE stage=full_align_start")
     align_result = whisperx.align(
         segments,
         model_a,
@@ -223,6 +343,55 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     )
     aligned_segments = align_result.get("segments", [])
     mapped_segments = _map_aligned_segments(segments, aligned_segments)
+    if not _has_usable_word_timings(aligned_segments):
+        _print("ALIGN_FALLBACK mode=chunked_retry")
+        chunked_segments: list[Optional[dict[str, Any]]] = [None] * len(segments)
+        chunks = _chunk_segments(segments, ALIGN_CHUNK_SECONDS)
+        total_chunks = len(chunks)
+        for chunk_index, (chunk_start, chunk_end, indices) in enumerate(chunks, start=1):
+            _print(
+                "ALIGN_STAGE stage=chunk_align_start "
+                f"chunk={chunk_index} total_chunks={total_chunks}"
+            )
+            sample_start = int(chunk_start * sample_rate)
+            sample_end = int(chunk_end * sample_rate)
+            sample_end = min(sample_end, audio.shape[0])
+            chunk_audio = audio[sample_start:sample_end]
+            local_segments = []
+            for idx in indices:
+                seg = segments[idx]
+                local_segments.append(
+                    {
+                        "start": float(seg.get("start", 0.0)) - chunk_start,
+                        "end": float(seg.get("end", 0.0)) - chunk_start,
+                        "text": seg.get("text", ""),
+                    }
+                )
+            chunk_result = whisperx.align(
+                local_segments,
+                model_a,
+                metadata,
+                chunk_audio,
+                device,
+                return_char_alignments=False,
+            )
+            chunk_aligned = chunk_result.get("segments", [])
+            mapped_chunk = _map_aligned_segments(local_segments, chunk_aligned)
+            for local_index, aligned in enumerate(mapped_chunk):
+                if aligned is None:
+                    continue
+                original_index = indices[local_index]
+                chunked_segments[original_index] = _offset_aligned_segment(
+                    aligned,
+                    chunk_start,
+                )
+        mapped_segments = chunked_segments
+        aligned_segments = [segment for segment in chunked_segments if segment is not None]
+        if not _has_usable_word_timings(aligned_segments):
+            if _count_tokens_in_cues(cues) > 0:
+                _print("ALIGN_FALLBACK mode=estimated reason=no_word_timings")
+                mapped_segments = _build_estimated_segments(cues)
+                aligned_segments = mapped_segments
     if len(mapped_segments) != len(segments):
         _print(
             "ALIGN_SEGMENT_MISMATCH "
