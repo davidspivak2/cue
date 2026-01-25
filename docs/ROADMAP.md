@@ -5,6 +5,7 @@
 - If work is not listed here, it is not scheduled.
 - The UX spec defines target behavior; this file defines implementation order and acceptance criteria.
 - Each work item must include: Status, Deliverable, Acceptance criteria, and UX spec reference (section name).
+- Example UX spec reference format: UX spec reference: H) Error UX + Diagnostics
 
 ## Now / Next (Queue)
 (Use a numbered list. Status tags must be one of: NEXT, IN PROGRESS, BLOCKED, DONE.)
@@ -16,21 +17,21 @@
    - Acceptance criteria:
      - Trigger an error: user can open details drawer and copy the diagnostics text.
      - No separate diagnostics “toolbox” appears on the error screen.
-   - UX spec reference: Error UX + Diagnostics
+   - UX spec reference: H) Error UX + Diagnostics
 
 2. [NEXT] PR13 — Packaging hardening / smoke tests
    - Deliverable:
      - Packaging flow hardened for release and smoke tests run against packaged builds.
    - Acceptance criteria:
      - Packaged build launches and completes the golden-path smoke test without regressions.
-   - UX spec reference: N/A (release engineering, not in UX spec)
+   - UX spec reference: N/A (engineering / packaging)
 
 3. [NEXT] PR15 — Copy polish + CTA reduction sweep
    - Deliverable:
      - Copy polish applied and CTA reduction pass completed across UI surfaces.
    - Acceptance criteria:
      - Strings match the approved copywriting glossary and CTA count is minimized per spec.
-   - UX spec reference: Copywriting glossary (approved strings)
+   - UX spec reference: K) Copywriting glossary (approved strings)
 
 4. [NEXT] Export optimization — cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
    - Deliverable:
@@ -38,12 +39,12 @@
      - “Getting video info” checklist row removed or adjusted if no longer accurate.
    - Acceptance criteria:
      - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
-   - UX spec reference: Export progress + success (in-Workbench)
+   - UX spec reference: G) Export progress + success (in-Workbench)
 
 5. [NEXT] Redesign Milestone 1 — Project system backend (persistence + multi-project)
    - Deliverable: app can create/open multiple projects with persisted state across restarts.
    - Acceptance criteria: see Milestone 1 checklist below.
-   - UX spec reference: Project model / Project Hub
+   - UX spec reference: C) Project model (new backend capability; document behavior)
 
 ## Milestones (Ordered to Completion)
 
