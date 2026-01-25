@@ -121,6 +121,11 @@ def _count_tokens_in_cues(cues: list[SrtCue]) -> int:
     return total
 
 
+def _normalize_for_match(text: str) -> str:
+    cleaned = re.sub(r"[\\.,!?;:\"'\\-–—…()\\[\\]{}]", " ", text)
+    return " ".join(cleaned.split()).strip().casefold()
+
+
 def _is_real_number(value: object) -> bool:
     if not isinstance(value, (int, float)):
         return False
@@ -300,6 +305,39 @@ def _collect_aligned_words(
     return words
 
 
+def _direct_segment_words(
+    aligned_segments: list[dict[str, Any]],
+) -> list[list[WordSpan]]:
+    cue_words: list[list[WordSpan]] = []
+    for segment in aligned_segments:
+        words: list[WordSpan] = []
+        segment_words = segment.get("words")
+        if isinstance(segment_words, list):
+            for word in segment_words:
+                if not isinstance(word, dict):
+                    continue
+                start = word.get("start")
+                end = word.get("end")
+                text = word.get("word")
+                if not _is_real_number(start) or not _is_real_number(end):
+                    continue
+                if text is None:
+                    continue
+                cleaned = str(text).strip()
+                if not cleaned:
+                    continue
+                words.append(
+                    WordSpan(
+                        text=cleaned,
+                        start=float(start),
+                        end=float(end),
+                        confidence=float(word["score"]) if word.get("score") is not None else None,
+                    )
+                )
+        cue_words.append(words)
+    return cue_words
+
+
 def _assign_words_to_cues(
     cues: list[SrtCue],
     aligned_words: list[dict[str, Optional[float]]],
@@ -467,18 +505,49 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
                 _print("ALIGN_FALLBACK mode=estimated reason=no_word_timings")
                 aligned_segments = _build_estimated_segments(cues)
     srt_hash = compute_srt_sha256(config.srt_path)
-    aligned_words = _collect_aligned_words(aligned_segments)
-    aligned_words_total = len(aligned_words)
-    if aligned_words_total:
-        _emit_words_timed(0, aligned_words_total)
-    cue_words, assigned_words, processed_words = _assign_words_to_cues(
-        cues,
-        aligned_words,
-        tolerance=0.1,
-        emit_progress=_emit_words_timed,
-    )
+    cue_words: list[list[WordSpan]]
+    assigned_words = 0
+    aligned_words_total = 0
+    unassigned_words = 0
+    if len(aligned_segments) == len(cues):
+        normalized_matches = 0
+        for cue, segment in zip(cues, aligned_segments):
+            cue_text = _normalize_for_match(cue.text)
+            segment_text = _normalize_for_match(str(segment.get("text", "")))
+            if cue_text and cue_text == segment_text:
+                normalized_matches += 1
+        if normalized_matches >= max(1, int(len(cues) * 0.8)):
+            _print("ALIGN_STAGE stage=direct_segment_map")
+            cue_words = _direct_segment_words(aligned_segments)
+            aligned_words_total = sum(len(words) for words in cue_words)
+            assigned_words = aligned_words_total
+            if aligned_words_total:
+                _emit_words_timed(0, aligned_words_total)
+                running_total = 0
+                for words in cue_words:
+                    running_total += len(words)
+                    _emit_words_timed(min(running_total, aligned_words_total), aligned_words_total)
+        else:
+            cue_words = []
+    else:
+        cue_words = []
+
+    if not cue_words:
+        aligned_words = _collect_aligned_words(aligned_segments)
+        aligned_words_total = len(aligned_words)
+        if aligned_words_total:
+            _emit_words_timed(0, aligned_words_total)
+        cue_words, assigned_words, processed_words = _assign_words_to_cues(
+            cues,
+            aligned_words,
+            tolerance=0.1,
+            emit_progress=_emit_words_timed,
+        )
+        if aligned_words_total:
+            _emit_words_timed(min(processed_words, aligned_words_total), aligned_words_total)
+        unassigned_words = aligned_words_total - assigned_words
+
     cues_with_words = sum(1 for words in cue_words if words)
-    unassigned_words = aligned_words_total - assigned_words
     align_assign_line = (
         f"ALIGN_ASSIGN cues={len(cues)} "
         f"aligned_words_with_times={aligned_words_total} "
@@ -487,8 +556,6 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
         f"unassigned_words={unassigned_words}"
     )
     _print(align_assign_line)
-    if aligned_words_total:
-        _emit_words_timed(min(processed_words, aligned_words_total), aligned_words_total)
     document = _build_document(
         cues=cues,
         cue_words=cue_words,
