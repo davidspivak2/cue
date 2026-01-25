@@ -7,7 +7,7 @@ from pathlib import Path
 import math
 import re
 import sys
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .srt_utils import compute_srt_sha256, parse_srt_file, SrtCue
 from .word_timing_schema import (
@@ -112,21 +112,6 @@ def _map_aligned_segments(
     for segment in segments:
         mapped.append(aligned_by_key.get(_segment_key(segment)))
     return mapped
-
-
-def _clamp(value: float, minimum: float, maximum: float) -> float:
-    return min(max(value, minimum), maximum)
-
-
-def _count_words(text: str) -> int:
-    return len(re.findall(r"\w+", text, flags=re.UNICODE))
-
-
-def _count_words_in_cues(cues: list[SrtCue]) -> int:
-    total = 0
-    for cue in cues:
-        total += _count_words(cue.text)
-    return total
 
 
 def _count_tokens_in_cues(cues: list[SrtCue]) -> int:
@@ -282,47 +267,99 @@ def _emit_words_timed(current: int, total: int) -> None:
     _print(f"ALIGN_WORDS_TIMED current={current} total={total}")
 
 
+def _collect_aligned_words(
+    aligned_segments: list[dict[str, Any]]
+) -> list[dict[str, Optional[float]]]:
+    words: list[dict[str, Optional[float]]] = []
+    for segment in aligned_segments:
+        segment_words = segment.get("words")
+        if not isinstance(segment_words, list):
+            continue
+        for word in segment_words:
+            if not isinstance(word, dict):
+                continue
+            start = word.get("start")
+            end = word.get("end")
+            text = word.get("word")
+            if not _is_real_number(start) or not _is_real_number(end):
+                continue
+            if text is None:
+                continue
+            cleaned = str(text).strip()
+            if not cleaned:
+                continue
+            words.append(
+                {
+                    "word": cleaned,
+                    "start": float(start),
+                    "end": float(end),
+                    "score": float(word["score"]) if word.get("score") is not None else None,
+                }
+            )
+    words.sort(key=lambda item: item["start"] if item["start"] is not None else 0.0)
+    return words
+
+
+def _assign_words_to_cues(
+    cues: list[SrtCue],
+    aligned_words: list[dict[str, Optional[float]]],
+    *,
+    tolerance: float,
+    emit_progress: Optional[Callable[[int, int], None]] = None,
+) -> tuple[list[list[WordSpan]], int, int]:
+    assignments: list[list[WordSpan]] = []
+    assigned_words = 0
+    processed_words = 0
+    index = 0
+    total_words = len(aligned_words)
+    for cue in cues:
+        cue_words: list[WordSpan] = []
+        cue_start = cue.start_seconds
+        cue_end = cue.end_seconds
+        cue_window_start = cue_start - tolerance
+        cue_window_end = cue_end + tolerance
+        while index < total_words:
+            word_entry = aligned_words[index]
+            word_start = word_entry["start"] or 0.0
+            word_end = word_entry["end"] or 0.0
+            if word_end < cue_window_start:
+                index += 1
+                processed_words += 1
+                continue
+            if word_start > cue_window_end:
+                break
+            cue_words.append(
+                WordSpan(
+                    text=str(word_entry["word"]),
+                    start=float(word_start),
+                    end=float(word_end),
+                    confidence=word_entry["score"],
+                )
+            )
+            index += 1
+            processed_words += 1
+            assigned_words += 1
+        if emit_progress and total_words:
+            emit_progress(min(processed_words, total_words), total_words)
+        assignments.append(cue_words)
+    if index < total_words:
+        processed_words += total_words - index
+    if emit_progress and total_words:
+        emit_progress(total_words, total_words)
+    return assignments, assigned_words, processed_words
+
+
 def _build_document(
     *,
     cues: list[SrtCue],
-    aligned_segments: list[Optional[dict[str, Any]]],
+    cue_words: list[list[WordSpan]],
     language: str,
     srt_hash: str,
-    total_words: int,
 ) -> WordTimingDocument:
     created_utc = datetime.now(timezone.utc).isoformat()
     cue_entries: list[CueWordTimings] = []
-    clamp_count = 0
-    skipped_words_total = 0
-    words_timed = 0
     for index, cue in enumerate(cues):
-        aligned = aligned_segments[index] if index < len(aligned_segments) else None
-        words: list[WordSpan] = []
-        if aligned and isinstance(aligned.get("words"), list):
-            for word in aligned["words"]:
-                if not isinstance(word, dict):
-                    continue
-                start = word.get("start")
-                end = word.get("end")
-                text = word.get("word")
-                if start is None or end is None or text is None:
-                    skipped_words_total += 1
-                    continue
-                start_value = float(start)
-                end_value = float(end)
-                clamped_start = _clamp(start_value, cue.start_seconds, cue.end_seconds)
-                clamped_end = _clamp(end_value, cue.start_seconds, cue.end_seconds)
-                if clamped_start != start_value or clamped_end != end_value:
-                    clamp_count += 1
-                confidence = word.get("score")
-                words.append(
-                    WordSpan(
-                        text=str(text),
-                        start=clamped_start,
-                        end=clamped_end,
-                        confidence=float(confidence) if confidence is not None else None,
-                    )
-                )
+        words = cue_words[index] if index < len(cue_words) else []
         cue_entries.append(
             CueWordTimings(
                 cue_index=index + 1,
@@ -332,13 +369,6 @@ def _build_document(
                 words=words,
             )
         )
-        words_timed += _count_words(cue.text)
-        if total_words:
-            _emit_words_timed(min(words_timed, total_words), total_words)
-    if clamp_count:
-        _print(f"ALIGN_CLAMPED_WORDS {clamp_count}")
-    if skipped_words_total:
-        _print(f"ALIGN_SKIPPED_WORDS {skipped_words_total}")
     return WordTimingDocument(
         schema_version=SCHEMA_VERSION,
         created_utc=created_utc,
@@ -358,10 +388,6 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     cues = parse_srt_file(config.srt_path)
     if len(segments) != len(cues):
         raise ValueError("Mismatch between segments and SRT cues.")
-    total_words = _count_words_in_cues(cues)
-    if total_words:
-        _emit_words_timed(0, total_words)
-
     device = _resolve_device(config.prefer_gpu, config.device)
     import whisperx
 
@@ -391,7 +417,6 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
         f"words_with_times={words_with_times}"
     )
     _print(align_stats_line)
-    mapped_segments = _map_aligned_segments(segments, aligned_segments)
     if not _has_usable_word_timings(aligned_segments):
         _print("ALIGN_FALLBACK mode=chunked_retry")
         sample_rate = getattr(getattr(whisperx, "audio", None), "SAMPLE_RATE", 16000)
@@ -440,23 +465,37 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
         if not _has_usable_word_timings(aligned_segments):
             if _count_tokens_in_cues(cues) > 0:
                 _print("ALIGN_FALLBACK mode=estimated reason=no_word_timings")
-                mapped_segments = _build_estimated_segments(cues)
-                aligned_segments = mapped_segments
-    if len(mapped_segments) != len(segments):
-        _print(
-            "ALIGN_SEGMENT_MISMATCH "
-            f"input={len(segments)} aligned={len(aligned_segments)}"
-        )
+                aligned_segments = _build_estimated_segments(cues)
     srt_hash = compute_srt_sha256(config.srt_path)
+    aligned_words = _collect_aligned_words(aligned_segments)
+    aligned_words_total = len(aligned_words)
+    if aligned_words_total:
+        _emit_words_timed(0, aligned_words_total)
+    cue_words, assigned_words, processed_words = _assign_words_to_cues(
+        cues,
+        aligned_words,
+        tolerance=0.1,
+        emit_progress=_emit_words_timed,
+    )
+    cues_with_words = sum(1 for words in cue_words if words)
+    unassigned_words = aligned_words_total - assigned_words
+    align_assign_line = (
+        f"ALIGN_ASSIGN cues={len(cues)} "
+        f"aligned_words_with_times={aligned_words_total} "
+        f"assigned_words={assigned_words} "
+        f"cues_with_words={cues_with_words} "
+        f"unassigned_words={unassigned_words}"
+    )
+    _print(align_assign_line)
+    if aligned_words_total:
+        _emit_words_timed(min(processed_words, aligned_words_total), aligned_words_total)
     document = _build_document(
         cues=cues,
-        aligned_segments=mapped_segments,
+        cue_words=cue_words,
         language=config.language,
         srt_hash=srt_hash,
-        total_words=total_words,
     )
     total_words = sum(len(cue.words) for cue in document.cues)
-    cues_with_words = sum(1 for cue in document.cues if cue.words)
     align_output_line = (
         f"ALIGN_OUTPUT total_words={total_words} "
         f"cues={len(document.cues)} cues_with_words={cues_with_words}"
@@ -465,7 +504,7 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     if total_words == 0:
         _eprint(
             "ALIGN_ERROR alignment produced no timed words. "
-            f"{align_stats_line} {align_output_line}"
+            f"{align_stats_line} {align_assign_line} {align_output_line}"
         )
         raise RuntimeError("Alignment produced no timed words.")
     save_word_timings_json(config.output_path, document)
