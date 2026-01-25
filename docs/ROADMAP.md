@@ -18,32 +18,32 @@
      - No separate diagnostics “toolbox” appears on the error screen.
    - UX spec reference: Error UX + Diagnostics
 
-2. [NEXT] Redesign Milestone 1 — Project system backend (persistence + multi-project)
-   - Deliverable: app can create/open multiple projects with persisted state across restarts.
-   - Acceptance criteria: see Milestone 1 checklist below.
-   - UX spec reference: Project model / Project Hub
-
-3. [NEXT] PR13 — Packaging hardening / smoke tests
+2. [NEXT] PR13 — Packaging hardening / smoke tests
    - Deliverable:
      - Packaging flow hardened for release and smoke tests run against packaged builds.
    - Acceptance criteria:
      - Packaged build launches and completes the golden-path smoke test without regressions.
    - UX spec reference: N/A (release engineering, not in UX spec)
 
-4. [NEXT] PR15 — Copy polish + CTA reduction sweep
+3. [NEXT] PR15 — Copy polish + CTA reduction sweep
    - Deliverable:
      - Copy polish applied and CTA reduction pass completed across UI surfaces.
    - Acceptance criteria:
      - Strings match the approved copywriting glossary and CTA count is minimized per spec.
    - UX spec reference: Copywriting glossary (approved strings)
 
-5. [NEXT] Export optimization — cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
+4. [NEXT] Export optimization — cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
    - Deliverable:
      - Video stream info cached earlier; export path uses cheap revalidation.
      - “Getting video info” checklist row removed or adjusted if no longer accurate.
    - Acceptance criteria:
      - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
    - UX spec reference: Export progress + success (in-Workbench)
+
+5. [NEXT] Redesign Milestone 1 — Project system backend (persistence + multi-project)
+   - Deliverable: app can create/open multiple projects with persisted state across restarts.
+   - Acceptance criteria: see Milestone 1 checklist below.
+   - UX spec reference: Project model / Project Hub
 
 ## Milestones (Ordered to Completion)
 
