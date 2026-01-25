@@ -31,8 +31,9 @@ winget install -e --id Gyan.FFmpeg
 ```
 
 For more context on the app and pipeline, see:
-* `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`
-* `docs/transcription_pipeline.md`
+* `docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md` (design contract; includes the archived project context appendix).
+* `README.md` (archived transcription pipeline appendix + consolidated docs pointers).
+* `docs/ROADMAP.md` (single source of truth for tasks).
 
 ## Run from source (developer testing)
 ```bat
