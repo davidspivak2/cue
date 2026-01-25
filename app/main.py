@@ -2658,7 +2658,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._worker.signals.started.connect(self._on_worker_started)
         self._worker.signals.step_event.connect(self._on_worker_step_event)
         self._worker.signals.finished.connect(self._on_worker_finished)
-        self._progress_controller = self._build_progress_controller(task_type)
+        self._progress_controller = self._build_progress_controller(
+            task_type,
+            transcription_settings=transcription_settings,
+            subtitle_mode=subtitle_mode,
+        )
         self._configure_checklist(task_type, transcription_settings, subtitle_mode)
         self._worker_thread.start()
         self._update_ui_state(idle=False)
@@ -2683,8 +2687,6 @@ class MainWindow(QtWidgets.QMainWindow):
         task_type = self._worker.task_type if self._worker else None
         if success:
             if task_type == TaskType.GENERATE_SRT:
-                self.progress_bar.setValue(99)
-                self.progress_bar.setFormat("99%")
                 self.status_label.setText("Creating subtitles")
                 self.elapsed_label.setText("")
             else:
@@ -2815,8 +2817,6 @@ class MainWindow(QtWidgets.QMainWindow):
         global_progress = self._progress_controller.update(step_id, step_progress)
         percent = int(round(global_progress * 100))
         percent = max(0, min(percent, 100))
-        if self._preparing_preview_active:
-            percent = min(percent, 99)
         self.progress_bar.setValue(percent)
         self.progress_bar.setFormat(f"{percent}%")
 
@@ -2987,8 +2987,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._handle_checklist_start(
             StepEvent(step_id=ChecklistStep.PREPARING_PREVIEW, state=StepState.START)
         )
-        self.progress_bar.setValue(99)
-        self.progress_bar.setFormat("99%")
         if self._preparing_preview_timer is None:
             self._preparing_preview_timer = QtCore.QTimer(self)
             self._preparing_preview_timer.setSingleShot(True)
@@ -3005,8 +3003,6 @@ class MainWindow(QtWidgets.QMainWindow):
             StepEvent(step_id=ChecklistStep.PREPARING_PREVIEW, state=StepState.DONE),
             "done",
         )
-        self.progress_bar.setValue(100)
-        self.progress_bar.setFormat("100%")
         if self._pending_subtitles_payload is not None:
             self._subtitles_reviewed = False
             self.set_state(AppState.SUBTITLES_READY)
@@ -3864,9 +3860,22 @@ class MainWindow(QtWidgets.QMainWindow):
             return None
         return Path(file_path)
 
-    def _build_progress_controller(self, task_type: str) -> ProgressController:
+    def _build_progress_controller(
+        self,
+        task_type: str,
+        *,
+        transcription_settings: Optional[TranscriptionSettings] = None,
+        subtitle_mode: str = "static",
+    ) -> ProgressController:
         if task_type == TaskType.GENERATE_SRT:
             steps = [ProgressStep.PREPARE_AUDIO, ProgressStep.TRANSCRIBE]
+            if transcription_settings and transcription_settings.punctuation_rescue_fallback_enabled:
+                steps.append(ProgressStep.FIX_PUNCTUATION)
+            if not transcription_settings or transcription_settings.vad_gap_rescue_enabled:
+                steps.append(ProgressStep.FIX_GAPS)
+            if subtitle_mode == "word_highlight":
+                steps.append(ProgressStep.ALIGN_WORDS)
+            steps.append(ProgressStep.PREPARING_PREVIEW)
         else:
             steps = [ProgressStep.EXPORT]
         return ProgressController(steps)

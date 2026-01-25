@@ -36,18 +36,30 @@ class StepEvent:
 class ProgressStep:
     PREPARE_AUDIO = "PREPARE_AUDIO"
     TRANSCRIBE = "TRANSCRIBE"
+    FIX_PUNCTUATION = "FIX_PUNCTUATION"
+    FIX_GAPS = "FIX_GAPS"
+    ALIGN_WORDS = "ALIGN_WORDS"
+    PREPARING_PREVIEW = "PREPARING_PREVIEW"
     EXPORT = "EXPORT"
 
 
 DEFAULT_STEP_WEIGHTS = {
     ProgressStep.PREPARE_AUDIO: 0.15,
-    ProgressStep.TRANSCRIBE: 0.60,
+    ProgressStep.TRANSCRIBE: 0.55,
+    ProgressStep.FIX_PUNCTUATION: 0.07,
+    ProgressStep.FIX_GAPS: 0.08,
+    ProgressStep.ALIGN_WORDS: 0.12,
+    ProgressStep.PREPARING_PREVIEW: 0.03,
     ProgressStep.EXPORT: 0.25,
 }
 
 STEP_ORDER = [
     ProgressStep.PREPARE_AUDIO,
     ProgressStep.TRANSCRIBE,
+    ProgressStep.FIX_PUNCTUATION,
+    ProgressStep.FIX_GAPS,
+    ProgressStep.ALIGN_WORDS,
+    ProgressStep.PREPARING_PREVIEW,
     ProgressStep.EXPORT,
 ]
 
