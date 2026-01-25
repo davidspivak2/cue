@@ -330,7 +330,6 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     import whisperx
 
     audio = whisperx.load_audio(str(config.wav_path))
-    sample_rate = whisperx.audio.SAMPLE_RATE
     model_a, metadata = _load_align_model(config.language, device, config.align_model)
     _print("ALIGN_STAGE stage=full_align_start")
     align_result = whisperx.align(
@@ -345,6 +344,7 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     mapped_segments = _map_aligned_segments(segments, aligned_segments)
     if not _has_usable_word_timings(aligned_segments):
         _print("ALIGN_FALLBACK mode=chunked_retry")
+        sample_rate = getattr(getattr(whisperx, "audio", None), "SAMPLE_RATE", 16000)
         chunked_segments: list[Optional[dict[str, Any]]] = [None] * len(segments)
         chunks = _chunk_segments(segments, ALIGN_CHUNK_SECONDS)
         total_chunks = len(chunks)
