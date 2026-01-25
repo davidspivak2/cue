@@ -1659,7 +1659,11 @@ class Worker(QtCore.QObject):
                         _mark_load_model_done()
                     if not write_started:
                         write_started = True
-                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                        self._emit_step_event(
+                            ChecklistStep.WRITE_SUBTITLES,
+                            StepState.START,
+                            reason_text="Listening to audio...",
+                        )
                     now = time.monotonic()
                     if now - last_progress_log >= 2.0:
                         _emit_log("Listening progress update received.", True)
@@ -1667,6 +1671,37 @@ class Worker(QtCore.QObject):
                     continue
 
                 _emit_log(text, show_in_ui)
+                if text == "WRITE_SUBTITLES_ASSEMBLING":
+                    write_started = True
+                    self._emit_step_event(
+                        ChecklistStep.WRITE_SUBTITLES,
+                        StepState.START,
+                        reason_text="Assembling subtitles...",
+                    )
+                    continue
+                if text == "WRITE_SUBTITLES_FINALIZING":
+                    write_started = True
+                    self._emit_step_event(
+                        ChecklistStep.WRITE_SUBTITLES,
+                        StepState.START,
+                        reason_text="Finalizing...",
+                    )
+                    continue
+                if text == "PUNCT_REVIEW_START":
+                    self._punctuation_active = True
+                    self._punctuation_attempt = 0
+                    self._emit_step_progress(
+                        ProgressStep.FIX_PUNCTUATION,
+                        0.0,
+                        "Reviewing punctuation",
+                        force=True,
+                    )
+                    self._emit_step_event(
+                        ChecklistStep.FIX_PUNCTUATION,
+                        StepState.START,
+                        reason_text="Analyzing...",
+                    )
+                    continue
                 if text.startswith("PUNCT_RESCUE "):
                     if (
                         self.transcription_settings
@@ -1709,25 +1744,22 @@ class Worker(QtCore.QObject):
                             if attempt < 1:
                                 continue
                             no_output_timeout_ref["value"] = 600.0
-                            if attempt == 2:
-                                detail = "Improving punctuation... (attempt 2)"
-                            elif attempt == 3:
-                                detail = "Improving punctuation... (attempt 3)"
-                            else:
-                                detail = "Improving punctuation..."
+                            was_active = self._punctuation_active
                             self._punctuation_active = True
                             self._punctuation_attempt = attempt
-                            self._emit_step_progress(
-                                ProgressStep.FIX_PUNCTUATION,
-                                0.0,
-                                "Reviewing punctuation",
-                                force=True,
-                            )
-                            self._emit_step_event(
-                                ChecklistStep.FIX_PUNCTUATION,
-                                StepState.START,
-                                reason_text=detail,
-                            )
+                            if not self._punctuation_final_emitted:
+                                self._emit_step_progress(
+                                    ProgressStep.FIX_PUNCTUATION,
+                                    0.0,
+                                    "Reviewing punctuation",
+                                    force=True,
+                                )
+                            if not was_active:
+                                self._emit_step_event(
+                                    ChecklistStep.FIX_PUNCTUATION,
+                                    StepState.START,
+                                    reason_text="Analyzing...",
+                                )
                 if text.startswith("PUNCT_RESCUE_DONE"):
                     if (
                         self.transcription_settings
@@ -1857,7 +1889,11 @@ class Worker(QtCore.QObject):
                         _mark_load_model_done()
                     if not write_started:
                         write_started = True
-                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                        self._emit_step_event(
+                            ChecklistStep.WRITE_SUBTITLES,
+                            StepState.START,
+                            reason_text="Listening to audio...",
+                        )
                     if duration_seconds is None and not smooth_transcribe_started:
                         smooth_transcribe_started = True
                         self._start_smooth_progress(
@@ -1906,7 +1942,11 @@ class Worker(QtCore.QObject):
                     self._stop_transcribe_estimator()
                     if not write_started:
                         write_started = True
-                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                        self._emit_step_event(
+                            ChecklistStep.WRITE_SUBTITLES,
+                            StepState.START,
+                            reason_text="Listening to audio...",
+                        )
                     self._emit_step_progress(
                         ProgressStep.TRANSCRIBE,
                         1.0,
