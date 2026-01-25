@@ -209,6 +209,7 @@ class Worker(QtCore.QObject):
         self._alignment_last_emit = 0.0
         self._alignment_progress_context: Optional[str] = None
         self._export_alignment_progress = 0.0
+        self._alignment_has_real_progress = False
 
     def cancel(self) -> None:
         with self._skip_lock:
@@ -401,6 +402,37 @@ class Worker(QtCore.QObject):
         self._ensure_word_timings_file(srt_path, cues)
         self._emit_transcription_post_steps()
 
+        if self.subtitle_mode == "word_highlight":
+            try:
+                timing_state, timing_reason = self._run_alignment_if_needed(
+                    srt_path,
+                    audio_path_for_srt(srt_path),
+                    context="create_subtitles",
+                )
+            except AlignmentError as exc:
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.FAILED,
+                    reason_code=exc.reason_code,
+                )
+                raise RuntimeError(
+                    "Word highlighting couldn’t be synced to the audio. "
+                    "Try generating subtitles again. If it still fails, switch to Static mode."
+                ) from exc
+            if timing_state == StepState.SKIPPED:
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.SKIPPED,
+                    reason_text=timing_reason or "already timed",
+                )
+            else:
+                self._emit_step_event(
+                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                    StepState.DONE,
+                    reason_text=timing_reason,
+                )
+
+        self._emit_step_event(ChecklistStep.PREPARING_PREVIEW, StepState.START)
         preview_frame_path: Optional[Path] = None
         preview_subtitle_text: Optional[str] = None
         preview_timestamp_seconds: Optional[float] = None
@@ -466,6 +498,13 @@ class Worker(QtCore.QObject):
                 )
         except Exception as exc:  # noqa: BLE001
             self.signals.log.emit(f"Preview generation failed: {exc}", False)
+        finally:
+            preview_detail = "Ready" if preview_frame_path else "Skipped"
+            self._emit_step_event(
+                ChecklistStep.PREPARING_PREVIEW,
+                StepState.DONE,
+                reason_text=preview_detail,
+            )
         if settings.keep_extracted_audio:
             self.signals.log.emit(
                 f"Keeping extracted audio file: {audio_path}",
@@ -1829,8 +1868,6 @@ class Worker(QtCore.QObject):
                     )
                 if not load_model_done:
                     _mark_load_model_done()
-                if write_started:
-                    self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.DONE)
                 return
 
             diagnostics = [
@@ -1969,6 +2006,7 @@ class Worker(QtCore.QObject):
             self._alignment_words_total = self._count_words_in_cues(srt_path)
             self._alignment_words_current = 0
             self._alignment_last_emit = 0.0
+            self._alignment_has_real_progress = False
             if self._alignment_words_total == 0:
                 self._update_export_alignment_progress(
                     self._alignment_words_current,
@@ -1991,17 +2029,23 @@ class Worker(QtCore.QObject):
                     reason_text=self._format_alignment_detail(
                         self._alignment_words_current,
                         self._alignment_words_total,
+                        estimated=True,
                     ),
                 )
                 start_time = time.monotonic()
 
                 def _estimate_alignment_progress() -> None:
-                    ramp_seconds = 40.0
-                    cap_ratio = 0.9
+                    ramp_seconds = min(
+                        max(self._alignment_words_total * 0.08, 40.0),
+                        900.0,
+                    )
+                    cap_ratio = 0.97
                     while not estimator_stop.is_set() and not alignment_real_progress.is_set():
                         elapsed = time.monotonic() - start_time
                         fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
                         estimated_current = int(self._alignment_words_total * fraction)
+                        if estimated_current == 0 and elapsed >= 1.0:
+                            estimated_current = 1
                         with alignment_lock:
                             if estimated_current > alignment_target["current"]:
                                 alignment_target["current"] = estimated_current
@@ -2075,6 +2119,7 @@ class Worker(QtCore.QObject):
                 total = int(match.group(2))
                 if current > 0:
                     alignment_real_progress.set()
+                    self._alignment_has_real_progress = True
                 with alignment_lock:
                     alignment_target["total"] = total
                     if current > alignment_target["current"]:
@@ -2146,6 +2191,7 @@ class Worker(QtCore.QObject):
                 alignment_target["current"] = total_words
             self._alignment_words_current = total_words
             self._alignment_words_total = total_words
+            self._alignment_has_real_progress = True
             self._maybe_emit_alignment_progress(total_words, total_words)
             return StepState.DONE, self._format_alignment_detail(total_words, total_words)
         finally:
@@ -2475,8 +2521,15 @@ class Worker(QtCore.QObject):
             total += len(re.findall(r"\w+", cue.text, flags=re.UNICODE))
         return total
 
-    def _format_alignment_detail(self, current: int, total: int) -> str:
-        return f"Words timed: {current:,}/{total:,}"
+    def _format_alignment_detail(
+        self,
+        current: int,
+        total: int,
+        *,
+        estimated: bool = False,
+    ) -> str:
+        prefix = "~ " if estimated else ""
+        return f"{prefix}{current:,}/{total:,} words"
 
     def _maybe_emit_alignment_progress(self, current: int, total: int) -> None:
         if total <= 0:
@@ -2487,7 +2540,11 @@ class Worker(QtCore.QObject):
             self._emit_step_event(
                 ChecklistStep.TIMING_WORD_HIGHLIGHTS,
                 StepState.START,
-                reason_text=self._format_alignment_detail(current, total),
+                reason_text=self._format_alignment_detail(
+                    current,
+                    total,
+                    estimated=not self._alignment_has_real_progress,
+                ),
             )
             self._update_export_alignment_progress(current, total)
 

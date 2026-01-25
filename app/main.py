@@ -2857,6 +2857,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 steps.append(
                     (ChecklistStep.FIX_MISSING_SUBTITLES, "Checking for gaps in subtitles")
                 )
+            if subtitle_mode == "word_highlight":
+                steps.append((ChecklistStep.TIMING_WORD_HIGHLIGHTS, "Timing word highlighting"))
             steps.append((ChecklistStep.PREPARING_PREVIEW, "Preparing preview"))
             return steps
         if task_type == TaskType.BURN_IN:
