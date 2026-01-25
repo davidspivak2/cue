@@ -2863,8 +2863,6 @@ class MainWindow(QtWidgets.QMainWindow):
             return steps
         if task_type == TaskType.BURN_IN:
             steps = [(ChecklistStep.GET_VIDEO_INFO, "Getting video info")]
-            if subtitle_mode == "word_highlight":
-                steps.append((ChecklistStep.TIMING_WORD_HIGHLIGHTS, "Timing word highlights"))
             steps.extend(
                 [
                     (ChecklistStep.ADD_SUBTITLES, "Adding subtitles to video"),

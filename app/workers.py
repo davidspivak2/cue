@@ -210,6 +210,7 @@ class Worker(QtCore.QObject):
         self._alignment_progress_context: Optional[str] = None
         self._export_alignment_progress = 0.0
         self._alignment_has_real_progress = False
+        self._alignment_emit_events = True
 
     def cancel(self) -> None:
         with self._skip_lock:
@@ -831,41 +832,10 @@ class Worker(QtCore.QObject):
             raise ValueError("Unable to determine video duration for overlay export")
 
         if self.subtitle_mode == "word_highlight":
-            self._emit_step_event(ChecklistStep.TIMING_WORD_HIGHLIGHTS, StepState.START)
-            self._alignment_progress_context = "export"
-            self._export_alignment_progress = 0.0
-            self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Preparing export", force=True)
-            try:
-                timing_state, timing_reason = self._run_alignment_if_needed(
-                    srt_path,
-                    audio_path_for_srt(srt_path),
-                    context="export",
-                    allow_cpu_retry=True,
-                )
-            except AlignmentError as exc:
-                self._alignment_progress_context = None
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.FAILED,
-                    reason_code=exc.reason_code,
-                )
-                raise RuntimeError(
-                    "Word highlighting couldn’t be synced to the audio. "
-                    "Try generating subtitles again. If it still fails, switch to Static mode."
-                ) from exc
-            self._alignment_progress_context = None
-            if timing_state == StepState.SKIPPED:
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.SKIPPED,
-                    reason_text=timing_reason or "already timed",
-                )
-            else:
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.DONE,
-                    reason_text=timing_reason,
-                )
+            self._ensure_word_timings_ready_for_export(
+                srt_path,
+                audio_path_for_srt(srt_path),
+            )
         self._emit_step_progress(ProgressStep.EXPORT, 0.10, "Preparing export", force=True)
 
         plan = build_graphics_overlay_plan(
@@ -1968,8 +1938,10 @@ class Worker(QtCore.QObject):
         context: str,
         allow_cpu_retry: bool = False,
         force_cpu: bool = False,
+        emit_step_events: bool = True,
     ) -> tuple[str, Optional[str]]:
         self._alignment_progress_context = context
+        self._alignment_emit_events = emit_step_events
         try:
             plan = build_alignment_plan(
                 subtitle_mode=self.subtitle_mode,
@@ -2027,7 +1999,7 @@ class Worker(QtCore.QObject):
                     "current": 0,
                     "total": self._alignment_words_total,
                 }
-                if self._alignment_words_total:
+                if self._alignment_words_total and emit_step_events:
                     self._emit_step_event(
                         ChecklistStep.TIMING_WORD_HIGHLIGHTS,
                         StepState.START,
@@ -2223,11 +2195,12 @@ class Worker(QtCore.QObject):
                         "Alignment failed; retrying on CPU.",
                         True,
                     )
-                    self._emit_step_event(
-                        ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                        StepState.START,
-                        reason_text="Retrying alignment on CPU...",
-                    )
+                    if emit_step_events:
+                        self._emit_step_event(
+                            ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                            StepState.START,
+                            reason_text="Retrying alignment on CPU...",
+                        )
                     try:
                         return self._run_alignment_if_needed(
                             srt_path,
@@ -2235,6 +2208,7 @@ class Worker(QtCore.QObject):
                             context=context,
                             allow_cpu_retry=False,
                             force_cpu=True,
+                            emit_step_events=emit_step_events,
                         )
                     except AlignmentError as retry_exc:
                         raise AlignmentError(
@@ -2245,6 +2219,7 @@ class Worker(QtCore.QObject):
                 raise
         finally:
             self._alignment_progress_context = None
+            self._alignment_emit_events = True
 
     def _maybe_write_diagnostics(
         self,
@@ -2577,10 +2552,12 @@ class Worker(QtCore.QObject):
         *,
         estimated: bool = False,
     ) -> str:
-        prefix = "~ " if estimated else ""
-        return f"{prefix}{current:,}/{total:,} words"
+        return f"{current:,}/{total:,} words timed"
 
     def _maybe_emit_alignment_progress(self, current: int, total: int) -> None:
+        if not getattr(self, "_alignment_emit_events", True):
+            self._update_export_alignment_progress(current, total)
+            return
         if total <= 0:
             return
         now = time.monotonic()
@@ -2596,6 +2573,26 @@ class Worker(QtCore.QObject):
                 ),
             )
             self._update_export_alignment_progress(current, total)
+
+    def _ensure_word_timings_ready_for_export(self, srt_path: Path, audio_path: Path) -> None:
+        plan = build_alignment_plan(
+            subtitle_mode=self.subtitle_mode,
+            srt_path=srt_path,
+            audio_path=audio_path,
+            language="he",
+            prefer_gpu=True,
+        )
+        self.signals.log.emit(
+            "Alignment needed? "
+            f"{str(plan.should_run).lower()} reason={plan.reason} (context=export)",
+            True,
+        )
+        if not plan.should_run:
+            return
+        raise RuntimeError(
+            "Word highlight timings are missing or out of date. "
+            "Please regenerate subtitles or re-time word highlights before exporting."
+        )
 
     def _update_export_alignment_progress(self, current: int, total: int) -> None:
         if self._alignment_progress_context != "export":
