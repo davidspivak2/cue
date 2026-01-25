@@ -4,6 +4,7 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import math
 import re
 import sys
 from typing import Any, Optional
@@ -23,6 +24,11 @@ ALIGN_CHUNK_SECONDS = 600.0
 def _print(message: str) -> None:
     sys.stdout.buffer.write((message + "\n").encode("utf-8", errors="backslashreplace"))
     sys.stdout.buffer.flush()
+
+
+def _eprint(message: str) -> None:
+    sys.stderr.buffer.write((message + "\n").encode("utf-8", errors="backslashreplace"))
+    sys.stderr.buffer.flush()
 
 
 @dataclass(frozen=True)
@@ -128,6 +134,36 @@ def _count_tokens_in_cues(cues: list[SrtCue]) -> int:
     for cue in cues:
         total += len(re.findall(r"\S+", cue.text))
     return total
+
+
+def _is_real_number(value: object) -> bool:
+    if not isinstance(value, (int, float)):
+        return False
+    return not math.isnan(float(value))
+
+
+def _summarize_alignment_stats(
+    aligned_segments: list[dict[str, Any]],
+) -> tuple[int, int, int, int]:
+    segments_total = len(aligned_segments)
+    segments_with_words = 0
+    words_total_raw = 0
+    words_with_times = 0
+    for segment in aligned_segments:
+        words = segment.get("words")
+        if not isinstance(words, list):
+            continue
+        if words:
+            segments_with_words += 1
+        words_total_raw += len(words)
+        for word in words:
+            if not isinstance(word, dict):
+                continue
+            start = word.get("start")
+            end = word.get("end")
+            if _is_real_number(start) and _is_real_number(end):
+                words_with_times += 1
+    return segments_total, segments_with_words, words_total_raw, words_with_times
 
 
 def _segment_has_usable_words(segment: dict[str, Any]) -> bool:
@@ -341,6 +377,20 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
         return_char_alignments=False,
     )
     aligned_segments = align_result.get("segments", [])
+    (
+        segments_total,
+        segments_with_words,
+        words_total_raw,
+        words_with_times,
+    ) = _summarize_alignment_stats(aligned_segments)
+    align_stats_line = (
+        "ALIGN_STATS "
+        f"segments_total={segments_total} "
+        f"segments_with_words={segments_with_words} "
+        f"words_total_raw={words_total_raw} "
+        f"words_with_times={words_with_times}"
+    )
+    _print(align_stats_line)
     mapped_segments = _map_aligned_segments(segments, aligned_segments)
     if not _has_usable_word_timings(aligned_segments):
         _print("ALIGN_FALLBACK mode=chunked_retry")
@@ -405,8 +455,20 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
         srt_hash=srt_hash,
         total_words=total_words,
     )
-    save_word_timings_json(config.output_path, document)
     total_words = sum(len(cue.words) for cue in document.cues)
+    cues_with_words = sum(1 for cue in document.cues if cue.words)
+    align_output_line = (
+        f"ALIGN_OUTPUT total_words={total_words} "
+        f"cues={len(document.cues)} cues_with_words={cues_with_words}"
+    )
+    _print(align_output_line)
+    if total_words == 0:
+        _eprint(
+            "ALIGN_ERROR alignment produced no timed words. "
+            f"{align_stats_line} {align_output_line}"
+        )
+        raise RuntimeError("Alignment produced no timed words.")
+    save_word_timings_json(config.output_path, document)
     _print(f"ALIGN_DONE words={total_words} output={config.output_path}")
     return document
 
