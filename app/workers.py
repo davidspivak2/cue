@@ -433,6 +433,12 @@ class Worker(QtCore.QObject):
                     reason_text=timing_reason,
                 )
 
+        self._emit_step_progress(
+            ProgressStep.PREPARING_PREVIEW,
+            0.0,
+            "Preparing preview",
+            force=True,
+        )
         self._emit_step_event(ChecklistStep.PREPARING_PREVIEW, StepState.START)
         preview_frame_path: Optional[Path] = None
         preview_subtitle_text: Optional[str] = None
@@ -506,6 +512,12 @@ class Worker(QtCore.QObject):
                 StepState.DONE,
                 reason_text=preview_detail,
             )
+            self._emit_step_progress(
+                ProgressStep.PREPARING_PREVIEW,
+                1.0,
+                "Preparing preview",
+                force=True,
+            )
         if settings.keep_extracted_audio:
             self.signals.log.emit(
                 f"Keeping extracted audio file: {audio_path}",
@@ -555,17 +567,41 @@ class Worker(QtCore.QObject):
                         detail = "Improved punctuation"
                     else:
                         detail = f"Improved punctuation ({rescue_attempts} attempts)"
+                    self._emit_step_progress(
+                        ProgressStep.FIX_PUNCTUATION,
+                        0.0,
+                        "Reviewing punctuation",
+                        force=True,
+                    )
                     self._emit_step_event(
                         ChecklistStep.FIX_PUNCTUATION,
                         StepState.DONE,
                         reason_text=detail,
                     )
+                    self._emit_step_progress(
+                        ProgressStep.FIX_PUNCTUATION,
+                        1.0,
+                        detail,
+                        force=True,
+                    )
                     self._punctuation_final_emitted = True
                 else:
+                    self._emit_step_progress(
+                        ProgressStep.FIX_PUNCTUATION,
+                        0.0,
+                        "Reviewing punctuation",
+                        force=True,
+                    )
                     self._emit_step_event(
                         ChecklistStep.FIX_PUNCTUATION,
                         StepState.DONE,
                         reason_text="Looks good!",
+                    )
+                    self._emit_step_progress(
+                        ProgressStep.FIX_PUNCTUATION,
+                        1.0,
+                        "Looks good!",
+                        force=True,
                     )
                     self._punctuation_final_emitted = True
 
@@ -585,10 +621,22 @@ class Worker(QtCore.QObject):
                 detail = f"Found {gaps_found} gaps, filled {gaps_restored}"
             else:
                 detail = f"Found {gaps_found} gaps"
+            self._emit_step_progress(
+                ProgressStep.FIX_GAPS,
+                0.0,
+                "Checking for gaps in subtitles",
+                force=True,
+            )
             self._emit_step_event(
                 ChecklistStep.FIX_MISSING_SUBTITLES,
                 StepState.DONE,
                 reason_text=detail,
+            )
+            self._emit_step_progress(
+                ProgressStep.FIX_GAPS,
+                1.0,
+                detail,
+                force=True,
             )
 
     def _select_missing_subtitles_reason_code(self, vad_stats: dict[str, object]) -> str:
@@ -1632,10 +1680,22 @@ class Worker(QtCore.QObject):
                             attempt = int(attempt_match.group(1))
                             chosen = chosen_match.group(1) == "True"
                             if attempt == 0 and chosen:
+                                self._emit_step_progress(
+                                    ProgressStep.FIX_PUNCTUATION,
+                                    0.0,
+                                    "Reviewing punctuation",
+                                    force=True,
+                                )
                                 self._emit_step_event(
                                     ChecklistStep.FIX_PUNCTUATION,
                                     StepState.DONE,
                                     reason_text="Looks good!",
+                                )
+                                self._emit_step_progress(
+                                    ProgressStep.FIX_PUNCTUATION,
+                                    1.0,
+                                    "Looks good!",
+                                    force=True,
                                 )
                                 self._punctuation_final_emitted = True
                 if text.startswith("PUNCT_RESCUE_START"):
@@ -1657,6 +1717,12 @@ class Worker(QtCore.QObject):
                                 detail = "Improving punctuation..."
                             self._punctuation_active = True
                             self._punctuation_attempt = attempt
+                            self._emit_step_progress(
+                                ProgressStep.FIX_PUNCTUATION,
+                                0.0,
+                                "Reviewing punctuation",
+                                force=True,
+                            )
                             self._emit_step_event(
                                 ChecklistStep.FIX_PUNCTUATION,
                                 StepState.START,
@@ -1681,6 +1747,12 @@ class Worker(QtCore.QObject):
                             StepState.DONE,
                             reason_text=detail,
                         )
+                        self._emit_step_progress(
+                            ProgressStep.FIX_PUNCTUATION,
+                            1.0,
+                            detail,
+                            force=True,
+                        )
                         self._punctuation_final_emitted = True
                 if text.startswith("VAD_GAP_RESCUE_START"):
                     if (
@@ -1690,6 +1762,12 @@ class Worker(QtCore.QObject):
                         self._gap_found_count = 0
                         if not self._gap_active:
                             self._gap_active = True
+                            self._emit_step_progress(
+                                ProgressStep.FIX_GAPS,
+                                0.0,
+                                "Checking for gaps in subtitles",
+                                force=True,
+                            )
                             self._emit_step_event(
                                 ChecklistStep.FIX_MISSING_SUBTITLES,
                                 StepState.START,
@@ -1716,6 +1794,12 @@ class Worker(QtCore.QObject):
                             StepState.DONE,
                             reason_text=detail,
                         )
+                        self._emit_step_progress(
+                            ProgressStep.FIX_GAPS,
+                            1.0,
+                            detail,
+                            force=True,
+                        )
                 if text.startswith("VAD_GAP_DETECTED") and self._gap_active:
                     self._gap_found_count += 1
                     detail = f"Scanning... (found {self._gap_found_count} gaps)"
@@ -1734,6 +1818,12 @@ class Worker(QtCore.QObject):
                         StepState.SKIPPED,
                         reason_text="Skipped",
                     )
+                    self._emit_step_progress(
+                        ProgressStep.FIX_PUNCTUATION,
+                        1.0,
+                        "Skipped",
+                        force=True,
+                    )
                     continue
                 if text == "VAD_GAP_RESCUE_SKIPPED":
                     self._gap_active = False
@@ -1743,6 +1833,12 @@ class Worker(QtCore.QObject):
                         ChecklistStep.FIX_MISSING_SUBTITLES,
                         StepState.SKIPPED,
                         reason_text="Skipped",
+                    )
+                    self._emit_step_progress(
+                        ProgressStep.FIX_GAPS,
+                        1.0,
+                        "Skipped",
+                        force=True,
                     )
                     continue
                 if text.startswith("MODE"):
@@ -1957,6 +2053,13 @@ class Worker(QtCore.QObject):
                 True,
             )
             if not plan.should_run:
+                if context == "create_subtitles":
+                    self._emit_step_progress(
+                        ProgressStep.ALIGN_WORDS,
+                        1.0,
+                        "Timing word highlighting",
+                        force=True,
+                    )
                 return StepState.SKIPPED, "already timed"
             if plan.reason == "word_timings_has_no_words":
                 self.signals.log.emit(
@@ -1984,6 +2087,13 @@ class Worker(QtCore.QObject):
                 self._alignment_words_current = 0
                 self._alignment_last_emit = 0.0
                 self._alignment_has_real_progress = False
+                if context == "create_subtitles":
+                    self._emit_step_progress(
+                        ProgressStep.ALIGN_WORDS,
+                        0.0,
+                        "Timing word highlighting",
+                        force=True,
+                    )
                 if self._alignment_words_total == 0:
                     self._update_export_alignment_progress(
                         self._alignment_words_current,
@@ -2184,6 +2294,13 @@ class Worker(QtCore.QObject):
                 self._alignment_words_total = total_words
                 self._alignment_has_real_progress = True
                 self._maybe_emit_alignment_progress(total_words, total_words)
+                if context == "create_subtitles":
+                    self._emit_step_progress(
+                        ProgressStep.ALIGN_WORDS,
+                        1.0,
+                        "Timing word highlighting",
+                        force=True,
+                    )
                 return total_words
 
             try:
@@ -2572,6 +2689,13 @@ class Worker(QtCore.QObject):
                     estimated=not self._alignment_has_real_progress,
                 ),
             )
+            if self._alignment_progress_context == "create_subtitles":
+                self._emit_step_progress(
+                    ProgressStep.ALIGN_WORDS,
+                    current / total,
+                    "Timing word highlighting",
+                    force=True,
+                )
             self._update_export_alignment_progress(current, total)
 
     def _ensure_word_timings_ready_for_export(self, srt_path: Path, audio_path: Path) -> None:
