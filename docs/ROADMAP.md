@@ -49,9 +49,31 @@
 
 ### Milestone 0 — Stabilization
 0.1 PR12 — Error UX + details drawer + copy diagnostics
+- Deliverable:
+  - Error UI includes a details drawer and a “Copy diagnostics” action.
+  - Diagnostics tools remain in Settings only.
+- Acceptance criteria:
+  - Trigger an error: user can open details drawer and copy diagnostics text.
+  - No diagnostics tools appear outside Settings.
+
 0.2 PR13 — Packaging hardening / smoke tests
+- Deliverable:
+  - Packaging flow hardened for release and smoke tests run against packaged builds.
+- Acceptance criteria:
+  - Packaged build launches and completes the golden-path smoke test without regressions.
+
 0.3 PR15 — Copy polish + CTA reduction sweep
-0.4 Export optimization — cache video stream info earlier + cheap revalidate; potentially remove/adjust “Getting video info” checklist row
+- Deliverable:
+  - Copy polish applied and CTA reduction pass completed across UI surfaces.
+- Acceptance criteria:
+  - Strings match the approved copywriting glossary and CTA count is minimized per spec.
+
+0.4 Export optimization — cache video stream info earlier + cheap revalidate; adjust “Getting video info” checklist row if appropriate
+- Deliverable:
+  - Video stream info cached earlier; export path uses cheap revalidation.
+  - “Getting video info” checklist row removed or adjusted if no longer accurate.
+- Acceptance criteria:
+  - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
 
 Definition of done:
 - App is stable enough to proceed with refactors needed for redesign without frequent regressions.
@@ -238,16 +260,52 @@ Definition of done:
 
 ### Milestone 8 — Visual system conformance pass
 8.1 Token alignment (radius, borders, typography scale)
+- Deliverable:
+  - Radius, border, and typography tokens aligned with UX spec.
+- Acceptance criteria:
+  - Visual tokens match the UX spec and no regressions remain.
+
 8.2 Focus/hover/disabled states compliance
+- Deliverable:
+  - Focus, hover, and disabled states conform to the UX spec.
+- Acceptance criteria:
+  - UI interaction states match UX spec behaviors.
+
 8.3 Remove remaining old UI surfaces
+- Deliverable:
+  - Legacy UI surfaces replaced by redesign components.
+- Acceptance criteria:
+  - No old UI surfaces remain in the redesign flow.
 
 Definition of done:
 - UI consistently matches the UX spec visual system.
 
 ### Milestone 9 — Cleanup + ship readiness
 9.1 Remove obsolete screens/states replaced by Project Hub/Workbench
+- Deliverable:
+  - Old screens/states removed and replaced by Project Hub/Workbench flow.
+- Acceptance criteria:
+  - No obsolete screens or states remain accessible.
+
 9.2 Packaging + smoke tests (if not already satisfied)
+- Deliverable:
+  - Packaging hardening complete; smoke tests repeatable for releases.
+- Acceptance criteria:
+  - Packaged build launches and completes the golden-path smoke test.
+
 9.3 Final regression checklist (Create Subtitles / edit / style / export / relink / multi-project)
+- Deliverable:
+  - Final regression checklist executed across core flows.
+- Acceptance criteria:
+  - No regressions in Create Subtitles, edit, style, export, relink, or multi-project flows.
+
+9.4 Remove legacy Subtitle Edit integration
+- Deliverable:
+  - Subtitle Edit integration removed from UI, config, and launcher paths.
+  - `subtitle_edit_path` config key removed.
+- Acceptance criteria:
+  - No UI entry points or config references remain for Subtitle Edit.
+  - Codebase contains no Subtitle Edit launcher or integration logic.
 
 Definition of done:
 - All UX spec sections B–H are implemented; ROADMAP has no remaining redesign items.
@@ -256,21 +314,19 @@ Definition of done:
 - Keep this short; ideas go here only if they are explicitly not scheduled.
 
 ## Completed
-- A short bullet list only (do not paste old plans here; those go in the Archive appendix below).
+- A short bullet list only (do not paste old plans here; those go in the archived appendices below).
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.
 
-## Appendix: Archived documents (verbatim)
-- “CAPTION_GRAPHICS_OVERLAY_PLAN.md (verbatim)”
-- “PR10_WORD_HIGHLIGHT_PLAN.md (verbatim)”
+## Appendix: Archived plans (original content)
 
-### CAPTION_GRAPHICS_OVERLAY_PLAN.md (verbatim)
+### Appendix: Archived — Caption graphics overlay plan (original)
 # Caption Graphics Overlay Plan
 
 Status: Completed. This plan is kept for historical reference. For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
 
-## Status update (snapshot from 2025-02-14; see GUI context for current status)
+## Status update (snapshot from 2025-02-14; see the archived project context appendix in the UX spec for current status)
 - Overlay PR5 is complete (streaming overlay export is in place with the default graphics overlay path).
 - Overlay PR6 is complete (performance pass landed).
 - Overlay PR7 is complete (word background rendering, mutual exclusivity, and UI controls for line/word background color, opacity, padding, and corner radius are in place).
@@ -538,7 +594,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Check logs for state change counts vs. expected word transitions.
   - Compare debug burn output to expected word indices at key timestamps.
 
-### PR10_WORD_HIGHLIGHT_PLAN.md (verbatim)
+### Appendix: Archived — Word highlight plan (PR10) (original)
 # PR10 — Word Highlight Subtitles (Karaoke-Style) — Implementation Plan
 
 Status: Completed. This plan is kept for historical reference. For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
@@ -584,7 +640,7 @@ Last updated: 2026-02-27
 - **Primary files likely touched:**
   - `app/main.py`
   - `app/ui/state.py`
-  - `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`
+  - `project context appendix in the UX spec`
 - **Implementation notes:**
   - Keep defaults as current behavior (static) until Task 10 is complete.
   - Ensure config migrations are backward-compatible.
@@ -656,7 +712,7 @@ Last updated: 2026-02-27
   - `app/word_timing_schema.py`
   - `app/srt_utils.py`
   - `app/workers.py`
-  - `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`
+  - `project context appendix in the UX spec`
 - **Implementation notes:**
   - Include checksum/hash of SRT to detect staleness.
 - **Acceptance criteria:**
@@ -707,8 +763,8 @@ Last updated: 2026-02-27
   - `app/main.py`
   - `app/ui/subtitles_ready.py`
   - `app/diagnostics.py`
-  - `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md`
-  - `docs/PR10_WORD_HIGHLIGHT_PLAN.md`
+  - `project context appendix in the UX spec`
+  - `word highlight plan appendix in ROADMAP`
 - **Implementation notes:**
   - Ensure Static mode remains available and unchanged.
 - **Acceptance criteria:**

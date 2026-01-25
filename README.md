@@ -6,6 +6,7 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - ROADMAP.md is the only task list and single source of truth for “what to do next.”
 - HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md is the design contract for the redesign.
 - Historical docs were consolidated; archived contents now live in the ROADMAP appendices, the UX spec appendix, and the README appendices below.
+- README describes current behavior in main; future redesign behavior is defined in HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md.
 
 ## Features
 - Drag & drop or browse a single video (`.mp4`, `.mkv`, `.mov`, `.m4v`).
@@ -24,7 +25,7 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Checklist above the progress bar shows in-progress/completed statuses during subtitle creation and export.
 - Optional diagnostics bundle: zip logs + outputs automatically on exit.
 - Transcription includes VAD gap rescue to recover missed speech in large silent gaps.
-- Export is available immediately after subtitle creation (Subtitle Edit is optional).
+- Export is available immediately after subtitle creation in the Subtitles Ready view.
 
 ## Project structure
 ```
@@ -82,9 +83,9 @@ For more detail, see the UX/UI design contract in [`docs/HEBREW_SUBTITLE_GUI_UX_
 - **CUDA missing DLLs / GPU error**: The app automatically falls back to CPU and logs the CUDA error.
 - **FFmpeg not found**: Run `download_ffmpeg.bat` or install FFmpeg via winget.
 - **Audio copy fails during burn-in**: The app retries with AAC audio and logs the retry.
-- **Graphics overlay export debugging**: See the “Appendix: Archived GRAPHICS_OVERLAY_DEBUGGING.md (verbatim)” section below.
+- **Graphics overlay export debugging**: See the “Appendix: Archived — Graphics overlay debugging notes (original)” section below.
 
-## Appendix: Archived transcription_pipeline.md (verbatim)
+## Appendix: Archived — Transcription pipeline (original)
 # Transcription pipeline
 
 This document describes how the app extracts audio, launches the transcription worker,
@@ -218,7 +219,7 @@ When subtitles are ready, the GUI prepares a preview moment:
    In Word highlight mode, the still preview highlights the **second word** when no
    explicit word index is supplied (preview-only behavior; not time-accurate).
 
-## Appendix: Archived GRAPHICS_OVERLAY_DEBUGGING.md (verbatim)
+## Appendix: Archived — Graphics overlay debugging notes (original)
 # Graphics Overlay Renderer Debugging Notes
 
 ## What the graphics overlay renderer does
@@ -234,7 +235,7 @@ The graphics overlay renderer draws subtitle text into RGBA frames (using the sa
 - If “Zip logs and outputs on exit” is enabled, the app writes `hebrew_subtitles_bundle_*.zip` next to the selected video; it includes logs, diagnostics JSON, and output artifacts.
 
 ## How to enable diagnostics
-See the Diagnostics section in `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md` (Section 3) for the full settings reference. The exact checkbox labels you should look for are:
+In the app, open Settings → Diagnostics and enable the following checkboxes (as needed):
 - “Enable diagnostics logging”
 - “Write diagnostics on successful completion”
 - “Zip logs and outputs on exit”
@@ -260,22 +261,21 @@ See the Diagnostics section in `docs/HEBREW_SUBTITLE_GUI_CONTEXT.md` (Section 3)
 - If audio copy fails, verify the retry uses AAC (logged as `burn_in_audio_mode`).
 - Use the diagnostics JSON to cross-check paths (video, SRT, output) when mismatches are suspected.
 
-## Appendix: Archived DOCUMENTATION_INDEX.md (verbatim)
+## Appendix: Archived — Documentation index (original)
 # Documentation index
 
 Welcome to the HebrewSubtitleGUI documentation set. Use this page to find the right guide for your task.
 
 ## Start here
-- Roadmap (upcoming work): [`ROADMAP.md`](ROADMAP.md).
-- New contributors: [`HEBREW_SUBTITLE_GUI_CONTEXT.md`](HEBREW_SUBTITLE_GUI_CONTEXT.md) — product context, goals, and core workflows.
-- Developers: [`CONTRIBUTING.md`](CONTRIBUTING.md) — setup, development workflow, testing, and packaging steps.
-- Pipeline readers: [`transcription_pipeline.md`](transcription_pipeline.md) — end-to-end transcription pipeline walkthrough.
+- Roadmap (upcoming work): [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- Current behavior overview + archived references: [`README.md`](README.md).
+- Redesign contract: [`docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`](docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md).
+- Developers: [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
 ## Guides
-- [`HEBREW_SUBTITLE_GUI_CONTEXT.md`](HEBREW_SUBTITLE_GUI_CONTEXT.md) — product context, goals, and key user workflows.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — local setup, dev workflow, tests, and packaging notes.
-- [`transcription_pipeline.md`](transcription_pipeline.md) — transcription pipeline stages and data flow.
-- [`HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`](HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md) — UX/UI specification and design details.
-- [`CAPTION_GRAPHICS_OVERLAY_PLAN.md`](CAPTION_GRAPHICS_OVERLAY_PLAN.md) — graphics overlay plan for caption rendering (Completed plan / historical).
-- [`GRAPHICS_OVERLAY_DEBUGGING.md`](GRAPHICS_OVERLAY_DEBUGGING.md) — debugging guidance for graphics overlay rendering.
-- [`PR10_WORD_HIGHLIGHT_PLAN.md`](PR10_WORD_HIGHLIGHT_PLAN.md) — word highlight implementation plan and milestones (Completed plan / historical).
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — single source of truth for tasks and milestones.
+- [`docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`](docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md) — redesign contract and archived project context appendix.
+- [`README.md`](README.md) — current behavior summary and archived appendices:
+  - [Transcription pipeline appendix](README.md#appendix-archived--transcription-pipeline-original)
+  - [Graphics overlay debugging appendix](README.md#appendix-archived--graphics-overlay-debugging-notes-original)
+- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — setup, development workflow, tests, and packaging notes.
