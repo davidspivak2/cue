@@ -2552,7 +2552,7 @@ class Worker(QtCore.QObject):
         *,
         estimated: bool = False,
     ) -> str:
-        return f"{current:,}/{total:,} words"
+        return f"{current:,}/{total:,} words timed"
 
     def _maybe_emit_alignment_progress(self, current: int, total: int) -> None:
         if not getattr(self, "_alignment_emit_events", True):
