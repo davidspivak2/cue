@@ -127,6 +127,54 @@ def test_alignment_clears_stale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert is_word_timing_stale(output_path, srt_path) is False
 
 
+def test_alignment_handles_segment_mismatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    srt_path = tmp_path / "mismatch.srt"
+    wav_path = tmp_path / "mismatch.wav"
+    output_path = tmp_path / "mismatch.word_timings.json"
+    _write_srt(
+        srt_path,
+        "1\n00:00:00,000 --> 00:00:02,000\nאז\n\n"
+        "2\n00:00:02,000 --> 00:00:06,000\nשלום עולם\n",
+    )
+    wav_path.write_bytes(b"")
+    aligned_segments = [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "text": "אז",
+            "words": [{"word": "אז", "start": 0.2, "end": 0.5, "score": 0.9}],
+        },
+        {
+            "start": 2.0,
+            "end": 4.0,
+            "text": "שלום",
+            "words": [{"word": "שלום", "start": 2.2, "end": 2.8, "score": 0.85}],
+        },
+        {
+            "start": 4.0,
+            "end": 6.0,
+            "text": "עולם",
+            "words": [{"word": "עולם", "start": 4.2, "end": 4.7, "score": 0.8}],
+        },
+    ]
+    _make_stub_whisperx(monkeypatch, aligned_segments)
+    config = AlignmentConfig(
+        wav_path=wav_path,
+        srt_path=srt_path,
+        output_path=output_path,
+        language="he",
+        prefer_gpu=False,
+        device="cpu",
+        align_model=None,
+    )
+    run_alignment(config)
+    doc = load_word_timings_json(output_path)
+    assert sum(len(cue.words) for cue in doc.cues) > 0
+    assert [word.text for word in doc.cues[1].words] == ["שלום", "עולם"]
+
+
 def test_build_alignment_plan_for_preview(tmp_path: Path) -> None:
     srt_path = tmp_path / "sample.srt"
     audio_path = tmp_path / "sample_audio_for_whisper.wav"
