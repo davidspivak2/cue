@@ -1474,8 +1474,11 @@ class Worker(QtCore.QObject):
             done_seen = False
             done_srt_path: Optional[Path] = None
             load_model_done = False
-            detect_language_done = False
+            detect_started = False
+            detect_done = False
+            language_detected = False
             write_started = False
+            last_listen_detail_second = -1
             transcribe_config_json: Optional[str] = None
             watchdog_triggered = False
             watchdog_elapsed = 0.0
@@ -1518,6 +1521,57 @@ class Worker(QtCore.QObject):
                     ChecklistStep.LOAD_MODEL,
                     StepState.DONE,
                     reason_text=_friendly_model_name(model_detail_id),
+                )
+
+            def _format_listen_time(seconds: float) -> str:
+                total_seconds = int(max(seconds, 0.0))
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                secs = total_seconds % 60
+                return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+            def _build_listen_detail(current_seconds: float) -> str:
+                if duration_seconds is None:
+                    return "Listening to audio..."
+                total = max(duration_seconds, 0.0)
+                current = min(max(current_seconds, 0.0), total)
+                if total - current <= 0.5:
+                    current = total
+                return (
+                    "Listening to audio... "
+                    f"{_format_listen_time(current)}/{_format_listen_time(total)}"
+                )
+
+            def _ensure_detect_language_started() -> None:
+                nonlocal detect_started
+                if detect_started:
+                    return
+                detect_started = True
+                self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
+
+            def _ensure_write_started() -> None:
+                nonlocal write_started
+                if write_started:
+                    return
+                write_started = True
+                self._emit_step_event(
+                    ChecklistStep.WRITE_SUBTITLES,
+                    StepState.START,
+                    reason_text=_build_listen_detail(max_end_seconds),
+                )
+
+            def _maybe_update_listen_detail() -> None:
+                nonlocal last_listen_detail_second
+                if not write_started:
+                    return
+                current_second = int(max_end_seconds)
+                if current_second == last_listen_detail_second:
+                    return
+                last_listen_detail_second = current_second
+                self._emit_step_event(
+                    ChecklistStep.WRITE_SUBTITLES,
+                    StepState.START,
+                    reason_text=_build_listen_detail(max_end_seconds),
                 )
             if duration_seconds is None:
                 self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Loading model")
@@ -1629,23 +1683,23 @@ class Worker(QtCore.QObject):
                     _emit_load_model_start_detail()
                 if text.startswith("PROGRESS_END"):
                     _emit_log(text, False)
+                    try:
+                        end_value = float(text.split(" ", 1)[1])
+                    except (IndexError, ValueError):
+                        continue
+                    if end_value > max_end_seconds:
+                        max_end_seconds = end_value
                     if duration_seconds:
-                        try:
-                            end_value = float(text.split(" ", 1)[1])
-                        except (IndexError, ValueError):
-                            continue
-                        if end_value > max_end_seconds:
-                            max_end_seconds = end_value
-                            progress = min(0.99, max_end_seconds / duration_seconds)
-                            with progress_lock:
-                                real_progress = progress
-                                real_progress_seen = True
-                                transcribe_started = True
-                            self._emit_step_progress(
-                                ProgressStep.TRANSCRIBE,
-                                progress,
-                                "Listening to audio",
-                            )
+                        progress = min(0.99, max_end_seconds / duration_seconds)
+                        with progress_lock:
+                            real_progress = progress
+                            real_progress_seen = True
+                            transcribe_started = True
+                        self._emit_step_progress(
+                            ProgressStep.TRANSCRIBE,
+                            progress,
+                            "Listening to audio",
+                        )
                     else:
                         transcribe_started = True
                         if not smooth_transcribe_started:
@@ -1657,13 +1711,10 @@ class Worker(QtCore.QObject):
                             )
                     if not load_model_done:
                         _mark_load_model_done()
-                    if not write_started:
-                        write_started = True
-                        self._emit_step_event(
-                            ChecklistStep.WRITE_SUBTITLES,
-                            StepState.START,
-                            reason_text="Listening to audio...",
-                        )
+                    _ensure_detect_language_started()
+                    if language_detected:
+                        _ensure_write_started()
+                        _maybe_update_listen_detail()
                     now = time.monotonic()
                     if now - last_progress_log >= 2.0:
                         _emit_log("Listening progress update received.", True)
@@ -1671,21 +1722,7 @@ class Worker(QtCore.QObject):
                     continue
 
                 _emit_log(text, show_in_ui)
-                if text == "WRITE_SUBTITLES_ASSEMBLING":
-                    write_started = True
-                    self._emit_step_event(
-                        ChecklistStep.WRITE_SUBTITLES,
-                        StepState.START,
-                        reason_text="Assembling subtitles...",
-                    )
-                    continue
-                if text == "WRITE_SUBTITLES_FINALIZING":
-                    write_started = True
-                    self._emit_step_event(
-                        ChecklistStep.WRITE_SUBTITLES,
-                        StepState.START,
-                        reason_text="Finalizing...",
-                    )
+                if text in {"WRITE_SUBTITLES_ASSEMBLING", "WRITE_SUBTITLES_FINALIZING"}:
                     continue
                 if text == "PUNCT_REVIEW_START":
                     self._punctuation_active = True
@@ -1887,13 +1924,10 @@ class Worker(QtCore.QObject):
                         transcribe_started = True
                     if not load_model_done:
                         _mark_load_model_done()
-                    if not write_started:
-                        write_started = True
-                        self._emit_step_event(
-                            ChecklistStep.WRITE_SUBTITLES,
-                            StepState.START,
-                            reason_text="Listening to audio...",
-                        )
+                    _ensure_detect_language_started()
+                    if language_detected:
+                        _ensure_write_started()
+                        _maybe_update_listen_detail()
                     if duration_seconds is None and not smooth_transcribe_started:
                         smooth_transcribe_started = True
                         self._start_smooth_progress(
@@ -1916,8 +1950,9 @@ class Worker(QtCore.QObject):
                     )
                     continue
                 if text.startswith("Detected language:"):
-                    if not detect_language_done:
-                        detect_language_done = True
+                    if not detect_done:
+                        _ensure_detect_language_started()
+                        detect_done = True
                         if not load_model_done:
                             _mark_load_model_done()
                         language_match = re.search(r"Detected language:\s*([a-zA-Z-]+)", text)
@@ -1930,6 +1965,9 @@ class Worker(QtCore.QObject):
                             StepState.DONE,
                             reason_text=f"{language_name} detected",
                         )
+                        language_detected = True
+                        _ensure_write_started()
+                        _maybe_update_listen_detail()
                     continue
                 if text.startswith("DONE"):
                     done_seen = True
@@ -1939,13 +1977,13 @@ class Worker(QtCore.QObject):
                         done_srt_path = Path(parts[1].strip())
                     self._stop_smooth_progress()
                     self._stop_transcribe_estimator()
-                    if not write_started:
-                        write_started = True
-                        self._emit_step_event(
-                            ChecklistStep.WRITE_SUBTITLES,
-                            StepState.START,
-                            reason_text="Listening to audio...",
-                        )
+                    final_srt_path = done_srt_path or srt_path
+                    words_total = self._count_words_in_cues(final_srt_path)
+                    self._emit_step_event(
+                        ChecklistStep.WRITE_SUBTITLES,
+                        StepState.DONE,
+                        reason_text=f"{words_total:,} words written",
+                    )
                     self._emit_step_progress(
                         ProgressStep.TRANSCRIBE,
                         1.0,

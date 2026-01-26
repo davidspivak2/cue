@@ -688,13 +688,11 @@ def _run_transcription_attempt(
                 if duration_seconds:
                     last_reported_percent = max_end / duration_seconds
         splitter_stats = SplitterStats()
-        _print("WRITE_SUBTITLES_ASSEMBLING")
         cues = split_segments_into_cues(
             raw_segments,
             config=splitter_config,
             stats=splitter_stats,
         )
-        _print("WRITE_SUBTITLES_FINALIZING")
         segments: list[SrtSegment] = []
         for index, cue in enumerate(cues, start=1):
             segments.append(
