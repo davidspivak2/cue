@@ -1925,7 +1925,6 @@ class Worker(QtCore.QObject):
                             language_match.group(1).lower() if language_match else "unknown"
                         )
                         language_name = self._describe_language(language_code)
-                        self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
                         self._emit_step_event(
                             ChecklistStep.DETECT_LANGUAGE,
                             StepState.DONE,
