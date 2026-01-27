@@ -2891,6 +2891,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.checklist_layout.addWidget(row)
 
     def _on_worker_step_event(self, event: StepEvent) -> None:
+        current_state = self._checklist_state.get(event.step_id, "pending")
+        self._logger.info(
+            "Checklist event: step=%s state=%s reason_text=%s reason_code=%s active_step=%s current_state=%s",
+            event.step_id,
+            event.state,
+            event.reason_text,
+            event.reason_code,
+            self._active_checklist_step,
+            current_state,
+        )
         if event.step_id not in self._checklist_rows:
             return
         if event.state == StepState.START:
@@ -2914,17 +2924,39 @@ class MainWindow(QtWidgets.QMainWindow):
     def _handle_checklist_start(self, event: StepEvent) -> None:
         step_id = event.step_id
         detail_text = event.reason_text
-        self._complete_prerequisites(step_id)
-        if self._active_checklist_step and self._active_checklist_step != step_id:
-            self._finalize_step(self._active_checklist_step, "done")
-            self._active_checklist_step = None
         current_state = self._checklist_state.get(step_id, "pending")
         row = self._checklist_rows[step_id]
         if current_state == "active":
             row.set_active_detail(detail_text)
             return
         if current_state in ("done", "failed", "skipped"):
+            self._logger.info(
+                "Checklist START ignored: step=%s current_state=%s active_step=%s",
+                step_id,
+                current_state,
+                self._active_checklist_step,
+            )
             return
+        if self._active_checklist_step and self._active_checklist_step != step_id:
+            active_step = self._active_checklist_step
+            active_index = self._checklist_order.index(active_step)
+            incoming_index = self._checklist_order.index(step_id)
+            if incoming_index < active_index:
+                self._logger.info(
+                    "Checklist START ignored: step=%s behind active_step=%s",
+                    step_id,
+                    active_step,
+                )
+                return
+        self._complete_prerequisites(step_id)
+        if self._active_checklist_step and self._active_checklist_step != step_id:
+            self._logger.info(
+                "Checklist START: finalizing previous active step %s because %s started.",
+                self._active_checklist_step,
+                step_id,
+            )
+            self._finalize_step(self._active_checklist_step, "done")
+            self._active_checklist_step = None
         row.set_state("active", detail_text=detail_text)
         row.set_skip_visible(step_id in {ChecklistStep.FIX_PUNCTUATION, ChecklistStep.FIX_MISSING_SUBTITLES})
         self._checklist_state[step_id] = "active"
@@ -2940,8 +2972,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._finalize_step(step_id, "done", reason_text)
             return
         self._complete_prerequisites(step_id)
-        if self._active_checklist_step != step_id:
-            self._finalize_step(step_id, "active")
         reason_text = self._resolve_reason_text(event)
         self._finalize_step(step_id, state, reason_text)
         if self._active_checklist_step == step_id:
@@ -2955,9 +2985,15 @@ class MainWindow(QtWidgets.QMainWindow):
             state = self._checklist_state.get(prior_step, "pending")
             if state in ("done", "failed", "skipped"):
                 continue
-            self._finalize_step(prior_step, "done")
-            if self._active_checklist_step == prior_step:
-                self._active_checklist_step = None
+            if state == "active":
+                self._logger.info(
+                    "Checklist auto-complete: step=%s marked done before %s.",
+                    prior_step,
+                    step_id,
+                )
+                self._finalize_step(prior_step, "done")
+                if self._active_checklist_step == prior_step:
+                    self._active_checklist_step = None
 
     def _finalize_step(
         self,
@@ -2965,6 +3001,14 @@ class MainWindow(QtWidgets.QMainWindow):
         state: str,
         reason_text: Optional[str] = None,
     ) -> None:
+        previous_state = self._checklist_state.get(step_id, "pending")
+        self._logger.info(
+            "Checklist finalize: step=%s %s -> %s reason_text=%s",
+            step_id,
+            previous_state,
+            state,
+            reason_text,
+        )
         row = self._checklist_rows.get(step_id)
         if not row:
             return

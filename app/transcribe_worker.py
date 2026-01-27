@@ -1171,6 +1171,8 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             duration_seconds=duration_seconds,
         )
         raw_summary = _build_raw_punctuation_summary(raw_segments)
+        _print(f"WRITE_SUBTITLES_DONE srt=\"{srt_path.resolve()}\"")
+        _print("PUNCT_REVIEW_START")
         attempts.append(
             {
                 "attempt": 0,
