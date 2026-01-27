@@ -62,6 +62,7 @@ from .srt_utils import (
     select_preview_moment,
 )
 from .align_utils import audio_path_for_srt, build_alignment_plan
+from .alignment_words import count_alignment_words_in_srt
 from .word_timing_schema import (
     SCHEMA_VERSION,
     WordTimingValidationError,
@@ -211,6 +212,8 @@ class Worker(QtCore.QObject):
         self._export_alignment_progress = 0.0
         self._alignment_has_real_progress = False
         self._alignment_emit_events = True
+        self._write_subtitles_words_total: Optional[int] = None
+        self._write_subtitles_done_emitted = False
 
     def cancel(self) -> None:
         with self._skip_lock:
@@ -1474,8 +1477,11 @@ class Worker(QtCore.QObject):
             done_seen = False
             done_srt_path: Optional[Path] = None
             load_model_done = False
-            detect_language_done = False
+            detect_started = False
+            detect_done = False
+            language_detected = False
             write_started = False
+            last_listen_detail_second = -1
             transcribe_config_json: Optional[str] = None
             watchdog_triggered = False
             watchdog_elapsed = 0.0
@@ -1518,6 +1524,57 @@ class Worker(QtCore.QObject):
                     ChecklistStep.LOAD_MODEL,
                     StepState.DONE,
                     reason_text=_friendly_model_name(model_detail_id),
+                )
+
+            def _format_listen_time(seconds: float) -> str:
+                total_seconds = int(max(seconds, 0.0))
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                secs = total_seconds % 60
+                return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+            def _build_listen_detail(current_seconds: float) -> str:
+                if duration_seconds is None:
+                    return "Listening to audio..."
+                total = max(duration_seconds, 0.0)
+                current = min(max(current_seconds, 0.0), total)
+                if total - current <= 0.5:
+                    current = total
+                return (
+                    "Listening to audio... "
+                    f"{_format_listen_time(current)}/{_format_listen_time(total)}"
+                )
+
+            def _ensure_detect_language_started() -> None:
+                nonlocal detect_started
+                if detect_started:
+                    return
+                detect_started = True
+                self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
+
+            def _ensure_write_started() -> None:
+                nonlocal write_started
+                if write_started:
+                    return
+                write_started = True
+                self._emit_step_event(
+                    ChecklistStep.WRITE_SUBTITLES,
+                    StepState.START,
+                    reason_text=_build_listen_detail(max_end_seconds),
+                )
+
+            def _maybe_update_listen_detail() -> None:
+                nonlocal last_listen_detail_second
+                if not write_started:
+                    return
+                current_second = int(max_end_seconds)
+                if current_second == last_listen_detail_second:
+                    return
+                last_listen_detail_second = current_second
+                self._emit_step_event(
+                    ChecklistStep.WRITE_SUBTITLES,
+                    StepState.START,
+                    reason_text=_build_listen_detail(max_end_seconds),
                 )
             if duration_seconds is None:
                 self._start_smooth_progress(ProgressStep.TRANSCRIBE, "Loading model")
@@ -1629,23 +1686,23 @@ class Worker(QtCore.QObject):
                     _emit_load_model_start_detail()
                 if text.startswith("PROGRESS_END"):
                     _emit_log(text, False)
+                    try:
+                        end_value = float(text.split(" ", 1)[1])
+                    except (IndexError, ValueError):
+                        continue
+                    if end_value > max_end_seconds:
+                        max_end_seconds = end_value
                     if duration_seconds:
-                        try:
-                            end_value = float(text.split(" ", 1)[1])
-                        except (IndexError, ValueError):
-                            continue
-                        if end_value > max_end_seconds:
-                            max_end_seconds = end_value
-                            progress = min(0.99, max_end_seconds / duration_seconds)
-                            with progress_lock:
-                                real_progress = progress
-                                real_progress_seen = True
-                                transcribe_started = True
-                            self._emit_step_progress(
-                                ProgressStep.TRANSCRIBE,
-                                progress,
-                                "Listening to audio",
-                            )
+                        progress = min(0.99, max_end_seconds / duration_seconds)
+                        with progress_lock:
+                            real_progress = progress
+                            real_progress_seen = True
+                            transcribe_started = True
+                        self._emit_step_progress(
+                            ProgressStep.TRANSCRIBE,
+                            progress,
+                            "Listening to audio",
+                        )
                     else:
                         transcribe_started = True
                         if not smooth_transcribe_started:
@@ -1657,9 +1714,10 @@ class Worker(QtCore.QObject):
                             )
                     if not load_model_done:
                         _mark_load_model_done()
-                    if not write_started:
-                        write_started = True
-                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                    _ensure_detect_language_started()
+                    if language_detected:
+                        _ensure_write_started()
+                        _maybe_update_listen_detail()
                     now = time.monotonic()
                     if now - last_progress_log >= 2.0:
                         _emit_log("Listening progress update received.", True)
@@ -1667,6 +1725,34 @@ class Worker(QtCore.QObject):
                     continue
 
                 _emit_log(text, show_in_ui)
+                if text.startswith("WRITE_SUBTITLES_DONE"):
+                    match = re.search(r'srt="([^"]+)"', text)
+                    if match:
+                        srt_hint = Path(match.group(1))
+                        self._write_subtitles_words_total = count_alignment_words_in_srt(
+                            srt_hint,
+                            "he",
+                        )
+                        self._emit_write_subtitles_created_if_needed()
+                    continue
+                if text in {"WRITE_SUBTITLES_ASSEMBLING", "WRITE_SUBTITLES_FINALIZING"}:
+                    continue
+                if text == "PUNCT_REVIEW_START":
+                    self._emit_write_subtitles_created_if_needed()
+                    self._punctuation_active = True
+                    self._punctuation_attempt = 0
+                    self._emit_step_progress(
+                        ProgressStep.FIX_PUNCTUATION,
+                        0.0,
+                        "Reviewing punctuation",
+                        force=True,
+                    )
+                    self._emit_step_event(
+                        ChecklistStep.FIX_PUNCTUATION,
+                        StepState.START,
+                        reason_text="Analyzing...",
+                    )
+                    continue
                 if text.startswith("PUNCT_RESCUE "):
                     if (
                         self.transcription_settings
@@ -1709,25 +1795,22 @@ class Worker(QtCore.QObject):
                             if attempt < 1:
                                 continue
                             no_output_timeout_ref["value"] = 600.0
-                            if attempt == 2:
-                                detail = "Improving punctuation... (attempt 2)"
-                            elif attempt == 3:
-                                detail = "Improving punctuation... (attempt 3)"
-                            else:
-                                detail = "Improving punctuation..."
+                            was_active = self._punctuation_active
                             self._punctuation_active = True
                             self._punctuation_attempt = attempt
-                            self._emit_step_progress(
-                                ProgressStep.FIX_PUNCTUATION,
-                                0.0,
-                                "Reviewing punctuation",
-                                force=True,
-                            )
-                            self._emit_step_event(
-                                ChecklistStep.FIX_PUNCTUATION,
-                                StepState.START,
-                                reason_text=detail,
-                            )
+                            if not self._punctuation_final_emitted:
+                                self._emit_step_progress(
+                                    ProgressStep.FIX_PUNCTUATION,
+                                    0.0,
+                                    "Reviewing punctuation",
+                                    force=True,
+                                )
+                            if not was_active:
+                                self._emit_step_event(
+                                    ChecklistStep.FIX_PUNCTUATION,
+                                    StepState.START,
+                                    reason_text="Analyzing...",
+                                )
                 if text.startswith("PUNCT_RESCUE_DONE"):
                     if (
                         self.transcription_settings
@@ -1855,9 +1938,10 @@ class Worker(QtCore.QObject):
                         transcribe_started = True
                     if not load_model_done:
                         _mark_load_model_done()
-                    if not write_started:
-                        write_started = True
-                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                    _ensure_detect_language_started()
+                    if language_detected:
+                        _ensure_write_started()
+                        _maybe_update_listen_detail()
                     if duration_seconds is None and not smooth_transcribe_started:
                         smooth_transcribe_started = True
                         self._start_smooth_progress(
@@ -1880,8 +1964,9 @@ class Worker(QtCore.QObject):
                     )
                     continue
                 if text.startswith("Detected language:"):
-                    if not detect_language_done:
-                        detect_language_done = True
+                    if not detect_done:
+                        _ensure_detect_language_started()
+                        detect_done = True
                         if not load_model_done:
                             _mark_load_model_done()
                         language_match = re.search(r"Detected language:\s*([a-zA-Z-]+)", text)
@@ -1889,12 +1974,14 @@ class Worker(QtCore.QObject):
                             language_match.group(1).lower() if language_match else "unknown"
                         )
                         language_name = self._describe_language(language_code)
-                        self._emit_step_event(ChecklistStep.DETECT_LANGUAGE, StepState.START)
                         self._emit_step_event(
                             ChecklistStep.DETECT_LANGUAGE,
                             StepState.DONE,
                             reason_text=f"{language_name} detected",
                         )
+                        language_detected = True
+                        _ensure_write_started()
+                        _maybe_update_listen_detail()
                     continue
                 if text.startswith("DONE"):
                     done_seen = True
@@ -1904,9 +1991,13 @@ class Worker(QtCore.QObject):
                         done_srt_path = Path(parts[1].strip())
                     self._stop_smooth_progress()
                     self._stop_transcribe_estimator()
-                    if not write_started:
-                        write_started = True
-                        self._emit_step_event(ChecklistStep.WRITE_SUBTITLES, StepState.START)
+                    final_srt_path = done_srt_path or srt_path
+                    if self._write_subtitles_words_total is None:
+                        self._write_subtitles_words_total = count_alignment_words_in_srt(
+                            final_srt_path,
+                            "he",
+                        )
+                    self._emit_write_subtitles_created_if_needed()
                     self._emit_step_progress(
                         ProgressStep.TRANSCRIBE,
                         1.0,
@@ -2083,10 +2174,14 @@ class Worker(QtCore.QObject):
             if not plan.output_path.parent.exists():
                 plan.output_path.parent.mkdir(parents=True, exist_ok=True)
             def _execute_alignment_run() -> int:
-                self._alignment_words_total = self._count_words_in_cues(srt_path)
+                if self._write_subtitles_words_total is not None:
+                    self._alignment_words_total = self._write_subtitles_words_total
+                else:
+                    self._alignment_words_total = count_alignment_words_in_srt(srt_path, "he")
                 self._alignment_words_current = 0
                 self._alignment_last_emit = 0.0
                 self._alignment_has_real_progress = False
+                alignment_total_mismatch_logged = False
                 if context == "create_subtitles":
                     self._emit_step_progress(
                         ProgressStep.ALIGN_WORDS,
@@ -2109,47 +2204,70 @@ class Worker(QtCore.QObject):
                     "current": 0,
                     "total": self._alignment_words_total,
                 }
-                if self._alignment_words_total and emit_step_events:
-                    self._emit_step_event(
-                        ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                        StepState.START,
-                        reason_text=self._format_alignment_detail(
-                            self._alignment_words_current,
-                            self._alignment_words_total,
-                            estimated=True,
-                        ),
-                    )
+                if emit_step_events:
+                    if self._alignment_words_total > 0:
+                        self._emit_step_event(
+                            ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                            StepState.START,
+                            reason_text=self._format_alignment_detail(
+                                self._alignment_words_current,
+                                self._alignment_words_total,
+                                estimated=True,
+                            ),
+                        )
+                    else:
+                        self._emit_step_event(
+                            ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                            StepState.START,
+                            reason_text="Starting...",
+                        )
                     start_time = time.monotonic()
 
-                    def _estimate_alignment_progress() -> None:
-                        ramp_seconds = min(
-                            max(self._alignment_words_total * 0.08, 40.0),
-                            900.0,
-                        )
+                    def _start_estimator_if_needed(total: int) -> None:
+                        nonlocal estimator_thread
+                        if estimator_thread is not None or total <= 0:
+                            return
+                        ramp_seconds = min(max(total * 0.08, 40.0), 900.0)
                         cap_ratio = 0.97
-                        while not estimator_stop.is_set() and not alignment_real_progress.is_set():
-                            elapsed = time.monotonic() - start_time
-                            fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
-                            estimated_current = int(self._alignment_words_total * fraction)
-                            if estimated_current == 0 and elapsed >= 1.0:
-                                estimated_current = 1
-                            with alignment_lock:
-                                if estimated_current > alignment_target["current"]:
-                                    alignment_target["current"] = estimated_current
-                            estimator_stop.wait(0.5)
 
-                    estimator_thread = threading.Thread(
-                        target=_estimate_alignment_progress,
-                        daemon=True,
-                    )
-                    estimator_thread.start()
+                        def _estimate_alignment_progress() -> None:
+                            while (
+                                not estimator_stop.is_set()
+                                and not alignment_real_progress.is_set()
+                            ):
+                                elapsed = time.monotonic() - start_time
+                                fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
+                                estimated_current = int(total * fraction)
+                                if estimated_current == 0 and elapsed >= 1.0:
+                                    estimated_current = 1
+                                with alignment_lock:
+                                    if estimated_current > alignment_target["current"]:
+                                        alignment_target["current"] = estimated_current
+                                estimator_stop.wait(0.5)
+
+                        estimator_thread = threading.Thread(
+                            target=_estimate_alignment_progress,
+                            daemon=True,
+                        )
+                        estimator_thread.start()
+
+                    _start_estimator_if_needed(self._alignment_words_total)
 
                     def _smooth_alignment_progress() -> None:
                         display_current = 0
+                        last_total = 0
                         while not smoother_stop.is_set():
                             with alignment_lock:
                                 current_target = alignment_target["current"]
                                 current_total = alignment_target["total"]
+                            if current_total > 0 and last_total <= 0:
+                                self._alignment_words_current = display_current
+                                self._alignment_words_total = current_total
+                                self._maybe_emit_alignment_progress(
+                                    display_current,
+                                    current_total,
+                                )
+                            last_total = current_total
                             if current_total <= 0:
                                 smoother_stop.wait(0.2)
                                 continue
@@ -2191,6 +2309,7 @@ class Worker(QtCore.QObject):
                 stderr_tail: deque[str] = deque(maxlen=50)
 
                 def _handle_alignment_line(line: str) -> None:
+                    nonlocal alignment_total_mismatch_logged
                     stripped = line.strip()
                     if not stripped:
                         return
@@ -2208,9 +2327,27 @@ class Worker(QtCore.QObject):
                         alignment_real_progress.set()
                         self._alignment_has_real_progress = True
                     with alignment_lock:
-                        alignment_target["total"] = total
+                        if alignment_target["total"] <= 0:
+                            alignment_target["total"] = total
+                        elif total != alignment_target["total"]:
+                            if not alignment_total_mismatch_logged:
+                                self.signals.log.emit(
+                                    "Alignment total mismatch: "
+                                    f"expected={alignment_target['total']} reported={total}",
+                                    True,
+                                )
+                                alignment_total_mismatch_logged = True
+                            total = alignment_target["total"]
+                        if alignment_target["total"] > 0:
+                            current = min(current, alignment_target["total"])
                         if current > alignment_target["current"]:
                             alignment_target["current"] = current
+                    if (
+                        emit_step_events
+                        and total > 0
+                        and not alignment_real_progress.is_set()
+                    ):
+                        _start_estimator_if_needed(total)
 
                 def _read_stream(
                     stream: Optional[Iterable[str]],
@@ -2287,6 +2424,13 @@ class Worker(QtCore.QObject):
                         "Alignment failed: output had no timings.",
                         "align_output_empty",
                     )
+                if self._alignment_words_total and total_words != self._alignment_words_total:
+                    self.signals.log.emit(
+                        "Alignment total mismatch after output: "
+                        f"expected={self._alignment_words_total} reported={total_words}",
+                        True,
+                    )
+                    total_words = self._alignment_words_total
                 with alignment_lock:
                     alignment_target["total"] = total_words
                     alignment_target["current"] = total_words
@@ -2634,6 +2778,16 @@ class Worker(QtCore.QObject):
             )
         )
 
+    def _emit_write_subtitles_created_if_needed(self) -> None:
+        if self._write_subtitles_done_emitted:
+            return
+        self._emit_step_event(
+            ChecklistStep.WRITE_SUBTITLES,
+            StepState.DONE,
+            reason_text="Subtitles created",
+        )
+        self._write_subtitles_done_emitted = True
+
     def _describe_language(self, language_code: str) -> str:
         language_map = {
             "he": "Hebrew",
@@ -2651,16 +2805,6 @@ class Worker(QtCore.QObject):
         }
         base_code = language_code.split("-", 1)[0]
         return language_map.get(base_code, base_code.upper())
-
-    def _count_words_in_cues(self, srt_path: Path) -> int:
-        try:
-            cues = parse_srt_file(srt_path)
-        except Exception:  # noqa: BLE001
-            return 0
-        total = 0
-        for cue in cues:
-            total += len(re.findall(r"\w+", cue.text, flags=re.UNICODE))
-        return total
 
     def _format_alignment_detail(
         self,

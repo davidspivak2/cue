@@ -9,6 +9,7 @@ import re
 import sys
 from typing import Any, Callable, Optional
 
+from .alignment_words import count_alignment_words_in_cues, tokenize_alignment_words
 from .srt_utils import compute_srt_sha256, parse_srt_file, SrtCue
 from .word_timing_schema import (
     CueWordTimings,
@@ -112,13 +113,6 @@ def _map_aligned_segments(
     for segment in segments:
         mapped.append(aligned_by_key.get(_segment_key(segment)))
     return mapped
-
-
-def _count_tokens_in_cues(cues: list[SrtCue]) -> int:
-    total = 0
-    for cue in cues:
-        total += len(re.findall(r"\S+", cue.text))
-    return total
 
 
 def _normalize_for_match(text: str) -> str:
@@ -230,10 +224,10 @@ def _offset_aligned_segment(segment: dict[str, Any], offset: float) -> dict[str,
     return adjusted
 
 
-def _build_estimated_segments(cues: list[SrtCue]) -> list[dict[str, Any]]:
+def _build_estimated_segments(cues: list[SrtCue], language: str) -> list[dict[str, Any]]:
     estimated_segments: list[dict[str, Any]] = []
     for cue in cues:
-        tokens = re.findall(r"\S+", cue.text)
+        tokens = tokenize_alignment_words(cue.text, language)
         words: list[dict[str, Any]] = []
         duration = max(0.0, cue.end_seconds - cue.start_seconds)
         if tokens:
@@ -424,6 +418,9 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
 
     segments = build_segments_from_srt(config.srt_path)
     cues = parse_srt_file(config.srt_path)
+    planned_total = count_alignment_words_in_cues(cues, config.language)
+    if planned_total > 0:
+        _emit_words_timed(0, planned_total)
     if len(segments) != len(cues):
         raise ValueError("Mismatch between segments and SRT cues.")
     device = _resolve_device(config.prefer_gpu, config.device)
@@ -501,9 +498,9 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
         mapped_segments = chunked_segments
         aligned_segments = [segment for segment in chunked_segments if segment is not None]
         if not _has_usable_word_timings(aligned_segments):
-            if _count_tokens_in_cues(cues) > 0:
+            if count_alignment_words_in_cues(cues, config.language) > 0:
                 _print("ALIGN_FALLBACK mode=estimated reason=no_word_timings")
-                aligned_segments = _build_estimated_segments(cues)
+                aligned_segments = _build_estimated_segments(cues, config.language)
     srt_hash = compute_srt_sha256(config.srt_path)
     cue_words: list[list[WordSpan]]
     assigned_words = 0
