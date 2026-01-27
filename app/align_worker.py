@@ -418,6 +418,9 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
 
     segments = build_segments_from_srt(config.srt_path)
     cues = parse_srt_file(config.srt_path)
+    planned_total = count_alignment_words_in_cues(cues, config.language)
+    if planned_total > 0:
+        _emit_words_timed(0, planned_total)
     if len(segments) != len(cues):
         raise ValueError("Mismatch between segments and SRT cues.")
     device = _resolve_device(config.prefer_gpu, config.device)

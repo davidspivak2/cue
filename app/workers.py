@@ -2205,43 +2205,69 @@ class Worker(QtCore.QObject):
                     "total": self._alignment_words_total,
                 }
                 if emit_step_events:
-                    self._emit_step_event(
-                        ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                        StepState.START,
-                        reason_text="Starting...",
-                    )
+                    if self._alignment_words_total > 0:
+                        self._emit_step_event(
+                            ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                            StepState.START,
+                            reason_text=self._format_alignment_detail(
+                                self._alignment_words_current,
+                                self._alignment_words_total,
+                                estimated=True,
+                            ),
+                        )
+                    else:
+                        self._emit_step_event(
+                            ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                            StepState.START,
+                            reason_text="Starting...",
+                        )
                     start_time = time.monotonic()
 
-                    def _estimate_alignment_progress() -> None:
-                        ramp_seconds = min(
-                            max(self._alignment_words_total * 0.08, 40.0),
-                            900.0,
-                        )
+                    def _start_estimator_if_needed(total: int) -> None:
+                        nonlocal estimator_thread
+                        if estimator_thread is not None or total <= 0:
+                            return
+                        ramp_seconds = min(max(total * 0.08, 40.0), 900.0)
                         cap_ratio = 0.97
-                        while not estimator_stop.is_set() and not alignment_real_progress.is_set():
-                            elapsed = time.monotonic() - start_time
-                            fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
-                            estimated_current = int(self._alignment_words_total * fraction)
-                            if estimated_current == 0 and elapsed >= 1.0:
-                                estimated_current = 1
-                            with alignment_lock:
-                                if estimated_current > alignment_target["current"]:
-                                    alignment_target["current"] = estimated_current
-                            estimator_stop.wait(0.5)
 
-                    if self._alignment_words_total > 0:
+                        def _estimate_alignment_progress() -> None:
+                            while (
+                                not estimator_stop.is_set()
+                                and not alignment_real_progress.is_set()
+                            ):
+                                elapsed = time.monotonic() - start_time
+                                fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
+                                estimated_current = int(total * fraction)
+                                if estimated_current == 0 and elapsed >= 1.0:
+                                    estimated_current = 1
+                                with alignment_lock:
+                                    if estimated_current > alignment_target["current"]:
+                                        alignment_target["current"] = estimated_current
+                                estimator_stop.wait(0.5)
+
                         estimator_thread = threading.Thread(
                             target=_estimate_alignment_progress,
                             daemon=True,
                         )
                         estimator_thread.start()
 
+                    _start_estimator_if_needed(self._alignment_words_total)
+
                     def _smooth_alignment_progress() -> None:
                         display_current = 0
+                        last_total = 0
                         while not smoother_stop.is_set():
                             with alignment_lock:
                                 current_target = alignment_target["current"]
                                 current_total = alignment_target["total"]
+                            if current_total > 0 and last_total <= 0:
+                                self._alignment_words_current = display_current
+                                self._alignment_words_total = current_total
+                                self._maybe_emit_alignment_progress(
+                                    display_current,
+                                    current_total,
+                                )
+                            last_total = current_total
                             if current_total <= 0:
                                 smoother_stop.wait(0.2)
                                 continue
@@ -2316,6 +2342,12 @@ class Worker(QtCore.QObject):
                             current = min(current, alignment_target["total"])
                         if current > alignment_target["current"]:
                             alignment_target["current"] = current
+                    if (
+                        emit_step_events
+                        and total > 0
+                        and not alignment_real_progress.is_set()
+                    ):
+                        _start_estimator_if_needed(total)
 
                 def _read_stream(
                     stream: Optional[Iterable[str]],
