@@ -62,6 +62,7 @@ from .srt_utils import (
     select_preview_moment,
 )
 from .align_utils import audio_path_for_srt, build_alignment_plan
+from .alignment_words import count_alignment_words_in_srt
 from .word_timing_schema import (
     SCHEMA_VERSION,
     WordTimingValidationError,
@@ -211,6 +212,8 @@ class Worker(QtCore.QObject):
         self._export_alignment_progress = 0.0
         self._alignment_has_real_progress = False
         self._alignment_emit_events = True
+        self._write_subtitles_words_total: Optional[int] = None
+        self._write_subtitles_words_emitted = False
 
     def cancel(self) -> None:
         with self._skip_lock:
@@ -1723,14 +1726,18 @@ class Worker(QtCore.QObject):
 
                 _emit_log(text, show_in_ui)
                 if text.startswith("WRITE_SUBTITLES_DONE"):
-                    match = re.search(r"words=(\d+)", text)
+                    match = re.search(r'srt="([^"]+)"', text)
                     if match:
-                        words_total = int(match.group(1))
-                        self._emit_step_event(
-                            ChecklistStep.WRITE_SUBTITLES,
-                            StepState.DONE,
-                            reason_text=f"{words_total:,} words written",
-                        )
+                        srt_hint = Path(match.group(1))
+                        words_total = count_alignment_words_in_srt(srt_hint, "he")
+                        self._write_subtitles_words_total = words_total
+                        if not self._write_subtitles_words_emitted:
+                            self._emit_step_event(
+                                ChecklistStep.WRITE_SUBTITLES,
+                                StepState.DONE,
+                                reason_text=f"{words_total:,} words written",
+                            )
+                            self._write_subtitles_words_emitted = True
                     continue
                 if text in {"WRITE_SUBTITLES_ASSEMBLING", "WRITE_SUBTITLES_FINALIZING"}:
                     continue
@@ -1988,12 +1995,15 @@ class Worker(QtCore.QObject):
                     self._stop_smooth_progress()
                     self._stop_transcribe_estimator()
                     final_srt_path = done_srt_path or srt_path
-                    words_total = self._count_words_in_cues(final_srt_path)
-                    self._emit_step_event(
-                        ChecklistStep.WRITE_SUBTITLES,
-                        StepState.DONE,
-                        reason_text=f"{words_total:,} words written",
-                    )
+                    if not self._write_subtitles_words_emitted:
+                        words_total = count_alignment_words_in_srt(final_srt_path, "he")
+                        self._write_subtitles_words_total = words_total
+                        self._emit_step_event(
+                            ChecklistStep.WRITE_SUBTITLES,
+                            StepState.DONE,
+                            reason_text=f"{words_total:,} words written",
+                        )
+                        self._write_subtitles_words_emitted = True
                     self._emit_step_progress(
                         ProgressStep.TRANSCRIBE,
                         1.0,
@@ -2170,10 +2180,14 @@ class Worker(QtCore.QObject):
             if not plan.output_path.parent.exists():
                 plan.output_path.parent.mkdir(parents=True, exist_ok=True)
             def _execute_alignment_run() -> int:
-                self._alignment_words_total = self._count_words_in_cues(srt_path)
+                if self._write_subtitles_words_total is not None:
+                    self._alignment_words_total = self._write_subtitles_words_total
+                else:
+                    self._alignment_words_total = count_alignment_words_in_srt(srt_path, "he")
                 self._alignment_words_current = 0
                 self._alignment_last_emit = 0.0
                 self._alignment_has_real_progress = False
+                alignment_total_mismatch_logged = False
                 if context == "create_subtitles":
                     self._emit_step_progress(
                         ProgressStep.ALIGN_WORDS,
@@ -2278,6 +2292,7 @@ class Worker(QtCore.QObject):
                 stderr_tail: deque[str] = deque(maxlen=50)
 
                 def _handle_alignment_line(line: str) -> None:
+                    nonlocal alignment_total_mismatch_logged
                     stripped = line.strip()
                     if not stripped:
                         return
@@ -2295,7 +2310,19 @@ class Worker(QtCore.QObject):
                         alignment_real_progress.set()
                         self._alignment_has_real_progress = True
                     with alignment_lock:
-                        alignment_target["total"] = total
+                        if alignment_target["total"] <= 0:
+                            alignment_target["total"] = total
+                        elif total != alignment_target["total"]:
+                            if not alignment_total_mismatch_logged:
+                                self.signals.log.emit(
+                                    "Alignment total mismatch: "
+                                    f"expected={alignment_target['total']} reported={total}",
+                                    True,
+                                )
+                                alignment_total_mismatch_logged = True
+                            total = alignment_target["total"]
+                        if alignment_target["total"] > 0:
+                            current = min(current, alignment_target["total"])
                         if current > alignment_target["current"]:
                             alignment_target["current"] = current
 
@@ -2374,6 +2401,13 @@ class Worker(QtCore.QObject):
                         "Alignment failed: output had no timings.",
                         "align_output_empty",
                     )
+                if self._alignment_words_total and total_words != self._alignment_words_total:
+                    self.signals.log.emit(
+                        "Alignment total mismatch after output: "
+                        f"expected={self._alignment_words_total} reported={total_words}",
+                        True,
+                    )
+                    total_words = self._alignment_words_total
                 with alignment_lock:
                     alignment_target["total"] = total_words
                     alignment_target["current"] = total_words
@@ -2738,16 +2772,6 @@ class Worker(QtCore.QObject):
         }
         base_code = language_code.split("-", 1)[0]
         return language_map.get(base_code, base_code.upper())
-
-    def _count_words_in_cues(self, srt_path: Path) -> int:
-        try:
-            cues = parse_srt_file(srt_path)
-        except Exception:  # noqa: BLE001
-            return 0
-        total = 0
-        for cue in cues:
-            total += len(re.findall(r"\w+", cue.text, flags=re.UNICODE))
-        return total
 
     def _format_alignment_detail(
         self,
