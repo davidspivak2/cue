@@ -1170,8 +1170,9 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             splitter_config=splitter_config,
             duration_seconds=duration_seconds,
         )
-        _print("PUNCT_REVIEW_START")
         raw_summary = _build_raw_punctuation_summary(raw_segments)
+        _print(f"WRITE_SUBTITLES_DONE words={int(raw_summary.get('words_count_raw', 0))}")
+        _print("PUNCT_REVIEW_START")
         attempts.append(
             {
                 "attempt": 0,

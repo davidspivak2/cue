@@ -1722,6 +1722,16 @@ class Worker(QtCore.QObject):
                     continue
 
                 _emit_log(text, show_in_ui)
+                if text.startswith("WRITE_SUBTITLES_DONE"):
+                    match = re.search(r"words=(\d+)", text)
+                    if match:
+                        words_total = int(match.group(1))
+                        self._emit_step_event(
+                            ChecklistStep.WRITE_SUBTITLES,
+                            StepState.DONE,
+                            reason_text=f"{words_total:,} words written",
+                        )
+                    continue
                 if text in {"WRITE_SUBTITLES_ASSEMBLING", "WRITE_SUBTITLES_FINALIZING"}:
                     continue
                 if text == "PUNCT_REVIEW_START":
