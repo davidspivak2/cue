@@ -213,7 +213,7 @@ class Worker(QtCore.QObject):
         self._alignment_has_real_progress = False
         self._alignment_emit_events = True
         self._write_subtitles_words_total: Optional[int] = None
-        self._write_subtitles_words_emitted = False
+        self._write_subtitles_done_emitted = False
 
     def cancel(self) -> None:
         with self._skip_lock:
@@ -1729,19 +1729,16 @@ class Worker(QtCore.QObject):
                     match = re.search(r'srt="([^"]+)"', text)
                     if match:
                         srt_hint = Path(match.group(1))
-                        words_total = count_alignment_words_in_srt(srt_hint, "he")
-                        self._write_subtitles_words_total = words_total
-                        if not self._write_subtitles_words_emitted:
-                            self._emit_step_event(
-                                ChecklistStep.WRITE_SUBTITLES,
-                                StepState.DONE,
-                                reason_text=f"{words_total:,} words written",
-                            )
-                            self._write_subtitles_words_emitted = True
+                        self._write_subtitles_words_total = count_alignment_words_in_srt(
+                            srt_hint,
+                            "he",
+                        )
+                        self._emit_write_subtitles_created_if_needed()
                     continue
                 if text in {"WRITE_SUBTITLES_ASSEMBLING", "WRITE_SUBTITLES_FINALIZING"}:
                     continue
                 if text == "PUNCT_REVIEW_START":
+                    self._emit_write_subtitles_created_if_needed()
                     self._punctuation_active = True
                     self._punctuation_attempt = 0
                     self._emit_step_progress(
@@ -1995,15 +1992,12 @@ class Worker(QtCore.QObject):
                     self._stop_smooth_progress()
                     self._stop_transcribe_estimator()
                     final_srt_path = done_srt_path or srt_path
-                    if not self._write_subtitles_words_emitted:
-                        words_total = count_alignment_words_in_srt(final_srt_path, "he")
-                        self._write_subtitles_words_total = words_total
-                        self._emit_step_event(
-                            ChecklistStep.WRITE_SUBTITLES,
-                            StepState.DONE,
-                            reason_text=f"{words_total:,} words written",
+                    if self._write_subtitles_words_total is None:
+                        self._write_subtitles_words_total = count_alignment_words_in_srt(
+                            final_srt_path,
+                            "he",
                         )
-                        self._write_subtitles_words_emitted = True
+                    self._emit_write_subtitles_created_if_needed()
                     self._emit_step_progress(
                         ProgressStep.TRANSCRIBE,
                         1.0,
@@ -2210,15 +2204,11 @@ class Worker(QtCore.QObject):
                     "current": 0,
                     "total": self._alignment_words_total,
                 }
-                if self._alignment_words_total and emit_step_events:
+                if emit_step_events:
                     self._emit_step_event(
                         ChecklistStep.TIMING_WORD_HIGHLIGHTS,
                         StepState.START,
-                        reason_text=self._format_alignment_detail(
-                            self._alignment_words_current,
-                            self._alignment_words_total,
-                            estimated=True,
-                        ),
+                        reason_text="Starting...",
                     )
                     start_time = time.monotonic()
 
@@ -2239,11 +2229,12 @@ class Worker(QtCore.QObject):
                                     alignment_target["current"] = estimated_current
                             estimator_stop.wait(0.5)
 
-                    estimator_thread = threading.Thread(
-                        target=_estimate_alignment_progress,
-                        daemon=True,
-                    )
-                    estimator_thread.start()
+                    if self._alignment_words_total > 0:
+                        estimator_thread = threading.Thread(
+                            target=_estimate_alignment_progress,
+                            daemon=True,
+                        )
+                        estimator_thread.start()
 
                     def _smooth_alignment_progress() -> None:
                         display_current = 0
@@ -2754,6 +2745,16 @@ class Worker(QtCore.QObject):
                 reason_text=reason_text,
             )
         )
+
+    def _emit_write_subtitles_created_if_needed(self) -> None:
+        if self._write_subtitles_done_emitted:
+            return
+        self._emit_step_event(
+            ChecklistStep.WRITE_SUBTITLES,
+            StepState.DONE,
+            reason_text="Subtitles created",
+        )
+        self._write_subtitles_done_emitted = True
 
     def _describe_language(self, language_code: str) -> str:
         language_map = {
