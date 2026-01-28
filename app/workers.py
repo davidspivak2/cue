@@ -507,19 +507,6 @@ class Worker(QtCore.QObject):
                 )
         except Exception as exc:  # noqa: BLE001
             self.signals.log.emit(f"Preview generation failed: {exc}", False)
-        finally:
-            preview_detail = "Ready" if preview_frame_path else "Skipped"
-            self._emit_step_event(
-                ChecklistStep.PREPARING_PREVIEW,
-                StepState.DONE,
-                reason_text=preview_detail,
-            )
-            self._emit_step_progress(
-                ProgressStep.PREPARING_PREVIEW,
-                1.0,
-                "Preparing preview",
-                force=True,
-            )
         if settings.keep_extracted_audio:
             self.signals.log.emit(
                 f"Keeping extracted audio file: {audio_path}",

@@ -2710,7 +2710,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._worker_thread.wait()
             self._worker_thread = None
             self._worker = None
-            self._progress_controller = None
+            if not (success and task_type == TaskType.GENERATE_SRT):
+                self._progress_controller = None
 
         if payload.get("srt_path"):
             candidate = Path(payload["srt_path"])
@@ -3047,6 +3048,16 @@ class MainWindow(QtWidgets.QMainWindow):
             StepEvent(step_id=ChecklistStep.PREPARING_PREVIEW, state=StepState.DONE),
             "done",
         )
+        if self._progress_controller:
+            global_progress = self._progress_controller.update(
+                ProgressStep.PREPARING_PREVIEW,
+                1.0,
+            )
+            percent = int(round(global_progress * 100))
+            percent = max(0, min(percent, 100))
+            self.progress_bar.setValue(percent)
+            self.progress_bar.setFormat(f"{percent}%")
+            self._progress_controller = None
         if self._pending_subtitles_payload is not None:
             self._subtitles_reviewed = False
             self.set_state(AppState.SUBTITLES_READY)
