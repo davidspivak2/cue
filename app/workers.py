@@ -2289,6 +2289,7 @@ class Worker(QtCore.QObject):
                     errors="replace",
                     **get_subprocess_kwargs(),
                 )
+                self._process = process
                 stdout_tail: deque[str] = deque(maxlen=50)
                 stderr_tail: deque[str] = deque(maxlen=50)
 
@@ -2341,6 +2342,8 @@ class Worker(QtCore.QObject):
                     if stream is None:
                         return
                     for line in stream:
+                        if self._cancelled.is_set():
+                            break
                         stripped = line.strip()
                         if stripped:
                             if handler:
@@ -2361,7 +2364,22 @@ class Worker(QtCore.QObject):
                 )
                 stdout_thread.start()
                 stderr_thread.start()
-                return_code = process.wait()
+                try:
+                    while True:
+                        if self._cancelled.is_set():
+                            process.terminate()
+                            try:
+                                process.wait(timeout=1)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                            break
+                        if process.poll() is not None:
+                            break
+                        time.sleep(0.05)
+                    return_code = process.wait()
+                finally:
+                    if self._process is process:
+                        self._process = None
                 estimator_stop.set()
                 if estimator_thread:
                     estimator_thread.join(timeout=1)
@@ -2377,6 +2395,12 @@ class Worker(QtCore.QObject):
                     f"Alignment finished: exit_code={return_code} output={plan.output_path}",
                     True,
                 )
+                if self._cancelled.is_set():
+                    try:
+                        plan.output_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise CancelledError()
                 if return_code != 0:
                     raise AlignmentError(
                         "Alignment failed: process returned error.",
