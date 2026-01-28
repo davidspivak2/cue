@@ -1486,12 +1486,18 @@ class Worker(QtCore.QObject):
             model_detail_rank = 0
             model_detail_id = TRANSCRIBE_MODEL_NAME
 
-            def _friendly_model_name(model_id: Optional[str]) -> str:
+            def _model_display_name(model_id: Optional[str]) -> str:
                 if model_id == "large-v3":
-                    return "OpenAI Whisper Large v3 loaded"
+                    return "OpenAI Whisper Large v3"
                 if model_id == "large-v2":
-                    return "OpenAI Whisper Large v2 loaded"
-                return "OpenAI Whisper loaded"
+                    return "OpenAI Whisper Large v2"
+                return "OpenAI Whisper"
+
+            def _format_model_loading_detail(model_display_name: str) -> str:
+                return f"Loading {model_display_name}..."
+
+            def _format_model_loaded_detail(model_display_name: str) -> str:
+                return f"{model_display_name} loaded"
 
             def _record_model_detail(model_id: Optional[str], rank: int) -> None:
                 nonlocal model_detail_rank, model_detail_id
@@ -1504,10 +1510,11 @@ class Worker(QtCore.QObject):
             def _emit_load_model_start_detail() -> None:
                 if load_model_done:
                     return
+                model_display_name = _model_display_name(model_detail_id)
                 self._emit_step_event(
                     ChecklistStep.LOAD_MODEL,
                     StepState.START,
-                    reason_text=_friendly_model_name(model_detail_id),
+                    reason_text=_format_model_loading_detail(model_display_name),
                 )
 
             def _mark_load_model_done() -> None:
@@ -1515,10 +1522,11 @@ class Worker(QtCore.QObject):
                 if load_model_done:
                     return
                 load_model_done = True
+                model_display_name = _model_display_name(model_detail_id)
                 self._emit_step_event(
                     ChecklistStep.LOAD_MODEL,
                     StepState.DONE,
-                    reason_text=_friendly_model_name(model_detail_id),
+                    reason_text=_format_model_loaded_detail(model_display_name),
                 )
 
             def _format_listen_time(seconds: float) -> str:
