@@ -1520,14 +1520,14 @@ class Worker(QtCore.QObject):
 
             def _build_listen_detail(current_seconds: float) -> str:
                 if duration_seconds is None:
-                    return "Listening to audio..."
+                    return "Listening to audio"
                 total = max(duration_seconds, 0.0)
                 current = min(max(current_seconds, 0.0), total)
                 if total - current <= 0.5:
                     current = total
                 return (
-                    "Listening to audio... "
-                    f"{_format_listen_time(current)}/{_format_listen_time(total)}"
+                    "Listening to audio "
+                    f"({_format_listen_time(current)}/{_format_listen_time(total)})"
                 )
 
             def _ensure_detect_language_started() -> None:
@@ -2433,7 +2433,7 @@ class Worker(QtCore.QObject):
 
             try:
                 total_words = _execute_alignment_run()
-                return StepState.DONE, self._format_alignment_detail(total_words, total_words)
+                return StepState.DONE, "Matching complete"
             except AlignmentError as exc:
                 if allow_cpu_retry and not force_cpu:
                     self.signals.log.emit(
@@ -2797,7 +2797,7 @@ class Worker(QtCore.QObject):
         *,
         estimated: bool = False,
     ) -> str:
-        return f"{current:,}/{total:,} words timed"
+        return f"Matching ({current:,}/{total:,} words)"
 
     def _maybe_emit_alignment_progress(self, current: int, total: int) -> None:
         if not getattr(self, "_alignment_emit_events", True):
