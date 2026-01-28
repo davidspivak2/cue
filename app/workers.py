@@ -200,7 +200,6 @@ class Worker(QtCore.QObject):
         self._punctuation_attempt = 0
         self._punctuation_final_emitted = False
         self._gap_active = False
-        self._gap_found_count = 0
         self._skip_punctuation = False
         self._skip_gaps = False
         self._control_dir: Optional[Path] = None
@@ -614,20 +613,17 @@ class Worker(QtCore.QObject):
         if isinstance(vad_stats, dict) and not vad_stats.get("enabled", True):
             return
         if not self._gap_active and not self._skip_gaps:
-            gaps_found = int(vad_stats.get("gaps_found", 0) or 0) if isinstance(vad_stats, dict) else 0
             gaps_restored = (
                 int(vad_stats.get("gaps_restored", 0) or 0) if isinstance(vad_stats, dict) else 0
             )
-            if gaps_found == 0:
-                detail = "No gaps found"
-            elif gaps_restored > 0:
-                detail = f"Found {gaps_found} gaps, filled {gaps_restored}"
+            if gaps_restored > 0:
+                detail = "Missed speech detected and fixed"
             else:
-                detail = f"Found {gaps_found} gaps"
+                detail = "Looks good!"
             self._emit_step_progress(
                 ProgressStep.FIX_GAPS,
                 0.0,
-                "Checking for gaps in subtitles",
+                "Checking for missed speech",
                 force=True,
             )
             self._emit_step_event(
@@ -1347,7 +1343,6 @@ class Worker(QtCore.QObject):
             self._punctuation_attempt = 0
             self._punctuation_final_emitted = False
             self._gap_active = False
-            self._gap_found_count = 0
             self._skip_punctuation = False
             self._skip_gaps = False
             self._control_dir = None
@@ -1842,19 +1837,22 @@ class Worker(QtCore.QObject):
                         self.transcription_settings
                         and self.transcription_settings.vad_gap_rescue_enabled
                     ):
-                        self._gap_found_count = 0
                         if not self._gap_active:
                             self._gap_active = True
                             self._emit_step_progress(
                                 ProgressStep.FIX_GAPS,
                                 0.0,
-                                "Checking for gaps in subtitles",
+                                "Checking for missed speech",
                                 force=True,
                             )
                             self._emit_step_event(
                                 ChecklistStep.FIX_MISSING_SUBTITLES,
                                 StepState.START,
-                                reason_text="Scanning...",
+                            )
+                            self._emit_step_event(
+                                ChecklistStep.FIX_MISSING_SUBTITLES,
+                                StepState.START,
+                                reason_text="Listening...",
                             )
                 if text.startswith("VAD_GAP_RESCUE_DONE"):
                     if (
@@ -1862,16 +1860,12 @@ class Worker(QtCore.QObject):
                         and self.transcription_settings.vad_gap_rescue_enabled
                     ):
                         self._gap_active = False
-                        match_found = re.search(r"gaps_found=(\d+)", text)
                         match_restored = re.search(r"gaps_restored=(\d+)", text)
-                        gaps_found = int(match_found.group(1)) if match_found else 0
                         gaps_restored = int(match_restored.group(1)) if match_restored else 0
-                        if gaps_found == 0:
-                            detail = "No gaps found"
-                        elif gaps_restored > 0:
-                            detail = f"Found {gaps_found} gaps, filled {gaps_restored}"
+                        if gaps_restored > 0:
+                            detail = "Missed speech detected and fixed"
                         else:
-                            detail = f"Found {gaps_found} gaps"
+                            detail = "Looks good!"
                         self._emit_step_event(
                             ChecklistStep.FIX_MISSING_SUBTITLES,
                             StepState.DONE,
@@ -1884,12 +1878,10 @@ class Worker(QtCore.QObject):
                             force=True,
                         )
                 if text.startswith("VAD_GAP_DETECTED") and self._gap_active:
-                    self._gap_found_count += 1
-                    detail = f"Scanning... (found {self._gap_found_count} gaps)"
                     self._emit_step_event(
                         ChecklistStep.FIX_MISSING_SUBTITLES,
                         StepState.START,
-                        reason_text=detail,
+                        reason_text="Listening...",
                     )
                 if text.startswith("PUNCT_RESCUE_SKIPPED"):
                     self._punctuation_active = False
