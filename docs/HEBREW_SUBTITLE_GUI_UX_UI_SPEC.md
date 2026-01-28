@@ -203,7 +203,12 @@ Create Subtitles is **not complete** until **both** succeed:
 
 ### F2) Progress checklist requirement
 Progress checklist **must include** a step named exactly:
-- **“Timing word highlighting (WhisperX)”**
+- **“Matching individual words to speech”**
+
+### F2a) Cancellation behavior
+- Cancel must stop the current operation promptly.
+- Cancel must not trigger fallback/retry logic.
+- Cancel must be surfaced as a cancelled state (not as a failure/error).
 
 ### F3) SUBTITLES_READY transition rule
 - Transition to **SUBTITLES_READY** only **after** WhisperX timing succeeds.
@@ -276,7 +281,7 @@ Create Subtitles must output:
 | --- | --- | --- | --- | --- | --- |
 | WB_NEEDS_VIDEO | Project exists but no linked video | **“Choose video…”** | Settings enabled (unless task running) | Panels closed/disabled | Workbench accessible via tab, but requires relink. |
 | WB_VIDEO_LINKED_READY | Video linked, ready to create subtitles | **“Create subtitles”** | Settings enabled (unless task running) | Left panel collapsed by default; right inspector available | Center preview shows video player. |
-| WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Timing word highlighting (WhisperX)”. |
+| WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Matching individual words to speech”. |
 | WB_SUBTITLES_READY | Subtitles + word timings available | **“Create video with subtitles”** | Settings enabled | Left panel user-controlled; right inspector docked/overlay per width | Subtitle text editable; timestamps read-only. |
 | WB_EXPORTING | Export in progress | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Export uses existing artifacts only. |
 | WB_EXPORT_SUCCESS | Export completed | **“Create video with subtitles”** | Settings enabled | Panels user-controlled | Show success UI with “Play video” + “Open folder”. |
@@ -333,7 +338,7 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 - “Choose video…”
 - “Create subtitles”
 - “Creating subtitles”
-- “Timing word highlighting (WhisperX)”
+- “Matching individual words to speech”
 - “Subtitles ready ✓”
 - “Create video with subtitles”
 - “Exporting video”
