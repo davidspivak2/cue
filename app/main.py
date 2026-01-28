@@ -2855,7 +2855,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
             if not transcription_settings or transcription_settings.vad_gap_rescue_enabled:
                 steps.append(
-                    (ChecklistStep.FIX_MISSING_SUBTITLES, "Checking for gaps in subtitles")
+                    (ChecklistStep.FIX_MISSING_SUBTITLES, "Checking for missed speech")
                 )
             if subtitle_mode == "word_highlight":
                 steps.append((ChecklistStep.TIMING_WORD_HIGHLIGHTS, "Timing word highlighting"))
