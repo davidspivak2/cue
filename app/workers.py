@@ -1472,6 +1472,7 @@ class Worker(QtCore.QObject):
             done_seen = False
             done_srt_path: Optional[Path] = None
             load_model_done = False
+            load_model_started = True
             detect_started = False
             detect_done = False
             language_detected = False
@@ -1493,11 +1494,15 @@ class Worker(QtCore.QObject):
                     return "OpenAI Whisper Large v2"
                 return "OpenAI Whisper"
 
-            def _format_model_loading_detail(model_display_name: str) -> str:
-                return f"Loading {model_display_name}..."
-
             def _format_model_loaded_detail(model_display_name: str) -> str:
                 return f"{model_display_name} loaded"
+
+            def _ensure_load_model_started() -> None:
+                nonlocal load_model_started
+                if load_model_started:
+                    return
+                load_model_started = True
+                self._emit_step_event(ChecklistStep.LOAD_MODEL, StepState.START)
 
             def _record_model_detail(model_id: Optional[str], rank: int) -> None:
                 nonlocal model_detail_rank, model_detail_id
@@ -1506,16 +1511,6 @@ class Worker(QtCore.QObject):
                 if rank >= model_detail_rank:
                     model_detail_rank = rank
                     model_detail_id = model_id
-
-            def _emit_load_model_start_detail() -> None:
-                if load_model_done:
-                    return
-                model_display_name = _model_display_name(model_detail_id)
-                self._emit_step_event(
-                    ChecklistStep.LOAD_MODEL,
-                    StepState.START,
-                    reason_text=_format_model_loading_detail(model_display_name),
-                )
 
             def _mark_load_model_done() -> None:
                 nonlocal load_model_done
@@ -1682,11 +1677,10 @@ class Worker(QtCore.QObject):
                 if text.startswith("MODEL_NAME "):
                     model_id = text.split(" ", 1)[1] if " " in text else ""
                     _record_model_detail(model_id.strip(), 1)
-                    _emit_load_model_start_detail()
+                    _ensure_load_model_started()
                 if text.startswith("MODEL_LOADED "):
                     model_id = text.split(" ", 1)[1] if " " in text else ""
                     _record_model_detail(model_id.strip(), 2)
-                    _emit_load_model_start_detail()
                     if not load_model_done:
                         _mark_load_model_done()
                         _ensure_detect_language_started()
