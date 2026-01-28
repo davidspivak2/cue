@@ -350,6 +350,8 @@ class Worker(QtCore.QObject):
                 force_cpu=False,
             )
         except TranscriptionError as exc:
+            if self._cancelled.is_set():
+                raise CancelledError("Operation cancelled.")
             should_retry = (
                 exc.return_code == 3221225477
                 or exc.watchdog_triggered
@@ -369,6 +371,8 @@ class Worker(QtCore.QObject):
                     True,
                 )
                 try:
+                    if self._cancelled.is_set():
+                        raise CancelledError("Operation cancelled.")
                     self._run_transcription_subprocess(
                         audio_path=audio_path,
                         srt_path=srt_path,
@@ -387,6 +391,8 @@ class Worker(QtCore.QObject):
                     True,
                 )
                 raise
+        except CancelledError:
+            raise
         except Exception:
             self.signals.log.emit(
                 f"Couldn't create subtitles; keeping audio file: {audio_path}",
@@ -825,6 +831,8 @@ class Worker(QtCore.QObject):
                 output_path=output_path,
                 video_duration=video_duration,
             )
+        except CancelledError:
+            raise
         except RuntimeError as exc:
             if str(exc).startswith(
                 "Word highlighting couldn’t be synced to the audio."
@@ -991,6 +999,8 @@ class Worker(QtCore.QObject):
                 self.signals.log.emit(perf_stats.summary_line(), True)
             return {"output_path": str(output_path)}
         except RuntimeError as exc:
+            if self._cancelled.is_set():
+                raise CancelledError("Operation cancelled.")
             self.signals.log.emit("Audio copy failed, trying another format...", True)
             self.signals.log.emit(str(exc), True)
 
@@ -1091,6 +1101,9 @@ class Worker(QtCore.QObject):
         return_code = process.wait()
         self._process = None
 
+        if self._cancelled.is_set():
+            raise CancelledError("Operation cancelled.")
+
         if return_code != 0:
             tail_text = "\n".join(stderr_tail)
             raise RuntimeError("Video processing failed. Details:\n" + tail_text)
@@ -1177,6 +1190,9 @@ class Worker(QtCore.QObject):
         return_code = process.wait()
         stderr_thread.join(timeout=1)
         self._process = None
+
+        if self._cancelled.is_set():
+            raise CancelledError("Operation cancelled.")
 
         if return_code == 0:
             if not end_emitted:
@@ -1289,6 +1305,9 @@ class Worker(QtCore.QObject):
         writer_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
         self._process = None
+
+        if self._cancelled.is_set():
+            raise CancelledError("Operation cancelled.")
 
         if return_code == 0:
             if not end_emitted:
@@ -1997,6 +2016,9 @@ class Worker(QtCore.QObject):
             self._stop_smooth_progress()
             self._stop_transcribe_estimator()
 
+            if self._cancelled.is_set():
+                raise CancelledError("Operation cancelled.")
+
             srt_candidate = done_srt_path or srt_path
             srt_exists = srt_candidate.exists()
             srt_size = srt_candidate.stat().st_size if srt_exists else 0
@@ -2289,6 +2311,7 @@ class Worker(QtCore.QObject):
                     errors="replace",
                     **get_subprocess_kwargs(),
                 )
+                self._process = process
                 stdout_tail: deque[str] = deque(maxlen=50)
                 stderr_tail: deque[str] = deque(maxlen=50)
 
@@ -2341,6 +2364,8 @@ class Worker(QtCore.QObject):
                     if stream is None:
                         return
                     for line in stream:
+                        if self._cancelled.is_set():
+                            break
                         stripped = line.strip()
                         if stripped:
                             if handler:
@@ -2361,7 +2386,22 @@ class Worker(QtCore.QObject):
                 )
                 stdout_thread.start()
                 stderr_thread.start()
-                return_code = process.wait()
+                try:
+                    while True:
+                        if self._cancelled.is_set():
+                            process.terminate()
+                            try:
+                                process.wait(timeout=1)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                            break
+                        if process.poll() is not None:
+                            break
+                        time.sleep(0.05)
+                    return_code = process.wait()
+                finally:
+                    if self._process is process:
+                        self._process = None
                 estimator_stop.set()
                 if estimator_thread:
                     estimator_thread.join(timeout=1)
@@ -2377,6 +2417,12 @@ class Worker(QtCore.QObject):
                     f"Alignment finished: exit_code={return_code} output={plan.output_path}",
                     True,
                 )
+                if self._cancelled.is_set():
+                    try:
+                        plan.output_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise CancelledError()
                 if return_code != 0:
                     raise AlignmentError(
                         "Alignment failed: process returned error.",
@@ -2435,6 +2481,8 @@ class Worker(QtCore.QObject):
                 total_words = _execute_alignment_run()
                 return StepState.DONE, "Matching complete"
             except AlignmentError as exc:
+                if self._cancelled.is_set():
+                    raise CancelledError("Operation cancelled.")
                 if allow_cpu_retry and not force_cpu:
                     self.signals.log.emit(
                         "Alignment failed; retrying on CPU.",
