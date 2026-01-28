@@ -2859,7 +2859,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     (ChecklistStep.FIX_MISSING_SUBTITLES, "Checking for missed speech")
                 )
             if subtitle_mode == "word_highlight":
-                steps.append((ChecklistStep.TIMING_WORD_HIGHLIGHTS, "Timing word highlighting"))
+                steps.append(
+                    (ChecklistStep.TIMING_WORD_HIGHLIGHTS, "Matching individual words to speech")
+                )
             steps.append((ChecklistStep.PREPARING_PREVIEW, "Preparing preview"))
             return steps
         if task_type == TaskType.BURN_IN:
