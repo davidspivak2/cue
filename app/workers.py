@@ -619,7 +619,7 @@ class Worker(QtCore.QObject):
             if gaps_restored > 0:
                 detail = "Missed speech detected and fixed"
             else:
-                detail = "No missed speech detected"
+                detail = "Looks good!"
             self._emit_step_progress(
                 ProgressStep.FIX_GAPS,
                 0.0,
@@ -1865,7 +1865,7 @@ class Worker(QtCore.QObject):
                         if gaps_restored > 0:
                             detail = "Missed speech detected and fixed"
                         else:
-                            detail = "No missed speech detected"
+                            detail = "Looks good!"
                         self._emit_step_event(
                             ChecklistStep.FIX_MISSING_SUBTITLES,
                             StepState.DONE,
