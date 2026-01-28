@@ -1679,6 +1679,9 @@ class Worker(QtCore.QObject):
                     model_id = text.split(" ", 1)[1] if " " in text else ""
                     _record_model_detail(model_id.strip(), 2)
                     _emit_load_model_start_detail()
+                    if not load_model_done:
+                        _mark_load_model_done()
+                        _ensure_detect_language_started()
                 if text.startswith("PROGRESS_END"):
                     _emit_log(text, False)
                     try:
