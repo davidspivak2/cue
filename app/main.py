@@ -6,6 +6,7 @@ if __name__ == "__main__" and __package__ is None:
 
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import collections
 import datetime
 from dataclasses import replace
 import json
@@ -68,7 +69,6 @@ from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.preview_playback import (
     PreviewPlaybackController,
 )
-from app.time_format import format_time
 from app.srt_utils import (
     compute_srt_sha256,
     is_word_timing_stale,
@@ -344,10 +344,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._checklist_state: dict[str, str] = {}
         self._active_checklist_step: Optional[str] = None
         self._worker_start_time: Optional[float] = None
-        self._last_global_progress = 0.0
         self._eta_ready = False
-        self._eta_smoothed_total_seconds: Optional[float] = None
+        self._eta_last_shown_text: Optional[str] = None
         self._eta_last_update_time = 0.0
+        self._eta_samples: collections.deque[tuple[float, float]] = collections.deque()
+        self._eta_smoothed_remaining: Optional[float] = None
         self._preparing_preview_active = False
         self._preparing_preview_timer: Optional[QtCore.QTimer] = None
         self._pending_subtitles_payload: Optional[dict] = None
@@ -2679,14 +2680,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_worker_started(self, status: str) -> None:
         if self._worker_start_time is None:
             self.elapsed_label.setText("")
-            self.remaining_label.setText("Remaining: Thinking...")
+            self.remaining_label.setText("Remaining: Thinking…")
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("0%")
             self._worker_start_time = time.monotonic()
-            self._last_global_progress = 0.0
             self._eta_ready = False
-            self._eta_smoothed_total_seconds = None
+            self._eta_last_shown_text = None
             self._eta_last_update_time = self._worker_start_time
+            self._eta_samples.clear()
+            self._eta_smoothed_remaining = None
             self._elapsed_timer.start()
             self.set_state(AppState.WORKING)
         heading = status
@@ -2722,10 +2724,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._elapsed_timer.stop()
         self._worker_start_time = None
-        self._last_global_progress = 0.0
         self._eta_ready = False
-        self._eta_smoothed_total_seconds = None
+        self._eta_last_shown_text = None
         self._eta_last_update_time = 0.0
+        self._eta_samples.clear()
+        self._eta_smoothed_remaining = None
 
         if self._worker_thread:
             self._worker_thread.quit()
@@ -2838,11 +2841,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._progress_controller:
             return
         global_progress = self._progress_controller.update(step_id, step_progress)
-        self._last_global_progress = global_progress
         percent = int(round(global_progress * 100))
         percent = max(0, min(percent, 100))
         self.progress_bar.setValue(percent)
         self.progress_bar.setFormat(f"{percent}%")
+        self._record_eta_sample(global_progress)
         self._update_remaining_label()
 
     def _configure_checklist(
@@ -3110,39 +3113,127 @@ class MainWindow(QtWidgets.QMainWindow):
         text = f"Elapsed: {minutes:02d}:{seconds:02d}"
         if self.elapsed_label.text() != text:
             self.elapsed_label.setText(text)
+        if self._eta_samples:
+            latest_progress = self._eta_samples[-1][1]
+            self._record_eta_sample(latest_progress)
         self._update_remaining_label()
 
     def _update_remaining_label(self) -> None:
         if self._worker_start_time is None or self._state != AppState.WORKING:
             return
-        now = time.monotonic()
-        elapsed = max(0.0, now - self._worker_start_time)
-        global_progress = self._last_global_progress
+        if not self._eta_samples:
+            self._set_remaining_label("Remaining: Thinking…")
+            return
+        self._trim_eta_samples(time.monotonic())
         if not self._eta_ready:
-            if elapsed < 5.0 or global_progress < 0.02:
-                self._set_remaining_label("Remaining: Thinking...", now)
+            if not self._eta_is_ready():
+                self._set_remaining_label("Remaining: Thinking…")
                 return
             self._eta_ready = True
-        if global_progress <= 0:
+        remaining_raw = self._compute_remaining_from_samples()
+        if remaining_raw is None:
+            if self._eta_last_shown_text is None:
+                self._set_remaining_label("Remaining: Thinking…")
             return
-        est_total = elapsed / global_progress
-        if self._eta_smoothed_total_seconds is None:
-            smoothed_total = est_total
-        else:
-            alpha = 0.2
-            smoothed_total = (
-                (1 - alpha) * self._eta_smoothed_total_seconds + alpha * est_total
-            )
-        self._eta_smoothed_total_seconds = smoothed_total
-        remaining = max(0.0, smoothed_total - elapsed)
-        formatted = format_time(remaining, remaining)
-        self._set_remaining_label(f"Remaining: {formatted}", now)
+        remaining_smoothed = self._smooth_remaining(remaining_raw)
+        remaining_rounded = self._round_remaining(remaining_smoothed)
+        formatted = self._format_duration(remaining_rounded)
+        self._set_remaining_label(f"Remaining: {formatted}")
 
-    def _set_remaining_label(self, text: str, now: float) -> None:
-        if self.remaining_label.text() == text:
-            if now - self._eta_last_update_time < 1.0:
+    def _record_eta_sample(self, global_progress: float) -> None:
+        now = time.monotonic()
+        if self._eta_samples:
+            last_time, last_progress = self._eta_samples[-1]
+            if now - last_time < 0.25:
+                return
+            if global_progress < last_progress:
+                return
+            delta_progress = global_progress - last_progress
+            if delta_progress > 0.05:
+                self._eta_samples.clear()
+                self._eta_ready = False
+                self._eta_smoothed_remaining = None
+                if self._eta_last_shown_text != "Remaining: Thinking…":
+                    self._set_remaining_label("Remaining: Thinking…", force=True)
+        self._eta_samples.append((now, global_progress))
+        self._trim_eta_samples(now)
+
+    def _trim_eta_samples(self, now: float) -> None:
+        while self._eta_samples and now - self._eta_samples[0][0] > 20.0:
+            self._eta_samples.popleft()
+
+    def _eta_is_ready(self) -> bool:
+        if len(self._eta_samples) < 2:
+            return False
+        start_time, start_progress = self._eta_samples[0]
+        end_time, end_progress = self._eta_samples[-1]
+        span = end_time - start_time
+        progress_delta = end_progress - start_progress
+        if span < 12.0 or progress_delta < 0.03:
+            return False
+        rate = progress_delta / span if span > 0 else 0.0
+        return rate > 0.0
+
+    def _compute_remaining_from_samples(self) -> Optional[float]:
+        if len(self._eta_samples) < 2:
+            return None
+        start_time, start_progress = self._eta_samples[0]
+        end_time, end_progress = self._eta_samples[-1]
+        span = end_time - start_time
+        progress_delta = end_progress - start_progress
+        if span <= 0 or progress_delta <= 0:
+            return None
+        rate = progress_delta / span
+        if rate <= 0:
+            return None
+        remaining_raw = (1.0 - end_progress) / rate
+        return max(0.0, min(remaining_raw, 24 * 60 * 60))
+
+    def _smooth_remaining(self, remaining_raw: float) -> float:
+        if self._eta_smoothed_remaining is None:
+            self._eta_smoothed_remaining = remaining_raw
+            return remaining_raw
+        old = self._eta_smoothed_remaining
+        smoothed = (0.8 * old) + (0.2 * remaining_raw)
+        limit = max(old * 0.25, 60.0)
+        smoothed = max(old - limit, min(old + limit, smoothed))
+        self._eta_smoothed_remaining = smoothed
+        return smoothed
+
+    def _round_remaining(self, remaining: float) -> int:
+        if remaining < 600:
+            interval = 5
+        elif remaining < 3600:
+            interval = 15
+        else:
+            interval = 60
+        return int(interval * round(remaining / interval))
+
+    def _format_duration(self, seconds: float) -> str:
+        total_seconds = max(0, int(seconds))
+        if total_seconds >= 3600:
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            secs = total_seconds % 60
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        minutes = total_seconds // 60
+        secs = total_seconds % 60
+        return f"{minutes:02d}:{secs:02d}"
+
+    def _set_remaining_label(self, text: str, force: bool = False) -> None:
+        now = time.monotonic()
+        text_changed = self._eta_last_shown_text != text
+        if not force and not text_changed and now - self._eta_last_update_time < 1.0:
+            return
+        if not force and text_changed and now - self._eta_last_update_time < 1.0:
+            if not (
+                self._eta_last_shown_text == "Remaining: Thinking…"
+                and text.startswith("Remaining: ")
+                and text != "Remaining: Thinking…"
+            ):
                 return
         self.remaining_label.setText(text)
+        self._eta_last_shown_text = text
         self._eta_last_update_time = now
 
     def _refresh_ffmpeg_status(self) -> None:
