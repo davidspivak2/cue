@@ -1,12 +1,12 @@
-# HebrewSubtitleGUI
+# Cue
 
-Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v3) and optionally hard-burning them into a new MP4. The GUI is built with PySide6 and is packaged as a double-clickable `.exe` with bundled FFmpeg.
+Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The GUI is built with PySide6 and is packaged as a double-clickable `.exe` with bundled FFmpeg. Supports RTL languages like Hebrew/Arabic.
 
 ## Docs
 - ROADMAP.md is the only task list and single source of truth for “what to do next.”
-- HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md is the design contract for the redesign.
+- CUE_UX_UI_SPEC.md is the design contract for the redesign.
 - Historical docs were consolidated; archived contents now live in the ROADMAP appendices, the UX spec appendix, and the README appendices below.
-- README describes current behavior in main; future redesign behavior is defined in HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md.
+- README describes current behavior in main; future redesign behavior is defined in CUE_UX_UI_SPEC.md.
 
 ## Features
 - Drag & drop or browse a single video (`.mp4`, `.mkv`, `.mov`, `.m4v`).
@@ -21,7 +21,7 @@ Windows desktop app for extracting Hebrew subtitles with faster-whisper (large-v
 - Word highlighting now applies correctly on wrapped subtitle lines in the graphics overlay preview/export path.
 - Graphics overlay export pipeline streams RGBA frames to FFmpeg.
 - Uses GPU (CUDA) when available, auto-falls back to CPU with clear logs.
-- Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`.
+- Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\Cue\logs\`.
 - Checklist above the progress bar shows in-progress/completed statuses during subtitle creation and export.
 - Optional diagnostics bundle: zip logs + outputs automatically on exit.
 - Transcription includes VAD gap rescue to recover missed speech in large silent gaps.
@@ -62,17 +62,17 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the canonical Windows set
 run-from-source, testing, and packaging steps.
 
 ## Portable install
-1. Copy the `dist\HebrewSubtitleGUI\` folder to `C:\Program Files\HebrewSubtitleGUI` (or any folder).
-2. Right-click `HebrewSubtitleGUI.exe` → **Create shortcut** → move shortcut to Desktop.
+1. Copy the `dist\Cue\` folder to `C:\Program Files\Cue` (or any folder).
+2. Right-click `Cue.exe` → **Create shortcut** → move shortcut to Desktop.
 3. Double-click the shortcut to launch (no Command Prompt needed).
 
 ## Quick start (Windows EXE)
-1. Double-click `HebrewSubtitleGUI.exe` (or create a shortcut and launch it).
+1. Double-click `Cue.exe` (or create a shortcut and launch it).
 2. Drop a video in the window and click **Create subtitles**.
 3. Expect outputs next to your video: `<video_stem>_audio_for_whisper.wav`, `<video_stem>.srt`, and `<video_stem>_subtitled.mp4`.
-4. Logs and cache live under `%LOCALAPPDATA%\HebrewSubtitleGUI\...`.
+4. Logs and cache live under `%LOCALAPPDATA%\Cue\...`.
 
-For more detail, see the UX/UI design contract in [`docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`](docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md).
+For more detail, see the UX/UI design contract in [`docs/CUE_UX_UI_SPEC.md`](docs/CUE_UX_UI_SPEC.md).
 
 ## Notes on model downloads
 - The first transcription run downloads the `large-v3` model from Hugging Face.
@@ -215,7 +215,7 @@ When subtitles are ready, the GUI prepares a preview moment:
    The preview cache key includes subtitle style + highlight settings and word-timing
    mtimes so word-highlight previews update when alignment data changes. Highlight
    color changes force an immediate preview refresh. Frames are cached under
-   `%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`.
+   `%LOCALAPPDATA%\Cue\cache\preview_frames`.
    In Word highlight mode, the still preview highlights the **second word** when no
    explicit word index is supplied (preview-only behavior; not time-accurate).
 
@@ -227,7 +227,7 @@ The graphics overlay renderer draws subtitle text into RGBA frames (using the sa
 
 ## Where to look when export or preview fails
 **Primary logs**
-- App runtime logs live in `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`.
+- App runtime logs live in `%LOCALAPPDATA%\Cue\logs\`.
 - Each run produces a timestamped log file like `hebrew_subtitle_gui_YYYYMMDD_HHMMSS.log`.
 
 **Diagnostics JSON (optional)**
@@ -264,17 +264,17 @@ In the app, open Settings → Diagnostics and enable the following checkboxes (a
 ## Appendix: Archived — Documentation index (original)
 # Documentation index
 
-Welcome to the HebrewSubtitleGUI documentation set. Use this page to find the right guide for your task.
+Welcome to the Cue documentation set. Use this page to find the right guide for your task.
 
 ## Start here
 - Roadmap (upcoming work): [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - Current behavior overview + archived references: [`README.md`](README.md).
-- Redesign contract: [`docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`](docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md).
+- Redesign contract: [`docs/CUE_UX_UI_SPEC.md`](docs/CUE_UX_UI_SPEC.md).
 - Developers: [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
 ## Guides
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — single source of truth for tasks and milestones.
-- [`docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`](docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md) — redesign contract and archived project context appendix.
+- [`docs/CUE_UX_UI_SPEC.md`](docs/CUE_UX_UI_SPEC.md) — redesign contract and archived project context appendix.
 - [`README.md`](README.md) — current behavior summary and archived appendices:
   - [Transcription pipeline appendix](README.md#appendix-archived--transcription-pipeline-original)
   - [Graphics overlay debugging appendix](README.md#appendix-archived--graphics-overlay-debugging-notes-original)
