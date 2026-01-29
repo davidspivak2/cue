@@ -8,7 +8,7 @@ from pathlib import Path
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke test frozen worker transcription")
-    parser.add_argument("--exe", default="dist/HebrewSubtitleGUI/HebrewSubtitleGUI.exe")
+    parser.add_argument("--exe", default="dist/Cue/Cue.exe")
     parser.add_argument("--wav", required=True)
     parser.add_argument("--srt", required=True)
     parser.add_argument("--lang", default="he")
