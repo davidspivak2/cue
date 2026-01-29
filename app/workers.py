@@ -1578,24 +1578,14 @@ class Worker(QtCore.QObject):
                     reason_text=_format_model_loaded_detail(model_display_name),
                 )
 
-            def _format_listen_time(seconds: float) -> str:
-                total_seconds = int(max(seconds, 0.0))
-                hours = total_seconds // 3600
-                minutes = (total_seconds % 3600) // 60
-                secs = total_seconds % 60
-                return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
             def _build_listen_detail(current_seconds: float) -> str:
-                if duration_seconds is None:
+                if not duration_seconds or duration_seconds <= 0:
                     return "Listening to audio"
                 total = max(duration_seconds, 0.0)
                 current = min(max(current_seconds, 0.0), total)
                 if total - current <= 0.5:
                     current = total
-                return (
-                    "Listening to audio "
-                    f"({_format_listen_time(current)}/{_format_listen_time(total)})"
-                )
+                return f"Listening to audio ({format_fraction(current, total)})"
 
             def _ensure_detect_language_started() -> None:
                 nonlocal detect_started
