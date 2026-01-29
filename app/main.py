@@ -68,6 +68,7 @@ from app.paths import get_app_data_dir, get_logs_dir, get_preview_frames_dir
 from app.preview_playback import (
     PreviewPlaybackController,
 )
+from app.time_format import format_time
 from app.srt_utils import (
     compute_srt_sha256,
     is_word_timing_stale,
@@ -343,6 +344,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._checklist_state: dict[str, str] = {}
         self._active_checklist_step: Optional[str] = None
         self._worker_start_time: Optional[float] = None
+        self._last_global_progress = 0.0
+        self._eta_ready = False
+        self._eta_smoothed_total_seconds: Optional[float] = None
+        self._eta_last_update_time = 0.0
         self._preparing_preview_active = False
         self._preparing_preview_timer: Optional[QtCore.QTimer] = None
         self._pending_subtitles_payload: Optional[dict] = None
@@ -419,6 +424,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.elapsed_label = QtWidgets.QLabel("")
         self.elapsed_label.setAlignment(QtCore.Qt.AlignCenter)
         self.elapsed_label.setStyleSheet("color: #777;")
+        self.remaining_label = QtWidgets.QLabel("")
+        self.remaining_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.remaining_label.setStyleSheet("color: #777;")
 
         self.log_box = QtWidgets.QPlainTextEdit()
         self.log_box.setReadOnly(True)
@@ -571,6 +579,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.checklist_widget)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.elapsed_label)
+        layout.addWidget(self.remaining_label)
         cancel_layout = QtWidgets.QHBoxLayout()
         cancel_layout.addStretch()
         cancel_layout.addWidget(self.cancel_button)
@@ -2670,9 +2679,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_worker_started(self, status: str) -> None:
         if self._worker_start_time is None:
             self.elapsed_label.setText("")
+            self.remaining_label.setText("Remaining: Thinking...")
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("0%")
             self._worker_start_time = time.monotonic()
+            self._last_global_progress = 0.0
+            self._eta_ready = False
+            self._eta_smoothed_total_seconds = None
+            self._eta_last_update_time = self._worker_start_time
             self._elapsed_timer.start()
             self.set_state(AppState.WORKING)
         heading = status
@@ -2689,21 +2703,29 @@ class MainWindow(QtWidgets.QMainWindow):
             if task_type == TaskType.GENERATE_SRT:
                 self.status_label.setText("Creating subtitles")
                 self.elapsed_label.setText("")
+                self.remaining_label.setText("")
             else:
                 self.progress_bar.setValue(100)
                 self.status_label.setText("Done")
                 self.elapsed_label.setText("")
+                self.remaining_label.setText("")
         elif message == "Operation cancelled.":
             self.progress_bar.setValue(0)
             self.status_label.setText("Cancelled")
             self.elapsed_label.setText("")
+            self.remaining_label.setText("")
         else:
             self.progress_bar.setValue(0)
             self.status_label.setText("Ready")
             self.elapsed_label.setText("")
+            self.remaining_label.setText("")
 
         self._elapsed_timer.stop()
         self._worker_start_time = None
+        self._last_global_progress = 0.0
+        self._eta_ready = False
+        self._eta_smoothed_total_seconds = None
+        self._eta_last_update_time = 0.0
 
         if self._worker_thread:
             self._worker_thread.quit()
@@ -2816,10 +2838,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._progress_controller:
             return
         global_progress = self._progress_controller.update(step_id, step_progress)
+        self._last_global_progress = global_progress
         percent = int(round(global_progress * 100))
         percent = max(0, min(percent, 100))
         self.progress_bar.setValue(percent)
         self.progress_bar.setFormat(f"{percent}%")
+        self._update_remaining_label()
 
     def _configure_checklist(
         self,
@@ -3086,6 +3110,40 @@ class MainWindow(QtWidgets.QMainWindow):
         text = f"Elapsed: {minutes:02d}:{seconds:02d}"
         if self.elapsed_label.text() != text:
             self.elapsed_label.setText(text)
+        self._update_remaining_label()
+
+    def _update_remaining_label(self) -> None:
+        if self._worker_start_time is None or self._state != AppState.WORKING:
+            return
+        now = time.monotonic()
+        elapsed = max(0.0, now - self._worker_start_time)
+        global_progress = self._last_global_progress
+        if not self._eta_ready:
+            if elapsed < 5.0 or global_progress < 0.02:
+                self._set_remaining_label("Remaining: Thinking...", now)
+                return
+            self._eta_ready = True
+        if global_progress <= 0:
+            return
+        est_total = elapsed / global_progress
+        if self._eta_smoothed_total_seconds is None:
+            smoothed_total = est_total
+        else:
+            alpha = 0.2
+            smoothed_total = (
+                (1 - alpha) * self._eta_smoothed_total_seconds + alpha * est_total
+            )
+        self._eta_smoothed_total_seconds = smoothed_total
+        remaining = max(0.0, smoothed_total - elapsed)
+        formatted = format_time(remaining, remaining)
+        self._set_remaining_label(f"Remaining: {formatted}", now)
+
+    def _set_remaining_label(self, text: str, now: float) -> None:
+        if self.remaining_label.text() == text:
+            if now - self._eta_last_update_time < 1.0:
+                return
+        self.remaining_label.setText(text)
+        self._eta_last_update_time = now
 
     def _refresh_ffmpeg_status(self) -> None:
         ffmpeg_path, ffprobe_path, _ = resolve_ffmpeg_paths()
