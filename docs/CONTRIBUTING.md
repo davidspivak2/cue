@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve HebrewSubtitleGUI! This guide focuses on Windows development, which is the primary target for the app and build pipeline.
+Thanks for helping improve Cue! This guide focuses on Windows development, which is the primary target for the app and build pipeline.
 
 ## Local setup (Windows 11 + Python 3.11)
 1. Create and activate a venv:
@@ -31,7 +31,7 @@ winget install -e --id Gyan.FFmpeg
 ```
 
 For more context on the app and pipeline, see:
-* `docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md` (design contract; includes the archived project context appendix).
+* `docs/CUE_UX_UI_SPEC.md` (design contract; includes the archived project context appendix).
 * `README.md` (archived transcription pipeline appendix + consolidated docs pointers).
 * `docs/ROADMAP.md` (single source of truth for tasks).
 
@@ -96,12 +96,12 @@ build_exe.bat
 
 Expected output:
 ```
-dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
+dist\Cue\Cue.exe
 ```
 
-The `dist\HebrewSubtitleGUI\` folder is the portable package you can zip or copy for release.
+The `dist\Cue\` folder is the portable package you can zip or copy for release.
 
 ## Preview cache notes
 Preview still frames are cached under:
-`%LOCALAPPDATA%\HebrewSubtitleGUI\cache\preview_frames`. If you need to refresh
+`%LOCALAPPDATA%\Cue\cache\preview_frames`. If you need to refresh
 previews during development, clear this folder.
