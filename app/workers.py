@@ -71,6 +71,7 @@ from .word_timing_schema import (
     save_word_timings_json,
     word_timings_path_for_srt,
 )
+from .time_format import format_fraction
 
 TRANSCRIBE_MODEL_NAME = "large-v3"
 
@@ -990,9 +991,18 @@ class Worker(QtCore.QObject):
                 make_frame_generator(),
                 progress_offset=0.10,
                 progress_scale=0.90,
+                detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                detail_total_seconds=duration_seconds,
             )
             self._burn_in_seconds = time.monotonic() - burn_start
-            self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE)
+            detail_text = None
+            if duration_seconds and duration_seconds > 0:
+                detail_text = format_fraction(duration_seconds, duration_seconds)
+            self._emit_step_event(
+                ChecklistStep.ADD_SUBTITLES,
+                StepState.DONE,
+                reason_text=detail_text,
+            )
             self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
             self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
             if perf_stats:
@@ -1015,9 +1025,18 @@ class Worker(QtCore.QObject):
             make_frame_generator(),
             progress_offset=0.10,
             progress_scale=0.90,
+            detail_step_id=ChecklistStep.ADD_SUBTITLES,
+            detail_total_seconds=duration_seconds,
         )
         self._burn_in_seconds = time.monotonic() - burn_start
-        self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE)
+        detail_text = None
+        if duration_seconds and duration_seconds > 0:
+            detail_text = format_fraction(duration_seconds, duration_seconds)
+        self._emit_step_event(
+            ChecklistStep.ADD_SUBTITLES,
+            StepState.DONE,
+            reason_text=detail_text,
+        )
         self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
         self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
         if perf_stats:
@@ -1218,6 +1237,8 @@ class Worker(QtCore.QObject):
         *,
         progress_offset: float = 0.0,
         progress_scale: float = 1.0,
+        detail_step_id: Optional[str] = None,
+        detail_total_seconds: Optional[float] = None,
     ) -> None:
         if self._cancelled.is_set():
             raise CancelledError()
@@ -1267,9 +1288,35 @@ class Worker(QtCore.QObject):
         writer_thread.start()
 
         last_log_time = 0.0
+        last_detail_emit = 0.0
+        last_detail_text: Optional[str] = None
         end_emitted = False
         if duration_seconds is None:
             self._start_smooth_progress(step_id, status_label)
+
+        def _maybe_emit_detail(current_seconds: float) -> None:
+            nonlocal last_detail_emit, last_detail_text
+            if not detail_step_id:
+                return
+            if not detail_total_seconds or detail_total_seconds <= 0:
+                return
+            if self._cancelled.is_set():
+                return
+            clamped_current = max(0.0, min(current_seconds, detail_total_seconds))
+            detail_text = format_fraction(clamped_current, detail_total_seconds)
+            if detail_text == last_detail_text:
+                return
+            now = time.monotonic()
+            if now - last_detail_emit < 0.25:
+                return
+            last_detail_text = detail_text
+            last_detail_emit = now
+            self._emit_step_event(
+                detail_step_id,
+                StepState.START,
+                reason_text=detail_text,
+            )
+
         assert process.stdout is not None
         for line in process.stdout:
             if self._cancelled.is_set():
@@ -1285,6 +1332,7 @@ class Worker(QtCore.QObject):
                 progress = max(0.0, min(progress, 1.0))
                 mapped_progress = progress_offset + progress_scale * progress
                 self._emit_step_progress(step_id, mapped_progress, status_label)
+                _maybe_emit_detail(out_time_ms / 1_000_000)
                 now = time.monotonic()
                 if now - last_log_time >= 0.25:
                     self.signals.log.emit(
@@ -1530,24 +1578,14 @@ class Worker(QtCore.QObject):
                     reason_text=_format_model_loaded_detail(model_display_name),
                 )
 
-            def _format_listen_time(seconds: float) -> str:
-                total_seconds = int(max(seconds, 0.0))
-                hours = total_seconds // 3600
-                minutes = (total_seconds % 3600) // 60
-                secs = total_seconds % 60
-                return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
             def _build_listen_detail(current_seconds: float) -> str:
-                if duration_seconds is None:
+                if not duration_seconds or duration_seconds <= 0:
                     return "Listening to audio"
                 total = max(duration_seconds, 0.0)
                 current = min(max(current_seconds, 0.0), total)
                 if total - current <= 0.5:
                     current = total
-                return (
-                    "Listening to audio "
-                    f"({_format_listen_time(current)}/{_format_listen_time(total)})"
-                )
+                return f"Listening to audio ({format_fraction(current, total)})"
 
             def _ensure_detect_language_started() -> None:
                 nonlocal detect_started
