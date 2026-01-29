@@ -194,7 +194,7 @@ Definition of done:
 
 5.2 Progress UI update
 - Deliverable:
-  - Progress checklist includes “Timing word highlighting (WhisperX)”
+  - Progress checklist includes “Matching individual words to speech”
 - Acceptance criteria:
   - Step appears and reports progress accurately.
 
@@ -500,7 +500,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Use consistent text shaping to avoid mismatch between rendering and highlight positions.
   - Be explicit about font fallback behavior.
 - Manual test checklist:
-  - Verify word highlights align with Arabic/Hebrew samples.
+  - Verify word highlights align with RTL samples (Arabic/Hebrew).
   - Verify mixed RTL/LTR sentences render correct word rectangles.
 
 ### Overlay PR5 — Export integration with streaming overlay frames (no disk)
@@ -604,7 +604,7 @@ Last updated: 2026-02-27
 
 ## A) Goal and user-visible outcomes
 - Subtitle mode selector is available, with **Word highlight** recommended as the default and **Static** as the alternative.
-- RTL Hebrew ordering stays stable during and after highlighting.
+- RTL ordering stays stable during and after highlighting (e.g., Hebrew/Arabic).
 - Highlight is real highlighting (not underline), with user-selectable highlight color.
 - Word timings come from alignment (WhisperX), not heuristic splitting.
 
