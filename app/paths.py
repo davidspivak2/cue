@@ -6,7 +6,7 @@ from pathlib import Path
 
 def get_app_data_dir() -> Path:
     local_appdata = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    path = local_appdata / "HebrewSubtitleGUI"
+    path = local_appdata / "Cue"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
