@@ -1,4 +1,4 @@
-# Hebrew Subtitle GUI — UX/UI Specification (Design Contract)
+# Cue — UX/UI Specification (Design Contract)
 
 **Last updated:** 2026-03-10  
 **Scope:** This document is the **single source of truth** for the full redesign: visual system, navigation model, project model, screen specs, state machine, and pipeline contract.
@@ -353,7 +353,7 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 - “Encode”, “Burn-in”, “Hardcode”
 
 ## Appendix: Archived — Project context (original)
-# Hebrew Subtitle GUI — Project Context (Read This First)
+# Cue — Project Context (Read This First)
 
 **Last updated:** 2026-03-10
 
@@ -370,7 +370,7 @@ It explains:
 - what has been worked on since GUI PR6 (progress + settings + diagnostics)
 - the current punctuation problem (what we measured, what we tried, what to do next)
 
-UX/UI target spec (design contract): **`/docs/HEBREW_SUBTITLE_GUI_UX_UI_SPEC.md`**.
+UX/UI target spec (design contract): **`/docs/CUE_UX_UI_SPEC.md`**.
 
 ## Current behavior vs target redesign
 
@@ -392,7 +392,7 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 
 ## 0) One-page overview (for new maintainers)
 
-**What this app is:** a Windows desktop GUI built with **PySide6** that generates Hebrew subtitles and (optionally) burns them into a new MP4.
+**What this app is:** a Windows desktop GUI built with **PySide6** that generates subtitles (any language) and (optionally) burns them into a new MP4. Supports RTL languages like Hebrew/Arabic.
 
 **Core workflow:**
 1) Create or open a project from **Project Hub**
@@ -412,20 +412,20 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 - Worker process launch differs by mode (python module vs worker EXE).
 
 **App data location (Windows):**
-`%LOCALAPPDATA%\HebrewSubtitleGUI\` — stores models, logs, config, and cache.
+`%LOCALAPPDATA%\Cue\` — stores models, logs, config, and cache.
 
 ---
 
 ## 1) What the app does (user-facing)
 
 Goal: turn a single video into:
-1) a Hebrew subtitle file (`.srt`, UTF‑8), and optionally
+1) a subtitle file (`.srt`, UTF‑8) in the target language, and optionally
 2) a new subtitled video (`*_subtitled.mp4`) with the subtitles burned-in.
 
 Typical flow:
 1) Create a new project from Project Hub (or open an existing one).
 2) App extracts a mono 16 kHz WAV using FFmpeg (optional cleanup filter).
-3) App runs faster‑whisper (Whisper) to transcribe Hebrew and write an `.srt`.
+3) App runs faster‑whisper (Whisper) to transcribe speech in the target language and write an `.srt`.
 4) App runs WhisperX alignment to generate word timings for Word highlight mode.
 5) User edits subtitle text in the Workbench (timestamps are visible but read-only).
 6) App burns subtitles into a new MP4 using FFmpeg.
@@ -487,7 +487,7 @@ Running it out-of-process:
 ## 3) Where data goes
 
 ### App data root (Windows)
-`%LOCALAPPDATA%\HebrewSubtitleGUI\`
+`%LOCALAPPDATA%\Cue\`
 
 Common subfolders:
 - `models\` — faster‑whisper model cache
@@ -537,7 +537,7 @@ Example:
 
 ## 3.25) Persisted settings (config.json) reference
 
-Settings are stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` and are loaded in `app/main.py`.
+Settings are stored in `%LOCALAPPDATA%\Cue\config.json` and are loaded in `app/main.py`.
 
 | Config key | UI label (exact) | Allowed values | Default | Pipeline impact |
 | --- | --- | --- | --- | --- |
@@ -643,7 +643,7 @@ The UI aggregates progress without regression (percent should not go backwards).
 Success looks like: SRT created in the correct folder, no crashes, optional diagnostics generated when enabled, and the exported video plays with visible subtitles.
 
 ### Known issues / gotchas (short, living list)
-- **Windows console Unicode:** printing Hebrew to cp1252 can crash; JSON printing is safest when redirected. Prefer `ensure_ascii=True` or safe-print helpers for stdout.
+- **Windows console Unicode:** printing RTL text (e.g., Hebrew/Arabic) to cp1252 can crash; JSON printing is safest when redirected. Prefer `ensure_ascii=True` or safe-print helpers for stdout.
 - **Benchmark outputs location:** write to `C:\subtitles_extra\outputs`, not inside the repo, to avoid churn and accidental commits.
 - **Keep-extracted-WAV affects reproducibility:** the app may delete the extracted WAV unless “Keep extracted WAV file” is enabled.
 - **Benchmark vs app differences:** device/compute-type and audio filter chain differences can change results; compare `TRANSCRIBE_CONFIG_JSON` / `TRANSCRIBE_STATS_JSON` / diagnostics to align runs.
@@ -702,7 +702,7 @@ Current default:
 - **Disabled by default** (OFF), because it can reduce punctuation quality on some audio.
 
 Configuration source:
-- Stored in `%LOCALAPPDATA%\HebrewSubtitleGUI\config.json` as `apply_audio_filter`.
+- Stored in `%LOCALAPPDATA%\Cue\config.json` as `apply_audio_filter`.
 
 ---
 
@@ -800,7 +800,7 @@ Benchmarks must use the **exact** `<video_stem>_audio_for_whisper.wav` produced 
 ## 9) Troubleshooting & diagnostics cheat-sheet
 
 **Logs (GUI runtime):**
-- Location: `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`
+- Location: `%LOCALAPPDATA%\Cue\logs\`
 - Open the most recent timestamped log to see FFmpeg commands, worker output, and errors.
 
 **Diagnostics JSON (opt-in):**
@@ -955,7 +955,7 @@ However, we verified cases where:
 ### 12.3 What we measured (key debugging results)
 We used small debug scripts (run locally) to count punctuation in **raw Whisper segments** before any splitting.
 
-Earlier measurements (pre audio-extraction default change) on a 30s Hebrew WAV (representative):
+Earlier measurements (pre audio-extraction default change) on a 30s RTL-language WAV (representative):
 - `large-v3`, `int16`, VAD **on**, word timestamps **on** → **0 commas / 0 periods**
 - `large-v3`, `int16`, VAD **off** → sometimes **1 comma**
 - `large-v3`, `int8`, VAD **on** → sometimes **1 comma**
@@ -971,7 +971,7 @@ Conclusion (current best hypothesis):
 - Tweaking `srt_splitter` reconstruction/alignment logic:
   - Helps only when punctuation exists in `segment.text`.
   - Does not create commas if Whisper didn’t output them.
-- Adding a Hebrew `initial_prompt` asking Whisper to add punctuation:
+- Adding an RTL-language `initial_prompt` (e.g., Hebrew) asking Whisper to add punctuation:
   - Did not reliably restore commas.
 
 ### 12.5 Constraints / non-negotiables
@@ -1019,7 +1019,7 @@ When reporting issues, attach:
 3) The exact Settings used (or let diagnostics capture it)
 
 If diagnostics are not enabled, capture:
-- the GUI runtime log file from `%LOCALAPPDATA%\HebrewSubtitleGUI\logs\`
+- the GUI runtime log file from `%LOCALAPPDATA%\Cue\logs\`
 - the `TRANSCRIBE_CONFIG_JSON` line (if present)
 
 ---
