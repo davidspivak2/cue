@@ -83,24 +83,24 @@ if not exist bin\ffprobe.exe (
   exit /b 1
 )
 
-if exist HebrewSubtitleGUI.spec del /f /q HebrewSubtitleGUI.spec
+if exist Cue.spec del /f /q Cue.spec
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 
-copy /Y "tools\\pyinstaller.spec.in" "HebrewSubtitleGUI.spec" >nul
+copy /Y "tools\\pyinstaller.spec.in" "Cue.spec" >nul
 if errorlevel 1 (
-  echo [ERROR] Failed to prepare HebrewSubtitleGUI.spec.
+  echo [ERROR] Failed to prepare Cue.spec.
   exit /b 1
 )
 
-pyinstaller --noconfirm HebrewSubtitleGUI.spec
+pyinstaller --noconfirm Cue.spec
 
 if errorlevel 1 (
   echo [ERROR] PyInstaller failed.
   exit /b 1
 )
 
-set "INTERNAL_DIR=dist\HebrewSubtitleGUI\_internal"
+set "INTERNAL_DIR=dist\Cue\_internal"
 if exist "%INTERNAL_DIR%" (
   echo [INFO] Scanning for OpenMP DLL duplicates...
   set "KEEP_OMP_DLL="
@@ -115,4 +115,4 @@ if exist "%INTERNAL_DIR%" (
   )
 )
 
-echo Build complete. Output in dist\HebrewSubtitleGUI\HebrewSubtitleGUI.exe
+echo Build complete. Output in dist\Cue\Cue.exe

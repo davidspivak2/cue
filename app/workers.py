@@ -1415,7 +1415,7 @@ class Worker(QtCore.QObject):
                     "app.transcribe_worker",
                 ]
             else:
-                worker_exe = Path(sys.executable).with_name("HebrewSubtitleWorker.exe")
+                worker_exe = Path(sys.executable).with_name("CueWorker.exe")
                 if worker_exe.exists():
                     command = [str(worker_exe)]
                 else:

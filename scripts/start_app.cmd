@@ -86,7 +86,7 @@ if "%SHOULD_INSTALL%"=="1" (
   echo [info] Dependencies look up-to-date. Skipping pip install.
 )
 
-echo [info] Starting HebrewSubtitleGUI...
+echo [info] Starting Cue...
 "%VENV_PY%" -m app.main
 set "APP_EXIT=%ERRORLEVEL%"
 if %APP_EXIT% NEQ 0 (
