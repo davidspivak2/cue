@@ -174,7 +174,7 @@ class Worker(QtCore.QObject):
         self._smooth_progress: Optional[SmoothProgress] = None
         self._transcribe_estimator_stop: Optional[threading.Event] = None
         self._transcribe_estimator_thread: Optional[threading.Thread] = None
-        self._logger = logging.getLogger("hebrew_subtitle_gui")
+        self._logger = logging.getLogger("cue")
         self._last_audio_extract_command: Optional[list[str]] = None
         self._audio_path: Optional[Path] = None
         self._srt_path: Optional[Path] = None

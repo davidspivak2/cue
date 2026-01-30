@@ -228,7 +228,7 @@ The graphics overlay renderer draws subtitle text into RGBA frames (using the sa
 ## Where to look when export or preview fails
 **Primary logs**
 - App runtime logs live in `%LOCALAPPDATA%\Cue\logs\`.
-- Each run produces a timestamped log file like `hebrew_subtitle_gui_YYYYMMDD_HHMMSS.log`.
+- Each run produces a timestamped log file like `cue_YYYYMMDD_HHMMSS.log`.
 
 **Diagnostics JSON (optional)**
 - When diagnostics logging is enabled, JSON files named `diag_*.json` are written **next to the export outputs** (same folder as the selected save location).
