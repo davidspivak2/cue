@@ -3941,9 +3941,9 @@ class MainWindow(QtWidgets.QMainWindow):
 def _configure_logging() -> tuple[logging.Logger, Path, Path, logging.FileHandler]:
     log_dir = get_logs_dir()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = log_dir / f"hebrew_subtitle_gui_{timestamp}.log"
+    log_path = log_dir / f"cue_{timestamp}.log"
 
-    logger = logging.getLogger("hebrew_subtitle_gui")
+    logger = logging.getLogger("cue")
     logger.setLevel(logging.INFO)
     handler = logging.FileHandler(log_path, encoding="utf-8")
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
