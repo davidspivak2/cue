@@ -526,12 +526,12 @@ folder as the selected video on exit. The bundle includes:
 
 When running `tools\punct_benchmark.py` (and similar local diagnostics), save output logs outside the repo so they are never accidentally committed:
 
-- Folder: `C:\subtitles_extra\outputs`
-- Do not write benchmark logs into `C:\subtitles_repo` (repo) to avoid accidental commits.
+- Folder: `C:\Cue_extra\outputs`
+- Do not write benchmark logs into `C:\Cue_repo` (repo) to avoid accidental commits.
 
 Example:
-- `C:\subtitles_extra\outputs\bench_rescue_test_audio_30s.txt`
-- `C:\subtitles_extra\outputs\bench_rescue_test_audio_full.txt`
+- `C:\Cue_extra\outputs\bench_rescue_test_audio_30s.txt`
+- `C:\Cue_extra\outputs\bench_rescue_test_audio_full.txt`
 
 ---
 
@@ -644,7 +644,7 @@ Success looks like: SRT created in the correct folder, no crashes, optional diag
 
 ### Known issues / gotchas (short, living list)
 - **Windows console Unicode:** printing RTL text (e.g., Hebrew/Arabic) to cp1252 can crash; JSON printing is safest when redirected. Prefer `ensure_ascii=True` or safe-print helpers for stdout.
-- **Benchmark outputs location:** write to `C:\subtitles_extra\outputs`, not inside the repo, to avoid churn and accidental commits.
+- **Benchmark outputs location:** write to `C:\Cue_extra\outputs`, not inside the repo, to avoid churn and accidental commits.
 - **Keep-extracted-WAV affects reproducibility:** the app may delete the extracted WAV unless “Keep extracted WAV file” is enabled.
 - **Benchmark vs app differences:** device/compute-type and audio filter chain differences can change results; compare `TRANSCRIBE_CONFIG_JSON` / `TRANSCRIBE_STATS_JSON` / diagnostics to align runs.
 
@@ -680,7 +680,7 @@ When creating subtitles, the app extracts audio to a WAV named:
 - `<video_stem>_audio_for_whisper.wav` is written in the output folder dictated by Save policy (often the same folder as the video).
 - By default, the WAV is deleted after successful transcription; if **“Keep extracted WAV file”** is enabled, it is retained.
 - Diagnostics JSON files are written next to the outputs when possible; if that fails, the app falls back to the app log directory.
-- Benchmark outputs should be written outside the repo (e.g., `C:\subtitles_extra\outputs`).
+- Benchmark outputs should be written outside the repo (e.g., `C:\Cue_extra\outputs`).
 
 ---
 
@@ -760,7 +760,7 @@ This is especially important when comparing CLI benchmark runs vs in-app runs.
 ## 8) Benchmarking (repeatable, and keep outputs out of the repo)
 
 **Recommended output folder (local only):**
-- Create `C:\subtitles_extra\outputs`
+- Create `C:\Cue_extra\outputs`
 - Do **not** write benchmark outputs inside the repo.
 
 **Use the app-created WAV for benchmarks:**
@@ -770,9 +770,9 @@ This is especially important when comparing CLI benchmark runs vs in-app runs.
 
 **Example benchmark commands (Windows cmd):**
 ```bat
-cd C:\subtitles_repo
+cd C:\Cue_repo
 .venv\Scripts\activate
-python -u tools\punct_benchmark.py --wav "D:\videos\clip_audio_for_whisper.wav" > C:\subtitles_extra\outputs\bench_clip.txt 2>&1
+python -u tools\punct_benchmark.py --wav "D:\videos\clip_audio_for_whisper.wav" > C:\Cue_extra\outputs\bench_clip.txt 2>&1
 ```
 
 **Unicode/console notes:**
@@ -792,7 +792,7 @@ Benchmarks must use the **exact** `<video_stem>_audio_for_whisper.wav` produced 
 - Locate the produced `*_audio_for_whisper.wav` in the output folder dictated by Save policy.
 - Run the benchmark against that exact WAV and redirect output outside the repo:
   ```bat
-  python -u tools\punct_benchmark.py --wav "D:\videos\clip_audio_for_whisper.wav" > C:\subtitles_extra\outputs\bench_clip.txt 2>&1
+  python -u tools\punct_benchmark.py --wav "D:\videos\clip_audio_for_whisper.wav" > C:\Cue_extra\outputs\bench_clip.txt 2>&1
   ```
 
 ---
