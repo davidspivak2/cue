@@ -438,17 +438,17 @@ Acceptance:
 
 \### PR1 — Add Tauri + React UI shell (no backend integration)
 
-\- \[ ] Create `desktop/` with Vite + React + TS
+\- \[x] Create `desktop/` with Vite + React + TS
 
-\- \[ ] Add MUI and a basic theme module
+\- \[x] Add MUI and a basic theme module
 
-\- \[ ] Minimal navigation: Home + Settings
+\- \[x] Minimal navigation: Home + Settings
 
-\- \[ ] Home shows placeholder “Ready” and disabled Start button
+\- \[x] Home shows placeholder “Ready” and disabled Start button
 
-\- \[ ] Settings shows dummy controls (toggles/sliders) to prove component styling
+\- \[x] Settings shows dummy controls (toggles/sliders) to prove component styling
 
-\- \[ ] `desktop/README.md` with exact Windows commands
+\- \[x] `desktop/README.md` with exact Windows commands
 
 Acceptance:
 
@@ -678,6 +678,12 @@ Every PR must include:
 
 
 
+\### 2026-02-01
+
+\- PR1: Added initial `desktop/` Tauri + React shell with MUI theming, navigation, and placeholder screens.
+
+
+
 \### 2026-01-30
 
 \- Plan created. Selected direction: Tauri/Electron + React (Tauri preferred). No implementation yet.
@@ -685,6 +691,4 @@ Every PR must include:
 
 
 (When implementing, add entries here per PR.)
-
-
 
