@@ -1,6 +1,6 @@
 # Cue
 
-Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The GUI is built with PySide6 and is packaged as a double-clickable `.exe` with bundled FFmpeg. Supports RTL languages like Hebrew/Arabic.
+Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI shell also exists in `desktop/` (PR1, no backend integration yet). Supports RTL languages like Hebrew/Arabic.
 
 ## Docs
 - ROADMAP.md is the only task list and single source of truth for “what to do next.”
@@ -60,6 +60,28 @@ requirements.txt
 ## Developer setup
 See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the canonical Windows setup, FFmpeg acquisition,
 run-from-source, testing, and packaging steps.
+
+## Desktop UI options
+
+### New Desktop UI (Tauri + React)
+- **Location:** `desktop/`
+- **Status:** PR1 delivers a UI shell only (no backend integration yet). The legacy Qt UI still exists.
+- **Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
+- **Dev run:**
+  ```bat
+  cd desktop
+  npm install
+  npm run tauri dev
+  ```
+- **Build:**
+  ```bat
+  cd desktop
+  npm run tauri build
+  ```
+
+### Legacy UI (PySide6)
+The current production UI lives under `app/` and runs via the Python entry point. See
+[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the run-from-source and packaging steps.
 
 ## Portable install
 1. Copy the `dist\Cue\` folder to `C:\Program Files\Cue` (or any folder).
