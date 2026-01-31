@@ -461,15 +461,15 @@ Acceptance:
 
 \### PR2 — Sidecar process management (backend runner stub)
 
-Status: In progress (current)
+Status: Done
 
-\- \[ ] Decide transport: HTTP streaming preferred
+\- \[x] Decide transport: HTTP streaming preferred
 
-\- \[ ] Add minimal backend runner (can be a Python server stub) packaged as sidecar
+\- \[x] Add minimal backend runner (can be a Python server stub) packaged as sidecar
 
-\- \[ ] UI can launch backend, call `/health`, show backend status in Settings
+\- \[x] UI can launch backend, call `/health`, show backend status in Settings
 
-\- \[ ] Fixed dev port for PR2: `127.0.0.1:8765`
+\- \[x] Fixed dev port for PR2: `127.0.0.1:8765`
 
 Acceptance:
 
@@ -481,11 +481,23 @@ Acceptance:
 
 \### PR3 — Backend contract scaffolding + event viewer
 
+Status: In progress (current)
+
 \- \[ ] Implement event stream consumer in UI
 
 \- \[ ] Show steps/progress in UI with a generic “Job Monitor” screen
 
 \- \[ ] Implement Cancel button that triggers cancel endpoint and UI transitions to “cancelling/cancelled”
+
+Endpoints (demo job only):
+\- `POST /jobs`
+\- `GET /jobs/{id}/events` (SSE)
+\- `POST /jobs/{id}/cancel`
+
+Dev workflow (PR3):
+\- Start backend: `scripts\run_backend_dev.cmd`
+\- Start UI: `cd desktop` then `npm run tauri dev`
+\- Settings → Demo Job → “Start demo job” to stream events; “Cancel” to stop.
 
 Acceptance:
 
