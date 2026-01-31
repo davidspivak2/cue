@@ -461,11 +461,15 @@ Acceptance:
 
 \### PR2 — Sidecar process management (backend runner stub)
 
+Status: In progress (current)
+
 \- \[ ] Decide transport: HTTP streaming preferred
 
 \- \[ ] Add minimal backend runner (can be a Python server stub) packaged as sidecar
 
 \- \[ ] UI can launch backend, call `/health`, show backend status in Settings
+
+\- \[ ] Fixed dev port for PR2: `127.0.0.1:8765`
 
 Acceptance:
 
