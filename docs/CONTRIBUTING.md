@@ -35,7 +35,25 @@ For more context on the app and pipeline, see:
 * `README.md` (archived transcription pipeline appendix + consolidated docs pointers).
 * `docs/ROADMAP.md` (single source of truth for tasks).
 
-## Run from source (developer testing)
+## New Desktop UI (Tauri + React)
+PR1 provides a UI shell only (no backend integration yet). The legacy Qt UI still exists for end-to-end runs.
+
+**Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
+
+**Dev run:**
+```bat
+cd desktop
+npm install
+npm run tauri dev
+```
+
+**Build:**
+```bat
+cd desktop
+npm run tauri build
+```
+
+## Legacy UI (PySide6) — Run from source (developer testing)
 ```bat
 .venv\Scripts\activate
 python -m app.main
