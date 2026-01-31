@@ -9,3 +9,10 @@ bin/ffmpeg.exe
 bin/ffprobe.exe
 debug_punct_matrix.py
 debug_raw_segments.py
+
+# Desktop UI (Node)
+desktop/node_modules/
+
+# Tauri (Rust)
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
