@@ -19,6 +19,22 @@ npm install
 npm run tauri dev
 ```
 
+## Run backend stub (PR2)
+
+```powershell
+scripts\\run_backend_dev.cmd
+```
+
+Health check URL: http://127.0.0.1:8765/health
+
+## Full dev workflow (backend + UI)
+
+```powershell
+scripts\\run_backend_dev.cmd
+cd desktop
+npm run tauri dev
+```
+
 ## Build Windows bundles/installers
 
 ```powershell
