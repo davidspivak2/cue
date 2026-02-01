@@ -1,5 +1,7 @@
 # Cue Desktop (Tauri + React)
 
+For overall project info, see: [`../README.md`](../README.md).
+
 ## Prerequisites (Windows)
 
 - Node.js (LTS)

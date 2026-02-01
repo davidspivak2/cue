@@ -2,6 +2,9 @@
 
 Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI is underway in `desktop/` (PR1 UI shell; PR2 backend health/version + UI connection status; PR3 job protocol scaffolding for SSE/cancel). Supports RTL languages like Hebrew/Arabic.
 
+## Desktop app (Tauri)
+This repo includes a Tauri + React desktop app under `desktop/` for the new UI. For desktop-specific setup and commands, see: [`desktop/README.md`](desktop/README.md).
+
 ## Docs
 - ROADMAP.md is the only task list and single source of truth for product/pipeline “what to do next.”
 - TAURI_REACT_OVERHAUL_PLAN.md is the single source of truth for Tauri migration tracking and PR status.
@@ -81,15 +84,7 @@ run-from-source, testing, and packaging steps.
   ```
 
 ### Desktop dev workflow (Tauri)
-- **One-time backend deps install:** `scripts\install_backend_dev_deps.cmd`
-- **Start backend:** `scripts\run_backend_dev.cmd` (health check: http://127.0.0.1:8765/health)
-- **Start UI (desktop):**
-  ```bat
-  cd desktop
-  npm ci
-  npm run tauri dev
-  ```
-Note: pip may warn that the Scripts directory is not on PATH; this is safe to ignore for this repo because imports work without PATH changes.
+Desktop instructions live in [`desktop/README.md`](desktop/README.md) (including backend dev setup, run steps, and the `/health` check on `127.0.0.1:8765`). Note: pip may warn that the Scripts directory is not on PATH; this is safe to ignore for this repo because imports work without PATH changes.
 
 ### Legacy UI (PySide6)
 The current production UI lives under `app/` and runs via the Python entry point. See
