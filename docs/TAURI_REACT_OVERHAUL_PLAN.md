@@ -495,9 +495,12 @@ Endpoints (demo job only):
 \- `POST /jobs/{id}/cancel`
 
 Dev workflow (PR3):
+\- One-time backend deps install: `scripts\install_backend_dev_deps.cmd`
 \- Start backend: `scripts\run_backend_dev.cmd`
 \- Start UI: `cd desktop` then `npm ci` then `npm run tauri dev`
 \- Settings → Demo Job → “Start demo job” to stream events; “Cancel” to stop.
+
+Note: pip may warn that the Scripts directory is not on PATH; you can ignore that for this project because imports work without PATH changes.
 
 Acceptance:
 
