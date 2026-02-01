@@ -1,9 +1,10 @@
 # Cue
 
-Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI shell also exists in `desktop/` (PR1, no backend integration yet). Supports RTL languages like Hebrew/Arabic.
+Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI is underway in `desktop/` (PR1 UI shell; PR2 backend health/version + UI connection status; PR3 job protocol scaffolding for SSE/cancel). Supports RTL languages like Hebrew/Arabic.
 
 ## Docs
-- ROADMAP.md is the only task list and single source of truth for “what to do next.”
+- ROADMAP.md is the only task list and single source of truth for product/pipeline “what to do next.”
+- TAURI_REACT_OVERHAUL_PLAN.md is the single source of truth for Tauri migration tracking and PR status.
 - CUE_UX_UI_SPEC.md is the design contract for the redesign.
 - Historical docs were consolidated; archived contents now live in the ROADMAP appendices, the UX spec appendix, and the README appendices below.
 - README describes current behavior in main; future redesign behavior is defined in CUE_UX_UI_SPEC.md.
@@ -65,12 +66,12 @@ run-from-source, testing, and packaging steps.
 
 ### New Desktop UI (Tauri + React)
 - **Location:** `desktop/`
-- **Status:** PR1 delivers a UI shell only (no backend integration yet). The legacy Qt UI still exists.
+- **Status:** Tauri + React desktop UI is underway: PR1 UI shell exists; PR2 adds backend health/version + UI connection status; PR3 adds job protocol scaffolding (SSE/cancel) used for further wiring. The legacy Qt UI still exists.
 - **Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
 - **Dev run:**
   ```bat
   cd desktop
-  npm install
+  npm ci
   npm run tauri dev
   ```
 - **Build:**
@@ -78,6 +79,17 @@ run-from-source, testing, and packaging steps.
   cd desktop
   npm run tauri build
   ```
+
+### Desktop dev workflow (Tauri)
+- **One-time backend deps install:** `scripts\install_backend_dev_deps.cmd`
+- **Start backend:** `scripts\run_backend_dev.cmd` (health check: http://127.0.0.1:8765/health)
+- **Start UI (desktop):**
+  ```bat
+  cd desktop
+  npm ci
+  npm run tauri dev
+  ```
+Note: pip may warn that the Scripts directory is not on PATH; this is safe to ignore for this repo because imports work without PATH changes.
 
 ### Legacy UI (PySide6)
 The current production UI lives under `app/` and runs via the Python entry point. See

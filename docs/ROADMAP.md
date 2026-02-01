@@ -1,5 +1,7 @@
 # Project Roadmap (Single Source of Truth)
 
+Note: Tauri migration tracking lives in `docs/TAURI_REACT_OVERHAUL_PLAN.md`; this roadmap is for product/pipeline priorities.
+
 ## Rules
 - This file is the ONLY place to look for “what to do next”.
 - If work is not listed here, it is not scheduled.

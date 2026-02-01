@@ -392,7 +392,7 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 
 ## 0) One-page overview (for new maintainers)
 
-**What this app is:** a Windows desktop GUI that generates subtitles (any language) and (optionally) burns them into a new MP4. The legacy UI is built with **PySide6**; a new **Tauri + React** desktop UI shell lives in `desktop/` (PR1, no backend integration yet). The Qt UI still exists for now. Supports RTL languages like Hebrew/Arabic.
+**What this app is:** a Windows desktop GUI that generates subtitles (any language) and (optionally) burns them into a new MP4. The legacy UI is built with **PySide6**; a new **Tauri + React** desktop UI lives in `desktop/` (PR1 UI shell; PR2 adds backend health/version + UI connection status; PR3 adds job protocol scaffolding for SSE/cancel). The Qt UI still exists for now. Supports RTL languages like Hebrew/Arabic.
 
 **Core workflow:**
 1) Create or open a project from **Project Hub**
@@ -435,7 +435,7 @@ Typical flow:
 ## 2) How it works (technical overview)
 
 ### Main moving parts
-- **New desktop UI shell (Tauri + React)**: `desktop/` (PR1 UI shell only; no backend integration yet)
+- **New desktop UI shell (Tauri + React)**: `desktop/` (PR1 UI shell; PR2 backend health/version + UI connection status; PR3 protocol scaffolding for SSE/cancel)
 - **Legacy GUI (PySide6)**: `app/main.py`
   - state machine / stacked pages (Project Hub + Workbench + Settings)
   - launches workers and updates UI
