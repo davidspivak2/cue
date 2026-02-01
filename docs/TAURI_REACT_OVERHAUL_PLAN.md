@@ -4,7 +4,7 @@
 
 Last updated: 2026-01-30  
 
-Owner: This document is the single source of truth for the UI overhaul plan. Update it as each PR lands.
+Owner: This document is the single source of truth for the Tauri UI overhaul plan and PR tracking. Update it as each PR lands.
 
 
 
@@ -437,7 +437,7 @@ Acceptance:
 
 
 \### PR1 — Add Tauri + React UI shell (no backend integration)
-Status: Done (UI shell only; no backend integration yet; legacy Qt UI still exists).
+Status: Done (UI shell only; legacy Qt UI still exists).
 
 \- \[x] Create `desktop/` with Vite + React + TS
 
@@ -453,7 +453,7 @@ Status: Done (UI shell only; no backend integration yet; legacy Qt UI still exis
 
 Acceptance:
 
-\- `npm install` and `npm run tauri dev` opens the window
+\- `npm ci` and `npm run tauri dev` opens the window
 
 \- `npm run tauri build` produces Windows bundle artifacts
 
@@ -483,11 +483,11 @@ Acceptance:
 
 Status: Complete
 
-\- \[ ] Implement event stream consumer in UI
+\- \[x] Implement event stream consumer in UI
 
-\- \[ ] Show steps/progress in UI with a generic “Job Monitor” screen
+\- \[x] Show steps/progress in UI with a generic “Job Monitor” screen
 
-\- \[ ] Implement Cancel button that triggers cancel endpoint and UI transitions to “cancelling/cancelled”
+\- \[x] Implement Cancel button that triggers cancel endpoint and UI transitions to “cancelling/cancelled”
 
 Endpoints (demo job only):
 \- `POST /jobs`
@@ -496,7 +496,7 @@ Endpoints (demo job only):
 
 Dev workflow (PR3):
 \- One-time backend deps install: `scripts\install_backend_dev_deps.cmd`
-\- Start backend: `scripts\run_backend_dev.cmd`
+\- Start backend: `scripts\run_backend_dev.cmd` (fixed port `127.0.0.1:8765`)
 \- Start UI: `cd desktop` then `npm ci` then `npm run tauri dev`
 \- Settings → Demo Job → “Start demo job” to stream events; “Cancel” to stop.
 
@@ -717,7 +717,7 @@ Every PR must include:
 
 \### 2026-02-01
 
-\- PR1: Added initial `desktop/` Tauri + React shell with MUI theming, navigation, and placeholder screens (UI shell only; no backend integration yet; legacy Qt UI still exists).
+\- PR1: Added initial `desktop/` Tauri + React shell with MUI theming, navigation, and placeholder screens (UI shell only; legacy Qt UI still exists).
 
 
 
