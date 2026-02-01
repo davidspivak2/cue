@@ -33,17 +33,20 @@ winget install -e --id Gyan.FFmpeg
 For more context on the app and pipeline, see:
 * `docs/CUE_UX_UI_SPEC.md` (design contract; includes the archived project context appendix).
 * `README.md` (archived transcription pipeline appendix + consolidated docs pointers).
-* `docs/ROADMAP.md` (single source of truth for tasks).
+* `docs/ROADMAP.md` (single source of truth for product/pipeline tasks).
+* `docs/TAURI_REACT_OVERHAUL_PLAN.md` (single source of truth for Tauri migration tracking).
 
 ## New Desktop UI (Tauri + React)
-PR1 provides a UI shell only (no backend integration yet). The legacy Qt UI still exists for end-to-end runs.
+Tauri + React is underway: PR1 UI shell exists; PR2 adds backend health/version + UI connection status; PR3 adds job protocol scaffolding (SSE/cancel) used for further wiring. The legacy Qt UI still exists for end-to-end runs.
 
 **Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
 
 **Dev run:**
 ```bat
+scripts\install_backend_dev_deps.cmd
+scripts\run_backend_dev.cmd
 cd desktop
-npm install
+npm ci
 npm run tauri dev
 ```
 

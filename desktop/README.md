@@ -1,5 +1,7 @@
 # Cue Desktop (Tauri + React)
 
+For overall project info, see: [`../README.md`](../README.md).
+
 ## Prerequisites (Windows)
 
 - Node.js (LTS)
@@ -8,36 +10,44 @@
 
 ## Install dependencies
 
-```powershell
+```bat
 cd desktop
-npm install
+npm ci
 ```
 
 ## Run in dev mode (Tauri window)
 
-```powershell
+```bat
 npm run tauri dev
 ```
 
-## Run backend stub (PR2)
+## Run backend dev server
 
-```powershell
-scripts\\run_backend_dev.cmd
+One-time backend deps install (from repo root):
+```bat
+scripts\install_backend_dev_deps.cmd
+```
+
+Run backend (from repo root):
+```bat
+scripts\run_backend_dev.cmd
 ```
 
 Health check URL: http://127.0.0.1:8765/health
 
 ## Full dev workflow (backend + UI)
 
-```powershell
-scripts\\run_backend_dev.cmd
+```bat
+scripts\install_backend_dev_deps.cmd
+scripts\run_backend_dev.cmd
 cd desktop
+npm ci
 npm run tauri dev
 ```
 
 ## Build Windows bundles/installers
 
-```powershell
+```bat
 npm run tauri build
 ```
 
