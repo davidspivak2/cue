@@ -10,11 +10,14 @@ import {
   Slider,
   Stack,
   Switch,
+  TextField,
   Typography
 } from "@mui/material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type DemoJobEvent = {
+type JobKind = "pipeline" | "demo";
+
+type JobEvent = {
   job_id: string;
   ts: string;
   type: "started" | "step" | "progress" | "completed" | "cancelled" | "error";
@@ -24,9 +27,16 @@ type DemoJobEvent = {
   status?: string;
 };
 
+type JobRequest = {
+  kind: JobKind;
+  input_path?: string;
+  output_dir?: string;
+  options?: Record<string, unknown>;
+};
+
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const BACKEND_HEALTH_URL = "http://127.0.0.1:8765/health";
-const DEMO_JOB_URL = `${BACKEND_BASE_URL}/jobs`;
+const JOBS_URL = `${BACKEND_BASE_URL}/jobs`;
 const BACKEND_TIMEOUT_MS = 1500;
 
 const Settings = () => {
@@ -37,12 +47,15 @@ const Settings = () => {
     "checking"
   );
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
-  const [demoJobId, setDemoJobId] = useState<string | null>(null);
-  const [demoStatus, setDemoStatus] = useState("idle");
+  const [jobKind, setJobKind] = useState<JobKind>("pipeline");
+  const [inputPath, setInputPath] = useState("");
+  const [outputDir, setOutputDir] = useState("");
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState("idle");
   const [latestStep, setLatestStep] = useState<string | null>(null);
   const [latestMessage, setLatestMessage] = useState<string | null>(null);
   const [latestProgress, setLatestProgress] = useState<number | null>(null);
-  const [demoEvents, setDemoEvents] = useState<DemoJobEvent[]>([]);
+  const [jobEvents, setJobEvents] = useState<JobEvent[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const checkBackend = useCallback(async () => {
@@ -83,9 +96,9 @@ const Settings = () => {
     };
   }, [closeEventSource]);
 
-  const handleDemoEvent = useCallback(
-    (event: DemoJobEvent) => {
-      setDemoEvents((prev) => {
+  const handleJobEvent = useCallback(
+    (event: JobEvent) => {
+      setJobEvents((prev) => {
         const next = [...prev, event];
         return next.length > 200 ? next.slice(next.length - 200) : next;
       });
@@ -103,47 +116,57 @@ const Settings = () => {
       }
 
       if (event.type === "started") {
-        setDemoStatus("running");
+        setJobStatus("running");
       }
 
       if (["completed", "cancelled", "error"].includes(event.type)) {
-        setDemoStatus(event.status ?? event.type);
+        setJobStatus(event.status ?? event.type);
         closeEventSource();
       }
     },
     [closeEventSource]
   );
 
-  const startDemoJob = useCallback(async () => {
+  const startJob = useCallback(async () => {
     closeEventSource();
-    setDemoJobId(null);
-    setDemoStatus("queued");
+    setJobId(null);
+    setJobStatus("queued");
     setLatestStep(null);
     setLatestMessage(null);
     setLatestProgress(null);
-    setDemoEvents([]);
+    setJobEvents([]);
 
     try {
-      const response = await fetch(DEMO_JOB_URL, { method: "POST" });
+      const requestBody: JobRequest = { kind: jobKind, options: {} };
+      if (jobKind === "pipeline") {
+        requestBody.input_path = inputPath.trim();
+        requestBody.output_dir = outputDir.trim();
+      }
+
+      const response = await fetch(JOBS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody)
+      });
       if (!response.ok) {
-        throw new Error(`Failed to start demo job: ${response.status}`);
+        throw new Error(`Failed to start job: ${response.status}`);
       }
       const payload = (await response.json()) as { job_id?: string; events_url?: string };
       if (!payload.job_id) {
-        throw new Error("Demo job response missing job_id");
+        throw new Error("Job response missing job_id");
       }
-      setDemoJobId(payload.job_id);
+      setJobId(payload.job_id);
 
-      const eventsUrl = payload.events_url ?? `${DEMO_JOB_URL}/${payload.job_id}/events`;
+      const eventsUrl = payload.events_url ?? `${JOBS_URL}/${payload.job_id}/events`;
       const source = new EventSource(eventsUrl);
       eventSourceRef.current = source;
 
       source.onmessage = (messageEvent) => {
         try {
-          const data = JSON.parse(messageEvent.data) as DemoJobEvent;
-          handleDemoEvent(data);
+          const data = JSON.parse(messageEvent.data) as JobEvent;
+          handleJobEvent(data);
         } catch (error) {
-          setDemoEvents((prev) => [
+          setJobEvents((prev) => [
             ...prev,
             {
               job_id: payload.job_id ?? "unknown",
@@ -153,47 +176,53 @@ const Settings = () => {
               status: "error"
             }
           ]);
-          setDemoStatus("error");
+          setJobStatus("error");
           closeEventSource();
         }
       };
 
       source.onerror = () => {
-        setDemoStatus("error");
+        setJobStatus("error");
         closeEventSource();
       };
     } catch (error) {
-      setDemoStatus("error");
+      setJobStatus("error");
     }
-  }, [closeEventSource, handleDemoEvent]);
+  }, [closeEventSource, handleJobEvent, inputPath, jobKind, outputDir]);
 
-  const cancelDemoJob = useCallback(async () => {
-    if (!demoJobId) {
+  const cancelJob = useCallback(async () => {
+    if (!jobId) {
       return;
     }
     try {
-      const response = await fetch(`${DEMO_JOB_URL}/${demoJobId}/cancel`, { method: "POST" });
+      const response = await fetch(`${JOBS_URL}/${jobId}/cancel`, { method: "POST" });
       if (response.ok) {
         const payload = (await response.json()) as { status?: string };
-        setDemoStatus(payload.status ?? "cancel_requested");
+        setJobStatus(payload.status ?? "cancel_requested");
       } else {
-        setDemoStatus("error");
+        setJobStatus("error");
       }
     } catch (error) {
-      setDemoStatus("error");
+      setJobStatus("error");
     }
-  }, [demoJobId]);
+  }, [jobId]);
 
-  const clearDemoEvents = useCallback(() => {
-    setDemoEvents([]);
+  const clearJobEvents = useCallback(() => {
+    setJobEvents([]);
     setLatestStep(null);
     setLatestMessage(null);
     setLatestProgress(null);
   }, []);
 
-  const demoIsRunning = useMemo(
-    () => ["queued", "running"].includes(demoStatus),
-    [demoStatus]
+  const jobIsRunning = useMemo(
+    () => ["queued", "running"].includes(jobStatus),
+    [jobStatus]
+  );
+  const pipelineInputsMissing = useMemo(
+    () =>
+      jobKind === "pipeline" &&
+      (!inputPath.trim().length || !outputDir.trim().length),
+    [inputPath, jobKind, outputDir]
   );
 
   return (
@@ -277,22 +306,79 @@ const Settings = () => {
       </Box>
       <Box>
         <Typography variant="h6" gutterBottom>
-          Demo Job
+          Jobs
         </Typography>
         <Stack spacing={2}>
+          <FormControl fullWidth>
+            <InputLabel id="job-kind-label">Job type</InputLabel>
+            <Select
+              labelId="job-kind-label"
+              value={jobKind}
+              label="Job type"
+              onChange={(event) => setJobKind(event.target.value as JobKind)}
+            >
+              <MenuItem value="pipeline">Pipeline job</MenuItem>
+              <MenuItem value="demo">Demo job</MenuItem>
+            </Select>
+          </FormControl>
+          {jobKind === "pipeline" ? (
+            <Stack spacing={1.5}>
+              <TextField
+                label="Input file path"
+                value={inputPath}
+                onChange={(event) => setInputPath(event.target.value)}
+                placeholder="C:\\path\\to\\video.mp4"
+                required
+                error={pipelineInputsMissing && !inputPath.trim().length}
+                helperText={
+                  pipelineInputsMissing && !inputPath.trim().length
+                    ? "Input path is required for pipeline jobs."
+                    : " "
+                }
+              />
+              <TextField
+                label="Output directory path"
+                value={outputDir}
+                onChange={(event) => setOutputDir(event.target.value)}
+                placeholder="C:\\Cue_output"
+                required
+                error={pipelineInputsMissing && !outputDir.trim().length}
+                helperText={
+                  pipelineInputsMissing && !outputDir.trim().length
+                    ? "Output directory is required for pipeline jobs."
+                    : " "
+                }
+              />
+            </Stack>
+          ) : (
+            <Typography color="text.secondary">
+              Demo jobs emit fake step/progress events for UI testing.
+            </Typography>
+          )}
+          {backendStatus !== "connected" ? (
+            <Typography color="text.secondary">
+              Run scripts\\run_backend_dev.cmd to start the backend.
+            </Typography>
+          ) : null}
           <Stack direction="row" spacing={2} alignItems="center">
-            <Button variant="contained" onClick={startDemoJob} disabled={demoIsRunning}>
-              Start demo job
+            <Button
+              variant="contained"
+              onClick={startJob}
+              disabled={
+                jobIsRunning || backendStatus !== "connected" || pipelineInputsMissing
+              }
+            >
+              Start job
             </Button>
             <Button
               variant="outlined"
               color="warning"
-              onClick={cancelDemoJob}
-              disabled={!demoIsRunning}
+              onClick={cancelJob}
+              disabled={!jobIsRunning}
             >
               Cancel
             </Button>
-            <Button variant="text" onClick={clearDemoEvents}>
+            <Button variant="text" onClick={clearJobEvents}>
               Clear
             </Button>
           </Stack>
@@ -300,11 +386,11 @@ const Settings = () => {
             <Typography>
               Status:{" "}
               <Box component="span" fontWeight={600}>
-                {demoStatus}
+                {jobStatus}
               </Box>
             </Typography>
-            {demoJobId ? (
-              <Typography color="text.secondary">Job ID: {demoJobId}</Typography>
+            {jobId ? (
+              <Typography color="text.secondary">Job ID: {jobId}</Typography>
             ) : null}
             {latestStep ? (
               <Typography color="text.secondary">
@@ -333,10 +419,10 @@ const Settings = () => {
             }}
           >
             <Stack spacing={0.5}>
-              {demoEvents.length === 0 ? (
+              {jobEvents.length === 0 ? (
                 <Typography color="text.secondary">No events yet.</Typography>
               ) : (
-                demoEvents.map((event, index) => (
+                jobEvents.map((event, index) => (
                   <Typography
                     key={`${event.ts}-${event.type}-${index}`}
                     variant="body2"
