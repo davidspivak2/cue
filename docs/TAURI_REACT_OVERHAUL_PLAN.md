@@ -481,7 +481,7 @@ Acceptance:
 
 \### PR3 — Backend contract scaffolding + event viewer
 
-Status: In progress (current)
+Status: Complete
 
 \- \[ ] Implement event stream consumer in UI
 
@@ -496,7 +496,7 @@ Endpoints (demo job only):
 
 Dev workflow (PR3):
 \- Start backend: `scripts\run_backend_dev.cmd`
-\- Start UI: `cd desktop` then `npm run tauri dev`
+\- Start UI: `cd desktop` then `npm ci` then `npm run tauri dev`
 \- Settings → Demo Job → “Start demo job” to stream events; “Cancel” to stop.
 
 Acceptance:
@@ -509,11 +509,26 @@ Acceptance:
 
 \### PR4 — Wire real “Create Subtitles” job to Python engine
 
+Status: In progress (current)
+
 \- \[ ] Use existing engine behavior to run create-subtitles pipeline through the new contract
 
 \- \[ ] Map existing steps to stable step IDs
 
 \- \[ ] Ensure artifacts (SRT + word timings if applicable) are returned via `artifact` events
+
+POST /jobs request body (pipeline jobs):
+```json
+{
+  "kind": "pipeline",
+  "input_path": "C:\\path\\to\\video.mp4",
+  "output_dir": "C:\\Cue_output",
+  "options": {}
+}
+```
+
+Progress/events (pipeline jobs):
+\- `started` → `step` (validate/transcribe/align/export) → `progress` (0/25/60/90/100) → terminal (`completed`/`cancelled`/`error`)
 
 Acceptance:
 

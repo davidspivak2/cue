@@ -11,11 +11,14 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
+
+from .backend_pipeline_adapter import PipelineCancelledError, run_pipeline_job
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -47,6 +50,7 @@ class JobState:
     created_at: datetime
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    kind: str = "demo"
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     event_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     sse_client_connected: bool = False
@@ -54,6 +58,13 @@ class JobState:
 
 
 JOBS: dict[str, JobState] = {}
+
+
+class JobRequest(BaseModel):
+    kind: Literal["demo", "pipeline"] = "pipeline"
+    input_path: Optional[str] = None
+    output_dir: Optional[str] = None
+    options: dict[str, Any] = Field(default_factory=dict)
 
 
 def _resolve_port() -> int:
@@ -145,6 +156,39 @@ async def _run_demo_job(job: JobState) -> None:
         )
 
 
+async def _run_pipeline_job(job: JobState, request: JobRequest) -> None:
+    try:
+        job.status = "running"
+        job.started_at = datetime.now(timezone.utc)
+        _enqueue_event(job, _build_event(job.job_id, "started"))
+
+        async def emit_event(event: dict[str, Any]) -> None:
+            _enqueue_event(job, _build_event(job.job_id, event.pop("type", "message"), **event))
+
+        await run_pipeline_job(
+            input_path=request.input_path or "",
+            output_dir=request.output_dir or "",
+            options=request.options,
+            cancel_event=job.cancel_event,
+            emit_event=emit_event,
+        )
+        if job.cancel_event.is_set():
+            _mark_cancelled(job)
+            return
+        job.status = "completed"
+        job.finished_at = datetime.now(timezone.utc)
+        _enqueue_event(job, _build_event(job.job_id, "completed", status=job.status))
+    except PipelineCancelledError:
+        _mark_cancelled(job)
+    except Exception as exc:  # noqa: BLE001 - pipeline job should report errors to the stream
+        job.status = "error"
+        job.finished_at = datetime.now(timezone.utc)
+        _enqueue_event(
+            job,
+            _build_event(job.job_id, "error", status=job.status, message=str(exc)),
+        )
+
+
 def _job_or_404(job_id: str) -> JobState:
     job = JOBS.get(job_id)
     if not job:
@@ -153,13 +197,27 @@ def _job_or_404(job_id: str) -> JobState:
 
 
 @app.post("/jobs")
-async def create_job() -> dict[str, str]:
+async def create_job(payload: JobRequest) -> dict[str, str]:
+    if payload.kind == "pipeline":
+        if not payload.input_path:
+            raise HTTPException(status_code=422, detail="input_path_required")
+        if not payload.output_dir:
+            raise HTTPException(status_code=422, detail="output_dir_required")
+
     job_id = str(uuid.uuid4())
-    job = JobState(job_id=job_id, status="queued", created_at=datetime.now(timezone.utc))
+    job = JobState(
+        job_id=job_id,
+        status="queued",
+        created_at=datetime.now(timezone.utc),
+        kind=payload.kind,
+    )
     JOBS[job_id] = job
-    job.task = asyncio.create_task(_run_demo_job(job))
+    if payload.kind == "demo":
+        job.task = asyncio.create_task(_run_demo_job(job))
+    else:
+        job.task = asyncio.create_task(_run_pipeline_job(job, payload))
     events_url = f"http://{HOST}:{PORT}/jobs/{job_id}/events"
-    return {"job_id": job_id, "events_url": events_url}
+    return {"job_id": job_id, "events_url": events_url, "status": job.status}
 
 
 @app.get("/jobs/{job_id}/events")
