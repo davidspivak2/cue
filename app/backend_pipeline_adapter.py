@@ -7,46 +7,51 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from .subtitle_style import (
-    DEFAULT_HIGHLIGHT_COLOR,
-    DEFAULT_SUBTITLE_MODE,
-    PRESET_DEFAULT,
-    VALID_SUBTITLE_MODES,
-    preset_style_defaults,
-    style_model_from_preset,
-)
-from .transcription_device import gpu_available
-from .workers import TaskType, TranscriptionSettings, Worker
-
 
 class PipelineCancelledError(Exception):
     pass
 
 
+class PipelineDependencyError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class PipelineSettings:
-    transcription: TranscriptionSettings
+    transcription: object
     subtitle_mode: str
     highlight_color: str
 
 
-def _resolve_device_and_compute(quality: str) -> tuple[str, str]:
+def _resolve_device_and_compute(
+    quality: str,
+    *,
+    gpu_available_fn: Callable[[], bool],
+) -> tuple[str, str]:
     if quality == "fast":
         return "cpu", "int8"
     if quality == "accurate":
         return "cpu", "int16"
     if quality == "ultra":
         return "cpu", "float32"
-    if gpu_available():
+    if gpu_available_fn():
         return "cuda", "float16"
     return "cpu", "int16"
 
 
-def _resolve_pipeline_settings(options: dict) -> PipelineSettings:
+def _resolve_pipeline_settings(
+    options: dict,
+    *,
+    gpu_available_fn: Callable[[], bool],
+    valid_subtitle_modes: set[str],
+    default_subtitle_mode: str,
+    default_highlight_color: str,
+    transcription_settings_cls: type,
+) -> PipelineSettings:
     quality = str(options.get("quality", "auto")).strip().lower() or "auto"
     device_override = options.get("device")
     compute_override = options.get("compute_type")
-    device, compute_type = _resolve_device_and_compute(quality)
+    device, compute_type = _resolve_device_and_compute(quality, gpu_available_fn=gpu_available_fn)
     if isinstance(device_override, str) and device_override:
         device = device_override
         if isinstance(compute_override, str) and compute_override:
@@ -59,14 +64,14 @@ def _resolve_pipeline_settings(options: dict) -> PipelineSettings:
         compute_type = compute_override
 
     subtitle_mode = options.get("subtitle_mode")
-    if not isinstance(subtitle_mode, str) or subtitle_mode not in VALID_SUBTITLE_MODES:
-        subtitle_mode = DEFAULT_SUBTITLE_MODE
+    if not isinstance(subtitle_mode, str) or subtitle_mode not in valid_subtitle_modes:
+        subtitle_mode = default_subtitle_mode
 
     highlight_color = options.get("highlight_color")
     if not isinstance(highlight_color, str) or not highlight_color.strip():
-        highlight_color = DEFAULT_HIGHLIGHT_COLOR
+        highlight_color = default_highlight_color
 
-    transcription = TranscriptionSettings(
+    transcription = transcription_settings_cls(
         apply_audio_filter=bool(options.get("apply_audio_filter", True)),
         keep_extracted_audio=bool(options.get("keep_extracted_audio", False)),
         device=device,
@@ -92,6 +97,10 @@ def _run_worker_task(
     srt_path: Path | None,
     settings: PipelineSettings,
     cancel_flag: threading.Event,
+    worker_cls: type,
+    preset_style_defaults_fn: Callable[[str], object],
+    style_model_from_preset_fn: Callable[..., object],
+    preset_default: str,
 ) -> tuple[bool, str, dict]:
     result: dict[str, object] = {"success": False, "message": "", "payload": {}}
 
@@ -100,12 +109,12 @@ def _run_worker_task(
         result["message"] = message
         result["payload"] = payload
 
-    subtitle_style = style_model_from_preset(
-        preset_style_defaults(PRESET_DEFAULT),
+    subtitle_style = style_model_from_preset_fn(
+        preset_style_defaults_fn(preset_default),
         subtitle_mode=settings.subtitle_mode,
         highlight_color=settings.highlight_color,
     )
-    worker = Worker(
+    worker = worker_cls(
         task_type=task_type,
         video_path=video_path,
         output_dir=output_dir,
@@ -147,7 +156,32 @@ async def run_pipeline_job(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    settings = _resolve_pipeline_settings(options)
+    try:
+        from .subtitle_style import (
+            DEFAULT_HIGHLIGHT_COLOR,
+            DEFAULT_SUBTITLE_MODE,
+            PRESET_DEFAULT,
+            VALID_SUBTITLE_MODES,
+            preset_style_defaults,
+            style_model_from_preset,
+        )
+        from .transcription_device import gpu_available
+        from .workers import TaskType, TranscriptionSettings, Worker
+    except ImportError as exc:
+        message = (
+            "Pipeline dependencies are missing (PySide6). "
+            "Install with `pip install PySide6` to run pipeline jobs."
+        )
+        raise PipelineDependencyError(message) from exc
+
+    settings = _resolve_pipeline_settings(
+        options,
+        gpu_available_fn=gpu_available,
+        valid_subtitle_modes=set(VALID_SUBTITLE_MODES),
+        default_subtitle_mode=DEFAULT_SUBTITLE_MODE,
+        default_highlight_color=DEFAULT_HIGHLIGHT_COLOR,
+        transcription_settings_cls=TranscriptionSettings,
+    )
 
     await emit_event({"type": "step", "step": "validate", "message": "Validated inputs."})
     await emit_event({"type": "progress", "pct": 0})
@@ -172,6 +206,10 @@ async def run_pipeline_job(
             srt_path=None,
             settings=settings,
             cancel_flag=cancel_flag,
+            worker_cls=Worker,
+            preset_style_defaults_fn=preset_style_defaults,
+            style_model_from_preset_fn=style_model_from_preset,
+            preset_default=PRESET_DEFAULT,
         )
     finally:
         cancel_task.cancel()
@@ -207,6 +245,10 @@ async def run_pipeline_job(
             srt_path=srt_path,
             settings=settings,
             cancel_flag=cancel_flag,
+            worker_cls=Worker,
+            preset_style_defaults_fn=preset_style_defaults,
+            style_model_from_preset_fn=style_model_from_preset,
+            preset_default=PRESET_DEFAULT,
         )
     finally:
         cancel_task.cancel()

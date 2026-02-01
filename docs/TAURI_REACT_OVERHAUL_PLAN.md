@@ -530,6 +530,8 @@ POST /jobs request body (pipeline jobs):
 Progress/events (pipeline jobs):
 \- `started` → `step` (validate/transcribe/align/export) → `progress` (0/25/60/90/100) → terminal (`completed`/`cancelled`/`error`)
 
+Note: pipeline jobs require additional Python dependencies (including PySide6). If they are missing, pipeline jobs will emit a terminal error event while `/health` remains available.
+
 Acceptance:
 
 \- You can create subtitles end-to-end from the new UI

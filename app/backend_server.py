@@ -18,7 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .backend_pipeline_adapter import PipelineCancelledError, run_pipeline_job
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -158,6 +157,26 @@ async def _run_demo_job(job: JobState) -> None:
 
 async def _run_pipeline_job(job: JobState, request: JobRequest) -> None:
     try:
+        from .backend_pipeline_adapter import (
+            PipelineCancelledError,
+            PipelineDependencyError,
+            run_pipeline_job,
+        )
+    except ImportError as exc:
+        job.status = "error"
+        job.finished_at = datetime.now(timezone.utc)
+        _enqueue_event(
+            job,
+            _build_event(
+                job.job_id,
+                "error",
+                status=job.status,
+                message=f"Pipeline adapter failed to load: {exc}",
+            ),
+        )
+        return
+
+    try:
         job.status = "running"
         job.started_at = datetime.now(timezone.utc)
         _enqueue_event(job, _build_event(job.job_id, "started"))
@@ -178,6 +197,13 @@ async def _run_pipeline_job(job: JobState, request: JobRequest) -> None:
         job.status = "completed"
         job.finished_at = datetime.now(timezone.utc)
         _enqueue_event(job, _build_event(job.job_id, "completed", status=job.status))
+    except PipelineDependencyError as exc:
+        job.status = "error"
+        job.finished_at = datetime.now(timezone.utc)
+        _enqueue_event(
+            job,
+            _build_event(job.job_id, "error", status=job.status, message=str(exc)),
+        )
     except PipelineCancelledError:
         _mark_cancelled(job)
     except Exception as exc:  # noqa: BLE001 - pipeline job should report errors to the stream
