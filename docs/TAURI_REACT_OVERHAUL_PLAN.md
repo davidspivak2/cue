@@ -481,7 +481,7 @@ Acceptance:
 
 \### PR3 — Backend contract scaffolding + event viewer
 
-Status: In progress (current)
+Status: Complete
 
 \- \[ ] Implement event stream consumer in UI
 
@@ -495,9 +495,12 @@ Endpoints (demo job only):
 \- `POST /jobs/{id}/cancel`
 
 Dev workflow (PR3):
+\- One-time backend deps install: `scripts\install_backend_dev_deps.cmd`
 \- Start backend: `scripts\run_backend_dev.cmd`
-\- Start UI: `cd desktop` then `npm run tauri dev`
+\- Start UI: `cd desktop` then `npm ci` then `npm run tauri dev`
 \- Settings → Demo Job → “Start demo job” to stream events; “Cancel” to stop.
+
+Note: pip may warn that the Scripts directory is not on PATH; you can ignore that for this project because imports work without PATH changes.
 
 Acceptance:
 
@@ -509,11 +512,28 @@ Acceptance:
 
 \### PR4 — Wire real “Create Subtitles” job to Python engine
 
+Status: In progress (current)
+
 \- \[ ] Use existing engine behavior to run create-subtitles pipeline through the new contract
 
 \- \[ ] Map existing steps to stable step IDs
 
 \- \[ ] Ensure artifacts (SRT + word timings if applicable) are returned via `artifact` events
+
+POST /jobs request body (pipeline jobs):
+```json
+{
+  "kind": "pipeline",
+  "input_path": "C:\\path\\to\\video.mp4",
+  "output_dir": "C:\\Cue_output",
+  "options": {}
+}
+```
+
+Progress/events (pipeline jobs):
+\- `started` → `step` (validate/transcribe/align/export) → `progress` (0/25/60/90/100) → terminal (`completed`/`cancelled`/`error`)
+
+Note: pipeline jobs require additional Python dependencies (including PySide6). If they are missing, pipeline jobs will emit a terminal error event while `/health` remains available.
 
 Acceptance:
 
