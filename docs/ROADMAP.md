@@ -318,6 +318,7 @@ Definition of done:
 
 ## Completed
 - A short bullet list only (do not paste old plans here; those go in the archived appendices below).
+- Desktop shell/backend wiring complete: `/health` + `POST /jobs` + SSE events are live; UI can run pipeline jobs and Cancel works.
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.

@@ -1,9 +1,78 @@
 # Cue
 
-Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI is underway in `desktop/` (PR1 UI shell; PR2 backend health/version + UI connection status; PR3 job protocol scaffolding for SSE/cancel). Supports RTL languages like Hebrew/Arabic.
+Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI lives in `desktop/` and is wired to backend health/version plus SSE job streaming. Supports RTL languages like Hebrew/Arabic.
 
 ## Desktop app (Tauri)
 This repo includes a Tauri + React desktop app under `desktop/` for the new UI. For desktop-specific setup and commands, see: [`desktop/README.md`](desktop/README.md).
+
+## Desktop (Tauri) dev quickstart
+The desktop UI is wired to the local backend server (health/version + SSE jobs). Use the steps below to run the full stack.
+
+### Start the backend (FastAPI)
+From the repo root:
+```bat
+scripts\install_backend_dev_deps.cmd
+scripts\run_backend_dev.cmd
+```
+
+- Default port is `8765` (the dev script sets `CUE_BACKEND_PORT=8765`). The backend reads `CUE_BACKEND_PORT` if you need to change it.
+- The desktop UI currently targets `http://127.0.0.1:8765` (see `desktop/src/pages/Settings.tsx`); if you change the backend port, update the UI constant to match.
+
+Verify backend health:
+```bat
+curl http://127.0.0.1:8765/health
+```
+
+### Start the desktop UI
+From `desktop/` (exact scripts from `desktop/package.json`):
+```bat
+cd desktop
+npm ci
+npm run tauri dev
+```
+
+### Verify the desktop is connected
+Open **Settings**:
+- Status shows **Connected** and a backend **Version** value.
+- Click **CHECK NOW** and confirm it succeeds.
+
+### Run a Pipeline job from the UI
+In **Settings**, choose **Pipeline job**, then:
+- Set **Input .mp4 path** and **Output directory**.
+- Click **Start job** and watch SSE progress events stream in.
+- Click **Cancel** to stop the job (works for demo and pipeline jobs).
+
+### Logs & diagnostics
+Backend dev logs and helper outputs land under `C:\Cue_extra\` (for example: `C:\Cue_extra\backend_dev.log`).
+
+### Backend API smoke test (cmd)
+Use this to verify `POST /jobs` + SSE streaming without the UI.
+
+1) Create a job and save the response:
+```bat
+if not exist "C:\Cue_extra" mkdir "C:\Cue_extra"
+curl -s -X POST http://127.0.0.1:8765/jobs ^
+  -H "Content-Type: application/json" ^
+  -d "{\"kind\":\"pipeline\",\"input_path\":\"C:\\path\\to\\video.mp4\",\"output_dir\":\"C:\\Cue_output\",\"options\":{}}" ^
+  > C:\Cue_extra\create_job_response.json
+```
+
+2) Extract `JOBID` (robust method; avoids the broken PowerShell/for-loop approach):
+```bat
+python -c "import json; r=json.load(open(r'C:\\Cue_extra\\create_job_response.json','r',encoding='utf-8')); print(r.get('job_id') or r.get('id') or '')" > C:\Cue_extra\jobid.txt
+set /p JOBID=<C:\Cue_extra\jobid.txt
+echo %JOBID%
+```
+
+3) Stream SSE events:
+```bat
+curl -N http://127.0.0.1:8765/jobs/%JOBID%/events
+```
+
+4) (Optional) Cancel the job:
+```bat
+curl -X POST http://127.0.0.1:8765/jobs/%JOBID%/cancel
+```
 
 ## Docs
 - ROADMAP.md is the only task list and single source of truth for product/pipeline “what to do next.”
@@ -69,7 +138,7 @@ run-from-source, testing, and packaging steps.
 
 ### New Desktop UI (Tauri + React)
 - **Location:** `desktop/`
-- **Status:** Tauri + React desktop UI is underway: PR1 UI shell exists; PR2 adds backend health/version + UI connection status; PR3 adds job protocol scaffolding (SSE/cancel) used for further wiring. The legacy Qt UI still exists.
+- **Status:** Tauri + React desktop UI is wired to the backend: Settings shows health/version connectivity, pipeline jobs run via `POST /jobs`, and SSE progress streams into the UI with Cancel working. The legacy Qt UI still exists.
 - **Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
 - **Dev run:**
   ```bat
