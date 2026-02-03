@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+def _ensure_qt_app() -> None:
+    try:
+        from PySide6 import QtGui
+    except Exception:
+        return
+
+    if QtGui.QGuiApplication.instance() is None:
+        QtGui.QGuiApplication([])
+
+_ensure_qt_app()
+
 import argparse
 import asyncio
 import json
