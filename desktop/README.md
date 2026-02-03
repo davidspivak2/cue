@@ -8,6 +8,26 @@ For overall project info, see: [`../README.md`](../README.md).
 - Rust toolchain (stable) with `cargo`
 - WebView2 Runtime (Evergreen)
 
+## Desktop (Tauri) development
+The recommended contributor workflow is still the one-command entrypoint from the repo root:
+```bat
+C:\Cue_repo\scripts\run_desktop_all.cmd
+```
+Use the desktop-only scripts below when you need to iterate/debug the UI without running the full stack.
+
+### Desktop-only scripts (from repo root)
+
+Install desktop dev dependencies (uses `package-lock.json` via `npm ci`):
+```bat
+scripts\install_desktop_dev_deps.cmd
+```
+Note: this script is expected to be run from the repo root `scripts\` folder.
+
+Run the desktop dev server / Tauri dev flow:
+```bat
+scripts\run_desktop_dev.cmd
+```
+
 ## Install dependencies
 
 ```bat
