@@ -34,6 +34,13 @@ scripts\run_backend_dev.cmd
 ```
 
 Health check URL: http://127.0.0.1:8765/health
+Backend dev logs land in `C:\Cue_extra\backend_dev.log`.
+
+## Current backend wiring (implemented)
+- **Settings** shows backend **Status: Connected** and the backend **Version** after a successful health check.
+- The UI can start **Pipeline jobs** (`POST /jobs`) using an input `.mp4` path + output directory.
+- Job progress/events stream over SSE (`GET /jobs/{job_id}/events`) into the UI and update progress.
+- **Cancel** works for both demo and pipeline jobs.
 
 ## Full dev workflow (backend + UI)
 

@@ -475,13 +475,13 @@ Acceptance:
 
 \- UI displays backend “connected” / “not connected”
 
-\- No pipeline yet
+\- No pipeline yet (pipeline wiring arrives in PR4)
 
 
 
 \### PR3 — Backend contract scaffolding + event viewer
 
-Status: Complete
+Status: Done
 
 \- \[x] Implement event stream consumer in UI
 
@@ -512,13 +512,13 @@ Acceptance:
 
 \### PR4 — Wire real “Create Subtitles” job to Python engine
 
-Status: In progress (current)
+Status: Done
 
-\- \[ ] Use existing engine behavior to run create-subtitles pipeline through the new contract
+\- \[x] Use existing engine behavior to run create-subtitles pipeline through the new contract
 
-\- \[ ] Map existing steps to stable step IDs
+\- \[x] Map existing steps to stable step IDs
 
-\- \[ ] Ensure artifacts (SRT + word timings if applicable) are returned via `artifact` events
+\- \[x] Ensure artifacts (SRT + word timings if applicable) are returned via `artifact` events
 
 POST /jobs request body (pipeline jobs):
 ```json
