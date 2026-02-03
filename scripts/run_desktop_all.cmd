@@ -2,6 +2,7 @@
 setlocal enabledelayedexpansion
 
 rem Runs: backend deps check/install -> desktop deps check/install -> start backend -> wait for /health -> start desktop dev
+rem Fixes a common failure where backend_port.txt contains trailing spaces, producing a URL like "http://127.0.0.1:8765 /health".
 
 set "REPO=C:\Cue_repo"
 set "EXTRA=C:\Cue_extra"
@@ -47,6 +48,15 @@ if not exist "%REPO%\desktop\node_modules" (
 )
 
 echo.
+echo === Checking if backend is already healthy ===
+call :read_port
+call :probe_health
+if "!HEALTH_HTTP!"=="200" (
+  echo Backend already healthy at !HEALTH_URL!
+  goto :launch_desktop
+)
+
+echo.
 echo === Starting backend in a new window ===
 if not exist "%REPO%\scripts\run_backend_dev.cmd" (
   echo ERROR: %REPO%\scripts\run_backend_dev.cmd not found.
@@ -56,28 +66,32 @@ if not exist "%REPO%\scripts\run_backend_dev.cmd" (
 start "Cue Backend" cmd /k ""%REPO%\scripts\run_backend_dev.cmd""
 
 echo Waiting for backend /health...
-rem Try up to 30 seconds total (30 attempts x 1s)
-set "OK="
-for /l %%A in (1,1,30) do (
-  rem Refresh port if backend wrote backend_port.txt
-  if exist "%PORT_FILE%" set /p PORT=<"%PORT_FILE%"
+set /a HEALTH_TRIES=60
 
-  curl -s "http://127.0.0.1:!PORT!/health" | findstr /c:"""ok"":true" >nul
-  if not errorlevel 1 (
-    set "OK=1"
-    goto :health_ok
-  )
-  timeout /t 1 /nobreak >nul
-)
+:wait_loop
+call :read_port
+call :probe_health
+if "!HEALTH_HTTP!"=="200" goto :health_ok
+
+set /a HEALTH_TRIES-=1
+if !HEALTH_TRIES! LEQ 0 goto :health_fail
+
+timeout /t 1 /nobreak >nul
+goto :wait_loop
 
 :health_ok
-if not defined OK (
-  echo ERROR: backend did not become healthy at http://127.0.0.1:!PORT!/health
-  echo Check the backend window and %EXTRA%\backend_dev.log
-  exit /b 1
-)
+echo Backend is healthy at !HEALTH_URL!
+goto :launch_desktop
 
-echo Backend healthy on port !PORT!.
+:health_fail
+echo ERROR: backend did not become healthy.
+echo   Last port read : "!PORT!"
+echo   Last health URL : !HEALTH_URL!
+echo   Last HTTP code  : !HEALTH_HTTP!
+echo Check the backend window and %EXTRA%\backend_dev.log
+exit /b 1
+
+:launch_desktop
 echo.
 echo === Launching desktop (Tauri) ===
 if not exist "%REPO%\scripts\run_desktop_dev.cmd" (
@@ -87,3 +101,19 @@ if not exist "%REPO%\scripts\run_desktop_dev.cmd" (
 
 call "%REPO%\scripts\run_desktop_dev.cmd"
 exit /b %errorlevel%
+
+rem --- helpers ---
+
+:read_port
+rem Read first token from backend_port.txt to avoid trailing/leading spaces.
+if exist "%PORT_FILE%" (
+  for /f "usebackq tokens=1" %%P in ("%PORT_FILE%") do set "PORT=%%P"
+)
+exit /b 0
+
+:probe_health
+set "HEALTH_URL=http://127.0.0.1:!PORT!/health"
+set "HEALTH_HTTP="
+for /f %%H in ('curl.exe --silent --output nul --write-out "%%{http_code}" "!HEALTH_URL!" 2^>nul') do set "HEALTH_HTTP=%%H"
+if not defined HEALTH_HTTP set "HEALTH_HTTP=000"
+exit /b 0
