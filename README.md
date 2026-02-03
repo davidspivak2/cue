@@ -5,45 +5,25 @@ Windows desktop app to create subtitles for videos (any language) with faster-wh
 ## Desktop app (Tauri)
 This repo includes a Tauri + React desktop app under `desktop/` for the new UI. For desktop-specific setup and commands, see: [`desktop/README.md`](desktop/README.md).
 
-## Desktop (Tauri) dev quickstart
-The desktop UI is wired to the local backend server (health/version + SSE jobs). Use the steps below to run the full stack.
-
-### Start the backend (FastAPI)
-From the repo root:
+## Local development (quick start)
+Use Windows Command Prompt (cmd) from the repo root. The preferred one-command entrypoint is:
 ```bat
-scripts\install_backend_dev_deps.cmd
-scripts\run_backend_dev.cmd
+C:\Cue_repo\scripts\run_desktop_all.cmd
 ```
 
-- Default port is `8765` (the dev script sets `CUE_BACKEND_PORT=8765`). The backend reads `CUE_BACKEND_PORT` if you need to change it.
-- The desktop UI currently targets `http://127.0.0.1:8765` (see `desktop/src/pages/Settings.tsx`); if you change the backend port, update the UI constant to match.
+What this does:
+- Ensures backend Python deps are installed (FastAPI/Uvicorn/Pydantic).
+- Ensures desktop npm deps are installed (`node_modules`).
+- Starts the backend in a new window.
+- Waits for `http://127.0.0.1:<port>/health` to return OK.
+- Launches the Tauri desktop dev app.
 
-Verify backend health:
-```bat
-curl http://127.0.0.1:8765/health
-```
+Logs and port info:
+- Backend dev log: `C:\Cue_extra\backend_dev.log`
+- Backend port file: `C:\Cue_extra\backend_port.txt`
+- The script waits on `/health` before launching the desktop app.
 
-### Start the desktop UI
-From `desktop/` (exact scripts from `desktop/package.json`):
-```bat
-cd desktop
-npm ci
-npm run tauri dev
-```
-
-### Verify the desktop is connected
-Open **Settings**:
-- Status shows **Connected** and a backend **Version** value.
-- Click **CHECK NOW** and confirm it succeeds.
-
-### Run a Pipeline job from the UI
-In **Settings**, choose **Pipeline job**, then:
-- Set **Input .mp4 path** and **Output directory**.
-- Click **Start job** and watch SSE progress events stream in.
-- Click **Cancel** to stop the job (works for demo and pipeline jobs).
-
-### Logs & diagnostics
-Backend dev logs and helper outputs land under `C:\Cue_extra\` (for example: `C:\Cue_extra\backend_dev.log`).
+For desktop-specific setup and commands, see: [`desktop/README.md`](desktop/README.md).
 
 ### Backend API smoke test (cmd)
 Use this to verify `POST /jobs` + SSE streaming without the UI.
