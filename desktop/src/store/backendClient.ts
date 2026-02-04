@@ -27,6 +27,7 @@ const JOBS_URL = `${BACKEND_BASE_URL}/jobs`;
 const BACKEND_TIMEOUT_MS = 1500;
 const FS_EXISTS_URL = `${BACKEND_BASE_URL}/fs/exists`;
 const FS_READ_TEXT_URL = `${BACKEND_BASE_URL}/fs/read_text`;
+const FS_WRITE_TEXT_URL = `${BACKEND_BASE_URL}/fs/write_text`;
 
 export const checkBackendHealth = async () => {
   const controller = new AbortController();
@@ -96,4 +97,15 @@ export const readTextFile = async (path: string) => {
   }
   const payload = (await response.json()) as { content?: string };
   return payload.content ?? "";
+};
+
+export const writeTextFile = async (path: string, content: string) => {
+  const response = await fetch(FS_WRITE_TEXT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, content })
+  });
+  if (!response.ok) {
+    throw new Error("Failed to write file.");
+  }
 };

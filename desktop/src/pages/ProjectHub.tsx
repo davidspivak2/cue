@@ -11,7 +11,7 @@ import {
 } from "@mui/material";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { useNavigate } from "react-router-dom";
 import { useProjects } from "../store/projectsContext";
 import { pickVideoFile } from "../store/filePicker";
@@ -28,66 +28,114 @@ const ProjectHub = () => {
     refreshProjects
   } = useProjects();
   const [dragActive, setDragActive] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const supportedExtensions = [".mp4", ".mov", ".mkv", ".m4v", ".avi", ".webm"];
+
+  const isSupportedVideo = useCallback(
+    (path: string) => {
+      const lower = path.toLowerCase();
+      return supportedExtensions.some((ext) => lower.endsWith(ext));
+    },
+    [supportedExtensions]
+  );
+
+  const normalizeSelection = (selection: string | string[] | null) => {
+    if (!selection) {
+      return null;
+    }
+    if (Array.isArray(selection)) {
+      return selection[0] ?? null;
+    }
+    return selection;
+  };
 
   useEffect(() => {
     void refreshProjects();
   }, [refreshProjects]);
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    const listen = async () => {
-      unlisten = await getCurrentWindow().onDragDropEvent((event) => {
-        if (event.payload.type === "over") {
-          setDragActive(true);
-        }
-        if (event.payload.type === "drop") {
-          setDragActive(false);
-          const [path] = event.payload.paths;
-          if (path) {
-            void handleCreateProject(path);
-          }
-        }
-        if (event.payload.type === "cancel") {
-          setDragActive(false);
+    let unlistenDrop: (() => void) | undefined;
+    let unlistenHover: (() => void) | undefined;
+    let unlistenCancel: (() => void) | undefined;
+    const listenEvents = async () => {
+      unlistenDrop = await listen<string[]>("tauri://file-drop", (event) => {
+        setDragActive(false);
+        const [path] = event.payload ?? [];
+        if (path) {
+          void handleCreateProject(path);
         }
       });
+      unlistenHover = await listen("tauri://file-drop-hover", () => {
+        setDragActive(true);
+      });
+      unlistenCancel = await listen("tauri://file-drop-cancelled", () => {
+        setDragActive(false);
+      });
     };
-    void listen();
+    void listenEvents();
     return () => {
-      if (unlisten) {
-        unlisten();
-      }
+      unlistenDrop?.();
+      unlistenHover?.();
+      unlistenCancel?.();
     };
-  }, []);
+  }, [handleCreateProject]);
 
   const handleCreateProject = useCallback(
     async (path?: string) => {
-      let sourcePath = path;
-      if (!sourcePath) {
-        const selection = await pickVideoFile();
-        if (!selection) {
+      try {
+        setErrorMessage(null);
+        let sourcePath = path;
+        if (!sourcePath) {
+          const selection = await pickVideoFile();
+          sourcePath = normalizeSelection(selection);
+          if (!sourcePath) {
+            return;
+          }
+        }
+        if (!isSupportedVideo(sourcePath)) {
+          setErrorMessage("Unsupported file type");
           return;
         }
-        sourcePath = selection;
-      }
-      const project = await createProject(sourcePath);
-      if (project) {
-        openProject(project.projectId);
-        navigate("/workbench");
+        const result = await createProject(sourcePath);
+        if (result.project) {
+          setErrorMessage(null);
+          openProject(result.project.projectId);
+          navigate("/workbench");
+        }
+        if (result.metadataPromise) {
+          result.metadataPromise.catch(() => {
+            setErrorMessage("Failed to load video metadata.");
+          });
+        }
+      } catch (error) {
+        console.error(error);
+        setErrorMessage("Failed to create project.");
       }
     },
-    [createProject, navigate, openProject]
+    [createProject, isSupportedVideo, navigate, openProject]
   );
 
   const handleRelink = useCallback(
     async (projectId: string) => {
+      setErrorMessage(null);
       const selection = await pickVideoFile();
-      if (!selection) {
+      const sourcePath = normalizeSelection(selection);
+      if (!sourcePath) {
         return;
       }
-      await relinkProjectPath(projectId, selection);
+      if (!isSupportedVideo(sourcePath)) {
+        setErrorMessage("Unsupported file type");
+        return;
+      }
+      try {
+        await relinkProjectPath(projectId, sourcePath);
+      } catch (error) {
+        console.error(error);
+        setErrorMessage("Failed to relink project.");
+      }
     },
-    [relinkProjectPath]
+    [isSupportedVideo, relinkProjectPath]
   );
 
   const cards = useMemo(
@@ -162,6 +210,20 @@ const ProjectHub = () => {
 
   return (
     <Stack spacing={3}>
+      {errorMessage ? (
+        <Box
+          sx={{
+            border: "1px solid",
+            borderColor: "error.main",
+            borderRadius: 2,
+            p: 2,
+            color: "error.main"
+          }}
+          role="alert"
+        >
+          <Typography>{errorMessage}</Typography>
+        </Box>
+      ) : null}
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Typography variant="h4" fontWeight={600}>
           Project Hub

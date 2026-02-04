@@ -2,8 +2,8 @@ export const nanoid = () => {
   return Math.random().toString(36).slice(2, 10);
 };
 
-export const formatDuration = (seconds: number) => {
-  if (!Number.isFinite(seconds)) {
+export const formatDuration = (seconds: number | null) => {
+  if (seconds === null || !Number.isFinite(seconds)) {
     return "—";
   }
   const total = Math.max(0, Math.round(seconds));

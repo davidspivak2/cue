@@ -88,6 +88,11 @@ class FilePathRequest(BaseModel):
     path: str
 
 
+class FileWriteRequest(BaseModel):
+    path: str
+    content: str
+
+
 def _resolve_port() -> int:
     raw = os.getenv("CUE_BACKEND_PORT")
     if not raw:
@@ -286,6 +291,17 @@ async def fs_read_text(payload: FilePathRequest) -> dict[str, Any]:
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"read_failed: {exc}") from exc
     return {"content": content}
+
+
+@app.post("/fs/write_text")
+async def fs_write_text(payload: FileWriteRequest) -> dict[str, Any]:
+    path = Path(payload.path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload.content, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"write_failed: {exc}") from exc
+    return {"ok": True}
 
 
 @app.post("/jobs")

@@ -16,7 +16,8 @@ import {
   Project,
   ProjectMap,
   relinkProject,
-  saveProject
+  saveProject,
+  updateProjectMetadata
 } from "./projects";
 
 type ProjectRuntime = {
@@ -38,9 +39,11 @@ type ProjectsContextValue = {
   openTabs: string[];
   hasActiveJob: boolean;
   activeJobProjectId?: string;
+  createProject: (
+    sourceVideoPath: string
+  ) => Promise<{ project: Project | null; metadataPromise?: Promise<Project> }>;
   openProject: (projectId: string) => void;
   closeProject: (projectId: string) => void;
-  createProject: (sourceVideoPath: string) => Promise<Project | null>;
   relinkProjectPath: (projectId: string, sourceVideoPath: string) => Promise<void>;
   refreshProjects: () => Promise<void>;
   startCreateSubtitles: (projectId: string) => Promise<void>;
@@ -86,11 +89,25 @@ export const ProjectsProvider = ({ children }: { children: React.ReactNode }) =>
   const eventSourceRef = useRef<Record<string, EventSource | null>>({});
 
   const refreshProjects = useCallback(async () => {
-    const loaded = await loadProjects();
+    let loaded: ProjectMap = {};
+    try {
+      loaded = await loadProjects();
+    } catch (error) {
+      console.error(error);
+      setProjects({});
+      setProjectOrder([]);
+      return;
+    }
     const ids = Object.keys(loaded);
     const updated: ProjectMap = { ...loaded };
     for (const projectId of ids) {
       const project = loaded[projectId];
+      if (!project.createdAt) {
+        updated[projectId] = {
+          ...project,
+          createdAt: new Date().toISOString()
+        };
+      }
       let videoExists = true;
       try {
         videoExists = await fileExists(project.sourceVideoPath);
@@ -148,14 +165,20 @@ export const ProjectsProvider = ({ children }: { children: React.ReactNode }) =>
   );
 
   const createProject = useCallback(async (sourceVideoPath: string) => {
-    try {
-      const project = await createProjectFromVideo(sourceVideoPath);
-      setProjects((prev) => ({ ...prev, [project.projectId]: project }));
-      setProjectOrder((prev) => [...prev, project.projectId]);
-      return project;
-    } catch (error) {
-      return null;
-    }
+    console.log(`createProject: ${sourceVideoPath}`);
+    const project = await createProjectFromVideo(sourceVideoPath);
+    setProjects((prev) => ({ ...prev, [project.projectId]: project }));
+    setProjectOrder((prev) => [...prev, project.projectId]);
+    const metadataPromise = updateProjectMetadata(project)
+      .then((updated) => {
+        setProjects((prev) => ({ ...prev, [project.projectId]: updated }));
+        return updated;
+      })
+      .catch((error: unknown) => {
+        console.error(error);
+        throw error;
+      });
+    return { project, metadataPromise };
   }, []);
 
   const relinkProjectPath = useCallback(async (projectId: string, sourceVideoPath: string) => {
