@@ -1,17 +1,22 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
-import Home from "./pages/Home";
+import ProjectHub from "./pages/ProjectHub";
+import Workbench from "./pages/Workbench";
 import Settings from "./pages/Settings";
+import { ProjectsProvider } from "./store/projectsContext";
 
 const App = () => (
-  <BrowserRouter>
-    <Routes>
-      <Route path="/" element={<AppLayout />}>
-        <Route index element={<Home />} />
-        <Route path="settings" element={<Settings />} />
-      </Route>
-    </Routes>
-  </BrowserRouter>
+  <ProjectsProvider>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<AppLayout />}>
+          <Route index element={<ProjectHub />} />
+          <Route path="workbench" element={<Workbench />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  </ProjectsProvider>
 );
 
 export default App;

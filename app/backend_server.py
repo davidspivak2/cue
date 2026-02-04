@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import uuid
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .ui.utils import get_media_duration_seconds, generate_thumbnail
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -75,6 +77,15 @@ class JobRequest(BaseModel):
     input_path: Optional[str] = None
     output_dir: Optional[str] = None
     options: dict[str, Any] = Field(default_factory=dict)
+
+
+class VideoInfoRequest(BaseModel):
+    path: str
+    output_dir: str
+
+
+class FilePathRequest(BaseModel):
+    path: str
 
 
 def _resolve_port() -> int:
@@ -231,6 +242,50 @@ def _job_or_404(job_id: str) -> JobState:
     if not job:
         raise HTTPException(status_code=404, detail="job_not_found")
     return job
+
+
+@app.post("/video/info")
+async def video_info(payload: VideoInfoRequest) -> dict[str, Any]:
+    video_path = Path(payload.path)
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="video_not_found")
+    output_dir = Path(payload.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    duration_seconds = get_media_duration_seconds(video_path)
+    if duration_seconds is None:
+        raise HTTPException(status_code=500, detail="duration_unavailable")
+    thumbnail_path = generate_thumbnail(video_path, duration_seconds, logger)
+    if thumbnail_path is None:
+        raise HTTPException(status_code=500, detail="thumbnail_unavailable")
+    target_thumbnail = output_dir / "thumb.png"
+    try:
+        shutil.copy2(thumbnail_path, target_thumbnail)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"thumbnail_copy_failed: {exc}") from exc
+    return {
+        "duration_seconds": duration_seconds,
+        "thumbnail_path": str(target_thumbnail),
+        "filename": video_path.name,
+    }
+
+
+@app.post("/fs/exists")
+async def fs_exists(payload: FilePathRequest) -> dict[str, Any]:
+    path = Path(payload.path)
+    return {"exists": path.exists()}
+
+
+@app.post("/fs/read_text")
+async def fs_read_text(payload: FilePathRequest) -> dict[str, Any]:
+    path = Path(payload.path)
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="file_not_found") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"read_failed: {exc}") from exc
+    return {"content": content}
 
 
 @app.post("/jobs")

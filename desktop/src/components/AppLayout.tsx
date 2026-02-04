@@ -1,86 +1,40 @@
-import {
-  AppBar,
-  Box,
-  Drawer,
-  List,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Toolbar,
-  Typography
-} from "@mui/material";
-import HomeIcon from "@mui/icons-material/Home";
+import { AppBar, Box, IconButton, Toolbar, Tooltip, Typography } from "@mui/material";
 import SettingsIcon from "@mui/icons-material/Settings";
-import { NavLink, Outlet } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useProjects } from "../store/projectsContext";
 
-const drawerWidth = 240;
+const AppLayout = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { hasActiveJob } = useProjects();
+  const settingsDisabled = hasActiveJob;
+  const isSettings = location.pathname.startsWith("/settings");
 
-const navItems = [
-  { label: "Home", to: "/", icon: <HomeIcon /> },
-  { label: "Settings", to: "/settings", icon: <SettingsIcon /> }
-];
-
-const AppLayout = () => (
-  <Box sx={{ display: "flex", minHeight: "100vh" }}>
-    <AppBar
-      position="fixed"
-      sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}
-    >
-      <Toolbar>
-        <Typography variant="h6" component="div">
-          Cue
-        </Typography>
-      </Toolbar>
-    </AppBar>
-    <Drawer
-      variant="permanent"
-      sx={{
-        width: drawerWidth,
-        flexShrink: 0,
-        [`& .MuiDrawer-paper`]: {
-          width: drawerWidth,
-          boxSizing: "border-box"
-        }
-      }}
-    >
-      <Toolbar />
-      <List>
-        {navItems.map((item) => (
-          <ListItemButton
-            key={item.label}
-            component={NavLink}
-            to={item.to}
-            sx={{
-              mx: 1,
-              mb: 0.5,
-              borderRadius: 1,
-              "&.active": {
-                backgroundColor: "action.selected",
-                "& .MuiListItemIcon-root": {
-                  color: "primary.main"
-                }
-              }
-            }}
-          >
-            <ListItemIcon>{item.icon}</ListItemIcon>
-            <ListItemText primary={item.label} />
-          </ListItemButton>
-        ))}
-      </List>
-    </Drawer>
-    <Box
-      component="main"
-      sx={{
-        flexGrow: 1,
-        px: 4,
-        py: 3,
-        mt: 8,
-        backgroundColor: "background.default"
-      }}
-    >
-      <Outlet />
+  return (
+    <Box sx={{ minHeight: "100vh", backgroundColor: "background.default" }}>
+      <AppBar position="sticky" elevation={0}>
+        <Toolbar sx={{ justifyContent: "space-between" }}>
+          <Typography variant="h6" fontWeight={600}>
+            Cue
+          </Typography>
+          <Tooltip title="Settings">
+            <span>
+              <IconButton
+                color="inherit"
+                onClick={() => navigate("/settings")}
+                disabled={settingsDisabled || isSettings}
+              >
+                <SettingsIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Toolbar>
+      </AppBar>
+      <Box component="main" sx={{ px: 4, py: 3 }}>
+        <Outlet />
+      </Box>
     </Box>
-  </Box>
-);
+  );
+};
 
 export default AppLayout;
