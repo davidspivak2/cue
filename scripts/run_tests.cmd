@@ -30,6 +30,28 @@ del /f /q "%TMP_SCRIPT%" >nul 2>nul
 exit /b %RET%
 
 :main
+if not defined RUN_TESTS_CAPTURED goto :capture
+goto :capture_done
+
+:capture
+set "RUN_TESTS_CAPTURED=1"
+set "LOG_TMP=%TEMP%\run_tests_%RANDOM%_%RANDOM%.log"
+powershell -NoProfile -Command "$env:RUN_TESTS_CAPTURED='1'; $env:LOG_TMP='%LOG_TMP%'; & '%~f0' %* 2>&1 | Tee-Object -FilePath $env:LOG_TMP; exit $LASTEXITCODE"
+set "CAPTURE_EXIT=%ERRORLEVEL%"
+if "%CAPTURE_EXIT%"=="0" goto :capture_success
+set "LOG_DIR=C:\Cue_extra\run_tests"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "LOG_STAMP=%%I"
+set "LOG_FINAL=%LOG_DIR%\run_tests_%LOG_STAMP%.log"
+move /y "%LOG_TMP%" "%LOG_FINAL%" >nul 2>&1
+echo [error] Tests failed. Log saved to: %LOG_FINAL%
+exit /b %CAPTURE_EXIT%
+
+:capture_success
+if exist "%LOG_TMP%" del /f /q "%LOG_TMP%" >nul 2>nul
+exit /b %CAPTURE_EXIT%
+
+:capture_done
 set "TEST_EXIT=0"
 
 REM ==========================
