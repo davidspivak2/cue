@@ -16,8 +16,9 @@ cd /d C:\Cue_repo\desktop
 rem Tauri dev expects Vite to be on 5173 (strictPort=true).
 set "VITE_PORT=5173"
 
-powershell -NoProfile -Command "if (Test-NetConnection -ComputerName 127.0.0.1 -Port %VITE_PORT% -InformationLevel Quiet) { exit 1 } else { exit 0 }" >nul 2>nul
-if %errorlevel%==1 (
+rem Check both IPv4 and IPv6 for port availability; auto-cleanup stale Cue Vite if found.
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Cue_repo\scripts\ensure_vite_port.ps1" -VitePort %VITE_PORT%
+if not %errorlevel%==0 (
   echo ERROR: Port %VITE_PORT% is already in use.
   echo Close the existing Vite/Tauri dev session that is using %VITE_PORT%.
   exit /b 1

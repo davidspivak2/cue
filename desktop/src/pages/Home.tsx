@@ -343,6 +343,7 @@ const Home = () => {
   const handleJobEvent = (event: JobEvent) => {
     if (event.type === "started") {
       jobStartRef.current = Date.now();
+      setElapsedText(formatElapsed(0));
       setStatusHeading(
         event.heading ??
           (jobKindRef.current === "create_video_with_subtitles"
@@ -598,7 +599,7 @@ const Home = () => {
           <div
             className={cn(
               "overflow-hidden rounded-lg border border-border bg-muted",
-              previewUrl ? "" : "flex items-center justify-center"
+              framePreviewUrl ? "" : "flex items-center justify-center"
             )}
             style={{ aspectRatio: "16 / 9" }}
           >
