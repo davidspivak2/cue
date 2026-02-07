@@ -1,445 +1,414 @@
+import * as React from "react";
+import { ArrowLeft } from "lucide-react";
+import { Link } from "react-router-dom";
+
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
-  Box,
-  Button,
-  FormControl,
-  FormControlLabel,
-  InputLabel,
-  LinearProgress,
-  MenuItem,
   Select,
-  Slider,
-  Stack,
-  Switch,
-  TextField,
-  Typography
-} from "@mui/material";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
+import {
+  fetchDeviceInfo,
+  fetchSettings,
+  SettingsConfig,
+  updateSettings
+} from "@/settingsClient";
 
-type JobKind = "pipeline" | "demo";
-
-type JobEvent = {
-  job_id: string;
-  ts: string;
-  type: "started" | "step" | "progress" | "completed" | "cancelled" | "error";
-  step?: string;
-  message?: string;
-  pct?: number;
-  status?: string;
+type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends Record<string, unknown> ? DeepPartial<T[K]> : T[K];
 };
 
-type JobRequest = {
-  kind: JobKind;
-  input_path?: string;
-  output_dir?: string;
-  options?: Record<string, unknown>;
+const mergeDeep = <T,>(base: T, update: DeepPartial<T>): T => {
+  const next: Record<string, unknown> = { ...(base as Record<string, unknown>) };
+  Object.entries(update || {}).forEach(([key, value]) => {
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      next[key] &&
+      typeof next[key] === "object" &&
+      !Array.isArray(next[key])
+    ) {
+      next[key] = mergeDeep(next[key], value as DeepPartial<unknown>);
+    } else {
+      next[key] = value as unknown;
+    }
+  });
+  return next as T;
 };
 
-const BACKEND_BASE_URL = "http://127.0.0.1:8765";
-const BACKEND_HEALTH_URL = "http://127.0.0.1:8765/health";
-const JOBS_URL = `${BACKEND_BASE_URL}/jobs`;
-const BACKEND_TIMEOUT_MS = 1500;
+const qualityOptions = [
+  { value: "auto", label: "Auto" },
+  { value: "fast", label: "Fast (int8)" },
+  { value: "accurate", label: "Accurate (int16)" },
+  { value: "ultra", label: "Ultra accurate (float32)" }
+];
+
+const qualityHelperText = (quality: string) => {
+  if (quality === "ultra") {
+    return "Very slow on most CPUs. Use only if you need maximum accuracy.";
+  }
+  if (quality === "fast") {
+    return "Faster, but may reduce accuracy on some machines.";
+  }
+  return "";
+};
+
+const qualityRunSummary = (quality: string, gpuAvailable: boolean | null) => {
+  if (quality === "fast") {
+    return "This will run on: CPU (int8)";
+  }
+  if (quality === "accurate") {
+    return "This will run on: CPU (int16)";
+  }
+  if (quality === "ultra") {
+    return "This will run on: CPU (float32)";
+  }
+  if (gpuAvailable === null) {
+    return "Checking GPU...";
+  }
+  return gpuAvailable ? "This will run on: GPU" : "This will run on: CPU";
+};
+
+const SettingsSection = ({
+  title,
+  children
+}: {
+  title: string;
+  children: React.ReactNode;
+}) => (
+  <section className="rounded-lg border border-border bg-card p-4">
+    <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+    <div className="mt-4 space-y-3">{children}</div>
+  </section>
+);
 
 const Settings = () => {
-  const [gpuEnabled, setGpuEnabled] = useState(false);
-  const [fontSize, setFontSize] = useState(16);
-  const [density, setDensity] = useState("comfortable");
-  const [backendStatus, setBackendStatus] = useState<"checking" | "connected" | "not_running">(
-    "checking"
-  );
-  const [backendVersion, setBackendVersion] = useState<string | null>(null);
-  const [jobKind, setJobKind] = useState<JobKind>("pipeline");
-  const [inputPath, setInputPath] = useState("");
-  const [outputDir, setOutputDir] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState("idle");
-  const [latestStep, setLatestStep] = useState<string | null>(null);
-  const [latestMessage, setLatestMessage] = useState<string | null>(null);
-  const [latestProgress, setLatestProgress] = useState<number | null>(null);
-  const [jobEvents, setJobEvents] = useState<JobEvent[]>([]);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [gpuAvailable, setGpuAvailable] = React.useState<boolean | null>(null);
 
-  const checkBackend = useCallback(async () => {
-    setBackendStatus("checking");
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(BACKEND_HEALTH_URL, { signal: controller.signal });
-      if (!response.ok) {
-        throw new Error(`Backend health check failed: ${response.status}`);
-      }
-      const payload = (await response.json()) as { version?: string };
-      setBackendVersion(typeof payload.version === "string" ? payload.version : null);
-      setBackendStatus("connected");
-    } catch (error) {
-      setBackendVersion(null);
-      setBackendStatus("not_running");
-    } finally {
-      window.clearTimeout(timeoutId);
-    }
-  }, []);
-
-  useEffect(() => {
-    void checkBackend();
-  }, [checkBackend]);
-
-  const closeEventSource = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      closeEventSource();
-    };
-  }, [closeEventSource]);
-
-  const handleJobEvent = useCallback(
-    (event: JobEvent) => {
-      setJobEvents((prev) => {
-        const next = [...prev, event];
-        return next.length > 200 ? next.slice(next.length - 200) : next;
-      });
-
-      if (event.type === "step") {
-        setLatestStep(event.step ?? null);
-        setLatestMessage(event.message ?? null);
-      }
-
-      if (event.type === "progress") {
-        setLatestProgress(typeof event.pct === "number" ? event.pct : null);
-        if (event.message) {
-          setLatestMessage(event.message);
+  React.useEffect(() => {
+    let active = true;
+    fetchSettings()
+      .then((data) => {
+        if (active) {
+          setSettings(data);
+          setError(null);
         }
-      }
+      })
+      .catch((err) => {
+        if (active) {
+          setError(err instanceof Error ? err.message : "Failed to load settings.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
-      if (event.type === "started") {
-        setJobStatus("running");
-      }
+  React.useEffect(() => {
+    let active = true;
+    fetchDeviceInfo()
+      .then((data) => {
+        if (active) {
+          setGpuAvailable(Boolean(data?.gpu_available));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setGpuAvailable(null);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
-      if (["completed", "cancelled", "error"].includes(event.type)) {
-        setJobStatus(event.status ?? event.type);
-        closeEventSource();
+  const persistSettings = React.useCallback(
+    async (update: DeepPartial<SettingsConfig>) => {
+      if (!settings) {
+        return;
+      }
+      const optimistic = mergeDeep(settings, update);
+      setSettings(optimistic);
+      try {
+        const next = await updateSettings(update as Record<string, unknown>);
+        setSettings(next);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save settings.");
+        setSettings(settings);
       }
     },
-    [closeEventSource]
+    [settings]
   );
 
-  const startJob = useCallback(async () => {
-    closeEventSource();
-    setJobId(null);
-    setJobStatus("queued");
-    setLatestStep(null);
-    setLatestMessage(null);
-    setLatestProgress(null);
-    setJobEvents([]);
+  const handleSavePolicyChange = (value: string) => {
+    persistSettings({ save_policy: value });
+  };
 
-    try {
-      const requestBody: JobRequest = { kind: jobKind, options: {} };
-      if (jobKind === "pipeline") {
-        requestBody.input_path = inputPath.trim();
-        requestBody.output_dir = outputDir.trim();
-      }
-
-      const response = await fetch(JOBS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody)
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to start job: ${response.status}`);
-      }
-      const payload = (await response.json()) as { job_id?: string; events_url?: string };
-      if (!payload.job_id) {
-        throw new Error("Job response missing job_id");
-      }
-      setJobId(payload.job_id);
-
-      const eventsUrl = payload.events_url ?? `${JOBS_URL}/${payload.job_id}/events`;
-      const source = new EventSource(eventsUrl);
-      eventSourceRef.current = source;
-
-      source.onmessage = (messageEvent) => {
-        try {
-          const data = JSON.parse(messageEvent.data) as JobEvent;
-          handleJobEvent(data);
-        } catch (error) {
-          setJobEvents((prev) => [
-            ...prev,
-            {
-              job_id: payload.job_id ?? "unknown",
-              ts: new Date().toISOString(),
-              type: "error",
-              message: "Failed to parse event stream message.",
-              status: "error"
-            }
-          ]);
-          setJobStatus("error");
-          closeEventSource();
-        }
-      };
-
-      source.onerror = () => {
-        setJobStatus("error");
-        closeEventSource();
-      };
-    } catch (error) {
-      setJobStatus("error");
-    }
-  }, [closeEventSource, handleJobEvent, inputPath, jobKind, outputDir]);
-
-  const cancelJob = useCallback(async () => {
-    if (!jobId) {
+  const handleBrowseFolder = async () => {
+    if (!settings || settings.save_policy !== "fixed_folder") {
       return;
     }
     try {
-      const response = await fetch(`${JOBS_URL}/${jobId}/cancel`, { method: "POST" });
-      if (response.ok) {
-        const payload = (await response.json()) as { status?: string };
-        setJobStatus(payload.status ?? "cancel_requested");
-      } else {
-        setJobStatus("error");
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === "string") {
+        await persistSettings({ save_folder: selected, save_policy: "fixed_folder" });
       }
-    } catch (error) {
-      setJobStatus("error");
+    } catch {
+      // Ignore dialog errors outside Tauri.
     }
-  }, [jobId]);
+  };
 
-  const clearJobEvents = useCallback(() => {
-    setJobEvents([]);
-    setLatestStep(null);
-    setLatestMessage(null);
-    setLatestProgress(null);
-  }, []);
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Loading settings...</p>;
+  }
 
-  const jobIsRunning = useMemo(
-    () => ["queued", "running"].includes(jobStatus),
-    [jobStatus]
-  );
-  const pipelineInputsMissing = useMemo(
-    () =>
-      jobKind === "pipeline" &&
-      (!inputPath.trim().length || !outputDir.trim().length),
-    [inputPath, jobKind, outputDir]
-  );
+  if (!settings) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-destructive">{error ?? "Settings unavailable."}</p>
+        <Button type="button" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  const diagnosticsEnabled = settings.diagnostics?.enabled ?? false;
+  const savePolicy = settings.save_policy ?? "same_folder";
+  const saveFolderValue = settings.save_folder ?? "";
 
   return (
-    <Stack spacing={4} maxWidth={520}>
-      <Box>
-        <Typography variant="h5" gutterBottom>
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+      <header className="flex items-center gap-3">
+        <Button asChild variant="ghost" size="sm" className="gap-2">
+          <Link to="/">
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Link>
+        </Button>
+        <h1 data-testid="settings-title" className="text-2xl font-semibold">
           Settings
-        </Typography>
-        <Typography color="text.secondary">
-          Placeholder controls to preview the UI theme.
-        </Typography>
-      </Box>
-      <FormControlLabel
-        control={
-          <Switch
-            checked={gpuEnabled}
-            onChange={(event) => setGpuEnabled(event.target.checked)}
-          />
-        }
-        label="Enable GPU (placeholder)"
-      />
-      <Box>
-        <Typography gutterBottom>Subtitle font size (placeholder)</Typography>
-        <Slider
-          value={fontSize}
-          min={12}
-          max={28}
-          step={1}
-          valueLabelDisplay="auto"
-          onChange={(_, value) => setFontSize(value as number)}
-        />
-      </Box>
-      <FormControl fullWidth>
-        <InputLabel id="theme-density-label">Theme density (placeholder)</InputLabel>
-        <Select
-          labelId="theme-density-label"
-          value={density}
-          label="Theme density (placeholder)"
-          onChange={(event) => setDensity(event.target.value)}
-        >
-          <MenuItem value="comfortable">Comfortable</MenuItem>
-          <MenuItem value="compact">Compact</MenuItem>
-          <MenuItem value="spacious">Spacious</MenuItem>
-        </Select>
-      </FormControl>
-      <Box>
-        <Typography variant="h6" gutterBottom>
-          Backend
-        </Typography>
-        <Stack spacing={1}>
-          <Typography>
-            Status:{" "}
-            <Box
-              component="span"
-              color={backendStatus === "connected" ? "success.main" : "text.secondary"}
-              fontWeight={600}
-            >
-              {backendStatus === "connected" ? "Connected" : "Not running"}
-            </Box>
-          </Typography>
-          {backendStatus === "connected" ? (
-            <Typography color="text.secondary">
-              Version: {backendVersion ?? "unknown"}
-            </Typography>
-          ) : (
-            <Typography color="text.secondary">
-              Run scripts\\run_backend_dev.cmd
-            </Typography>
-          )}
-          <Box>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={checkBackend}
-              disabled={backendStatus === "checking"}
-            >
-              Check now
-            </Button>
-          </Box>
-        </Stack>
-      </Box>
-      <Box>
-        <Typography variant="h6" gutterBottom>
-          Jobs
-        </Typography>
-        <Stack spacing={2}>
-          <FormControl fullWidth>
-            <InputLabel id="job-kind-label">Job type</InputLabel>
+        </h1>
+      </header>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      <SettingsSection title="Performance">
+        <div className="space-y-2">
+          <Label htmlFor="transcription-quality">Transcription quality</Label>
+          <div className="max-w-xs">
             <Select
-              labelId="job-kind-label"
-              value={jobKind}
-              label="Job type"
-              onChange={(event) => setJobKind(event.target.value as JobKind)}
+              value={settings.transcription_quality}
+              onValueChange={(value) => persistSettings({ transcription_quality: value })}
             >
-              <MenuItem value="pipeline">Pipeline job</MenuItem>
-              <MenuItem value="demo">Demo job</MenuItem>
+              <SelectTrigger id="transcription-quality">
+                <SelectValue placeholder="Select quality" />
+              </SelectTrigger>
+              <SelectContent>
+                {qualityOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
-          </FormControl>
-          {jobKind === "pipeline" ? (
-            <Stack spacing={1.5}>
-              <TextField
-                label="Input file path"
-                value={inputPath}
-                onChange={(event) => setInputPath(event.target.value)}
-                placeholder="C:\\path\\to\\video.mp4"
-                required
-                error={pipelineInputsMissing && !inputPath.trim().length}
-                helperText={
-                  pipelineInputsMissing && !inputPath.trim().length
-                    ? "Input path is required for pipeline jobs."
-                    : " "
-                }
-              />
-              <TextField
-                label="Output directory path"
-                value={outputDir}
-                onChange={(event) => setOutputDir(event.target.value)}
-                placeholder="C:\\Cue_output"
-                required
-                error={pipelineInputsMissing && !outputDir.trim().length}
-                helperText={
-                  pipelineInputsMissing && !outputDir.trim().length
-                    ? "Output directory is required for pipeline jobs."
-                    : " "
-                }
-              />
-            </Stack>
-          ) : (
-            <Typography color="text.secondary">
-              Demo jobs emit fake step/progress events for UI testing.
-            </Typography>
-          )}
-          {backendStatus !== "connected" ? (
-            <Typography color="text.secondary">
-              Run scripts\\run_backend_dev.cmd to start the backend.
-            </Typography>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {qualityRunSummary(settings.transcription_quality, gpuAvailable)}
+          </p>
+          {qualityHelperText(settings.transcription_quality) ? (
+            <p className="text-sm text-muted-foreground">
+              {qualityHelperText(settings.transcription_quality)}
+            </p>
           ) : null}
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Button
-              variant="contained"
-              onClick={startJob}
-              disabled={
-                jobIsRunning || backendStatus !== "connected" || pipelineInputsMissing
-              }
-            >
-              Start job
-            </Button>
-            <Button
-              variant="outlined"
-              color="warning"
-              onClick={cancelJob}
-              disabled={!jobIsRunning}
-            >
-              Cancel
-            </Button>
-            <Button variant="text" onClick={clearJobEvents}>
-              Clear
-            </Button>
-          </Stack>
-          <Stack spacing={0.5}>
-            <Typography>
-              Status:{" "}
-              <Box component="span" fontWeight={600}>
-                {jobStatus}
-              </Box>
-            </Typography>
-            {jobId ? (
-              <Typography color="text.secondary">Job ID: {jobId}</Typography>
-            ) : null}
-            {latestStep ? (
-              <Typography color="text.secondary">
-                Step: {latestStep}
-                {latestMessage ? ` — ${latestMessage}` : null}
-              </Typography>
-            ) : null}
-            {typeof latestProgress === "number" ? (
-              <Stack spacing={1}>
-                <Typography color="text.secondary">Progress: {latestProgress}%</Typography>
-                <LinearProgress
-                  variant="determinate"
-                  value={Math.min(100, Math.max(0, latestProgress))}
-                />
-              </Stack>
-            ) : null}
-          </Stack>
-          <Box
-            sx={{
-              border: "1px solid",
-              borderColor: "divider",
-              borderRadius: 1,
-              maxHeight: 200,
-              overflowY: "auto",
-              p: 1.5
-            }}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Save subtitles">
+        <div className="space-y-3">
+          <RadioGroup
+            value={savePolicy}
+            onValueChange={handleSavePolicyChange}
+            className="space-y-2"
           >
-            <Stack spacing={0.5}>
-              {jobEvents.length === 0 ? (
-                <Typography color="text.secondary">No events yet.</Typography>
-              ) : (
-                jobEvents.map((event, index) => (
-                  <Typography
-                    key={`${event.ts}-${event.type}-${index}`}
-                    variant="body2"
-                    color="text.secondary"
-                  >
-                    [{event.type}]
-                    {event.step ? ` ${event.step}` : ""}{" "}
-                    {event.message ? `— ${event.message}` : ""}{" "}
-                    {typeof event.pct === "number" ? `(${event.pct}%)` : ""}
-                  </Typography>
-                ))
-              )}
-            </Stack>
-          </Box>
-        </Stack>
-      </Box>
-    </Stack>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem id="save-same" value="same_folder" />
+              <Label htmlFor="save-same">Same folder as the video</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem id="save-fixed" value="fixed_folder" />
+              <Label htmlFor="save-fixed">Always save to this folder</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem id="save-ask" value="ask_every_time" />
+              <Label htmlFor="save-ask">Ask every time</Label>
+            </div>
+          </RadioGroup>
+          <div className="flex gap-2">
+            <Input
+              placeholder="No folder selected"
+              value={saveFolderValue}
+              readOnly
+              disabled={savePolicy !== "fixed_folder"}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleBrowseFolder}
+              disabled={savePolicy !== "fixed_folder"}
+            >
+              Browse...
+            </Button>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Punctuation">
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="punctuation-rescue"
+            checked={settings.punctuation_rescue_fallback_enabled}
+            onCheckedChange={(checked) =>
+              persistSettings({ punctuation_rescue_fallback_enabled: Boolean(checked) })
+            }
+          />
+          <Label htmlFor="punctuation-rescue">
+            Improve punctuation automatically (recommended)
+          </Label>
+        </div>
+        <p className="pl-6 text-sm text-muted-foreground">
+          If subtitles come out with little or no punctuation, the app will retry
+          transcription in a compatibility mode and use that result. This can take longer.
+        </p>
+      </SettingsSection>
+
+      <SettingsSection title="Audio">
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="audio-filter"
+            checked={settings.apply_audio_filter}
+            onCheckedChange={(checked) =>
+              persistSettings({ apply_audio_filter: Boolean(checked) })
+            }
+          />
+          <Label htmlFor="audio-filter">Clean up audio before transcription</Label>
+        </div>
+        <p className="pl-6 text-sm text-muted-foreground">
+          May help noisy recordings, but can reduce punctuation. Recommended: OFF unless
+          needed.
+        </p>
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="keep-audio"
+            checked={settings.keep_extracted_audio}
+            onCheckedChange={(checked) =>
+              persistSettings({ keep_extracted_audio: Boolean(checked) })
+            }
+          />
+          <Label htmlFor="keep-audio">Keep extracted WAV file</Label>
+        </div>
+        <p className="pl-6 text-sm text-muted-foreground">
+          Keeps the *_audio_for_whisper.wav file after transcription completes.
+        </p>
+      </SettingsSection>
+
+      <SettingsSection title="Diagnostics">
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="diagnostics-archive"
+            checked={settings.diagnostics?.archive_on_exit}
+            onCheckedChange={(checked) =>
+              persistSettings({
+                diagnostics: { archive_on_exit: Boolean(checked) }
+              })
+            }
+            disabled={!diagnosticsEnabled}
+          />
+          <Label htmlFor="diagnostics-archive">Zip logs and outputs on exit</Label>
+        </div>
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="diagnostics-enabled"
+            checked={diagnosticsEnabled}
+            onCheckedChange={(checked) =>
+              persistSettings({ diagnostics: { enabled: Boolean(checked) } })
+            }
+          />
+          <Label htmlFor="diagnostics-enabled">Enable diagnostics logging</Label>
+        </div>
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="diagnostics-success"
+            checked={settings.diagnostics?.write_on_success}
+            onCheckedChange={(checked) =>
+              persistSettings({
+                diagnostics: { write_on_success: Boolean(checked) }
+              })
+            }
+            disabled={!diagnosticsEnabled}
+          />
+          <Label htmlFor="diagnostics-success">
+            Write diagnostics on successful completion
+          </Label>
+        </div>
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="diagnostics-render"
+            checked={settings.diagnostics?.render_timing_logs_enabled ?? false}
+            onCheckedChange={(checked) =>
+              persistSettings({
+                diagnostics: { render_timing_logs_enabled: Boolean(checked) }
+              })
+            }
+            disabled={!diagnosticsEnabled}
+          />
+          <Label htmlFor="diagnostics-render">Enable render timing logs (dev-only)</Label>
+        </div>
+        <div className="mt-2 space-y-2">
+          {[
+            { key: "app_system", label: "App + system info" },
+            { key: "video_info", label: "Video info" },
+            { key: "audio_info", label: "Audio (WAV) info" },
+            { key: "transcription_config", label: "Transcription config" },
+            { key: "srt_stats", label: "SRT stats" },
+            { key: "commands_timings", label: "Commands + timings" }
+          ].map((category) => (
+            <div key={category.key} className="flex items-start gap-2">
+              <Checkbox
+                id={`diagnostics-${category.key}`}
+                checked={settings.diagnostics?.categories?.[category.key as keyof typeof settings.diagnostics.categories]}
+                onCheckedChange={(checked) =>
+                  persistSettings({
+                    diagnostics: {
+                      categories: { [category.key]: Boolean(checked) }
+                    }
+                  })
+                }
+                disabled={!diagnosticsEnabled}
+              />
+              <Label htmlFor={`diagnostics-${category.key}`}>{category.label}</Label>
+            </div>
+          ))}
+        </div>
+      </SettingsSection>
+    </div>
   );
 };
 

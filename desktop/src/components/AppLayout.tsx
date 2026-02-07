@@ -1,86 +1,46 @@
-import {
-  AppBar,
-  Box,
-  Drawer,
-  List,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Toolbar,
-  Typography
-} from "@mui/material";
-import HomeIcon from "@mui/icons-material/Home";
-import SettingsIcon from "@mui/icons-material/Settings";
+import { Home, Settings } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
-const drawerWidth = 240;
+import { cn } from "@/lib/utils";
 
 const navItems = [
-  { label: "Home", to: "/", icon: <HomeIcon /> },
-  { label: "Settings", to: "/settings", icon: <SettingsIcon /> }
+  { label: "Home", to: "/", icon: Home },
+  { label: "Settings", to: "/settings", icon: Settings }
 ];
 
 const AppLayout = () => (
-  <Box sx={{ display: "flex", minHeight: "100vh" }}>
-    <AppBar
-      position="fixed"
-      sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}
-    >
-      <Toolbar>
-        <Typography variant="h6" component="div">
-          Cue
-        </Typography>
-      </Toolbar>
-    </AppBar>
-    <Drawer
-      variant="permanent"
-      sx={{
-        width: drawerWidth,
-        flexShrink: 0,
-        [`& .MuiDrawer-paper`]: {
-          width: drawerWidth,
-          boxSizing: "border-box"
-        }
-      }}
-    >
-      <Toolbar />
-      <List>
-        {navItems.map((item) => (
-          <ListItemButton
-            key={item.label}
-            component={NavLink}
-            to={item.to}
-            sx={{
-              mx: 1,
-              mb: 0.5,
-              borderRadius: 1,
-              "&.active": {
-                backgroundColor: "action.selected",
-                "& .MuiListItemIcon-root": {
-                  color: "primary.main"
+  <div className="min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen">
+      <aside className="w-60 border-r border-border bg-card">
+        <div className="flex h-16 items-center px-4 text-lg font-semibold">Cue</div>
+        <nav className="space-y-1 px-2 pb-4">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.label}
+                to={item.to}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+                    isActive
+                      ? "bg-secondary text-foreground"
+                      : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
+                  )
                 }
-              }
-            }}
-          >
-            <ListItemIcon>{item.icon}</ListItemIcon>
-            <ListItemText primary={item.label} />
-          </ListItemButton>
-        ))}
-      </List>
-    </Drawer>
-    <Box
-      component="main"
-      sx={{
-        flexGrow: 1,
-        px: 4,
-        py: 3,
-        mt: 8,
-        backgroundColor: "background.default"
-      }}
-    >
-      <Outlet />
-    </Box>
-  </Box>
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </NavLink>
+            );
+          })}
+        </nav>
+      </aside>
+      <main className="flex-1 px-6 py-6">
+        <Outlet />
+      </main>
+    </div>
+  </div>
 );
 
 export default AppLayout;

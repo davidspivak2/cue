@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import math
+import os
 import platform
 import re
 import shutil
@@ -349,6 +350,7 @@ class Worker(QtCore.QObject):
                 srt_path=srt_path,
                 duration_seconds=duration_seconds,
                 force_cpu=False,
+                safe_mode=False,
             )
         except TranscriptionError as exc:
             if self._cancelled.is_set():
@@ -379,12 +381,11 @@ class Worker(QtCore.QObject):
                         srt_path=srt_path,
                         duration_seconds=duration_seconds,
                         force_cpu=True,
+                        safe_mode=True,
                     )
                 except TranscriptionError as retry_exc:
-                    message = (
-                        "Couldn't create subtitles after a retry.\n"
-                        f"Return code: {retry_exc.return_code}"
-                    )
+                    self.signals.log.emit(str(retry_exc), True)
+                    message = "Couldn't create subtitles after a retry.\n" + str(retry_exc)
                     raise RuntimeError(message) from retry_exc
             else:
                 self.signals.log.emit(
@@ -652,34 +653,57 @@ class Worker(QtCore.QObject):
 
     def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
-        command = [
-            str(ffmpeg_path),
-            "-y",
-            "-hide_banner",
-            "-i",
-            str(self.video_path),
-            "-vn",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-c:a",
-            "pcm_s16le",
-        ]
-        if apply_filter:
-            command += [
-                "-af",
-                "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,loudnorm=I=-16:TP=-1.5:LRA=11",
+
+        def _build_command(use_filter: bool) -> list[str]:
+            command = [
+                str(ffmpeg_path),
+                "-y",
+                "-hide_banner",
+                "-nostdin",
+                "-i",
+                str(self.video_path),
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-c:a",
+                "pcm_s16le",
             ]
-        command += ["-progress", "pipe:1", "-nostats"]
-        command.append(str(audio_path))
-        self._last_audio_extract_command = command
-        self._run_ffmpeg_with_progress(
-            command,
-            duration_seconds,
-            ProgressStep.PREPARE_AUDIO,
-            "Extracting audio",
-        )
+            if use_filter:
+                command += [
+                    "-af",
+                    "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,loudnorm=I=-16:TP=-1.5:LRA=11",
+                ]
+            command += ["-progress", "pipe:1", "-nostats"]
+            command.append(str(audio_path))
+            return command
+
+        def _run_extract(use_filter: bool) -> None:
+            command = _build_command(use_filter)
+            self._last_audio_extract_command = command
+            self._run_ffmpeg_with_progress(
+                command,
+                duration_seconds,
+                ProgressStep.PREPARE_AUDIO,
+                "Extracting audio",
+                no_output_timeout=60.0,
+            )
+
+        try:
+            _run_extract(apply_filter)
+        except RuntimeError as exc:
+            if not apply_filter:
+                raise
+            self.signals.log.emit(
+                f"Audio filter step stalled or failed ({exc}); retrying without filters.",
+                True,
+            )
+            try:
+                audio_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            _run_extract(False)
 
     def _ensure_preview_frame(
         self,
@@ -1136,6 +1160,7 @@ class Worker(QtCore.QObject):
         *,
         progress_offset: float = 0.0,
         progress_scale: float = 1.0,
+        no_output_timeout: float = 60.0,
     ) -> None:
         if self._cancelled.is_set():
             raise CancelledError()
@@ -1156,6 +1181,13 @@ class Worker(QtCore.QObject):
         log_lock = threading.Lock()
         output_lock = threading.Lock()
         last_output_time = time.monotonic()
+        watchdog_triggered = False
+        watchdog_stop = threading.Event()
+
+        def _mark_output() -> None:
+            nonlocal last_output_time
+            with output_lock:
+                last_output_time = time.monotonic()
 
         def _read_stderr() -> None:
             assert process.stderr is not None
@@ -1165,11 +1197,32 @@ class Worker(QtCore.QObject):
                 if text:
                     with log_lock:
                         self.signals.log.emit(text, True)
+                        _mark_output()
                 if self._cancelled.is_set():
                     break
 
         stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
         stderr_thread.start()
+
+        def _watchdog() -> None:
+            nonlocal watchdog_triggered
+            while not watchdog_stop.is_set():
+                time.sleep(1.0)
+                if process.poll() is not None:
+                    break
+                with output_lock:
+                    elapsed = time.monotonic() - last_output_time
+                if elapsed > no_output_timeout:
+                    watchdog_triggered = True
+                    self.signals.log.emit(
+                        f"Video tool stalled for {elapsed:.1f}s; stopping ffmpeg.",
+                        True,
+                    )
+                    process.terminate()
+                    break
+
+        watchdog_thread = threading.Thread(target=_watchdog, daemon=True)
+        watchdog_thread.start()
 
         last_log_time = 0.0
         end_emitted = False
@@ -1181,6 +1234,7 @@ class Worker(QtCore.QObject):
                 process.terminate()
                 raise CancelledError()
             text = line.strip()
+            _mark_output()
             if text.startswith("out_time_ms=") and duration_seconds:
                 try:
                     out_time_ms = int(text.split("=", 1)[1])
@@ -1207,6 +1261,8 @@ class Worker(QtCore.QObject):
                 end_emitted = True
 
         return_code = process.wait()
+        watchdog_stop.set()
+        watchdog_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
         self._process = None
 
@@ -1226,6 +1282,8 @@ class Worker(QtCore.QObject):
         if return_code != 0:
             tail_text = "\n".join(stderr_tail)
             raise RuntimeError("Video processing failed. Details:\n" + tail_text)
+        if watchdog_triggered:
+            raise RuntimeError("Video tool stalled while processing audio.")
 
     def _run_ffmpeg_with_progress_streaming(
         self,
@@ -1379,6 +1437,8 @@ class Worker(QtCore.QObject):
         srt_path: Path,
         duration_seconds: Optional[float],
         force_cpu: bool,
+        *,
+        safe_mode: bool = False,
     ) -> None:
         try:
             if not self.transcription_settings:
@@ -1391,6 +1451,15 @@ class Worker(QtCore.QObject):
                     compute_type = "int16"
             prefer_gpu = device == "cuda" and not force_cpu
             force_cpu_flag = force_cpu or device == "cpu"
+            if safe_mode:
+                force_cpu_flag = True
+                device = "cpu"
+                compute_type = "int8"
+                prefer_gpu = False
+                self.signals.log.emit(
+                    "Transcription safe mode enabled (CPU, int8, no VAD, no rescue).",
+                    True,
+                )
             self.signals.started.emit("Creating subtitles")
             self.signals.log.emit("Starting subtitles worker...", True)
             self._punctuation_active = False
@@ -1411,6 +1480,7 @@ class Worker(QtCore.QObject):
             if runtime_mode == "source":
                 command = [
                     sys.executable,
+                    "-u",
                     "-m",
                     "app.transcribe_worker",
                 ]
@@ -1421,6 +1491,7 @@ class Worker(QtCore.QObject):
                 else:
                     command = [
                         sys.executable,
+                        "-u",
                         "--run-transcribe-worker",
                     ]
             command += [
@@ -1438,15 +1509,13 @@ class Worker(QtCore.QObject):
             command += ["--device", device, "--compute-type", compute_type]
             if duration_seconds:
                 command += ["--duration-seconds", f"{duration_seconds:.2f}"]
-            if self._last_audio_extract_command:
-                command += [
-                    "--ffmpeg-args-json",
-                    json.dumps(self._last_audio_extract_command),
-                ]
-            command += [
-                "--punctuation-rescue",
-                "on" if self.transcription_settings.punctuation_rescue_fallback_enabled else "off",
-            ]
+            punctuation_rescue_enabled = (
+                self.transcription_settings.punctuation_rescue_fallback_enabled
+            )
+            if safe_mode:
+                punctuation_rescue_enabled = False
+                command.append("--no-vad-filter")
+            command += ["--punctuation-rescue", "on" if punctuation_rescue_enabled else "off"]
             try:
                 self._control_dir = Path(
                     tempfile.mkdtemp(dir=self.output_dir, prefix="transcribe_control_")
@@ -1466,6 +1535,7 @@ class Worker(QtCore.QObject):
                 "punctuation_rescue_fallback_enabled": (
                     self.transcription_settings.punctuation_rescue_fallback_enabled
                 ),
+                "safe_mode": safe_mode,
             }
             self.signals.log.emit(
                 f"TRANSCRIBE_PARENT_CONFIG {json.dumps(parent_config, sort_keys=True)}",
@@ -1477,14 +1547,18 @@ class Worker(QtCore.QObject):
                 f"Subtitles command: {subprocess.list2cmdline(command)}",
                 True,
             )
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+            env["PYTHONIOENCODING"] = "utf-8"
             process = subprocess.Popen(
                 command,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                **get_subprocess_kwargs(),
+                env=env,
             )
             self._process = process
 
@@ -1536,7 +1610,7 @@ class Worker(QtCore.QObject):
             watchdog_triggered = False
             watchdog_elapsed = 0.0
             watchdog_stop = threading.Event()
-            no_output_timeout_ref = {"value": 60.0}
+            no_output_timeout_ref = {"value": 120.0 if safe_mode else 60.0}
             smooth_transcribe_started = False
             model_detail_rank = 0
             model_detail_id = TRANSCRIBE_MODEL_NAME
@@ -1626,6 +1700,13 @@ class Worker(QtCore.QObject):
                     device,
                     compute_type,
                 )
+                if duration_seconds:
+                    multiplier = 3.0 if safe_mode else 2.0
+                    estimated_total = duration_seconds * rtf_est
+                    no_output_timeout_ref["value"] = max(
+                        no_output_timeout_ref["value"],
+                        max(120.0, estimated_total * multiplier),
+                    )
                 estimator_stop = threading.Event()
                 self._transcribe_estimator_stop = estimator_stop
 
@@ -2061,11 +2142,22 @@ class Worker(QtCore.QObject):
             srt_exists = srt_candidate.exists()
             srt_size = srt_candidate.stat().st_size if srt_exists else 0
 
-            if done_seen and srt_exists and srt_size > 0:
+            if srt_exists and srt_size > 0:
+                if not done_seen:
+                    _emit_log(
+                        "Subtitles file created without DONE marker; continuing.",
+                        True,
+                    )
+                    if self._write_subtitles_words_total is None:
+                        self._write_subtitles_words_total = count_alignment_words_in_srt(
+                            srt_candidate,
+                            "he",
+                        )
+                    self._emit_write_subtitles_created_if_needed()
                 if return_code != 0:
                     _emit_log(
-                        f"Subtitles worker exited with code {return_code}, but DONE was received and "
-                        f"subtitles file exists; continuing.",
+                        f"Subtitles worker exited with code {return_code}, but subtitles file exists; "
+                        "continuing.",
                         True,
                     )
                 if not load_model_done:
@@ -2342,6 +2434,7 @@ class Worker(QtCore.QObject):
                 )
                 process = subprocess.Popen(
                     plan.command,
+                    stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,

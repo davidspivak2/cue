@@ -78,7 +78,7 @@ def build_alignment_plan(
             prefer_gpu=prefer_gpu,
         )
 
-    command = [python_executable or sys.executable, "-m", "app.align_worker"]
+    command = [python_executable or sys.executable, "-u", "-m", "app.align_worker"]
     command += [
         "--wav",
         str(audio_path),
