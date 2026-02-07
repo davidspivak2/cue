@@ -392,12 +392,19 @@ def _kill_process_tree(pid: int) -> None:
 
 async def _run_runner_job(job: JobState, request: JobRequest) -> None:
     job.status = "running"
-    job.started_at = datetime.now(timezone.utc)
+    if job.started_at is None:
+        job.started_at = datetime.now(timezone.utc)
     command = _build_runner_command(request)
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
 
+    spawn_start = datetime.now(timezone.utc)
+    logger.info(
+        "Job %s spawning runner after %.2fs",
+        job.job_id,
+        (spawn_start - job.created_at).total_seconds(),
+    )
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -422,9 +429,15 @@ async def _run_runner_job(job: JobState, request: JobRequest) -> None:
 
     job.process = process
     terminal_seen = False
+    first_event_seen = False
+    logger.info(
+        "Job %s runner spawned after %.2fs",
+        job.job_id,
+        (datetime.now(timezone.utc) - job.created_at).total_seconds(),
+    )
 
     async def _read_stdout() -> None:
-        nonlocal terminal_seen
+        nonlocal terminal_seen, first_event_seen
         assert process.stdout is not None
         while True:
             raw = await process.stdout.readline()
@@ -458,6 +471,13 @@ async def _run_runner_job(job: JobState, request: JobRequest) -> None:
                 )
                 continue
             event_type = str(event.pop("type", "message"))
+            if not first_event_seen:
+                first_event_seen = True
+                logger.info(
+                    "Job %s first runner event after %.2fs",
+                    job.job_id,
+                    (datetime.now(timezone.utc) - job.created_at).total_seconds(),
+                )
             _enqueue_event(job, _build_event(job.job_id, event_type, **event))
             if event_type in TERMINAL_STATUSES:
                 terminal_seen = True
@@ -530,6 +550,7 @@ def _job_or_404(job_id: str) -> JobState:
 
 @app.post("/jobs")
 async def create_job(payload: JobRequest) -> dict[str, str]:
+    request_received_at = datetime.now(timezone.utc)
     if payload.kind in {"pipeline", "create_subtitles", "create_video_with_subtitles"}:
         if not payload.input_path:
             raise HTTPException(status_code=422, detail="input_path_required")
@@ -545,7 +566,22 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
         created_at=datetime.now(timezone.utc),
         kind=payload.kind,
     )
+    logger.info("Job %s request received (kind=%s)", job_id, payload.kind)
     JOBS[job_id] = job
+    if payload.kind in {"create_subtitles", "create_video_with_subtitles"}:
+        heading = (
+            "Creating video with subtitles"
+            if payload.kind == "create_video_with_subtitles"
+            else "Creating subtitles"
+        )
+        job.status = "running"
+        job.started_at = datetime.now(timezone.utc)
+        _enqueue_event(job, _build_event(job_id, "started", heading=heading))
+        logger.info(
+            "Job %s started event queued after %.2fs",
+            job_id,
+            (job.started_at - request_received_at).total_seconds(),
+        )
     if payload.kind == "demo":
         job.task = asyncio.create_task(_run_demo_job(job))
     elif payload.kind == "pipeline":

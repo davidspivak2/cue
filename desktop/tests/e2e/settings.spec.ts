@@ -129,18 +129,18 @@ test("diagnostics master toggle gates categories", async ({ page }) => {
   await expect(category).toBeEnabled();
 });
 
-test("custom style changes persist preset custom", async ({ page }) => {
+test("transcription quality updates settings", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.getByTestId("settings-title")).toBeVisible();
 
-  await page.getByRole("button", { name: "Customize..." }).click();
   const requestPromise = page.waitForRequest(
     (request) => request.url().includes("/settings") && request.method() === "PUT"
   );
-  await page.getByLabel("Font size").fill("30");
+
+  await page.locator("#transcription-quality").click();
+  await page.getByRole("option", { name: "Fast (int8)" }).click();
 
   const request = await requestPromise;
   const payload = request.postDataJSON();
-  expect(payload.settings.subtitle_style.preset).toBe("Custom");
-  expect(payload.settings.subtitle_style.custom.font_size).toBe(30);
+  expect(payload.settings.transcription_quality).toBe("fast");
 });
