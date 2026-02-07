@@ -10,6 +10,13 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "security": {
+      "capabilities": ["main"],
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/**"]
+      }
+    },
     "windows": [
       {
         "title": "Cue",

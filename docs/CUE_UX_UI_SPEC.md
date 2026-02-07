@@ -9,10 +9,10 @@ For project status and upcoming tasks, see `ROADMAP.md`.
 
 ---
 
-## A) Visual design system (Linear-style, dark only)
+## A) Visual design system (Linear-style, light + dark)
 
 ### A1) Visual principles
-- **Theme:** Dark only (no light theme).
+- **Theme:** Light + Dark themes. Default follows system. User can toggle **Light / Dark / System**.
 - **Typography:** Inter (bundled with the app).
 - **Density:** Comfortable.
 - **Radius:** 10px default.
@@ -36,6 +36,18 @@ For project status and upcoming tasks, see `ROADMAP.md`.
 - `color.accent`: `#7A5CFF` **(single app accent; use consistently)**
 - `color.danger`: `#FF5D5D`
 - `color.success`: `#3DDC84`
+
+**Color tokens (light theme):**
+- `color.bg`: `#F7F8FA`
+- `color.surface`: `#FFFFFF`
+- `color.surface-elevated`: `#F1F3F7`
+- `color.border`: `#D7DCE5`
+- `color.text.primary`: `#0F1115`
+- `color.text.secondary`: `#3C4353`
+- `color.text.muted`: `#6B7383`
+- `color.accent`: `#7A5CFF` **(single app accent; use consistently)**
+- `color.danger`: `#E23B3B`
+- `color.success`: `#1FA65A`
 
 **Typography scale (Inter):**
 - `type.h1`: 22px / 28px, semibold
@@ -296,9 +308,9 @@ Create Subtitles must output:
 
 Settings is a **full page** that replaces the current view. It uses the new design system but retains the existing controls and behaviors, with updated layout consistency only.
 
-### J0) Legacy removal requirement (Subtitle Edit)
-- Subtitle Edit integration must be **removed entirely** from the application code (UI + settings + config + launcher code).
-- Remove the persisted config key **`subtitle_edit_path`** and any related logic.
+### J0) Legacy removal status (Subtitle Edit)
+- Subtitle Edit integration still exists in the legacy Qt UI, including the persisted config key **`subtitle_edit_path`**.
+- Removal is tracked in `docs/ROADMAP.md` (Milestone 9.4). The redesign should not add new dependencies on Subtitle Edit.
 
 ### J1) Performance
 - “Transcription quality” combo: Auto / Fast (int8) / Accurate (int16) / Ultra accurate (float32)
@@ -353,6 +365,7 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 - “Encode”, “Burn-in”, “Hardcode”
 
 ## Appendix: Archived — Project context (original)
+# Historical context only. Planning lives in `ROADMAP.md`.
 # Cue — Project Context (Read This First)
 
 **Last updated:** 2026-03-10
@@ -366,9 +379,9 @@ It explains:
 - what the app does
 - how the pipeline works (GUI → FFmpeg → faster-whisper → SRT → FFmpeg burn-in)
 - where files go (models, logs, outputs)
-- the GUI PR1–PR13 roadmap **and current status**
+- the historical GUI PR1–PR13 roadmap snapshot and current status
 - what has been worked on since GUI PR6 (progress + settings + diagnostics)
-- the current punctuation problem (what we measured, what we tried, what to do next)
+- the punctuation problem investigation (what we measured, what we tried, historical next steps)
 
 UX/UI target spec (design contract): **`/docs/CUE_UX_UI_SPEC.md`**.
 
@@ -392,7 +405,7 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 
 ## 0) One-page overview (for new maintainers)
 
-**What this app is:** a Windows desktop GUI that generates subtitles (any language) and (optionally) burns them into a new MP4. The legacy UI is built with **PySide6**; a new **Tauri + React** desktop UI lives in `desktop/` (PR1 UI shell; PR2 adds backend health/version + UI connection status; PR3 adds job protocol scaffolding for SSE/cancel). The Qt UI still exists for now. Supports RTL languages like Hebrew/Arabic.
+**What this app is:** a Windows desktop GUI that generates subtitles (any language) and (optionally) burns them into a new MP4. The legacy UI is built with **PySide6**; a new **Tauri + React** desktop UI lives in `desktop/` (historical PR notes omitted here; see `ROADMAP.md` for current status). The Qt UI still exists for now. Supports RTL languages like Hebrew/Arabic.
 
 **Core workflow:**
 1) Create or open a project from **Project Hub**
@@ -435,7 +448,7 @@ Typical flow:
 ## 2) How it works (technical overview)
 
 ### Main moving parts
-- **New desktop UI shell (Tauri + React)**: `desktop/` (PR1 UI shell; PR2 backend health/version + UI connection status; PR3 protocol scaffolding for SSE/cancel)
+- **New desktop UI shell (Tauri + React)**: `desktop/` (see `ROADMAP.md` for current status)
 - **Legacy GUI (PySide6)**: `app/main.py`
   - state machine / stacked pages (Project Hub + Workbench + Settings)
   - launches workers and updates UI
@@ -609,9 +622,13 @@ The app creates a **word-timing JSON** artifact next to each SRT during **Create
 ### Progress model details (numbers)
 Progress weights are defined in `app/progress.py` and the docs must reflect the code. If the weights ever change, update both the code and this section together.
 
-Current weights:
+Current weights (relative; total can exceed 100%):
 - `PREPARE_AUDIO`: **15%**
-- `TRANSCRIBE`: **60%**
+- `TRANSCRIBE`: **55%**
+- `FIX_PUNCTUATION`: **7%**
+- `FIX_GAPS`: **8%**
+- `ALIGN_WORDS`: **12%**
+- `PREPARING_PREVIEW`: **3%**
 - `EXPORT`: **25%**
 
 The UI aggregates progress without regression (percent should not go backwards). Retry-style operations should **not** reset or jump backward; they should continue forward from the current aggregate progress.
@@ -824,7 +841,7 @@ Benchmarks must use the **exact** `<video_stem>_audio_for_whisper.wav` produced 
 
 ---
 
-## 10) Roadmap (GUI PR1–PR13) and current status
+## 10) Historical roadmap (GUI PR1–PR13) and current status
 
 This repo started with a 13‑PR UX/architecture overhaul plan. The exact PR boundaries have shifted a bit (some items were combined or rescaled), but the sequence is still a good mental model.
 

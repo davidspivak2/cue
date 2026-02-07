@@ -57,10 +57,10 @@ Health check URL: http://127.0.0.1:8765/health
 Backend dev logs land in `C:\Cue_extra\backend_dev.log`.
 
 ## Current backend wiring (implemented)
-- **Settings** shows backend **Status: Connected** and the backend **Version** after a successful health check.
-- The UI can start **Pipeline jobs** (`POST /jobs`) using an input `.mp4` path + output directory.
-- Job progress/events stream over SSE (`GET /jobs/{job_id}/events`) into the UI and update progress.
-- **Cancel** works for both demo and pipeline jobs.
+- Backend health endpoint is available (used by dev scripts), and Settings reads/writes `/settings`.
+- Backend endpoints for pipeline jobs and SSE are implemented (`POST /jobs`, `GET /jobs/{job_id}/events`).
+- The Home screen UI is still a placeholder; the Job Runner/Monitor UI is tracked in `docs/ROADMAP.md` (Desktop UI Migration D3).
+- Cancel is supported by the backend (`POST /jobs/{job_id}/cancel`) and will be surfaced in the Job Runner UI.
 
 ## Full dev workflow (backend + UI)
 
@@ -83,7 +83,7 @@ npm run tauri build
 After `npm run tauri build`, Windows artifacts are emitted under:
 
 ```
-workspace\cue\desktop\src-tauri\target\release\bundle\
+desktop\src-tauri\target\release\bundle\
 ```
 
 Look for `.msi` and `.exe` (NSIS) installers inside the `bundle` subfolders.

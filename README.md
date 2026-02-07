@@ -1,6 +1,6 @@
 # Cue
 
-Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI lives in `desktop/` and is wired to backend health/version plus SSE job streaming. Supports RTL languages like Hebrew/Arabic.
+Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI lives in `desktop/` and is mid-migration to the backend server (health/jobs endpoints exist; UI Job Runner pending). Supports RTL languages like Hebrew/Arabic.
 
 ## Desktop app (Tauri)
 This repo includes a Tauri + React desktop app under `desktop/` for the new UI. For desktop-specific setup and commands, see: [`desktop/README.md`](desktop/README.md).
@@ -55,9 +55,9 @@ curl -X POST http://127.0.0.1:8765/jobs/%JOBID%/cancel
 ```
 
 ## Docs
-- ROADMAP.md is the only task list and single source of truth for product/pipeline “what to do next.”
-- TAURI_REACT_OVERHAUL_PLAN.md is the single source of truth for Tauri migration tracking and PR status.
+- ROADMAP.md is the only task list and single source of truth for planned work (product, pipeline, and desktop UI).
 - CUE_UX_UI_SPEC.md is the design contract for the redesign.
+- TAURI_REACT_OVERHAUL_PLAN.md is a reference doc for desktop UI architecture/contract (not a plan).
 - Historical docs were consolidated; archived contents now live in the ROADMAP appendices, the UX spec appendix, and the README appendices below.
 - README describes current behavior in main; future redesign behavior is defined in CUE_UX_UI_SPEC.md.
 
@@ -118,7 +118,7 @@ run-from-source, testing, and packaging steps.
 
 ### New Desktop UI (Tauri + React)
 - **Location:** `desktop/`
-- **Status:** Tauri + React desktop UI is wired to the backend: Settings shows health/version connectivity, pipeline jobs run via `POST /jobs`, and SSE progress streams into the UI with Cancel working. The legacy Qt UI still exists.
+- **Status:** Desktop UI is mid-migration to the backend server: Settings reads/writes `/settings`, and the Job Runner/Monitor UI is still a placeholder (see `docs/ROADMAP.md`). The legacy Qt UI still exists.
 - **Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
 - **Dev run:**
   ```bat

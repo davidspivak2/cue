@@ -33,11 +33,11 @@ winget install -e --id Gyan.FFmpeg
 For more context on the app and pipeline, see:
 * `docs/CUE_UX_UI_SPEC.md` (design contract; includes the archived project context appendix).
 * `README.md` (archived transcription pipeline appendix + consolidated docs pointers).
-* `docs/ROADMAP.md` (single source of truth for product/pipeline tasks).
-* `docs/TAURI_REACT_OVERHAUL_PLAN.md` (single source of truth for Tauri migration tracking).
+* `docs/ROADMAP.md` (only plan for product/pipeline/desktop UI work).
+* `docs/TAURI_REACT_OVERHAUL_PLAN.md` (desktop UI architecture/contract reference; not a plan).
 
 ## New Desktop UI (Tauri + React)
-Tauri + React is underway: PR1 UI shell exists; PR2 adds backend health/version + UI connection status; PR3 adds job protocol scaffolding (SSE/cancel) used for further wiring. The legacy Qt UI still exists for end-to-end runs.
+The new desktop UI lives in `desktop/` and uses the backend server contract (`/health`, `/jobs` SSE). The legacy Qt UI still exists for end-to-end runs. Planned migration steps live in `docs/ROADMAP.md`.
 
 **Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
 
@@ -87,8 +87,8 @@ If you add tests, prefer pytest:
 pytest
 ```
 
-Qt-based tests auto-create a `QApplication` (see `tests/conftest.py`). If PySide6
-is missing, those tests will be skipped via `pytest.importorskip`.
+Qt-based tests auto-create a `QApplication`. If PySide6 is missing, those tests
+will be skipped via `pytest.importorskip`.
 
 Preview playback includes a focused regression test for timestamp shifting (feature currently hidden in the GUI):
 ```bat
@@ -101,9 +101,17 @@ scripts\test_branch.cmd
 ```
 
 ## Dependency syncing (Windows helpers)
-`scripts\start_app.cmd` and `scripts\run_tests.cmd` automatically install dependencies when
-`requirements.txt` or `requirements-dev.txt` change. You can override this behavior with
-`start_app.cmd --install` or `start_app.cmd --no-install`.
+`scripts\run_tests.cmd` automatically installs dependencies when `requirements.txt`
+or `requirements-dev.txt` change.
+
+To launch the app after installing deps, use:
+```bat
+python -m app.main
+```
+or:
+```bat
+python run_app.py
+```
 
 ### CI
 There is no CI pipeline configured yet (no `.github/workflows`), so run relevant checks locally before opening a PR.
