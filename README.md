@@ -42,7 +42,7 @@ If you want to run the app from source or contribute, see the [Contributing guid
 
 1. **Open the app** and drop a video file into the window (or click "Choose video...").
 2. **Click "Create subtitles"** and wait for the AI to transcribe. The first run downloads the language model, which may take a few minutes.
-3. **Customize your subtitles** — pick a style, choose between static or word-highlight mode, and adjust colors.
+3. **Review and style your subtitles** — the app opens a “Review subtitles” screen where you can pick a style, choose between static or word-highlight mode, and adjust colors.
 4. **Click "Create video with subtitles"** to export a new MP4 with subtitles burned in.
 
 Your subtitle file (`.srt`) and the new video appear next to the original video by default. You can change the save location in Settings.

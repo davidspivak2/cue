@@ -104,7 +104,7 @@ app/                              # Python backend and pipeline
 
 desktop/                          # Tauri + React desktop app
   src/                            # React frontend (TypeScript)
-    pages/                        # Home, Settings screens
+    pages/                        # Home, Review, Settings screens
     components/                   # UI components (shadcn/Tailwind)
     jobsClient.ts                 # Backend job API client
     settingsClient.ts             # Backend settings API client
@@ -130,7 +130,8 @@ If you are new to the codebase, start here:
 2. **`app/workers.py`** — The heavy lifter. Handles audio extraction, transcription subprocess management, FFmpeg burn-in, and progress reporting.
 3. **`app/transcribe_worker.py`** — The transcription subprocess. Loads the Whisper model, runs transcription, applies punctuation rescue, and writes the SRT file.
 4. **`desktop/src/pages/Home.tsx`** — The main UI screen with the 5-state workflow (empty, video selected, working, subtitles ready, export done).
-5. **`desktop/src/pages/Settings.tsx`** — The settings screen (transcription quality, save policy, audio options, diagnostics).
+5. **`desktop/src/pages/Review.tsx`** — The review screen for styling, preview, and export before burn-in.
+6. **`desktop/src/pages/Settings.tsx`** — The settings screen (transcription quality, save policy, audio options, diagnostics).
 
 ---
 
@@ -178,6 +179,7 @@ The desktop UI communicates with the Python backend over HTTP:
 | `/jobs/{id}/events` | GET | SSE event stream for job progress |
 | `/jobs/{id}/cancel` | POST | Cancel a running job |
 | `/settings` | GET/PUT | Read or update app settings |
+| `/preview-style` | POST | Render a styled preview still and return a file path |
 | `/device` | GET | GPU/device info for the settings UI |
 
 Jobs emit typed SSE events: `started`, `checklist`, `progress`, `log`, `result`, `heartbeat`, `completed`, `cancelled`, `error`.

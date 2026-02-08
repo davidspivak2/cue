@@ -162,6 +162,22 @@ The preferred way to run tests locally:
 pytest
 ```
 
+### Desktop e2e tests (Playwright)
+
+These tests exercise the Tauri UI flow in a browser:
+
+1) Start the Vite dev server (keep it running in a separate terminal):
+```bash
+cd desktop
+npx vite --port 5173
+```
+
+2) Run the e2e tests:
+```bash
+cd desktop
+npm run test:e2e
+```
+
 On Windows, there is also a helper script:
 ```bat
 scripts\run_tests.cmd
