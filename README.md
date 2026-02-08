@@ -1,359 +1,74 @@
 # Cue
 
-Windows desktop app to create subtitles for videos (any language) with faster-whisper (large-v3) and optionally hard-burn them into a new MP4. The legacy GUI is built with PySide6 and packaged as a double-clickable `.exe` with bundled FFmpeg; a new Tauri + React desktop UI lives in `desktop/` and is mid-migration to the backend server (health/jobs endpoints exist; UI Job Runner pending). Supports RTL languages like Hebrew/Arabic.
+Create subtitles for any video, in any language, right on your computer.
 
-## Desktop app (Tauri)
-This repo includes a Tauri + React desktop app under `desktop/` for the new UI. For desktop-specific setup and commands, see: [`desktop/README.md`](desktop/README.md).
+Cue is a desktop app that uses AI speech recognition to generate subtitles and burn them directly into your video. Everything runs locally on your machine — no uploads, no cloud, no subscriptions.
 
-## Local development (quick start)
-Use Windows Command Prompt (cmd) from the repo root. The preferred one-command entrypoint is:
-```bat
-C:\Cue_repo\scripts\run_desktop_all.cmd
-```
+## Screenshots
 
-What this does:
-- Ensures backend Python deps are installed (FastAPI/Uvicorn/Pydantic).
-- Ensures desktop npm deps are installed (`node_modules`).
-- Starts the backend in a new window.
-- Waits for `http://127.0.0.1:<port>/health` to return OK.
-- Launches the Tauri desktop dev app.
-
-Logs and port info:
-- Backend dev log: `C:\Cue_extra\backend_dev.log`
-- Backend port file: `C:\Cue_extra\backend_port.txt`
-- The script waits on `/health` before launching the desktop app.
-
-For desktop-specific setup and commands, see: [`desktop/README.md`](desktop/README.md).
-
-### Backend API smoke test (cmd)
-Use this to verify `POST /jobs` + SSE streaming without the UI.
-
-1) Create a job and save the response:
-```bat
-if not exist "C:\Cue_extra" mkdir "C:\Cue_extra"
-curl -s -X POST http://127.0.0.1:8765/jobs ^
-  -H "Content-Type: application/json" ^
-  -d "{\"kind\":\"pipeline\",\"input_path\":\"C:\\path\\to\\video.mp4\",\"output_dir\":\"C:\\Cue_output\",\"options\":{}}" ^
-  > C:\Cue_extra\create_job_response.json
-```
-
-2) Extract `JOBID` (robust method; avoids the broken PowerShell/for-loop approach):
-```bat
-python -c "import json; r=json.load(open(r'C:\\Cue_extra\\create_job_response.json','r',encoding='utf-8')); print(r.get('job_id') or r.get('id') or '')" > C:\Cue_extra\jobid.txt
-set /p JOBID=<C:\Cue_extra\jobid.txt
-echo %JOBID%
-```
-
-3) Stream SSE events:
-```bat
-curl -N http://127.0.0.1:8765/jobs/%JOBID%/events
-```
-
-4) (Optional) Cancel the job:
-```bat
-curl -X POST http://127.0.0.1:8765/jobs/%JOBID%/cancel
-```
-
-## Docs
-- ROADMAP.md is the only task list and single source of truth for planned work (product, pipeline, and desktop UI).
-- CUE_UX_UI_SPEC.md is the design contract for the redesign.
-- TAURI_REACT_OVERHAUL_PLAN.md is a reference doc for desktop UI architecture/contract (not a plan).
-- Historical docs were consolidated; archived contents now live in the ROADMAP appendices, the UX spec appendix, and the README appendices below.
-- README describes current behavior in main; future redesign behavior is defined in CUE_UX_UI_SPEC.md.
+<!-- TODO: Add 2-3 screenshots or a GIF of the app once the UI is stable. -->
 
 ## Features
-- Drag & drop or browse a single video (`.mp4`, `.mkv`, `.mov`, `.m4v`).
-- Extracts mono 16k WAV (`<video_stem>_audio_for_whisper.wav`).
-- Generates UTF-8 SRT subtitles (`<video_stem>.srt`).
-- Hard-burns subtitles into `<video_stem>_subtitled.mp4` with subtitle style presets, subtitle modes, and customization.
-- Subtitles-ready preview card with a subtitle still frame (click to expand).
-- Subtitle mode selector (Word highlight vs Static) and highlight color picker (Word highlight is the default).
-- Highlight color changes refresh the preview still immediately.
-- Export uses the graphics overlay renderer only.
-- Graphics-based preview rendering keeps subtitle styling aligned with export results.
-- Word highlighting now applies correctly on wrapped subtitle lines in the graphics overlay preview/export path.
-- Graphics overlay export pipeline streams RGBA frames to FFmpeg.
-- Uses GPU (CUDA) when available, auto-falls back to CPU with clear logs.
-- Non-blocking UI with Cancel support; runtime logs are written to `%LOCALAPPDATA%\Cue\logs\`.
-- Checklist above the progress bar shows in-progress/completed statuses during subtitle creation and export.
-- Optional diagnostics bundle: zip logs + outputs automatically on exit.
-- Transcription includes VAD gap rescue to recover missed speech in large silent gaps.
-- Export is available immediately after subtitle creation in the Subtitles Ready view.
 
-## Project structure
-```
-app/
-  main.py                 # Application entry point (Qt UI + orchestration)
-  align_utils.py          # Word-alignment plan + helpers
-  align_worker.py         # WhisperX alignment worker (word timings)
-  transcribe_worker.py    # Background transcription worker logic
-  srt_splitter.py         # Subtitle chunking/splitting helpers
-  progress.py             # Progress tracking and reporting utilities
-  workers.py              # Worker queue/thread management
-  ffmpeg_utils.py         # FFmpeg invocation helpers
-  graphics_preview_renderer.py # Graphics-based preview rendering
-  srt_utils.py            # SRT parsing/formatting helpers
-  subtitle_style.py       # Subtitle style presets and style normalization helpers
-  graphics_overlay_export.py # Graphics overlay export planning + helpers
-  word_timing_schema.py   # Word timing JSON contract + validation
-  ui/                     # UI components, theme, and widgets
-bin/
-  ffmpeg.exe
-  ffprobe.exe
-docs/                     # Project documentation
-tools/                    # Developer tooling/utilities
-tests/                    # Test suite
-build_exe.bat
-download_ffmpeg.bat
-run_app.py                # Convenience script to launch the app
-run_worker.py             # Convenience script to launch the worker
-requirements.txt
-```
+- **Automatic subtitles** — Drop a video in, get an SRT subtitle file out. Powered by Whisper large-v3.
+- **Burn subtitles into video** — Export a new MP4 with subtitles baked in. No extra tools needed.
+- **Word-by-word highlighting** — Karaoke-style word highlighting that follows the speaker in real time.
+- **Style customization** — Choose from presets or customize fonts, colors, outlines, shadows, and backgrounds.
+- **Any language** — Automatic language detection. Supports all languages that Whisper supports.
+- **RTL support** — Full right-to-left rendering for Hebrew, Arabic, and other RTL languages.
+- **GPU acceleration** — Uses your GPU (CUDA) when available for faster transcription. Falls back to CPU automatically.
+- **Runs offline** — Everything runs locally. Your videos never leave your computer.
+- **Open source** — Free to use. Built on top of open-source tools.
 
-## Developer setup
-See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the canonical Windows setup, FFmpeg acquisition,
-run-from-source, testing, and packaging steps.
+## Download and install
 
-## Desktop UI options
+### Windows
 
-### New Desktop UI (Tauri + React)
-- **Location:** `desktop/`
-- **Status:** Desktop UI is mid-migration to the backend server: Settings reads/writes `/settings`, and the Job Runner/Monitor UI is still a placeholder (see `docs/ROADMAP.md`). The legacy Qt UI still exists.
-- **Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
-- **Dev run:**
-  ```bat
-  cd desktop
-  npm ci
-  npm run tauri dev
-  ```
-- **Build:**
-  ```bat
-  cd desktop
-  npm run tauri build
-  ```
+<!-- TODO: Add download link to the latest .msi or .exe installer once packaging is ready. -->
 
-### Desktop dev workflow (Tauri)
-Desktop instructions live in [`desktop/README.md`](desktop/README.md) (including backend dev setup, run steps, and the `/health` check on `127.0.0.1:8765`). Note: pip may warn that the Scripts directory is not on PATH; this is safe to ignore for this repo because imports work without PATH changes.
+Download the latest installer from the [Releases](../../releases) page and run it.
 
-### Legacy UI (PySide6)
-The current production UI lives under `app/` and runs via the Python entry point. See
-[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the run-from-source and packaging steps.
+### macOS
 
-## Portable install
-1. Copy the `dist\Cue\` folder to `C:\Program Files\Cue` (or any folder).
-2. Right-click `Cue.exe` → **Create shortcut** → move shortcut to Desktop.
-3. Double-click the shortcut to launch (no Command Prompt needed).
+<!-- TODO: Add download link to the latest .dmg once macOS packaging is ready. -->
 
-## Quick start (Windows EXE)
-1. Double-click `Cue.exe` (or create a shortcut and launch it).
-2. Drop a video in the window and click **Create subtitles**.
-3. Expect outputs next to your video: `<video_stem>_audio_for_whisper.wav`, `<video_stem>.srt`, and `<video_stem>_subtitled.mp4`.
-4. Logs and cache live under `%LOCALAPPDATA%\Cue\...`.
+macOS support is planned. Check the [Releases](../../releases) page for updates.
 
-For more detail, see the UX/UI design contract in [`docs/CUE_UX_UI_SPEC.md`](docs/CUE_UX_UI_SPEC.md).
+### Build from source
 
-## Notes on model downloads
-- The first transcription run downloads the `large-v3` model from Hugging Face.
-- This can take time and will be logged in the app.
-- Symlink warnings on Windows are logged but not fatal.
+If you want to run the app from source or contribute, see the [Contributing guide](docs/CONTRIBUTING.md).
 
-## Troubleshooting
-- **CUDA missing DLLs / GPU error**: The app automatically falls back to CPU and logs the CUDA error.
-- **FFmpeg not found**: Run `download_ffmpeg.bat` or install FFmpeg via winget.
-- **Audio copy fails during burn-in**: The app retries with AAC audio and logs the retry.
-- **Graphics overlay export debugging**: See the “Appendix: Archived — Graphics overlay debugging notes (original)” section below.
+## Quick start
 
-## Appendix: Archived — Transcription pipeline (original)
-# Transcription pipeline
+1. **Open the app** and drop a video file into the window (or click "Choose video...").
+2. **Click "Create subtitles"** and wait for the AI to transcribe. The first run downloads the language model, which may take a few minutes.
+3. **Customize your subtitles** — pick a style, choose between static or word-highlight mode, and adjust colors.
+4. **Click "Create video with subtitles"** to export a new MP4 with subtitles burned in.
 
-This document describes how the app extracts audio, launches the transcription worker,
-and writes SRT output. It also explains how to compare transcription configuration
-between machines.
+Your subtitle file (`.srt`) and the new video appear next to the original video by default. You can change the save location in Settings.
 
-## End-to-end flow
+## How it works
 
-1. **Video selection (GUI).**
-   The GUI selects a video file and prepares output paths for the WAV and SRT.
-2. **Audio extraction via FFmpeg.**
-   The GUI runs FFmpeg to extract a 16 kHz mono WAV. It logs the exact FFmpeg command
-   to the GUI log.
-3. **Whisper worker subprocess.**
-   The GUI launches `app.transcribe_worker` (or the packaged worker executable) with
-   the WAV/SRT paths and GPU/CPU flags.
-4. **Model load and transcription.**
-   The worker selects device/compute type based on `--prefer-gpu`/`--force-cpu` and
-   the CUDA probe, loads the `faster-whisper` model from the cache, and calls
-   `model.transcribe(...)` with the configured parameters.
-5. **SRT generation.**
-   The worker converts segments into SRT, writes the file, and reports completion.
-6. **Word-timing alignment (word highlight mode).**
-   When subtitle mode is set to word highlight, the GUI runs `app.align_worker`
-   to populate `<video_stem>.word_timings.json` using WhisperX alignment. The
-   alignment step re-runs when the timings file is missing, invalid, empty, or stale.
+Cue extracts the audio from your video, runs it through [Whisper](https://github.com/openai/whisper) (via [faster-whisper](https://github.com/SYSTRAN/faster-whisper)) to generate subtitles, and then uses [FFmpeg](https://ffmpeg.org/) to burn them into a new video. Word-level timing for the highlight mode comes from [WhisperX](https://github.com/m-bain/whisperX) alignment.
 
-## FFmpeg discovery notes
+For a deeper technical overview, see the [Architecture guide](docs/ARCHITECTURE.md).
 
-FFmpeg and FFprobe are resolved in this order:
-1. Packaged `bin\ffmpeg.exe`/`bin\ffprobe.exe` for PyInstaller builds.
-2. `bin\ffmpeg.exe`/`bin\ffprobe.exe` in the repo for source runs.
-3. System `PATH` fallback.
+## Contributing
 
-## Model cache paths
+Contributions are welcome! See the [Contributing guide](docs/CONTRIBUTING.md) for setup instructions and the [Architecture guide](docs/ARCHITECTURE.md) for a codebase overview.
 
-Model files live under the models directory returned by `app.paths.get_models_dir()`.
-The worker logs the `MODELS_DIR` and `MODEL_DIR` paths at startup. The configured
-`download_root` passed to `WhisperModel` points at this directory, so model cache
-contents should be comparable across machines.
+## License
 
-## Transcription parameters
+<!-- TODO: Choose a license before making the repo public. See docs/internal/ for license discussion notes. -->
 
-The worker logs a full `TRANSCRIBE_CONFIG_JSON` line and a readable
-`TRANSCRIBE_CONFIG_TEXT` block at startup. This configuration includes:
+License TBD. This software is not yet licensed for public distribution or use.
 
-- **Audio extraction:** the FFmpeg arguments used by the GUI (see the GUI log and
-  `TRANSCRIBE_PARENT_CONFIG` entries, plus any `--ffmpeg-args-json` provided to the worker).
-- **Device selection:** whether GPU was requested, the CUDA probe result, and the
-  chosen device/compute type.
-- **Model initialization:** the exact `WhisperModel(...)` arguments, including
-  `device`, `compute_type`, `cpu_threads`, `num_workers`, and `download_root`.
-- **Transcription kwargs:** the `model.transcribe(...)` keyword arguments such as
-  `beam_size`, `vad_filter`, `vad_parameters`, and `word_timestamps`.
-- **SRT formatting:** the worker-controlled formatting (timestamp style, index
-  start, trimming, and separator behavior).
+## Acknowledgments
 
-The worker also enumerates the defaults it relies on (for example, parameters like
-`best_of` or `temperature` that are left to `faster-whisper` defaults).
+Cue is built on top of these excellent open-source projects:
 
-## Comparing machines
-
-To compare machines without running a transcription or downloading models, run:
-
-```cmd
-python -m app.transcribe_worker --print-transcribe-config --prefer-gpu
-```
-
-### Optional alternatives (non-primary)
-
-```bash
-python -m app.transcribe_worker --print-transcribe-config --prefer-gpu
-```
-
-```powershell
-python -m app.transcribe_worker --print-transcribe-config --prefer-gpu
-```
-
-This prints:
-
-- `TRANSCRIBE_CONFIG_JSON ...` (single-line JSON for diffing)
-- `TRANSCRIBE_CONFIG_TEXT ...` (multi-line human-readable summary)
-
-The config dump resolves the effective compute type (even in `--print-transcribe-config`
-mode), so it is safe to use for comparing GPU/CPU fallbacks without running a full
-transcription.
-
-Compare the JSON payloads between machines to spot differences in device selection,
-model cache paths, or parameter settings.
-
-## Notes on segmentation and formatting
-
-SRT segmentation starts from `faster-whisper` output segments, but the worker
-**does** apply a splitter (`app/srt_splitter.py`) when segments are long. A segment
-is split into multiple cues if it exceeds any of these thresholds:
-- **Apply-if thresholds:** >12.0s duration, >160 characters, or >26 words.
-- **Max cue targets when splitting:** 8.0s, 90 characters, or 14 words per cue.
-
-When splitting, the worker prefers boundaries at punctuation, then large gaps
-(`gap_sec=0.4`) between words. If word timings cannot be aligned to the original
-segment text, the splitter falls back to time-based chunking and reconstructs text
-from words. If segmentation differs between machines, compare the config dump,
-device selection, model versions, and splitter thresholds.
-
-## VAD gap rescue
-
-When VAD filtering is enabled, the worker scans for large gaps between VAD segments.
-If a gap exceeds the rescue threshold, the worker extracts each gap audio slice and
-re-transcribes it with VAD disabled, then merges any usable segments back into the
-main transcript. Limits are enforced on the number of gaps and total rescued duration.
-
-## Punctuation rescue
-
-When **Improve punctuation automatically (recommended)** is enabled, the pipeline can run an optional punctuation rescue after the initial transcription. This happens in the Create Subtitles flow before/alongside gap rescue, and it only triggers when punctuation quality appears poor. The rescue may run multiple passes; the UI reflects this with “Improving punctuation...” on attempt 1 and “Improving punctuation... (attempt 2/3)” on later attempts. The UI also supports skipping punctuation rescue: clicking Skip shows “Skipping...”, the step only becomes Skipped after confirmation, and the pipeline continues forward without waiting on punctuation rescue to finish.
-
-## Subtitle preview generation (GUI)
-
-When subtitles are ready, the GUI prepares a preview moment:
-
-1. **SRT parsing + cue selection.** The GUI parses the generated SRT file, picks the
-   first non-empty cue, and anchors the preview moment at ~25% into that cue
-   (clamped to the cue bounds).
-2. **Preview still frame.** The GUI extracts a raw video frame via FFmpeg and renders
-   subtitles with the graphics preview renderer (draws text directly onto the image).
-   The graphics preview renderer computes highlight clip rects line-relative so wrapped
-   lines highlight correctly.
-   The preview cache key includes subtitle style + highlight settings and word-timing
-   mtimes so word-highlight previews update when alignment data changes. Highlight
-   color changes force an immediate preview refresh. Frames are cached under
-   `%LOCALAPPDATA%\Cue\cache\preview_frames`.
-   In Word highlight mode, the still preview highlights the **second word** when no
-   explicit word index is supplied (preview-only behavior; not time-accurate).
-
-## Appendix: Archived — Graphics overlay debugging notes (original)
-# Graphics Overlay Renderer Debugging Notes
-
-## What the graphics overlay renderer does
-The graphics overlay renderer draws subtitle text into RGBA frames (using the same styling rules as the preview renderer) and streams those frames to FFmpeg, which composites them over the source video using an overlay filter. This means export is purely image-based: the renderer paints the text into frames, and FFmpeg handles the video encode + audio mux.
-
-## Where to look when export or preview fails
-**Primary logs**
-- App runtime logs live in `%LOCALAPPDATA%\Cue\logs\`.
-- Each run produces a timestamped log file like `cue_YYYYMMDD_HHMMSS.log`.
-
-**Diagnostics JSON (optional)**
-- When diagnostics logging is enabled, JSON files named `diag_*.json` are written **next to the export outputs** (same folder as the selected save location).
-- If “Zip logs and outputs on exit” is enabled, the app writes `hebrew_subtitles_bundle_*.zip` next to the selected video; it includes logs, diagnostics JSON, and output artifacts.
-
-## How to enable diagnostics
-In the app, open Settings → Diagnostics and enable the following checkboxes (as needed):
-- “Enable diagnostics logging”
-- “Write diagnostics on successful completion”
-- “Zip logs and outputs on exit”
-- “App + system info”
-- “Video info”
-- “Audio (WAV) info”
-- “Transcription config”
-- “SRT stats”
-- “Commands + timings”
-
-## Most important debug signals
-1. **Renderer line at export start**
-   - Look for `Export renderer=graphics_overlay` in the log to confirm the pipeline.
-2. **FFmpeg command line + filter**
-   - The log captures the export filter string and the FFmpeg command used for burn-in.
-   - The diagnostics JSON includes `commands_timings.burn_in_command_used` and `commands_timings.burn_in_filter`.
-3. **FFmpeg stderr output**
-   - Export failures emit the FFmpeg stderr lines into the session log. This is usually the fastest signal for codec/muxing failures.
-
-## Quick triage checklist
-- Confirm the renderer line is present and set to graphics overlay.
-- Confirm the overlay filter is `overlay=0:0:format=auto` (graphics overlay pipeline).
-- If audio copy fails, verify the retry uses AAC (logged as `burn_in_audio_mode`).
-- Use the diagnostics JSON to cross-check paths (video, SRT, output) when mismatches are suspected.
-
-## Appendix: Archived — Documentation index (original)
-# Documentation index
-
-Welcome to the Cue documentation set. Use this page to find the right guide for your task.
-
-## Start here
-- Roadmap (upcoming work): [`docs/ROADMAP.md`](docs/ROADMAP.md).
-- Current behavior overview + archived references: [`README.md`](README.md).
-- Redesign contract: [`docs/CUE_UX_UI_SPEC.md`](docs/CUE_UX_UI_SPEC.md).
-- Developers: [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
-
-## Guides
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — single source of truth for tasks and milestones.
-- [`docs/CUE_UX_UI_SPEC.md`](docs/CUE_UX_UI_SPEC.md) — redesign contract and archived project context appendix.
-- [`README.md`](README.md) — current behavior summary and archived appendices:
-  - [Transcription pipeline appendix](README.md#appendix-archived--transcription-pipeline-original)
-  - [Graphics overlay debugging appendix](README.md#appendix-archived--graphics-overlay-debugging-notes-original)
-- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — setup, development workflow, tests, and packaging notes.
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — Fast Whisper transcription with CTranslate2
+- [WhisperX](https://github.com/m-bain/whisperX) — Word-level timestamp alignment
+- [FFmpeg](https://ffmpeg.org/) — Audio/video processing
+- [Tauri](https://tauri.app/) — Desktop app framework
+- [React](https://react.dev/) — UI framework
