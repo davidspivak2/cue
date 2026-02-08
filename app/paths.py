@@ -47,5 +47,11 @@ def get_preview_clips_dir() -> Path:
     return path
 
 
+def get_projects_dir() -> Path:
+    path = get_app_data_dir() / "projects"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_config_path() -> Path:
     return get_app_data_dir() / "config.json"

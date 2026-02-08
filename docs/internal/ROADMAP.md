@@ -43,7 +43,7 @@ Note: Tauri migration tracking lives in `docs/internal/TAURI_REACT_OVERHAUL_PLAN
      - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
    - UX spec reference: G) Export progress + success (in-Workbench)
 
-5. [NEXT] Redesign Milestone 1 — Project system backend (persistence + multi-project)
+5. [DONE] Redesign Milestone 1 — Project system backend (persistence + multi-project)
    - Deliverable: app can create/open multiple projects with persisted state across restarts.
    - Acceptance criteria: see Milestone 1 checklist below.
    - UX spec reference: C) Project model (new backend capability; document behavior)
@@ -319,9 +319,11 @@ Definition of done:
 ## Completed
 - A short bullet list only (do not paste old plans here; those go in the archived appendices below).
 - Desktop shell/backend wiring complete: `/health` + `POST /jobs` + SSE events are live; UI can run pipeline jobs and Cancel works.
+- Backend project persistence complete: `/projects` endpoints + on-disk project folders + job `project_id` linkage.
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.
+- 2026-02-08 — Milestone 1 backend completed (projects storage + `/projects` API + job linkage) ahead of Project Hub UI.
 
 ## Appendix: Archived plans (original content)
 
