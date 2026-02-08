@@ -36,6 +36,10 @@ Backend
 - `app/qt_worker_runner.py` exists and emits JSONL events.
 - `app/workers.py` includes ffmpeg watchdog + audio filter fallback and safer transcription subprocess handling.
 - Settings stored in `config.json` under the app data dir (same as Qt).
+- Project system backend:
+  - Projects stored under app data `projects/` with `index.json` and per-project folders (`project.json`, `subtitles.srt`, `word_timings.json`, `style.json`).
+  - New endpoints: `GET/POST /projects`, `GET/PUT /projects/{project_id}`, `POST /projects/{project_id}/relink`.
+  - Jobs accept optional `project_id`; runner `result` events update project artifacts and export path.
 
 Desktop
 - `desktop/src/main.tsx` uses shadcn/Tailwind ThemeProvider (no MUI).
@@ -249,6 +253,7 @@ Handoff outputs
 - Phase 5 - Remove MUI/Emotion and cleanup: Done
 - Phase 6 - Tests and verification: Done (tests not run locally)
 - Tauri dev build unblock (capabilities/main.json): Done
+- Project system backend (Milestone 1 backend): Done (API + tests)
 
 ---
 
@@ -269,6 +274,17 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+
+Date: 2026-02-08
+Agent: gpt-5.2-codex-xhigh
+Phase: Project system backend (Milestone 1 backend)
+Status: Done
+Summary:
+- Added backend project persistence (per-project folders under app data + `project.json` manifest + `index.json`).
+- Added `/projects` endpoints and `project_id` job linkage (runner `result` updates project artifacts + export path).
+- Tests run: `pytest tests/test_project_store.py tests/test_backend_projects_api.py tests/test_backend_job_project_update.py`
+- Known issues: Desktop UI is not wired to `/projects` yet (API-only for now).
+- Suggested next step: Wire desktop UI to create/open projects and build Project Hub (Milestone 2).
 
 Date: 2026-02-08
 Agent: gpt-5.2-codex-xhigh

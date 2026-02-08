@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app import project_store
 from app.config import apply_config_defaults
 from app.paths import get_config_path
 from app.transcription_device import gpu_available
@@ -68,6 +69,7 @@ class JobState:
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     kind: str = "demo"
+    project_id: Optional[str] = None
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     event_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     sse_client_connected: bool = False
@@ -89,6 +91,7 @@ class JobRequest(BaseModel):
     output_dir: Optional[str] = None
     srt_path: Optional[str] = None
     options: dict[str, Any] = Field(default_factory=dict)
+    project_id: Optional[str] = None
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -103,6 +106,20 @@ class PreviewStyleRequest(BaseModel):
     subtitle_mode: str = "word_highlight"
     highlight_color: str = "#FFD400"
     highlight_opacity: float = 1.0
+
+
+class ProjectCreateRequest(BaseModel):
+    video_path: str
+    style: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectUpdateRequest(BaseModel):
+    subtitles_srt_text: Optional[str] = None
+    style: Optional[dict[str, Any]] = None
+
+
+class ProjectRelinkRequest(BaseModel):
+    video_path: str
 
 
 VALID_SAVE_POLICIES = {"same_folder", "fixed_folder", "ask_every_time"}
@@ -400,6 +417,40 @@ def _kill_process_tree(pid: int) -> None:
             return
 
 
+def _maybe_update_project_from_runner_event(
+    request: JobRequest,
+    event_type: str,
+    event: dict[str, Any],
+) -> None:
+    project_id = request.project_id
+    if not project_id:
+        return
+    try:
+        if event_type == "started" and request.kind == "create_video_with_subtitles":
+            project_store.set_project_status(project_id, "exporting")
+            return
+        if event_type == "result":
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                return
+            if request.kind == "create_subtitles":
+                project_store.record_subtitles_result(
+                    project_id,
+                    srt_path=payload.get("srt_path"),
+                    word_timings_path=payload.get("word_timings_path"),
+                )
+            elif request.kind == "create_video_with_subtitles":
+                project_store.record_export_result(
+                    project_id,
+                    output_path=payload.get("output_path"),
+                )
+            return
+        if event_type in {"cancelled", "error"}:
+            project_store.refresh_project_status(project_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Project update failed for %s: %s", project_id, exc)
+
+
 async def _run_runner_job(job: JobState, request: JobRequest) -> None:
     job.status = "running"
     if job.started_at is None:
@@ -481,6 +532,7 @@ async def _run_runner_job(job: JobState, request: JobRequest) -> None:
                 )
                 continue
             event_type = str(event.pop("type", "message"))
+            _maybe_update_project_from_runner_event(request, event_type, event)
             if not first_event_seen:
                 first_event_seen = True
                 logger.info(
@@ -568,6 +620,8 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
             raise HTTPException(status_code=422, detail="output_dir_required")
     if payload.kind == "create_video_with_subtitles" and not payload.srt_path:
         raise HTTPException(status_code=422, detail="srt_path_required")
+    if payload.project_id:
+        project_store.get_project(payload.project_id)
 
     job_id = str(uuid.uuid4())
     job = JobState(
@@ -575,6 +629,7 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
         status="queued",
         created_at=datetime.now(timezone.utc),
         kind=payload.kind,
+        project_id=payload.project_id,
     )
     logger.info("Job %s request received (kind=%s)", job_id, payload.kind)
     JOBS[job_id] = job
@@ -647,6 +702,42 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             pass
     return {"ok": True, "job_id": job_id, "status": "cancel_requested"}
+
+
+@app.get("/projects")
+def list_projects() -> list[dict[str, Any]]:
+    active_project_ids = {
+        job.project_id
+        for job in JOBS.values()
+        if getattr(job, "project_id", None) and job.status == "running"
+    }
+    active_ids = active_project_ids or None
+    summaries = project_store.list_projects(active_ids)
+    return [summary.model_dump() for summary in summaries]
+
+
+@app.post("/projects")
+def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
+    return project_store.create_project(payload.video_path, style=payload.style)
+
+
+@app.get("/projects/{project_id}")
+def get_project(project_id: str) -> dict[str, Any]:
+    return project_store.get_project(project_id)
+
+
+@app.put("/projects/{project_id}")
+def update_project(project_id: str, payload: ProjectUpdateRequest) -> dict[str, Any]:
+    return project_store.update_project(
+        project_id,
+        subtitles_srt_text=payload.subtitles_srt_text,
+        style=payload.style,
+    )
+
+
+@app.post("/projects/{project_id}/relink")
+def relink_project(project_id: str, payload: ProjectRelinkRequest) -> dict[str, Any]:
+    return project_store.relink_project(project_id, payload.video_path)
 
 
 @app.get("/settings")

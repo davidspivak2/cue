@@ -84,6 +84,7 @@ Transcription runs as a **separate subprocess** to keep the UI responsive, enabl
 ```
 app/                              # Python backend and pipeline
   backend_server.py               # FastAPI server (health, jobs, settings, device)
+  project_store.py                # Project persistence (project folders, index, manifest)
   qt_worker_runner.py             # Runs legacy Worker in a Qt-safe subprocess
   main.py                         # Legacy Qt UI entry point (PySide6)
   workers.py                      # Audio extraction, worker orchestration, burn-in
@@ -148,6 +149,7 @@ If you are new to the codebase, start here:
 | `logs/` | Runtime log files (timestamped) |
 | `cache/thumbs/` | Video thumbnail cache |
 | `cache/preview_frames/` | Subtitle preview frame cache |
+| `projects/` | Project folders + `index.json` + per-project `project.json` |
 
 ### Per-video outputs
 
@@ -178,11 +180,15 @@ The desktop UI communicates with the Python backend over HTTP:
 | `/jobs` | POST | Create a new job (create subtitles or export video) |
 | `/jobs/{id}/events` | GET | SSE event stream for job progress |
 | `/jobs/{id}/cancel` | POST | Cancel a running job |
+| `/projects` | GET/POST | List or create projects |
+| `/projects/{id}` | GET/PUT | Fetch or update a project |
+| `/projects/{id}/relink` | POST | Relink a missing source video |
 | `/settings` | GET/PUT | Read or update app settings |
 | `/preview-style` | POST | Render a styled preview still and return a file path |
 | `/device` | GET | GPU/device info for the settings UI |
 
 Jobs emit typed SSE events: `started`, `checklist`, `progress`, `log`, `result`, `heartbeat`, `completed`, `cancelled`, `error`.
+`POST /jobs` accepts an optional `project_id` to associate job results with a saved project.
 
 ---
 
