@@ -176,6 +176,8 @@ The Workbench is a **single unified** edit + style + preview + export surface fo
 - Styling capabilities remain conceptually the same, but controls are reorganized into **clean sections** with consistent spacing and hierarchy (Linear-style).
 - Preview reflects style changes **immediately**.
 
+Current implementation note (pre-Workbench): style controls live on the **Review subtitles** screen. After “Create subtitles” completes, the app navigates to `/review` for styling and export.
+
 ### E4) Subtitle editing requirements (explicit)
 Users can **edit subtitle text only**. Timestamps are visible but **not editable**.
 The redesign workflow is **in-app subtitle text editing only** (no external subtitle editor).
@@ -570,7 +572,7 @@ Settings are stored in `%LOCALAPPDATA%\Cue\config.json` and are loaded in `app/m
 | `subtitle_style.appearance` | (style model, internal) | Object with font, color, outline, shadow, background, and layout fields | Derived from preset/custom | Preview + export styling |
 | `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects word-highlight vs static rendering; export uses graphics overlay only |
 | `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (graphics overlay only) |
-| `subtitle_style.highlight_opacity` | “Highlight opacity” (slider in Subtitles Ready style pane) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
+| `subtitle_style.highlight_opacity` | “Highlight opacity” (slider in Review style pane, current; Workbench later) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”

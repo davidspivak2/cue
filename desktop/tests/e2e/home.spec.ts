@@ -298,7 +298,7 @@ test("home flow shows Qt-parity copy", async ({ page }) => {
   const exportSettingsRequest = page.waitForRequest(
     (request) => request.url().includes("/settings") && request.method() === "PUT"
   );
-  const exportButton = page.getByRole("button", { name: "Export video" });
+  const exportButton = page.getByRole("button", { name: "Create video with subtitles" });
   await expect(exportButton).toBeVisible();
   await exportButton.click();
 

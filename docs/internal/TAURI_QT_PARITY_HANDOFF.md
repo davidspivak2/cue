@@ -29,10 +29,10 @@ Every agent must update it before handing work to another agent.
 
 ## 2) Current repo snapshot (verify and update)
 
-As of 2026-02-06, in this repo:
+As of 2026-02-08, in this repo:
 
 Backend
-- `app/backend_server.py` supports `create_subtitles` and `create_video_with_subtitles`, plus `/settings` and `/device`.
+- `app/backend_server.py` supports `create_subtitles` and `create_video_with_subtitles`, plus `/settings`, `/preview-style`, and `/device`.
 - `app/qt_worker_runner.py` exists and emits JSONL events.
 - `app/workers.py` includes ffmpeg watchdog + audio filter fallback and safer transcription subprocess handling.
 - Settings stored in `config.json` under the app data dir (same as Qt).
@@ -41,6 +41,7 @@ Desktop
 - `desktop/src/main.tsx` uses shadcn/Tailwind ThemeProvider (no MUI).
 - `desktop/src/components/AppLayout.tsx` uses shadcn layout and lucide icons.
 - `desktop/src/pages/Home.tsx` implements the 5-state UI and Tauri file picker/drag-drop.
+- `desktop/src/pages/Review.tsx` provides the Review screen for style, preview, and export.
 - `desktop/src/pages/Settings.tsx` exists and matches Qt parity (no subtitle style section).
 - `desktop/src-tauri/tauri.conf.json` enables capabilities and asset protocol scope for previews.
 - `desktop/package.json` has no `@mui` or `@emotion` deps.
@@ -59,6 +60,7 @@ Primary files
 
 State machine (Home screen)
 `EMPTY -> VIDEO_SELECTED -> WORKING -> SUBTITLES_READY -> EXPORT_DONE`
+Note: after `create_subtitles` completes, the UI navigates to `/review` for styling and export. Home still owns the job state machine.
 
 ---
 
@@ -266,6 +268,18 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+
+Date: 2026-02-08
+Agent: gpt-5.2-codex-xhigh
+Phase: Docs sync for Review flow
+Status: Done
+Summary:
+- Updated repo snapshot to include `/preview-style` and the Review screen.
+- Noted the flow change: Home runs the job state machine but navigates to `/review` after subtitle creation.
+- Docs and UI were aligned to use “Create video with subtitles” as the export CTA.
+- Tests run: `npx vite build`, `npx playwright test` (with dev server).
+- Known issues: None observed.
+- Suggested next step: Continue roadmap items in `docs/internal/ROADMAP.md`.
 
 Date: 2026-02-06
 Agent: gpt-5.2-codex-xhigh

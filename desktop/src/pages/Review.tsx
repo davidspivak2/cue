@@ -377,7 +377,7 @@ const Review = () => {
               Saving...
             </>
           ) : (
-            "Export video"
+            "Create video with subtitles"
           )}
         </Button>
       </header>
