@@ -95,6 +95,16 @@ class SettingsUpdateRequest(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
+class PreviewStyleRequest(BaseModel):
+    video_path: str
+    srt_path: str
+    timestamp: Optional[float] = None
+    subtitle_style: dict[str, Any] = Field(default_factory=dict)
+    subtitle_mode: str = "word_highlight"
+    highlight_color: str = "#FFD400"
+    highlight_opacity: float = 1.0
+
+
 VALID_SAVE_POLICIES = {"same_folder", "fixed_folder", "ask_every_time"}
 VALID_TRANSCRIPTION_QUALITIES = {"auto", "fast", "accurate", "ultra"}
 DEFAULT_DIAGNOSTICS_CATEGORIES = {
@@ -649,6 +659,103 @@ def update_settings(payload: SettingsUpdateRequest) -> dict[str, Any]:
     current = _read_settings_file()
     merged = _merge_settings(current, payload.settings)
     return _write_settings_file(merged)
+
+
+@app.post("/preview-style")
+def preview_style(payload: PreviewStyleRequest) -> dict[str, Any]:
+    import hashlib as _hashlib
+
+    from .ffmpeg_utils import extract_raw_frame
+    from .graphics_preview_renderer import build_preview_cache_key, render_graphics_preview
+    from .paths import get_preview_frames_dir
+    from .srt_utils import parse_srt_file, select_cue_for_timestamp, select_preview_moment
+    from .subtitle_style import normalize_style_model, preset_defaults
+
+    video_path = Path(payload.video_path)
+    srt_path = Path(payload.srt_path)
+
+    if not video_path.exists():
+        raise HTTPException(status_code=422, detail="video_path not found")
+    if not srt_path.exists():
+        raise HTTPException(status_code=422, detail="srt_path not found")
+
+    cues = parse_srt_file(srt_path)
+    if not cues:
+        raise HTTPException(status_code=422, detail="srt_file_empty")
+
+    if payload.timestamp is not None:
+        timestamp = payload.timestamp
+        cue = select_cue_for_timestamp(cues, timestamp)
+        subtitle_text = cue.text if cue else cues[0].text
+    else:
+        moment = select_preview_moment(cues, None)
+        if moment is None:
+            raise HTTPException(status_code=422, detail="no_preview_moment")
+        timestamp = moment.timestamp_seconds
+        subtitle_text = moment.subtitle_text
+
+    fallback = preset_defaults(
+        "Default",
+        subtitle_mode=payload.subtitle_mode,
+        highlight_color=payload.highlight_color,
+    )
+    style = normalize_style_model(payload.subtitle_style, fallback)
+
+    try:
+        srt_mtime = int(srt_path.stat().st_mtime_ns)
+    except OSError:
+        srt_mtime = 0
+
+    preview_dir = get_preview_frames_dir()
+    cache_key = build_preview_cache_key(
+        video_path=str(video_path),
+        srt_mtime=srt_mtime,
+        word_timings_mtime=None,
+        timestamp_ms=int(timestamp * 1000),
+        preview_width=1280,
+        style=style,
+        subtitle_mode=payload.subtitle_mode,
+        highlight_color=payload.highlight_color,
+        highlight_opacity=payload.highlight_opacity,
+    )
+
+    output_path = preview_dir / f"{cache_key}.png"
+    if output_path.exists():
+        return {"preview_path": str(output_path)}
+
+    raw_key = _hashlib.sha1(
+        f"{video_path}|{int(timestamp * 1000)}|1280".encode()
+    ).hexdigest()
+    raw_frame_path = preview_dir / f"_raw_{raw_key}.png"
+
+    if not raw_frame_path.exists():
+        success = extract_raw_frame(video_path, timestamp, raw_frame_path, width=1280)
+        if not success:
+            raise HTTPException(status_code=500, detail="frame_extraction_failed")
+
+    try:
+        from PySide6 import QtGui as _QtGui
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"PySide6 not available: {exc}",
+        ) from exc
+
+    frame = _QtGui.QImage(str(raw_frame_path))
+    if frame.isNull():
+        raise HTTPException(status_code=500, detail="frame_load_failed")
+
+    result = render_graphics_preview(
+        frame,
+        subtitle_text=subtitle_text,
+        style=style,
+        subtitle_mode=payload.subtitle_mode,
+        highlight_color=payload.highlight_color,
+        highlight_opacity=payload.highlight_opacity,
+    )
+
+    result.image.save(str(output_path), "PNG")
+    return {"preview_path": str(output_path)}
 
 
 @app.get("/device")

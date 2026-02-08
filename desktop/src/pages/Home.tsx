@@ -4,6 +4,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import Checklist, { ChecklistItem } from "@/components/Checklist";
 import DropZone from "@/components/DropZone";
@@ -25,6 +26,13 @@ import {
 } from "@/jobsClient";
 import { fetchSettings, SettingsConfig } from "@/settingsClient";
 import { cn } from "@/lib/utils";
+
+type HomeLocationState = {
+  action?: "start_export";
+  videoPath?: string;
+  srtPath?: string;
+  outputDir?: string;
+} | null;
 
 type AppState =
   | "EMPTY"
@@ -86,6 +94,10 @@ const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem
   items.map((item) => ({ ...item, state: "pending" }));
 
 const Home = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const incomingState = location.state as HomeLocationState;
+
   const [state, setState] = React.useState<AppState>("EMPTY");
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -108,6 +120,10 @@ const Home = () => {
   const jobKindRef = React.useRef<JobKind | null>(null);
   const jobStartRef = React.useRef<number | null>(null);
   const previewUrlRef = React.useRef<string | null>(null);
+  const srtPathRef = React.useRef<string | null>(null);
+  const previewFramePathRef = React.useRef<string | null>(null);
+  const outputDirRef = React.useRef<string | null>(null);
+  const pendingExportRef = React.useRef(false);
 
   const isTauriEnv = isTauri();
 
@@ -128,6 +144,55 @@ const Home = () => {
       active = false;
     };
   }, []);
+
+  /* Handle navigation back from Review page with export action */
+  React.useEffect(() => {
+    if (
+      incomingState?.action === "start_export" &&
+      incomingState.videoPath &&
+      incomingState.srtPath &&
+      incomingState.outputDir
+    ) {
+      setVideoPath(incomingState.videoPath);
+      setSrtPath(incomingState.srtPath);
+      srtPathRef.current = incomingState.srtPath;
+      setOutputDir(incomingState.outputDir);
+      outputDirRef.current = incomingState.outputDir;
+      pendingExportRef.current = true;
+      /* Clear the location state so a refresh doesn't re-trigger */
+      window.history.replaceState({}, "");
+    }
+  }, [incomingState]);
+
+  /* Auto-start export when settings are ready and export is pending */
+  React.useEffect(() => {
+    if (!pendingExportRef.current || !settings) {
+      return;
+    }
+    const srt = srtPathRef.current;
+    const vPath = videoPath;
+    const dir = outputDirRef.current;
+    if (!srt || !vPath || !dir) {
+      return;
+    }
+    pendingExportRef.current = false;
+    setError(null);
+    resetJobState();
+    setChecklistItems(defaultChecklist(buildExportChecklist()));
+    jobKindRef.current = "create_video_with_subtitles";
+    createVideoWithSubtitlesJob(
+      {
+        inputPath: vPath,
+        outputDir: dir,
+        srtPath: srt,
+        options: buildJobOptions(settings)
+      },
+      {
+        onEvent: handleJobEvent,
+        onError: () => setError("Connection lost while streaming job updates.")
+      }
+    ).then((job) => setJobStream(job));
+  }, [settings, videoPath]);
 
   React.useEffect(() => {
     if (state !== "WORKING" || jobStartRef.current === null) {
@@ -381,12 +446,14 @@ const Home = () => {
       }
       if (typeof payload.srt_path === "string") {
         setSrtPath(payload.srt_path);
+        srtPathRef.current = payload.srt_path;
       }
       if (typeof payload.output_path === "string") {
         setOutputVideoPath(payload.output_path);
       }
       if (typeof payload.preview_frame_path === "string") {
         setPreviewFramePath(payload.preview_frame_path);
+        previewFramePathRef.current = payload.preview_frame_path;
       }
       if (jobKindRef.current === "create_subtitles") {
         updateChecklist(checklistStepIds.preparingPreview, "done");
@@ -399,6 +466,15 @@ const Home = () => {
       jobStartRef.current = null;
       if (jobKindRef.current === "create_video_with_subtitles") {
         setState("EXPORT_DONE");
+      } else if (srtPathRef.current && videoPath) {
+        navigate("/review", {
+          state: {
+            videoPath,
+            srtPath: srtPathRef.current,
+            outputDir: outputDirRef.current,
+            previewFramePath: previewFramePathRef.current
+          }
+        });
       } else {
         setState("SUBTITLES_READY");
       }
@@ -432,6 +508,7 @@ const Home = () => {
       return;
     }
     setOutputDir(resolvedOutputDir);
+    outputDirRef.current = resolvedOutputDir;
     setError(null);
     resetJobState();
     setChecklistItems(defaultChecklist(buildGenerateChecklist(settings)));

@@ -27,12 +27,43 @@ export type SubtitleStyleCustom = {
   box_padding: number;
 };
 
+export type SubtitleStyleAppearance = {
+  font_family: string;
+  font_size: number;
+  font_style: string;
+  text_color: string;
+  text_opacity: number;
+  letter_spacing: number;
+  outline_enabled: boolean;
+  outline_width: number;
+  outline_color: string;
+  shadow_enabled: boolean;
+  shadow_strength: number;
+  shadow_offset_x: number;
+  shadow_offset_y: number;
+  shadow_color: string;
+  shadow_opacity: number;
+  background_mode: string;
+  line_bg_color: string;
+  line_bg_opacity: number;
+  line_bg_padding: number;
+  line_bg_radius: number;
+  word_bg_color: string;
+  word_bg_opacity: number;
+  word_bg_padding: number;
+  word_bg_radius: number;
+  vertical_anchor: string;
+  vertical_offset: number;
+  subtitle_mode: string;
+  highlight_color: string;
+};
+
 export type SubtitleStyle = {
   preset: string;
   highlight_color: string;
   highlight_opacity?: number;
   custom?: Partial<SubtitleStyleCustom>;
-  appearance?: Record<string, unknown>;
+  appearance?: SubtitleStyleAppearance;
 };
 
 export type SettingsConfig = {
@@ -51,9 +82,24 @@ export type DeviceInfo = {
   gpu_available: boolean;
 };
 
+export type PreviewStyleRequest = {
+  video_path: string;
+  srt_path: string;
+  timestamp?: number;
+  subtitle_style: Partial<SubtitleStyleAppearance>;
+  subtitle_mode: string;
+  highlight_color: string;
+  highlight_opacity: number;
+};
+
+export type PreviewStyleResponse = {
+  preview_path: string;
+};
+
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const SETTINGS_URL = `${BACKEND_BASE_URL}/settings`;
 const DEVICE_URL = `${BACKEND_BASE_URL}/device`;
+const PREVIEW_STYLE_URL = `${BACKEND_BASE_URL}/preview-style`;
 
 const ensureOk = async (response: Response) => {
   if (response.ok) {
@@ -85,4 +131,16 @@ export const fetchDeviceInfo = async (): Promise<DeviceInfo> => {
   const response = await fetch(DEVICE_URL);
   await ensureOk(response);
   return (await response.json()) as DeviceInfo;
+};
+
+export const previewStyle = async (
+  request: PreviewStyleRequest
+): Promise<PreviewStyleResponse> => {
+  const response = await fetch(PREVIEW_STYLE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  await ensureOk(response);
+  return (await response.json()) as PreviewStyleResponse;
 };
