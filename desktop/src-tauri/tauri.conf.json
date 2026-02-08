@@ -11,21 +11,7 @@
   },
   "app": {
     "security": {
-      "capabilities": [
-        {
-          "identifier": "main",
-          "description": "Main window capability",
-          "windows": ["main"],
-          "permissions": [
-            "core:default",
-            "core:event:default",
-            "core:event:allow-listen",
-            "dialog:default",
-            "dialog:allow-open",
-            "opener:allow-open-path"
-          ]
-        }
-      ],
+      "capabilities": ["main"],
       "assetProtocol": {
         "enable": true,
         "scope": ["$HOME/**"]
@@ -33,6 +19,7 @@
     },
     "windows": [
       {
+        "label": "main",
         "title": "Cue",
         "width": 1100,
         "height": 700

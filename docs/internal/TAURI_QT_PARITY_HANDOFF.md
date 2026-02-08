@@ -248,6 +248,7 @@ Handoff outputs
 - Phase 4 - Settings migration off MUI: Done (MUI removed from layout/settings/main)
 - Phase 5 - Remove MUI/Emotion and cleanup: Done
 - Phase 6 - Tests and verification: Done (tests not run locally)
+- Tauri dev build unblock (capabilities/main.json): Done
 
 ---
 
@@ -268,6 +269,20 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+
+Date: 2026-02-08
+Agent: gpt-5.2-codex-xhigh
+Phase: Tauri dev build unblock (capabilities)
+Status: Done
+Summary:
+- Fixed Tauri `generate_context!()` panic: `capability ... identifier main not found`.
+- Root cause: `desktop/src-tauri/capabilities/` existed but had no `main.json`.
+- Fix:
+  - Added `desktop/src-tauri/capabilities/main.json`
+  - Updated `desktop/src-tauri/tauri.conf.json` to use `"capabilities": ["main"]` and set window `"label": "main"`.
+- Tests run: `cargo build --no-default-features`, `scripts/run_desktop_dev.cmd`.
+- Known issues: None observed.
+- Suggested next step: `docs/internal/ROADMAP.md` → PR12 (Error UX + details drawer + Copy diagnostics).
 
 Date: 2026-02-08
 Agent: gpt-5.2-codex-xhigh
