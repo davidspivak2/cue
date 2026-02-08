@@ -1,136 +1,219 @@
 # Contributing
 
-Thanks for helping improve Cue! This guide focuses on Windows development, which is the primary target for the app and build pipeline.
+Thanks for helping improve Cue! This guide covers everything you need to get the app running locally and start contributing.
 
-## Local setup (Windows 11 + Python 3.11)
-1. Create and activate a venv:
-   ```bat
-   python -m venv .venv
-   .venv\Scripts\activate
-   ```
-2. Install dependencies:
-   ```bat
-   python -m pip install -r requirements.txt
-   ```
-   Optional dev/test deps:
-   ```bat
-   python -m pip install -r requirements-dev.txt
-   ```
+For a high-level overview of how the codebase is organized, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-### FFmpeg acquisition
-The app expects `bin\ffmpeg.exe` and `bin\ffprobe.exe` or an FFmpeg installation on PATH.
+---
 
-Option 1 (recommended): run the bundled script:
+## First-time contributor quick start
+
+1. Clone the repo and install Python + Node.js (see platform-specific setup below).
+2. Run the one-command dev launcher:
+   ```bat
+   scripts\run_desktop_all.cmd
+   ```
+   This installs dependencies, starts the backend, and opens the desktop app.
+3. Make your changes on a feature branch, test locally, and open a PR.
+
+That's it for the basics. The rest of this guide covers setup details for each platform.
+
+---
+
+## Windows setup (primary platform)
+
+### Prerequisites
+
+- **Python 3.11+**
+- **Node.js** (LTS)
+- **Rust toolchain** (stable) with `cargo`
+- **Visual Studio C++ build tools** (for native compilation)
+- **WebView2 Runtime** (usually already installed on Windows 10/11)
+
+### Python environment
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
+```
+
+Optional dev/test dependencies:
+```bat
+python -m pip install -r requirements-dev.txt
+```
+
+### FFmpeg
+
+The app needs FFmpeg and FFprobe. Either:
+
+**Option 1** (recommended) — run the bundled download script:
 ```bat
 download_ffmpeg.bat
 ```
 
-Option 2: install with winget:
+**Option 2** — install via winget:
 ```bat
 winget install -e --id Gyan.FFmpeg
 ```
 
-For more context on the app and pipeline, see:
-* `docs/CUE_UX_UI_SPEC.md` (design contract; includes the archived project context appendix).
-* `README.md` (archived transcription pipeline appendix + consolidated docs pointers).
-* `docs/ROADMAP.md` (only plan for product/pipeline/desktop UI work).
-* `docs/TAURI_REACT_OVERHAUL_PLAN.md` (desktop UI architecture/contract reference; not a plan).
+The app looks for `bin\ffmpeg.exe` / `bin\ffprobe.exe` first, then falls back to the system PATH.
 
-## New Desktop UI (Tauri + React)
-The new desktop UI lives in `desktop/` and uses the backend server contract (`/health`, `/jobs` SSE). The legacy Qt UI still exists for end-to-end runs. Planned migration steps live in `docs/ROADMAP.md`.
+### Running the app (Windows)
 
-**Prereqs:** Node.js, Rust toolchain, Visual Studio C++ build tools, WebView2.
-
-**Dev run:**
+The preferred one-command entrypoint:
 ```bat
-scripts\install_backend_dev_deps.cmd
-scripts\run_backend_dev.cmd
+scripts\run_desktop_all.cmd
+```
+
+This handles everything: installs backend and frontend dependencies, starts the Python backend, waits for it to be healthy, then launches the Tauri desktop app.
+
+---
+
+## macOS setup
+
+### Prerequisites
+
+- **Python 3.11+** (via Homebrew: `brew install python@3.11`)
+- **Node.js** (LTS, via Homebrew: `brew install node`)
+- **Rust toolchain** (via rustup: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- **Xcode Command Line Tools** (`xcode-select --install`)
+- **FFmpeg** (`brew install ffmpeg`)
+
+### Python environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Optional dev/test dependencies:
+```bash
+pip install -r requirements-dev.txt
+```
+
+### Running the app (macOS)
+
+Start the backend:
+```bash
+source .venv/bin/activate
+python -m app.backend_server
+```
+
+In a second terminal, start the desktop app:
+```bash
 cd desktop
 npm ci
 npm run tauri dev
 ```
 
-**Build:**
-```bat
+> **Note:** The `scripts/*.cmd` files are Windows-only. On macOS, run the backend and desktop dev server separately as shown above.
+
+---
+
+## Desktop app (Tauri + React)
+
+The desktop UI lives in `desktop/` and communicates with the Python backend over HTTP and SSE.
+
+For desktop-specific setup details, see [`desktop/README.md`](../desktop/README.md).
+
+**Install frontend dependencies:**
+```bash
 cd desktop
+npm ci
+```
+
+**Run in dev mode:**
+```bash
+npm run tauri dev
+```
+
+**Build installers:**
+```bash
 npm run tauri build
 ```
 
-## Legacy UI (PySide6) — Run from source (developer testing)
+---
+
+## Legacy Qt UI (PySide6) — reference only
+
+The legacy Qt UI under `app/main.py` is the original production interface. It is kept as a reference while the Tauri app reaches full feature parity. **Do not add new features to the Qt UI.** It will be removed once the Tauri app is fully functional.
+
+To run it (Windows only, for reference):
 ```bat
 .venv\Scripts\activate
 python -m app.main
 ```
-The app will use `bin\ffmpeg.exe`/`bin\ffprobe.exe` if present, otherwise it will fall back to
-FFmpeg installed on PATH.
 
+---
 
-## Recommended dev workflow
-* **Branching:** create feature branches from `main`, e.g. `feature/short-description`.
-* **Commits:** there are no strict commit conventions enforced; prefer clear, imperative messages (e.g., `Add settings validation`).
-* **Pull requests:** describe the change, include steps to test locally, and call out any UX changes.
+## Development workflow
 
-## Running checks/tests
-There is minimal test coverage currently. The preferred way to run tests locally is:
+- **Branching:** Create feature branches from `main`, e.g. `feature/short-description`.
+- **Commits:** Prefer clear, imperative messages (e.g., "Add settings validation").
+- **Pull requests:** Describe the change, include steps to test locally, and call out any UX changes.
+
+## Running tests
+
+The preferred way to run tests locally:
+
+```bash
+pytest
+```
+
+On Windows, there is also a helper script:
 ```bat
 scripts\run_tests.cmd
 ```
 
-Notes on `scripts\run_tests.cmd`:
-* Prompts for the branch to test and refuses dirty working trees.
-* Runs from a temporary copy so branch switches don't change the script mid-run.
-* Creates/uses `.venv`, upgrades pip, and installs `requirements.txt` (+ `requirements-dev.txt` if present).
-* Set `RUN_TESTS_NO_PAUSE=1` to skip the final pause in non-interactive runs.
-
-If you add tests, prefer pytest:
-```bat
-pytest
-```
-
-Qt-based tests auto-create a `QApplication`. If PySide6 is missing, those tests
-will be skipped via `pytest.importorskip`.
-
-Preview playback includes a focused regression test for timestamp shifting (feature currently hidden in the GUI):
-```bat
-pytest tests/test_preview_playback_shift.py
-```
-
-Convenience script for branch testing + launch:
-```bat
-scripts\test_branch.cmd
-```
-
-## Dependency syncing (Windows helpers)
-`scripts\run_tests.cmd` automatically installs dependencies when `requirements.txt`
-or `requirements-dev.txt` change.
-
-To launch the app after installing deps, use:
-```bat
-python -m app.main
-```
-or:
-```bat
-python run_app.py
-```
+Notes:
+- Qt-based tests auto-create a `QApplication`. If PySide6 is not installed, those tests are skipped automatically.
+- Set `RUN_TESTS_NO_PAUSE=1` to skip the final pause in non-interactive runs on Windows.
 
 ### CI
-There is no CI pipeline configured yet (no `.github/workflows`), so run relevant checks locally before opening a PR.
 
-## Packaging / release (Windows)
-To build the distributable executable, use:
+There is no CI pipeline configured yet. Run tests locally before opening a PR.
+
+---
+
+## Packaging / release
+
+### Windows (Tauri installer)
+
+```bash
+cd desktop
+npm run tauri build
+```
+
+Outputs `.msi` and `.exe` installers under `desktop/src-tauri/target/release/bundle/`.
+
+### Windows (Legacy PyInstaller — reference only)
+
 ```bat
 .venv\Scripts\activate
 build_exe.bat
 ```
 
-Expected output:
-```
-dist\Cue\Cue.exe
+Produces `dist\Cue\Cue.exe` (portable folder).
+
+### macOS
+
+```bash
+cd desktop
+npm run tauri build
 ```
 
-The `dist\Cue\` folder is the portable package you can zip or copy for release.
+Produces a `.dmg` under `desktop/src-tauri/target/release/bundle/`.
 
-## Preview cache notes
-Preview still frames are cached under:
-`%LOCALAPPDATA%\Cue\cache\preview_frames`. If you need to refresh
-previews during development, clear this folder.
+---
+
+## Preview cache
+
+Preview still frames are cached at `%LOCALAPPDATA%\Cue\cache\preview_frames` (Windows) or `~/Library/Application Support/Cue/cache/preview_frames` (macOS). Clear this folder if you need to force a preview refresh during development.
+
+---
+
+## Internal documentation
+
+For internal planning documents (roadmap, UX spec, migration plans), see [`docs/internal/`](internal/).

@@ -1,5 +1,6 @@
 {
   "name": "cue-desktop",
+  "description": "Cue desktop app — create subtitles for any video using AI speech recognition",
   "private": true,
   "version": "0.1.0",
   "type": "module",

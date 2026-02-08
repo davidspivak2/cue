@@ -310,7 +310,7 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 
 ### J0) Legacy removal status (Subtitle Edit)
 - Subtitle Edit integration still exists in the legacy Qt UI, including the persisted config key **`subtitle_edit_path`**.
-- Removal is tracked in `docs/ROADMAP.md` (Milestone 9.4). The redesign should not add new dependencies on Subtitle Edit.
+- Removal is tracked in `docs/internal/ROADMAP.md` (Milestone 9.4). The redesign should not add new dependencies on Subtitle Edit.
 
 ### J1) Performance
 - “Transcription quality” combo: Auto / Fast (int8) / Accurate (int16) / Ultra accurate (float32)
@@ -383,7 +383,7 @@ It explains:
 - what has been worked on since GUI PR6 (progress + settings + diagnostics)
 - the punctuation problem investigation (what we measured, what we tried, historical next steps)
 
-UX/UI target spec (design contract): **`/docs/CUE_UX_UI_SPEC.md`**.
+UX/UI target spec (design contract): **`/docs/internal/CUE_UX_UI_SPEC.md`**.
 
 ## Current behavior vs target redesign
 

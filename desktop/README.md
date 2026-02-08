@@ -56,11 +56,13 @@ scripts\run_backend_dev.cmd
 Health check URL: http://127.0.0.1:8765/health
 Backend dev logs land in `C:\Cue_extra\backend_dev.log`.
 
-## Current backend wiring (implemented)
-- Backend health endpoint is available (used by dev scripts), and Settings reads/writes `/settings`.
-- Backend endpoints for pipeline jobs and SSE are implemented (`POST /jobs`, `GET /jobs/{job_id}/events`).
-- The Home screen UI is still a placeholder; the Job Runner/Monitor UI is tracked in `docs/ROADMAP.md` (Desktop UI Migration D3).
-- Cancel is supported by the backend (`POST /jobs/{job_id}/cancel`) and will be surfaced in the Job Runner UI.
+## Backend wiring
+- Backend health endpoint (`/health`) is used by dev scripts to wait for startup.
+- Settings reads/writes via `/settings`.
+- Pipeline jobs via `POST /jobs` with SSE event streaming at `GET /jobs/{job_id}/events`.
+- Cancel via `POST /jobs/{job_id}/cancel`.
+
+For the full API surface, see [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
 
 ## Full dev workflow (backend + UI)
 
