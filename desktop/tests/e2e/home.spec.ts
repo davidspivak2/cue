@@ -173,6 +173,25 @@ test("home flow shows Qt-parity copy", async ({ page }) => {
     await route.continue();
   });
 
+  await page.route("**://127.0.0.1:8765/preview-style", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type"
+        }
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ preview_path: "C:\\fake\\preview.png" })
+    });
+  });
+
   await page.route("**://127.0.0.1:8765/jobs", async (route) => {
     const request = route.request();
     if (request.method() === "OPTIONS") {
@@ -266,22 +285,30 @@ test("home flow shows Qt-parity copy", async ({ page }) => {
     status: "completed"
   });
 
-  await expect(page.getByText("Subtitles ready")).toBeVisible();
-  await expect(page.getByText("Saving as:")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create video with subtitles" })).toBeVisible();
+  /* After subtitle creation completes, app navigates to /review */
+  await expect(page.getByRole("heading", { name: "Review subtitles" })).toBeVisible();
+  await expect(page.url()).toContain("/review");
 
-  const showDetails = page.getByRole("button", { name: "Show details" });
-  await expect(showDetails).toBeVisible();
-  await showDetails.click();
-  await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Open details file" })).toBeVisible();
+  /* Verify style controls are visible on the Review page */
+  await expect(page.getByText("Mode")).toBeVisible();
+  await expect(page.getByText("Quick settings")).toBeVisible();
+  await expect(page.getByText("Background")).toBeVisible();
 
-  const createVideo = page.getByRole("button", { name: "Create video with subtitles" });
-  const exportRequest = page.waitForRequest(
+  /* Click Export to go back to Home and start the export job */
+  const exportSettingsRequest = page.waitForRequest(
+    (request) => request.url().includes("/settings") && request.method() === "PUT"
+  );
+  const exportButton = page.getByRole("button", { name: "Export video" });
+  await expect(exportButton).toBeVisible();
+  await exportButton.click();
+
+  await exportSettingsRequest;
+
+  /* Should navigate back to Home and auto-start export */
+  const exportJobRequest = page.waitForRequest(
     (request) => request.url().endsWith("/jobs") && request.method() === "POST"
   );
-  await createVideo.click();
-  await exportRequest;
+  await exportJobRequest;
 
   await page.waitForFunction(
     (expectedUrl) => window.__mockEventSourceState?.lastUrl === expectedUrl,
