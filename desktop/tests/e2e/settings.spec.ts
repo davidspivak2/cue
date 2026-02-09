@@ -99,7 +99,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("save policy enables the path controls", async ({ page }) => {
-  await page.goto("/settings");
+  await page.goto("/");
+  await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-title")).toBeVisible();
 
   const pathField = page.getByPlaceholder("No folder selected");
@@ -114,7 +115,8 @@ test("save policy enables the path controls", async ({ page }) => {
 });
 
 test("diagnostics master toggle gates categories", async ({ page }) => {
-  await page.goto("/settings");
+  await page.goto("/");
+  await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-title")).toBeVisible();
 
   const master = page.getByLabel("Enable diagnostics logging");
@@ -130,7 +132,8 @@ test("diagnostics master toggle gates categories", async ({ page }) => {
 });
 
 test("transcription quality updates settings", async ({ page }) => {
-  await page.goto("/settings");
+  await page.goto("/");
+  await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-title")).toBeVisible();
 
   const requestPromise = page.waitForRequest(
