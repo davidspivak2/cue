@@ -52,6 +52,7 @@ const Workbench = () => {
   const [isLoading, setIsLoading] = React.useState(true);
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
+  const showSubtitlesOverlay = false;
 
   React.useEffect(() => {
     let active = true;
@@ -115,11 +116,14 @@ const Workbench = () => {
   const videoPath = project?.video?.path ?? "";
   const previewSrc = videoPath ? (isTauriEnv ? convertFileSrc(videoPath) : videoPath) : "";
   const hasVideoPreview = Boolean(previewSrc);
-  const showLeftToggle = !leftPanelOpen;
-  const isOverlayOpen = leftPanelOpen || rightOverlayOpen;
+  const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
+  const isOverlayOpen = (showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen;
   const showScrim = isNarrow && isOverlayOpen;
 
   const openLeftPanel = () => {
+    if (!showSubtitlesOverlay) {
+      return;
+    }
     if (isNarrow) {
       setRightOverlayOpen(false);
     }
@@ -139,13 +143,13 @@ const Workbench = () => {
   };
 
   const closeOverlays = React.useCallback(() => {
-    if (leftPanelOpen) {
+    if (showSubtitlesOverlay && leftPanelOpen) {
       setLeftPanelOpen(false);
     }
     if (rightOverlayOpen) {
       setRightOverlayOpen(false);
     }
-  }, [leftPanelOpen, rightOverlayOpen]);
+  }, [leftPanelOpen, rightOverlayOpen, showSubtitlesOverlay]);
 
   React.useEffect(() => {
     if (!isOverlayOpen) {
@@ -240,9 +244,9 @@ const Workbench = () => {
 
       {!isLoading && !error && (
         <>
-          {(showLeftToggle || isNarrow) && (
+          {((showSubtitlesOverlay && showLeftToggle) || isNarrow) && (
             <div className="relative z-50 flex flex-wrap items-center gap-2">
-              {showLeftToggle && (
+              {showSubtitlesOverlay && showLeftToggle && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -306,7 +310,7 @@ const Workbench = () => {
             />
           )}
 
-          {leftPanelOpen && (
+          {showSubtitlesOverlay && leftPanelOpen && (
             <aside
               className="fixed inset-y-0 left-0 z-50 flex w-[min(90vw,360px)] flex-col border-r border-border bg-card shadow-lg"
               data-testid="workbench-left-drawer"

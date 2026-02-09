@@ -95,9 +95,6 @@ test("workbench shell wide layout", async ({ page }) => {
   await expect(page.getByTestId("workbench-center-panel")).toBeVisible();
   await expect(page.getByTestId("workbench-right-panel")).toBeVisible();
   await expect(page.getByTestId("workbench-left-drawer")).toHaveCount(0);
-
-  await page.getByTestId("workbench-open-left").click();
-  await expect(page.getByTestId("workbench-left-drawer")).toBeVisible();
 });
 
 test("workbench shell narrow overlays", async ({ page }) => {
@@ -112,13 +109,9 @@ test("workbench shell narrow overlays", async ({ page }) => {
   await expect(page.getByTestId("workbench-right-panel")).toHaveCount(0);
   await expect(page.getByTestId("workbench-open-style")).toBeVisible();
 
-  await page.getByTestId("workbench-open-left").click();
-  await expect(page.getByTestId("workbench-left-drawer")).toBeVisible();
-  await expect(page.getByTestId("workbench-overlay-scrim")).toBeVisible();
-
   await page.getByTestId("workbench-open-style").click();
   await expect(page.getByTestId("workbench-right-drawer")).toBeVisible();
-  await expect(page.getByTestId("workbench-left-drawer")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-overlay-scrim")).toBeVisible();
 
   await page.getByTestId("workbench-overlay-scrim").click();
   await expect(page.getByTestId("workbench-right-drawer")).toHaveCount(0);
