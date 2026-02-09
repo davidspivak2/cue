@@ -4,7 +4,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { label: "Home", to: "/", icon: Home },
+  { label: "Project Hub", to: "/", icon: Home },
   { label: "Settings", to: "/settings", icon: Settings }
 ];
 

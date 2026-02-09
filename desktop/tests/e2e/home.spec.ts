@@ -223,7 +223,7 @@ test("home flow shows Qt-parity copy", async ({ page }) => {
     await route.continue();
   });
 
-  await page.goto("/");
+  await page.goto("/legacy");
 
   await expect(page.getByText("Drop a video here")).toBeVisible();
   await expect(page.getByText("or choose one from your computer")).toBeVisible();
