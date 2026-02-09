@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useNavigate } from "react-router-dom";
 
 import DropZone from "@/components/DropZone";
 import { Badge } from "@/components/ui/badge";
@@ -146,6 +147,7 @@ const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean)
 };
 
 const ProjectHub = () => {
+  const navigate = useNavigate();
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [banner, setBanner] = React.useState<Banner | null>(null);
@@ -445,7 +447,7 @@ const ProjectHub = () => {
       setRelinkPromptProject(project);
       return;
     }
-    showBanner("info", "Workbench coming soon.");
+    navigate(`/workbench/${encodeURIComponent(project.project_id)}`);
   };
 
   const confirmRelinkWarning = async () => {
