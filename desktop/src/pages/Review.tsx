@@ -322,7 +322,7 @@ const Review = () => {
         }
       });
       /* navigate to Home with export action */
-      navigate("/", {
+      navigate("/legacy", {
         state: {
           action: "start_export",
           videoPath: navState.videoPath,

@@ -255,7 +255,7 @@ Handoff outputs
 - Tauri dev build unblock (capabilities/main.json): Done
 - Project system backend (Milestone 1 backend): Done (API + tests)
 - Project Hub UI (Milestone 2.1 + 2.2): Done (Project Hub screen + card interactions + relink prompt/validation)
-- Project Hub launch behavior (Milestone 2.3): Not started (next)
+- Project Hub launch behavior (Milestone 2.3): Done
 
 ---
 
@@ -276,6 +276,17 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+
+Date: 2026-02-09
+Agent: gpt-5.2-codex-xhigh
+Phase: Project Hub launch behavior (Milestone 2.3)
+Status: Done
+Summary:
+- Added a one-time launch guard so the app always starts on Project Hub.
+- Updated Playwright E2E tests to start at Project Hub before navigating to Settings or Legacy Home.
+- Tests run: `npm run build` (vite build). E2E not run.
+- Known issues: None observed.
+- Suggested next step: Continue Milestone 3 (Workbench shell) from `docs/internal/ROADMAP.md`.
 
 Date: 2026-02-09
 Agent: gpt-5.2-codex-xhigh
