@@ -4,6 +4,7 @@ import Home from "./pages/Home";
 import ProjectHub from "./pages/ProjectHub";
 import Review from "./pages/Review";
 import Settings from "./pages/Settings";
+import Workbench from "./pages/Workbench";
 
 const App = () => {
   return (
@@ -14,6 +15,7 @@ const App = () => {
           <Route path="legacy" element={<Home />} />
           <Route path="review" element={<Review />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="workbench/:projectId" element={<Workbench />} />
         </Route>
       </Routes>
     </BrowserRouter>

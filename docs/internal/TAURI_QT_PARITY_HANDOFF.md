@@ -256,6 +256,7 @@ Handoff outputs
 - Project system backend (Milestone 1 backend): Done (API + tests)
 - Project Hub UI (Milestone 2.1 + 2.2): Done (Project Hub screen + card interactions + relink prompt/validation)
 - Project Hub launch behavior (Milestone 2.3): Done
+- Workbench shell (Milestone 3.1): Partial (route + card navigation + placeholder layout)
 
 ---
 
@@ -276,6 +277,22 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+
+Date: 2026-02-09
+Agent: gpt-5.2-codex-xhigh
+Phase: Workbench entry (Project Hub cards open Workbench)
+Status: Done
+Summary:
+- Project Hub normal cards now open Workbench (`/workbench/:projectId`); missing-file cards still use the relink prompt.
+- Workbench shell added with Back button + left/center/right placeholders; loads project detail from `GET /projects/{id}`.
+- Current routes: `/` Project Hub (cold-start forced), `/workbench/:projectId`, `/legacy`, `/review`, `/settings`.
+- Tests run: `npm run build`, `npm run test:e2e` (all pass).
+- Known gaps: Workbench is a placeholder only (no tabs, no real panels).
+- Next Project Hub/Workbench steps:
+  - Implement Workbench tabs (multi-project open/activate) per UX spec.
+  - Update card clicks to activate existing tabs when open.
+  - Decide missing-file behavior in Workbench (open with relink-required vs keep hub-only).
+  - Replace placeholders with real panels (video preview, subtitles list, style inspector).
 
 Date: 2026-02-09
 Agent: gpt-5.2-codex-xhigh

@@ -39,6 +39,25 @@ test("project hub card interactions", async ({ page }) => {
   ];
   let createdCount = 0;
 
+  const buildManifest = (project) => ({
+    project_id: project.project_id,
+    status: project.status,
+    created_at: project.created_at,
+    updated_at: project.updated_at,
+    video: {
+      path: project.video_path,
+      filename: project.title,
+      duration_seconds: project.duration_seconds,
+      thumbnail_path: project.thumbnail_path
+    },
+    artifacts: {
+      subtitles_path: "subtitles.srt",
+      word_timings_path: "word_timings.json",
+      style_path: "style.json"
+    },
+    latest_export: null
+  });
+
   await page.route("**://127.0.0.1:8765/projects", async (route) => {
     const request = route.request();
     if (request.method() === "OPTIONS") {
@@ -119,13 +138,42 @@ test("project hub card interactions", async ({ page }) => {
     });
   });
 
+  await page.route("**://127.0.0.1:8765/projects/*", async (route) => {
+    const request = route.request();
+    const url = request.url();
+    if (request.method() === "GET") {
+      const projectId = url.split("/projects/")[1]?.split("/")[0];
+      const project = projects.find((entry) => entry.project_id === projectId);
+      if (!project) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "not_found" })
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(buildManifest(project))
+      });
+      return;
+    }
+
+    await route.continue();
+  });
+
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New project" })).toBeVisible();
 
   await page.getByText("good.mp4").click();
-  await expect(page.getByText("Workbench coming soon.")).toBeVisible();
+  await page.waitForURL("**/workbench/project-1");
+  await expect(page.getByTestId("workbench")).toBeVisible();
+  await expect(page.getByText("good.mp4")).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
 
   await page.getByText("missing.mp4").click();
   await expect(page.getByRole("heading", { name: "Video file not found" })).toBeVisible();

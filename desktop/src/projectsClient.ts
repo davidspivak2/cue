@@ -13,6 +13,21 @@ export type ProjectSummary = {
   thumbnail_path?: string | null;
 };
 
+export type ProjectVideoInfo = {
+  path?: string | null;
+  filename?: string | null;
+  duration_seconds?: number | null;
+  thumbnail_path?: string | null;
+};
+
+export type ProjectManifest = {
+  project_id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  video?: ProjectVideoInfo | null;
+};
+
 const ensureOk = async (response: Response) => {
   if (response.ok) {
     return;
@@ -57,4 +72,13 @@ export const relinkProject = async (
   });
   await ensureOk(response);
   return (await response.json()) as ProjectSummary;
+};
+
+export const fetchProject = async (projectId: string): Promise<ProjectManifest> => {
+  if (!projectId) {
+    throw new Error("project_id_required");
+  }
+  const response = await fetch(`${PROJECTS_URL}/${projectId}`);
+  await ensureOk(response);
+  return (await response.json()) as ProjectManifest;
 };
