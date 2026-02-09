@@ -46,7 +46,7 @@ Desktop
 - `desktop/src/components/AppLayout.tsx` uses shadcn layout + lucide icons, with a user-controlled collapsible sidebar (icon strip, persisted in localStorage).
 - `desktop/src/pages/ProjectHub.tsx` is the default route, supports project list/create, and blocks missing-file projects with a relink prompt.
 - `desktop/src/workbenchTabs.tsx` tracks open project tabs in memory; Workbench renders a tab strip.
-- `desktop/src/pages/Workbench.tsx` loads project detail, shows a real video preview (`<video controls>` + `convertFileSrc`), keeps Style docked on wide screens and overlay on narrow (<1100px), and uses overlay-only subtitles list to avoid preview shrink.
+- `desktop/src/pages/Workbench.tsx` loads project detail, shows a real video preview (`<video controls>` + `convertFileSrc`), keeps Style docked on wide screens and overlay on narrow (<1100px). The subtitles overlay code exists but is currently hidden in the UI.
 - `desktop/src/hooks/useWindowWidth.ts` provides exact 1100px breakpoint logic.
 - `desktop/src/pages/Home.tsx` implements the 5-state UI and Tauri file picker/drag-drop.
 - `desktop/src/pages/Review.tsx` provides the Review screen for style, preview, and export.
@@ -55,7 +55,7 @@ Desktop
 - `desktop/src-tauri/tauri.conf.json` enables capabilities and asset protocol scope for previews.
 - `desktop/package.json` has no `@mui` or `@emotion` deps.
 
-Note: We intentionally diverged from the UX spec’s “left docked subtitles panel on wide screens” because it made the video preview unusably small. Subtitles list is overlay-only to preserve preview usability.
+Note: We intentionally diverged from the UX spec’s “left docked subtitles panel on wide screens” because it made the video preview unusably small. Subtitles list is overlay-only by design, but the overlay UI is currently hidden (feature paused).
 
 If any item above is no longer true, update this section before you continue.
 
@@ -264,7 +264,9 @@ Handoff outputs
 - Project Hub UI (Milestone 2.1 + 2.2): Done (Project Hub screen + card interactions + relink prompt/validation)
 - Project Hub launch behavior (Milestone 2.3): Done
 - Workbench tabs/navigation: Done (tab strip + open/activate)
-- Workbench shell (Milestone 3.1): Done (preview + style docked/overlay + subtitles overlay-only; content still placeholder)
+- Workbench shell (Milestone 3.1): Done (preview + style docked/overlay; subtitles overlay code present but hidden; content still placeholder)
+- Milestone 4.1 (left list editing): Deferred while subtitle list UI is hidden/paused.
+- Milestone 4.2 (on-video editing contract): Next
 
 ---
 
@@ -285,6 +287,30 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+
+Date: 2026-02-09
+Agent: gpt-5.2-codex-xhigh
+Phase: Docs alignment - Milestone 4 sequencing
+Status: Done
+Summary:
+- Clarified that Milestone 4.1 is not the next actionable UI task right now.
+- Rationale: Milestone 4.1 in `docs/internal/ROADMAP.md` is explicitly "Left list editing", and the subtitle list UI is intentionally hidden/paused.
+- Next best task is Milestone 4.2 (on-video editing contract), then resume 4.1 when subtitle list UI is re-enabled.
+- Tests run: Not run (doc-only update).
+- Known gaps: subtitle list content + editing not implemented; style inspector still placeholder; busy/read-only rules not enforced.
+- Next best task: Milestone 4.2 on-video editing (pause/select/edit with Enter/Esc), followed by 4.3 selection styling contract.
+
+Date: 2026-02-09
+Agent: gpt-5.2-codex-xhigh
+Phase: Pause subtitles overlay UI
+Status: Done
+Summary:
+- Subtitles overlay drawer UI is now hidden while keeping the code in place (feature paused).
+- Workbench remains preview-first with Style docked on wide screens and overlay on narrow screens.
+- Tests updated to stop expecting the subtitles drawer.
+- Tests run: Not run (not requested).
+- Known gaps: subtitle list content + editing not implemented; style inspector still placeholder; busy/read-only rules not enforced.
+- Next best task: implement Workbench subtitle list editing + selection/seek sync (Milestone 4.1), then wire StyleControls into Workbench.
 
 Date: 2026-02-09
 Agent: gpt-5.2-codex-xhigh
