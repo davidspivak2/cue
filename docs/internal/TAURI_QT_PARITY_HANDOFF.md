@@ -1,6 +1,6 @@
 # Cue Tauri Migration - Qt Parity Multi-Agent Handoff Plan
 
-Last updated: 2026-02-06
+Last updated: 2026-02-09
 
 Owner: This document is the single source of truth for multi-agent handoff.
 Every agent must update it before handing work to another agent.
@@ -29,7 +29,7 @@ Every agent must update it before handing work to another agent.
 
 ## 2) Current repo snapshot (verify and update)
 
-As of 2026-02-08, in this repo:
+As of 2026-02-09, in this repo:
 
 Backend
 - `app/backend_server.py` supports `create_subtitles` and `create_video_with_subtitles`, plus `/settings`, `/preview-style`, and `/device`.
@@ -43,12 +43,19 @@ Backend
 
 Desktop
 - `desktop/src/main.tsx` uses shadcn/Tailwind ThemeProvider (no MUI).
-- `desktop/src/components/AppLayout.tsx` uses shadcn layout and lucide icons.
+- `desktop/src/components/AppLayout.tsx` uses shadcn layout + lucide icons, with a user-controlled collapsible sidebar (icon strip, persisted in localStorage).
+- `desktop/src/pages/ProjectHub.tsx` is the default route, supports project list/create, and blocks missing-file projects with a relink prompt.
+- `desktop/src/workbenchTabs.tsx` tracks open project tabs in memory; Workbench renders a tab strip.
+- `desktop/src/pages/Workbench.tsx` loads project detail, shows a real video preview (`<video controls>` + `convertFileSrc`), keeps Style docked on wide screens and overlay on narrow (<1100px), and uses overlay-only subtitles list to avoid preview shrink.
+- `desktop/src/hooks/useWindowWidth.ts` provides exact 1100px breakpoint logic.
 - `desktop/src/pages/Home.tsx` implements the 5-state UI and Tauri file picker/drag-drop.
 - `desktop/src/pages/Review.tsx` provides the Review screen for style, preview, and export.
 - `desktop/src/pages/Settings.tsx` exists and matches Qt parity (no subtitle style section).
+- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout (wide vs narrow overlays).
 - `desktop/src-tauri/tauri.conf.json` enables capabilities and asset protocol scope for previews.
 - `desktop/package.json` has no `@mui` or `@emotion` deps.
+
+Note: We intentionally diverged from the UX spec’s “left docked subtitles panel on wide screens” because it made the video preview unusably small. Subtitles list is overlay-only to preserve preview usability.
 
 If any item above is no longer true, update this section before you continue.
 
@@ -256,7 +263,8 @@ Handoff outputs
 - Project system backend (Milestone 1 backend): Done (API + tests)
 - Project Hub UI (Milestone 2.1 + 2.2): Done (Project Hub screen + card interactions + relink prompt/validation)
 - Project Hub launch behavior (Milestone 2.3): Done
-- Workbench shell (Milestone 3.1): Partial (route + card navigation + placeholder layout)
+- Workbench tabs/navigation: Done (tab strip + open/activate)
+- Workbench shell (Milestone 3.1): Done (preview + style docked/overlay + subtitles overlay-only; content still placeholder)
 
 ---
 
@@ -277,6 +285,20 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+
+Date: 2026-02-09
+Agent: gpt-5.2-codex-xhigh
+Phase: Workbench tabs + preview-friendly shell layout
+Status: Done
+Summary:
+- Project Hub cards open/activate Workbench tabs; missing-file projects are blocked in hub via relink prompt.
+- Workbench layout updated to protect preview: Style docked on wide screens, overlay on narrow; subtitles list is overlay-only.
+- Sidebar can collapse to icon strip (user-controlled, persisted in localStorage).
+- Tests updated/added: `desktop/tests/e2e/workbench-shell.spec.ts`, `desktop/tests/e2e/project-hub.spec.ts`.
+- Known divergence: left docked subtitles panel intentionally avoided to prevent preview shrink.
+- Tests run: Not run (not requested).
+- Known gaps: subtitle list content + editing not implemented; style inspector still placeholder; busy/read-only rules not enforced.
+- Next best task: implement Workbench subtitle list editing + selection/seek sync (Milestone 4.1), then wire StyleControls into Workbench.
 
 Date: 2026-02-09
 Agent: gpt-5.2-codex-xhigh

@@ -26,6 +26,17 @@ test("project hub card interactions", async ({ page }) => {
       thumbnail_path: ""
     },
     {
+      project_id: "project-3",
+      title: "another.mp4",
+      video_path: "C:\\fake\\another.mp4",
+      missing_video: false,
+      status: "ready",
+      created_at: "2026-02-09T00:00:00Z",
+      updated_at: "2026-02-09T00:00:00Z",
+      duration_seconds: 42,
+      thumbnail_path: ""
+    },
+    {
       project_id: "project-2",
       title: "missing.mp4",
       video_path: "C:\\fake\\missing.mp4",
@@ -172,6 +183,31 @@ test("project hub card interactions", async ({ page }) => {
   await page.waitForURL("**/workbench/project-1");
   await expect(page.getByTestId("workbench")).toBeVisible();
   await expect(page.getByText("good.mp4")).toBeVisible();
+  await expect(page.getByTestId("workbench-tabs")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "good.mp4" })).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
+
+  await page.getByText("another.mp4").click();
+  await page.waitForURL("**/workbench/project-3");
+  await expect(page.getByRole("tab", { name: "good.mp4" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "another.mp4" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "another.mp4" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+
+  await page.getByRole("tab", { name: "good.mp4" }).click();
+  await page.waitForURL("**/workbench/project-1");
+  await expect(page.getByRole("tab", { name: "good.mp4" })).toHaveAttribute("aria-selected", "true");
+
+  await page.getByRole("tab", { name: "another.mp4" }).click();
+  await page.waitForURL("**/workbench/project-3");
+  await expect(page.getByRole("tab", { name: "another.mp4" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
 
