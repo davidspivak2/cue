@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { createProject, fetchProjects, ProjectSummary, relinkProject } from "@/projectsClient";
+import { useWorkbenchTabs } from "@/workbenchTabs";
 
 type FileWithPath = File & { path?: string };
 
@@ -72,6 +73,16 @@ const resolveFilePath = (file: File) => {
 const getFileName = (value: string) => {
   const parts = value.split(/[/\\]/);
   return parts[parts.length - 1] ?? value;
+};
+
+const resolveProjectTitle = (project: ProjectSummary) => {
+  if (project.title) {
+    return project.title;
+  }
+  if (project.video_path) {
+    return getFileName(project.video_path);
+  }
+  return "Untitled project";
 };
 
 const getFileExtension = (value: string) => {
@@ -148,6 +159,7 @@ const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean)
 
 const ProjectHub = () => {
   const navigate = useNavigate();
+  const { openOrActivateTab } = useWorkbenchTabs();
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [banner, setBanner] = React.useState<Banner | null>(null);
@@ -447,6 +459,7 @@ const ProjectHub = () => {
       setRelinkPromptProject(project);
       return;
     }
+    openOrActivateTab({ projectId: project.project_id, title: resolveProjectTitle(project) });
     navigate(`/workbench/${encodeURIComponent(project.project_id)}`);
   };
 
