@@ -254,6 +254,8 @@ Handoff outputs
 - Phase 6 - Tests and verification: Done (tests not run locally)
 - Tauri dev build unblock (capabilities/main.json): Done
 - Project system backend (Milestone 1 backend): Done (API + tests)
+- Project Hub UI (Milestone 2.1 + 2.2): Done (Project Hub screen + card interactions + relink prompt/validation)
+- Project Hub launch behavior (Milestone 2.3): Not started (next)
 
 ---
 
@@ -274,6 +276,23 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+
+Date: 2026-02-09
+Agent: gpt-5.2-codex-xhigh
+Phase: Project Hub UI (Milestone 2.1 + 2.2)
+Status: Done
+Summary:
+- Added Project Hub screen as the default route (`/`) and moved legacy Home to `/legacy`.
+- Project Hub supports project list + create (button + drag/drop) via `/projects`.
+- Card interactions added:
+  - Normal cards show a “Workbench coming soon” message.
+  - Missing-file cards show an explicit prompt explaining the file moved and offer Select/Cancel.
+  - Relink uses warn + confirm validation: mismatched filename and/or duration warns before allowing “Use this file anyway”.
+  - Unsupported file types are blocked with a clear error.
+- Added `relinkProject` client helper and updated Playwright coverage for card interactions.
+- Tests run: Manual UI verification by user (“tested, looks good”).
+- Known issues: No Workbench flow yet; `/legacy` is not linked in the UI.
+- Suggested next step: Milestone 2.3 (force launch to Project Hub) and update E2E tests that deep-link to routes like `/settings`.
 
 Date: 2026-02-08
 Agent: gpt-5.2-codex-xhigh
