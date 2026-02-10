@@ -42,6 +42,7 @@ DEFAULT_PORT = 8765
 PORT = DEFAULT_PORT
 PING_INTERVAL_SECONDS = 12.0
 RUNNER_CANCEL_TIMEOUT_SECONDS = 8.0
+PROJECT_DELETE_CANCEL_TIMEOUT_SECONDS = 3.0
 
 logger = logging.getLogger(__name__)
 
@@ -610,6 +611,44 @@ def _job_or_404(job_id: str) -> JobState:
     return job
 
 
+def _jobs_for_project(project_id: str) -> list[JobState]:
+    return [
+        job
+        for job in JOBS.values()
+        if job.project_id == project_id and job.status not in TERMINAL_STATUSES
+    ]
+
+
+async def _cancel_jobs_for_project(project_id: str) -> list[str]:
+    target_jobs = _jobs_for_project(project_id)
+    if not target_jobs:
+        return []
+
+    for job in target_jobs:
+        job.cancel_event.set()
+        if job.process and job.process.stdin:
+            try:
+                job.process.stdin.write(b"cancel\n")
+                await job.process.stdin.drain()
+            except Exception:  # noqa: BLE001
+                pass
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PROJECT_DELETE_CANCEL_TIMEOUT_SECONDS
+    while loop.time() < deadline:
+        remaining = [job for job in target_jobs if job.status not in TERMINAL_STATUSES]
+        if not remaining:
+            break
+        await asyncio.sleep(0.1)
+
+    remaining = [job for job in target_jobs if job.status not in TERMINAL_STATUSES]
+    for job in remaining:
+        if job.process and job.process.returncode is None:
+            await asyncio.to_thread(_kill_process_tree, job.process.pid)
+
+    return [job.job_id for job in target_jobs]
+
+
 @app.post("/jobs")
 async def create_job(payload: JobRequest) -> dict[str, str]:
     request_received_at = datetime.now(timezone.utc)
@@ -726,6 +765,12 @@ def get_project(project_id: str) -> dict[str, Any]:
     return project_store.get_project(project_id)
 
 
+@app.get("/projects/{project_id}/subtitles")
+def get_project_subtitles(project_id: str) -> dict[str, str]:
+    subtitles_srt_text = project_store.get_project_subtitles_text(project_id)
+    return {"subtitles_srt_text": subtitles_srt_text}
+
+
 @app.put("/projects/{project_id}")
 def update_project(project_id: str, payload: ProjectUpdateRequest) -> dict[str, Any]:
     return project_store.update_project(
@@ -738,6 +783,17 @@ def update_project(project_id: str, payload: ProjectUpdateRequest) -> dict[str, 
 @app.post("/projects/{project_id}/relink")
 def relink_project(project_id: str, payload: ProjectRelinkRequest) -> dict[str, Any]:
     return project_store.relink_project(project_id, payload.video_path)
+
+
+@app.delete("/projects/{project_id}")
+async def delete_project(project_id: str) -> dict[str, Any]:
+    cancelled_job_ids = await _cancel_jobs_for_project(project_id)
+    project_store.delete_project(project_id)
+    return {
+        "ok": True,
+        "project_id": project_id,
+        "cancelled_job_ids": cancelled_job_ids,
+    }
 
 
 @app.get("/settings")

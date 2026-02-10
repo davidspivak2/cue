@@ -181,7 +181,8 @@ The desktop UI communicates with the Python backend over HTTP:
 | `/jobs/{id}/events` | GET | SSE event stream for job progress |
 | `/jobs/{id}/cancel` | POST | Cancel a running job |
 | `/projects` | GET/POST | List or create projects |
-| `/projects/{id}` | GET/PUT | Fetch or update a project |
+| `/projects/{id}` | GET/PUT/DELETE | Fetch, update, or delete a project |
+| `/projects/{id}/subtitles` | GET | Fetch stored project subtitles (SRT text) |
 | `/projects/{id}/relink` | POST | Relink a missing source video |
 | `/settings` | GET/PUT | Read or update app settings |
 | `/preview-style` | POST | Render a styled preview still and return a file path |

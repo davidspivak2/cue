@@ -380,6 +380,32 @@ def get_project(project_id: str) -> dict[str, Any]:
         return manifest
 
 
+def get_project_subtitles_text(project_id: str) -> str:
+    with _STORE_LOCK:
+        _ensure_store()
+        manifest = _read_manifest(project_id)
+        subtitles_path = _artifact_path(manifest, "subtitles_path")
+        if not subtitles_path.exists():
+            raise HTTPException(status_code=404, detail="subtitles_not_found")
+        try:
+            return subtitles_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="subtitles_read_failed") from exc
+
+
+def delete_project(project_id: str) -> None:
+    with _STORE_LOCK:
+        _ensure_store()
+        _read_manifest(project_id)
+        project_dir = _project_dir(project_id)
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
+        summaries = [
+            summary for summary in list_projects() if summary.project_id != project_id
+        ]
+        _write_index(summaries)
+
+
 def create_project(video_path: str, *, style: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     if not isinstance(video_path, str) or not video_path.strip():
         raise HTTPException(status_code=422, detail="video_path_required")

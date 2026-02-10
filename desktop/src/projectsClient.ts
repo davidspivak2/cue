@@ -20,12 +20,30 @@ export type ProjectVideoInfo = {
   thumbnail_path?: string | null;
 };
 
+export type ProjectArtifacts = {
+  subtitles_path?: string | null;
+  word_timings_path?: string | null;
+  style_path?: string | null;
+};
+
 export type ProjectManifest = {
   project_id: string;
   status: string;
   created_at: string;
   updated_at: string;
   video?: ProjectVideoInfo | null;
+  artifacts?: ProjectArtifacts | null;
+};
+
+export type ProjectUpdatePayload = {
+  subtitles_srt_text?: string;
+  style?: Record<string, unknown>;
+};
+
+export type ProjectDeleteResponse = {
+  ok: boolean;
+  project_id: string;
+  cancelled_job_ids?: string[];
 };
 
 const ensureOk = async (response: Response) => {
@@ -81,4 +99,46 @@ export const fetchProject = async (projectId: string): Promise<ProjectManifest> 
   const response = await fetch(`${PROJECTS_URL}/${projectId}`);
   await ensureOk(response);
   return (await response.json()) as ProjectManifest;
+};
+
+export const fetchProjectSubtitles = async (projectId: string): Promise<string> => {
+  if (!projectId) {
+    throw new Error("project_id_required");
+  }
+  const response = await fetch(`${PROJECTS_URL}/${projectId}/subtitles`);
+  await ensureOk(response);
+  const payload = (await response.json()) as { subtitles_srt_text?: unknown };
+  if (typeof payload.subtitles_srt_text !== "string") {
+    throw new Error("subtitles_srt_text_missing");
+  }
+  return payload.subtitles_srt_text;
+};
+
+export const updateProject = async (
+  projectId: string,
+  payload: ProjectUpdatePayload
+): Promise<ProjectManifest> => {
+  if (!projectId) {
+    throw new Error("project_id_required");
+  }
+  const response = await fetch(`${PROJECTS_URL}/${projectId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  await ensureOk(response);
+  return (await response.json()) as ProjectManifest;
+};
+
+export const deleteProject = async (
+  projectId: string
+): Promise<ProjectDeleteResponse> => {
+  if (!projectId) {
+    throw new Error("project_id_required");
+  }
+  const response = await fetch(`${PROJECTS_URL}/${projectId}`, {
+    method: "DELETE"
+  });
+  await ensureOk(response);
+  return (await response.json()) as ProjectDeleteResponse;
 };

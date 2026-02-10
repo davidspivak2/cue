@@ -1,6 +1,6 @@
 # Cue Tauri Migration - Qt Parity Multi-Agent Handoff Plan
 
-Last updated: 2026-02-09
+Last updated: 2026-02-10
 
 Owner: This document is the single source of truth for multi-agent handoff.
 Every agent must update it before handing work to another agent.
@@ -29,7 +29,7 @@ Every agent must update it before handing work to another agent.
 
 ## 2) Current repo snapshot (verify and update)
 
-As of 2026-02-09, in this repo:
+As of 2026-02-10, in this repo:
 
 Backend
 - `app/backend_server.py` supports `create_subtitles` and `create_video_with_subtitles`, plus `/settings`, `/preview-style`, and `/device`.
@@ -38,24 +38,25 @@ Backend
 - Settings stored in `config.json` under the app data dir (same as Qt).
 - Project system backend:
   - Projects stored under app data `projects/` with `index.json` and per-project folders (`project.json`, `subtitles.srt`, `word_timings.json`, `style.json`).
-  - New endpoints: `GET/POST /projects`, `GET/PUT /projects/{project_id}`, `POST /projects/{project_id}/relink`.
-  - Jobs accept optional `project_id`; runner `result` events update project artifacts and export path.
+  - New endpoints: `GET/POST /projects`, `GET/PUT/DELETE /projects/{project_id}`, `GET /projects/{project_id}/subtitles`, `POST /projects/{project_id}/relink`.
+  - Jobs accept optional `project_id`; runner events update project state (`result` updates artifacts/export path, export `started` sets `exporting`, `cancelled`/`error` refresh project status).
 
 Desktop
 - `desktop/src/main.tsx` uses shadcn/Tailwind ThemeProvider (no MUI).
 - `desktop/src/components/AppLayout.tsx` uses shadcn layout + lucide icons, with a user-controlled collapsible sidebar (icon strip, persisted in localStorage).
-- `desktop/src/pages/ProjectHub.tsx` is the default route, supports project list/create, and blocks missing-file projects with a relink prompt.
+- `desktop/src/pages/ProjectHub.tsx` is the default route, supports project list/create/delete (with confirmation), and blocks missing-file projects with a relink prompt.
 - `desktop/src/workbenchTabs.tsx` tracks open project tabs in memory; Workbench renders a tab strip.
-- `desktop/src/pages/Workbench.tsx` loads project detail, shows a real video preview (`<video controls>` + `convertFileSrc`), keeps Style docked on wide screens and overlay on narrow (<1100px). The subtitles overlay code exists but is currently hidden in the UI.
+- `desktop/src/pages/Workbench.tsx` loads project detail, shows a real video preview (`<video controls>` + `convertFileSrc`), keeps Style docked on wide screens and overlay on narrow (<1100px), supports on-video subtitle select/edit interactions (pause/select on first click, inline edit on second click while paused, Enter save, Esc cancel), and now renders real `StyleControls` in both style panes (settings-backed).
 - `desktop/src/hooks/useWindowWidth.ts` provides exact 1100px breakpoint logic.
 - `desktop/src/pages/Home.tsx` implements the 5-state UI and Tauri file picker/drag-drop.
 - `desktop/src/pages/Review.tsx` provides the Review screen for style, preview, and export.
 - `desktop/src/pages/Settings.tsx` exists and matches Qt parity (no subtitle style section).
-- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout (wide vs narrow overlays).
+- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout (wide vs narrow overlays) and on-video subtitle edit interactions.
+- `desktop/tests/e2e/project-hub.spec.ts` covers Project Hub card interactions, relink flow, and delete confirmation flow.
 - `desktop/src-tauri/tauri.conf.json` enables capabilities and asset protocol scope for previews.
 - `desktop/package.json` has no `@mui` or `@emotion` deps.
 
-Note: We intentionally diverged from the UX spec’s “left docked subtitles panel on wide screens” because it made the video preview unusably small. Subtitles list is overlay-only by design, but the overlay UI is currently hidden (feature paused).
+Note: We intentionally diverged from the UX spec’s “left docked subtitles panel on wide screens” because it made the video preview unusably small. Subtitles list remains overlay-only by design and is still hidden/paused; Milestone 4.2 currently uses on-video editing without re-enabling the left list UI.
 
 If any item above is no longer true, update this section before you continue.
 
@@ -258,15 +259,17 @@ Handoff outputs
 - Phase 3 - Home page Qt parity UI: Done
 - Phase 4 - Settings migration off MUI: Done (MUI removed from layout/settings/main)
 - Phase 5 - Remove MUI/Emotion and cleanup: Done
-- Phase 6 - Tests and verification: Done (tests not run locally)
+- Phase 6 - Tests and verification: Done (targeted backend + e2e tests run locally; full-suite coverage still incremental)
 - Tauri dev build unblock (capabilities/main.json): Done
 - Project system backend (Milestone 1 backend): Done (API + tests)
 - Project Hub UI (Milestone 2.1 + 2.2): Done (Project Hub screen + card interactions + relink prompt/validation)
 - Project Hub launch behavior (Milestone 2.3): Done
+- Project deletion with confirmation: Done (Project Hub delete action + confirmation + backend cancel-then-delete)
 - Workbench tabs/navigation: Done (tab strip + open/activate)
-- Workbench shell (Milestone 3.1): Done (preview + style docked/overlay; subtitles overlay code present but hidden; content still placeholder)
+- Workbench shell (Milestone 3.1): Done (preview + style docked/overlay; right style pane uses real controls; left subtitles list overlay remains hidden/paused)
 - Milestone 4.1 (left list editing): Deferred while subtitle list UI is hidden/paused.
-- Milestone 4.2 (on-video editing contract): Next
+- Milestone 4.2 (on-video editing contract): Done
+- Milestone 4.3 (selection styling contract): Next
 
 ---
 
@@ -287,6 +290,61 @@ Before you hand off
 ## 8) Handoff log (append-only)
 
 Template (copy and fill; newest at top)
+Note: Entries are chronological snapshots. Older entries may mention gaps that were later resolved; use the newest entry plus sections 2 and 6 for current state.
+
+Date: 2026-02-10
+Agent: gpt-5.3-codex-xhigh
+Phase: Workbench style controls + docs parity reconciliation
+Status: Done
+Summary:
+- Wired `StyleControls` into Workbench (docked right panel on wide screens + right overlay drawer on narrow screens) and backed it with `fetchSettings`/`updateSettings` so style edits now persist from Workbench.
+- Confirmed Project Hub delete flow remains live (project-data-only delete with confirmation; backend cancel-then-delete semantics for running project jobs).
+- Reconciled docs to current behavior:
+  - Snapshot now reflects current backend project/job semantics and Workbench style pane state.
+  - Status board wording now matches implemented Workbench shell behavior.
+- Tests run:
+  - `npm run build` (desktop)
+  - `npm run test:e2e -- tests/e2e/workbench-shell.spec.ts tests/e2e/project-hub.spec.ts`
+  - `python -m pytest tests/test_project_store.py tests/test_backend_projects_api.py tests/test_backend_job_project_update.py`
+- Known gaps: Milestone 4.1 (left list editing) remains deferred while left subtitles panel is hidden/paused; Milestone 4.3 selection styling contract still pending.
+- Next best task: Milestone 4.3 selection styling contract (selection accent behavior, export non-persistence verification, then list/on-video sync when 4.1 is resumed).
+
+Date: 2026-02-10
+Agent: gpt-5.3-codex-xhigh
+Phase: Project delete with confirmation
+Status: Done
+Summary:
+- Added backend project delete support: `project_store.delete_project(...)` and `DELETE /projects/{project_id}`.
+- Delete behavior is project-data-only (keeps source video file untouched) and now cancels running jobs for that project before delete proceeds.
+- Added frontend delete client helper (`deleteProject`) and Project Hub delete UI (trash action on card + confirmation dialog + cancel/confirm flow).
+- Updated tests:
+  - Backend: `tests/test_project_store.py` and `tests/test_backend_projects_api.py` now cover delete success/not-found and cancel-running-job behavior.
+  - E2E: `desktop/tests/e2e/project-hub.spec.ts` now covers delete confirm/cancel and successful card removal.
+- Tests run:
+  - `python -m pytest tests/test_project_store.py tests/test_backend_projects_api.py`
+  - `npm run build` (desktop)
+  - `npm run test:e2e -- tests/e2e/project-hub.spec.ts`
+  - `npm run test:e2e -- tests/e2e/workbench-shell.spec.ts`
+- Known gaps: no undo/restore flow for deleted projects; busy/read-only cross-project rules remain unimplemented.
+- Next best task: Milestone 4.3 selection styling contract and export-time verification that selection accents are never rendered.
+
+Date: 2026-02-10
+Agent: gpt-5.3-codex-xhigh
+Phase: Milestone 4.2 - on-video editing contract
+Status: Done
+Summary:
+- Added backend subtitle-read contract for projects: `project_store.get_project_subtitles_text()` and `GET /projects/{project_id}/subtitles`.
+- Added frontend project client support for subtitle editing persistence (`fetchProjectSubtitles`, `updateProject`) plus frontend SRT parse/serialize utility (`desktop/src/lib/srt.ts`).
+- Implemented Workbench on-video editing contract: click active subtitle while playing pauses + selects; click again while paused opens inline editor anchored on-video; Enter saves via `PUT /projects/{id}`; Esc cancels local edit.
+- Added/updated tests:
+  - Backend: `tests/test_backend_projects_api.py` covers missing + read-after-write subtitle endpoint behavior.
+  - E2E: `desktop/tests/e2e/workbench-shell.spec.ts` now covers Enter-save and Esc-cancel contract flows.
+- Tests run:
+  - `python -m pytest tests/test_backend_projects_api.py tests/test_project_store.py tests/test_backend_job_project_update.py`
+  - `npm run build` (desktop)
+  - `npm run test:e2e -- tests/e2e/workbench-shell.spec.ts`
+- Known gaps: Milestone 4.1 left list editing remains deferred/hidden; style inspector is still placeholder; busy/read-only cross-project rules still not enforced.
+- Next best task: Milestone 4.3 selection styling contract (selection accent behavior and explicit export non-persistence verification, plus list/on-video sync once list UI is re-enabled).
 
 Date: 2026-02-09
 Agent: gpt-5.2-codex-xhigh
