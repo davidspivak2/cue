@@ -34,15 +34,100 @@ const buildManifest = (project) => ({
 });
 
 const DEFAULT_SRT = "1\n00:00:00,000 --> 00:00:04,000\nOriginal subtitle line\n";
+const GENERATED_SRT = "1\n00:00:00,000 --> 00:00:03,000\nGenerated subtitle line\n";
 
 const getProjectIdFromUrl = (url) => url.split("/projects/")[1]?.split("/")[0] ?? "";
+const getJobIdFromEventsUrl = (url) => url.split("/jobs/")[1]?.split("/")[0] ?? "";
+
+const buildSettings = () => ({
+  save_policy: "same_folder",
+  save_folder: "",
+  transcription_quality: "auto",
+  punctuation_rescue_fallback_enabled: true,
+  apply_audio_filter: false,
+  keep_extracted_audio: false,
+  diagnostics: {
+    enabled: false,
+    write_on_success: false,
+    archive_on_exit: false,
+    categories: {
+      app_system: true,
+      video_info: true,
+      audio_info: true,
+      transcription_config: true,
+      srt_stats: true,
+      commands_timings: true
+    }
+  },
+  subtitle_mode: "word_highlight",
+  subtitle_style: {
+    preset: "Default",
+    highlight_color: "#FFD400",
+    highlight_opacity: 1.0,
+    appearance: {
+      font_family: "Arial",
+      font_size: 28,
+      text_color: "#FFFFFF",
+      outline_width: 2,
+      shadow_strength: 1,
+      vertical_offset: 28,
+      subtitle_mode: "word_highlight",
+      highlight_color: "#FFD400"
+    }
+  }
+});
 
 const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
   let putCallCount = 0;
   let lastPutPayload = null;
-  const subtitlesByProject = new Map(
-    projects.map((project) => [project.project_id, initialSrtText])
-  );
+  let lastJobPayload = null;
+  let settings = buildSettings();
+  const subtitlesByProject = new Map();
+  if (typeof initialSrtText === "string") {
+    projects.forEach((project) => {
+      subtitlesByProject.set(project.project_id, initialSrtText);
+    });
+  }
+  const eventsByJob = new Map();
+
+  await page.route("**://127.0.0.1:8765/settings", async (route) => {
+    const request = route.request();
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type"
+        }
+      });
+      return;
+    }
+    if (request.method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(settings)
+      });
+      return;
+    }
+    if (request.method() === "PUT") {
+      try {
+        const payload = JSON.parse(request.postData() ?? "{}");
+        const update = payload?.settings ?? {};
+        settings = { ...settings, ...update };
+      } catch {
+        // ignore malformed payloads in test mocks.
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(settings)
+      });
+      return;
+    }
+    await route.continue();
+  });
 
   await page.route("**://127.0.0.1:8765/projects", async (route) => {
     const request = route.request();
@@ -132,9 +217,72 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
     });
   });
 
+  await page.route("**://127.0.0.1:8765/jobs", async (route) => {
+    const request = route.request();
+    if (request.method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    try {
+      lastJobPayload = JSON.parse(request.postData() ?? "{}");
+    } catch {
+      lastJobPayload = null;
+    }
+    const jobId = `job-${Date.now()}`;
+    const eventsUrl = `http://127.0.0.1:8765/jobs/${jobId}/events`;
+    const ts = new Date().toISOString();
+    const payloadProjectId =
+      (lastJobPayload && typeof lastJobPayload.project_id === "string"
+        ? lastJobPayload.project_id
+        : projects[0]?.project_id) || "";
+    const kind = lastJobPayload?.kind;
+    if (kind === "create_subtitles" && payloadProjectId) {
+      subtitlesByProject.set(payloadProjectId, GENERATED_SRT);
+      const target = projects.find((entry) => entry.project_id === payloadProjectId);
+      if (target) {
+        target.status = "ready";
+      }
+    }
+    const eventsBody = [
+      `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "started", heading: "Creating subtitles" })}\n\n`,
+      `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "progress", pct: 100, message: "Done" })}\n\n`,
+      `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "completed", status: "completed" })}\n\n`
+    ].join("");
+    eventsByJob.set(jobId, eventsBody);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ job_id: jobId, events_url: eventsUrl, status: "running" })
+    });
+  });
+
+  await page.route("**://127.0.0.1:8765/jobs/*/events", async (route) => {
+    const request = route.request();
+    const jobId = getJobIdFromEventsUrl(request.url());
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache"
+      },
+      body:
+        eventsByJob.get(jobId) ??
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts: new Date().toISOString(), type: "completed", status: "completed" })}\n\n`
+    });
+  });
+
+  await page.route("**://127.0.0.1:8765/jobs/*/cancel", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true })
+    });
+  });
+
   return {
     getPutCallCount: () => putCallCount,
-    getLastPutPayload: () => lastPutPayload
+    getLastPutPayload: () => lastPutPayload,
+    getLastJobPayload: () => lastJobPayload
   };
 };
 
@@ -202,6 +350,42 @@ test("workbench shell narrow overlays", async ({ page }) => {
 
   await page.getByTestId("workbench-overlay-scrim").click();
   await expect(page.getByTestId("workbench-right-drawer")).toHaveCount(0);
+});
+
+test("workbench shows empty state before subtitles are created", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects, null);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-empty-state")).toBeVisible();
+  await expect(page.getByText("No subtitles yet.")).toBeVisible();
+  await expect(page.getByTestId("workbench-create-subtitles")).toBeVisible();
+  await expect(page.getByTestId("workbench-right-panel")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-open-style")).toHaveCount(0);
+});
+
+test("workbench creates subtitles from empty state", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects, null);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  const createRequest = page.waitForRequest(
+    (request) => request.url().includes("/jobs") && request.method() === "POST"
+  );
+  await page.getByTestId("workbench-create-subtitles").click();
+  await createRequest;
+
+  await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-right-panel")).toBeVisible();
+  expect(api.getLastJobPayload()?.project_id).toBe("project-1");
 });
 
 test("on-video contract saves subtitle with Enter", async ({ page }) => {

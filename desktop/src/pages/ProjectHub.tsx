@@ -53,6 +53,8 @@ const STATUS_LABELS: Record<string, string> = {
 
 const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v"]);
 const MAX_DURATION_DIFF_SECONDS = 3;
+const NEW_PROJECT_CTA = "New project";
+const CREATE_SUBTITLES_CTA = "Create subtitles";
 
 const formatDuration = (durationSeconds?: number | null) => {
   if (durationSeconds === null || durationSeconds === undefined) {
@@ -222,15 +224,20 @@ const ProjectHub = () => {
       setBanner(null);
       setIsCreating(true);
       try {
-        await createProject(videoPath);
+        const createdProject = await createProject(videoPath);
         await loadProjects();
+        openOrActivateTab({
+          projectId: createdProject.project_id,
+          title: resolveProjectTitle(createdProject)
+        });
+        navigate(`/workbench/${encodeURIComponent(createdProject.project_id)}`);
       } catch (err) {
         showBanner("error", err instanceof Error ? err.message : "Failed to create project.");
       } finally {
         setIsCreating(false);
       }
     },
-    [loadProjects, showBanner]
+    [loadProjects, navigate, openOrActivateTab, showBanner]
   );
 
   const handleFileSelected = (file: File) => {
@@ -474,6 +481,16 @@ const ProjectHub = () => {
     navigate(`/workbench/${encodeURIComponent(project.project_id)}`);
   };
 
+  const handleCreateSubtitlesFromCard = (project: ProjectSummary) => {
+    if (isBusyOperation || project.missing_video || project.status !== "needs_subtitles") {
+      return;
+    }
+    openOrActivateTab({ projectId: project.project_id, title: resolveProjectTitle(project) });
+    navigate(`/workbench/${encodeURIComponent(project.project_id)}`, {
+      state: { autoStartSubtitles: true }
+    });
+  };
+
   const confirmRelinkWarning = async () => {
     if (!relinkWarning) {
       return;
@@ -513,6 +530,29 @@ const ProjectHub = () => {
   const showEmptyState = !isLoading && projects.length === 0;
   const enableRootDrop = !isTauriEnv && !showEmptyState && !isBusyOperation;
 
+  React.useEffect(() => {
+    // #region agent log
+    fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: "post-fix",
+        hypothesisId: "H6",
+        location: "desktop/src/pages/ProjectHub.tsx:520",
+        message: "Project Hub CTA labels rendered",
+        data: {
+          pathname: window.location.pathname,
+          headerCtaLabel: NEW_PROJECT_CTA,
+          emptyStateCtaLabel: NEW_PROJECT_CTA,
+          isLoading,
+          projectCount: projects.length
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {});
+    // #endregion
+  }, [isLoading, projects.length]);
+
   return (
     <div
       data-testid="project-hub"
@@ -527,13 +567,13 @@ const ProjectHub = () => {
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Project Hub</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Projects</h1>
           <p className="text-sm text-muted-foreground">
             Create a new project or open an existing one.
           </p>
         </div>
         <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
-          New project
+          {NEW_PROJECT_CTA}
         </Button>
       </div>
 
@@ -596,14 +636,14 @@ const ProjectHub = () => {
           >
             <p className="text-lg font-semibold text-foreground">No projects yet</p>
             <p className="text-sm text-muted-foreground">
-              Drop a video anywhere on this screen or use “New project”.
+              Drop a video anywhere on this screen or use "{NEW_PROJECT_CTA}".
             </p>
             <Button
               variant="secondary"
               onClick={openFileDialog}
               disabled={isCreating || isBusyOperation}
             >
-              New project
+              {NEW_PROJECT_CTA}
             </Button>
           </div>
         ) : (
@@ -688,9 +728,30 @@ const ProjectHub = () => {
                   </Button>
                 </div>
                 <div className="mt-3 space-y-1">
-                  <p className="truncate text-sm font-medium text-foreground">
-                    {project.title || "Untitled project"}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                      {project.title || "Untitled project"}
+                    </p>
+                    {project.status === "needs_subtitles" && !project.missing_video && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleCreateSubtitlesFromCard(project);
+                        }}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                        }}
+                        disabled={cardDisabled}
+                        data-testid={`project-card-create-subtitles-${project.project_id}`}
+                      >
+                        {CREATE_SUBTITLES_CTA}
+                      </Button>
+                    )}
+                  </div>
                   {durationLabel && (
                     <p className="text-xs text-muted-foreground">{durationLabel}</p>
                   )}

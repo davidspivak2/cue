@@ -1,6 +1,7 @@
 # Project Roadmap (Single Source of Truth)
 
 Note: Tauri migration tracking lives in `docs/internal/TAURI_REACT_OVERHAUL_PLAN.md`; this roadmap is for product/pipeline priorities.
+Terminology note: the user-facing screen label is now **"Projects"** (same screen/route previously labeled "Project Hub").
 
 ## Rules
 - This file is the ONLY place to look for “what to do next”.
@@ -326,9 +327,12 @@ Definition of done:
 - Backend project persistence complete: `/projects` endpoints (`GET/POST`, `GET/PUT/DELETE /projects/{id}`, `GET /projects/{id}/subtitles`, `POST /projects/{id}/relink`) + on-disk project folders + job `project_id` linkage.
 - Project Hub delete flow complete: confirmed delete in UI, project-data-only removal, and backend cancel-then-delete behavior.
 - Workbench on-video edit + style pane complete: on-video Enter/Esc editing contract is live and Workbench style pane now renders real `StyleControls` (wide + narrow overlay).
+- Projects entry flow update complete: top-right CTA is now `New project`, creating a project auto-opens its Workbench tab, and `needs_subtitles` cards now include a secondary `Create subtitles` action.
+- Workbench no-subtitles state update complete: strict empty state (`No subtitles yet.` + primary `Create subtitles`) is live, style pane/drawer is hidden until subtitles exist, and create-subtitles now runs directly in Workbench with checklist/progress/cancel plus `project_id` job linkage.
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.
+- 2026-02-10 — User-facing label updated from "Project Hub" to "Projects"; no route/model change.
 - 2026-02-08 — Milestone 1 backend completed (projects storage + `/projects` API + job linkage) ahead of Project Hub UI.
 
 ## Appendix: Archived plans (original content)
