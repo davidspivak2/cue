@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi import HTTPException
+
 from app import project_store
 from app.paths import get_projects_dir
 
@@ -45,3 +47,28 @@ def test_create_list_relink_update(tmp_path: Path, monkeypatch) -> None:
     projects = project_store.list_projects()
     assert projects[0].missing_video is True
     assert projects[0].status == "missing_file"
+
+
+def test_delete_project(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+    project_dir = get_projects_dir() / project_id
+    assert project_dir.exists()
+
+    project_store.delete_project(project_id)
+
+    assert not project_dir.exists()
+    assert project_store.list_projects() == []
+
+    try:
+        project_store.get_project(project_id)
+    except HTTPException as exc:
+        assert exc.status_code == 404
+        assert exc.detail == "project_not_found"
+    else:
+        raise AssertionError("Expected project_not_found after delete")

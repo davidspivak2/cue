@@ -1,5 +1,5 @@
 import * as React from "react";
-import { X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -18,7 +18,13 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { createProject, fetchProjects, ProjectSummary, relinkProject } from "@/projectsClient";
+import {
+  createProject,
+  deleteProject,
+  fetchProjects,
+  ProjectSummary,
+  relinkProject
+} from "@/projectsClient";
 import { useWorkbenchTabs } from "@/workbenchTabs";
 
 type FileWithPath = File & { path?: string };
@@ -159,7 +165,7 @@ const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean)
 
 const ProjectHub = () => {
   const navigate = useNavigate();
-  const { openOrActivateTab } = useWorkbenchTabs();
+  const { closeTab, openOrActivateTab } = useWorkbenchTabs();
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [banner, setBanner] = React.useState<Banner | null>(null);
@@ -169,15 +175,20 @@ const ProjectHub = () => {
     null
   );
   const [relinkWarning, setRelinkWarning] = React.useState<RelinkWarning | null>(null);
+  const [deleteConfirmProject, setDeleteConfirmProject] =
+    React.useState<ProjectSummary | null>(null);
   const [pendingRelinkProject, setPendingRelinkProject] = React.useState<ProjectSummary | null>(
     null
   );
   const [busyProjectId, setBusyProjectId] = React.useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const relinkInputRef = React.useRef<HTMLInputElement>(null);
 
   const isTauriEnv = isTauri();
   const isRelinking = busyProjectId !== null;
+  const isDeleting = deletingProjectId !== null;
+  const isBusyOperation = isRelinking || isDeleting;
 
   const showBanner = React.useCallback((type: BannerTone, message: string) => {
     setBanner({ type, message });
@@ -240,7 +251,7 @@ const ProjectHub = () => {
   };
 
   const openFileDialog = React.useCallback(async () => {
-    if (isCreating || isRelinking) {
+    if (isCreating || isBusyOperation) {
       return;
     }
     if (!isTauriEnv) {
@@ -265,7 +276,7 @@ const ProjectHub = () => {
     } catch (dialogError) {
       showBanner("error", "Could not open the file picker. Please try again.");
     }
-  }, [handleCreateProject, isCreating, isRelinking, isTauriEnv, showBanner]);
+  }, [handleCreateProject, isBusyOperation, isCreating, isTauriEnv, showBanner]);
 
   React.useEffect(() => {
     if (!isTauriEnv) {
@@ -296,7 +307,7 @@ const ProjectHub = () => {
 
   const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (isCreating || isRelinking) {
+    if (isCreating || isBusyOperation) {
       return;
     }
     setIsDragging(true);
@@ -304,14 +315,14 @@ const ProjectHub = () => {
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (isCreating || isRelinking) {
+    if (isCreating || isBusyOperation) {
       return;
     }
     setIsDragging(true);
   };
 
   const handleDragLeave = () => {
-    if (isCreating || isRelinking) {
+    if (isCreating || isBusyOperation) {
       return;
     }
     setIsDragging(false);
@@ -319,7 +330,7 @@ const ProjectHub = () => {
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (isCreating || isRelinking) {
+    if (isCreating || isBusyOperation) {
       return;
     }
     setIsDragging(false);
@@ -397,7 +408,7 @@ const ProjectHub = () => {
 
   const beginRelinkSelection = React.useCallback(
     async (project: ProjectSummary) => {
-      if (isRelinking) {
+      if (isBusyOperation) {
         return;
       }
       setRelinkPromptProject(null);
@@ -428,7 +439,7 @@ const ProjectHub = () => {
       setPendingRelinkProject(project);
       relinkInputRef.current?.click();
     },
-    [handleRelinkSelection, isRelinking, isTauriEnv, showBanner]
+    [handleRelinkSelection, isBusyOperation, isTauriEnv, showBanner]
   );
 
   const handleRelinkInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -452,7 +463,7 @@ const ProjectHub = () => {
   };
 
   const handleCardClick = (project: ProjectSummary) => {
-    if (isRelinking) {
+    if (isBusyOperation) {
       return;
     }
     if (project.missing_video || project.status === "missing_file") {
@@ -472,8 +483,35 @@ const ProjectHub = () => {
     await performRelink(project, path);
   };
 
+  const confirmDeleteProject = React.useCallback(async () => {
+    if (!deleteConfirmProject || isBusyOperation) {
+      return;
+    }
+    const project = deleteConfirmProject;
+    setDeleteConfirmProject(null);
+    setBanner(null);
+    setDeletingProjectId(project.project_id);
+    try {
+      const result = await deleteProject(project.project_id);
+      setProjects((prev) => prev.filter((entry) => entry.project_id !== project.project_id));
+      closeTab(project.project_id);
+      const cancelledCount = Array.isArray(result.cancelled_job_ids)
+        ? result.cancelled_job_ids.length
+        : 0;
+      const cancelledMessage =
+        cancelledCount > 0
+          ? ` Running job cancelled first${cancelledCount > 1 ? " (multiple jobs)." : "."}`
+          : "";
+      showBanner("info", `Project deleted.${cancelledMessage}`);
+    } catch (err) {
+      showBanner("error", err instanceof Error ? err.message : "Failed to delete project.");
+    } finally {
+      setDeletingProjectId(null);
+    }
+  }, [closeTab, deleteConfirmProject, isBusyOperation, showBanner]);
+
   const showEmptyState = !isLoading && projects.length === 0;
-  const enableRootDrop = !isTauriEnv && !showEmptyState && !isRelinking;
+  const enableRootDrop = !isTauriEnv && !showEmptyState && !isBusyOperation;
 
   return (
     <div
@@ -494,7 +532,7 @@ const ProjectHub = () => {
             Create a new project or open an existing one.
           </p>
         </div>
-        <Button onClick={openFileDialog} disabled={isCreating || isRelinking}>
+        <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
           New project
         </Button>
       </div>
@@ -505,7 +543,7 @@ const ProjectHub = () => {
         accept="video/*"
         className="hidden"
         onChange={handleInputChange}
-        disabled={isCreating || isRelinking}
+        disabled={isCreating || isBusyOperation}
         data-testid="new-project-input"
       />
 
@@ -515,7 +553,7 @@ const ProjectHub = () => {
         accept="video/*"
         className="hidden"
         onChange={handleRelinkInputChange}
-        disabled={isRelinking}
+        disabled={isBusyOperation}
         data-testid="relink-input"
       />
 
@@ -563,7 +601,7 @@ const ProjectHub = () => {
             <Button
               variant="secondary"
               onClick={openFileDialog}
-              disabled={isCreating || isRelinking}
+              disabled={isCreating || isBusyOperation}
             >
               New project
             </Button>
@@ -571,7 +609,7 @@ const ProjectHub = () => {
         ) : (
           <DropZone
             onFileSelected={handleFileSelected}
-            disabled={isCreating || isRelinking}
+            disabled={isCreating || isBusyOperation}
             className="rounded-lg"
           />
         ))}
@@ -582,17 +620,30 @@ const ProjectHub = () => {
             const thumbnailSrc = resolveThumbnailSrc(project.thumbnail_path, isTauriEnv);
             const durationLabel = formatDuration(project.duration_seconds);
             const statusLabel = resolveStatusLabel(project);
-            const isBusy = busyProjectId === project.project_id;
+            const isBusy =
+              busyProjectId === project.project_id || deletingProjectId === project.project_id;
+            const cardDisabled = isBusyOperation;
             return (
-              <button
+              <div
                 key={project.project_id}
-                type="button"
+                role="button"
+                tabIndex={cardDisabled ? -1 : 0}
                 onClick={() => handleCardClick(project)}
-                disabled={isRelinking}
+                onKeyDown={(event) => {
+                  if (cardDisabled) {
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleCardClick(project);
+                  }
+                }}
+                aria-disabled={cardDisabled}
                 aria-busy={isBusy}
+                data-testid={`project-card-${project.project_id}`}
                 className={cn(
                   "rounded-lg border bg-card p-3 text-left transition",
-                  isRelinking ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:border-primary/60",
+                  cardDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:border-primary/60",
                   isBusy ? "ring-1 ring-primary/40" : ""
                 )}
               >
@@ -614,6 +665,27 @@ const ProjectHub = () => {
                   <Badge variant="secondary" className="absolute left-2 top-2">
                     {statusLabel}
                   </Badge>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-2 top-2 h-7 w-7 bg-background/80 text-muted-foreground hover:text-destructive"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (cardDisabled) {
+                        return;
+                      }
+                      setDeleteConfirmProject(project);
+                    }}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    disabled={cardDisabled}
+                    aria-label={`Delete ${resolveProjectTitle(project)}`}
+                    data-testid={`project-card-delete-${project.project_id}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
                 <div className="mt-3 space-y-1">
                   <p className="truncate text-sm font-medium text-foreground">
@@ -623,11 +695,53 @@ const ProjectHub = () => {
                     <p className="text-xs text-muted-foreground">{durationLabel}</p>
                   )}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
       )}
+
+      <Dialog
+        open={Boolean(deleteConfirmProject)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteConfirmProject(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete project?</DialogTitle>
+            <DialogDescription>
+              This removes the project and its saved subtitle/style/export data from Cue. Your
+              original video file stays on your computer.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteConfirmProject ? (
+            <p className="text-sm text-muted-foreground">
+              Project: <span className="font-medium text-foreground">{resolveProjectTitle(deleteConfirmProject)}</span>
+            </p>
+          ) : null}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost" type="button" disabled={isDeleting}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                void confirmDeleteProject();
+              }}
+              disabled={isBusyOperation}
+              data-testid="confirm-delete-project"
+            >
+              {isDeleting ? "Deleting..." : "Delete project"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(relinkPromptProject)}
@@ -658,7 +772,7 @@ const ProjectHub = () => {
                   void beginRelinkSelection(relinkPromptProject);
                 }
               }}
-              disabled={isRelinking}
+              disabled={isBusyOperation}
             >
               Select file
             </Button>

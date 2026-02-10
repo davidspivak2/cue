@@ -3,13 +3,26 @@ import { ArrowLeft } from "lucide-react";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useNavigate, useParams } from "react-router-dom";
 
+import StyleControls from "@/components/SubtitleStyle/StyleControls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { fetchProject, ProjectManifest } from "@/projectsClient";
+import {
+  fetchProject,
+  fetchProjectSubtitles,
+  ProjectManifest,
+  updateProject
+} from "@/projectsClient";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
 import { useWorkbenchTabs } from "@/workbenchTabs";
+import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
+import {
+  fetchSettings,
+  SettingsConfig,
+  SubtitleStyleAppearance,
+  updateSettings
+} from "@/settingsClient";
 
 const STATUS_LABELS: Record<string, string> = {
   needs_video: "Needs video",
@@ -40,6 +53,78 @@ const resolveStatusLabel = (status?: string | null) => {
   return STATUS_LABELS[status] ?? "Needs subtitles";
 };
 
+const extractErrorDetail = (message: string): string => {
+  try {
+    const parsed = JSON.parse(message) as { detail?: unknown };
+    if (typeof parsed.detail === "string") {
+      return parsed.detail;
+    }
+  } catch {
+    // ignore parse failures; return raw string below.
+  }
+  return message;
+};
+
+const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
+  font_family: "Arial",
+  font_size: 28,
+  font_style: "regular",
+  text_color: "#FFFFFF",
+  text_opacity: 1.0,
+  letter_spacing: 0,
+  outline_enabled: true,
+  outline_width: 2,
+  outline_color: "#000000",
+  shadow_enabled: true,
+  shadow_strength: 1,
+  shadow_offset_x: 0,
+  shadow_offset_y: 0,
+  shadow_color: "#000000",
+  shadow_opacity: 1.0,
+  background_mode: "none",
+  line_bg_color: "#000000",
+  line_bg_opacity: 0.7,
+  line_bg_padding: 8,
+  line_bg_radius: 0,
+  word_bg_color: "#000000",
+  word_bg_opacity: 0.4,
+  word_bg_padding: 8,
+  word_bg_radius: 0,
+  vertical_anchor: "bottom",
+  vertical_offset: 28,
+  subtitle_mode: "word_highlight",
+  highlight_color: "#FFD400"
+};
+
+function useDebounce<T extends (...args: never[]) => void>(
+  fn: T,
+  delayMs: number
+): T {
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fnRef = React.useRef(fn);
+  fnRef.current = fn;
+
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  return React.useCallback(
+    (...args: Parameters<T>) => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+      timerRef.current = setTimeout(() => {
+        fnRef.current(...args);
+      }, delayMs);
+    },
+    [delayMs]
+  ) as T;
+}
+
 const Workbench = () => {
   const navigate = useNavigate();
   const { projectId } = useParams();
@@ -47,9 +132,24 @@ const Workbench = () => {
   const width = useWindowWidth();
   const isNarrow = width < 1100;
   const isTauriEnv = isTauri();
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const [project, setProject] = React.useState<ProjectManifest | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [subtitleLoadError, setSubtitleLoadError] = React.useState<string | null>(null);
+  const [editError, setEditError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isStyleLoading, setIsStyleLoading] = React.useState(true);
+  const [styleError, setStyleError] = React.useState<string | null>(null);
+  const [appearance, setAppearance] =
+    React.useState<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
+  const [preset, setPreset] = React.useState("Default");
+  const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
+  const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
+  const [cues, setCues] = React.useState<SrtCue[]>([]);
+  const [selectedCueId, setSelectedCueId] = React.useState<string | null>(null);
+  const [editingCueId, setEditingCueId] = React.useState<string | null>(null);
+  const [editingText, setEditingText] = React.useState("");
+  const [isSavingCue, setIsSavingCue] = React.useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const showSubtitlesOverlay = false;
@@ -84,6 +184,80 @@ const Workbench = () => {
   }, [projectId]);
 
   React.useEffect(() => {
+    let active = true;
+    if (!projectId) {
+      setCues([]);
+      setSelectedCueId(null);
+      setEditingCueId(null);
+      setEditingText("");
+      setSubtitleLoadError(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    setCues([]);
+    setSelectedCueId(null);
+    setEditingCueId(null);
+    setEditingText("");
+    setSubtitleLoadError(null);
+    fetchProjectSubtitles(projectId)
+      .then((srtText) => {
+        if (!active) return;
+        setCues(parseSrt(srtText));
+      })
+      .catch((err) => {
+        if (!active) return;
+        const message =
+          err instanceof Error ? extractErrorDetail(err.message) : "Failed to load subtitles.";
+        if (message === "subtitles_not_found") {
+          setSubtitleLoadError(null);
+          return;
+        }
+        setSubtitleLoadError(message);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
+  const applyStyleFromSettings = React.useCallback((data: SettingsConfig) => {
+    const style = data.subtitle_style;
+    const app = (style.appearance as SubtitleStyleAppearance | undefined) ?? DEFAULT_APPEARANCE;
+    setAppearance({
+      ...DEFAULT_APPEARANCE,
+      ...app,
+      subtitle_mode: data.subtitle_mode ?? app.subtitle_mode,
+      highlight_color: style.highlight_color ?? app.highlight_color
+    });
+    setPreset(style.preset ?? "Default");
+    setHighlightOpacity(style.highlight_opacity ?? 1.0);
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    setIsStyleLoading(true);
+    fetchSettings()
+      .then((data) => {
+        if (!active) return;
+        applyStyleFromSettings(data);
+        setStyleError(null);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setStyleError(err instanceof Error ? err.message : "Failed to load style settings.");
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsStyleLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [applyStyleFromSettings]);
+
+  React.useEffect(() => {
     if (!projectId) {
       return;
     }
@@ -96,7 +270,19 @@ const Workbench = () => {
     }
     setLeftPanelOpen(false);
     setRightOverlayOpen(false);
+    setCurrentTimeSeconds(0);
+    setEditError(null);
   }, [projectId]);
+
+  React.useEffect(() => {
+    if (selectedCueId && !cues.some((cue) => cue.id === selectedCueId)) {
+      setSelectedCueId(null);
+    }
+    if (editingCueId && !cues.some((cue) => cue.id === editingCueId)) {
+      setEditingCueId(null);
+      setEditingText("");
+    }
+  }, [cues, editingCueId, selectedCueId]);
 
   React.useEffect(() => {
     if (!projectId || !project) {
@@ -119,6 +305,149 @@ const Workbench = () => {
   const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
   const isOverlayOpen = (showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen;
   const showScrim = isNarrow && isOverlayOpen;
+  const activeCue = React.useMemo(() => {
+    return (
+      cues.find(
+        (cue) => cue.startSeconds <= currentTimeSeconds && currentTimeSeconds <= cue.endSeconds
+      ) ?? null
+    );
+  }, [cues, currentTimeSeconds]);
+  const isEditingCue = editingCueId !== null;
+  const isActiveCueSelected = activeCue ? selectedCueId === activeCue.id : false;
+  const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
+
+  const persistStyleSettings = React.useCallback(
+    async (
+      nextAppearance: SubtitleStyleAppearance,
+      nextPreset: string,
+      nextHighlightOpacity: number
+    ) => {
+      try {
+        await updateSettings({
+          subtitle_mode: nextAppearance.subtitle_mode,
+          subtitle_style: {
+            preset: nextPreset,
+            highlight_color: nextAppearance.highlight_color,
+            highlight_opacity: nextHighlightOpacity,
+            appearance: nextAppearance as unknown as Record<string, unknown>
+          }
+        });
+        setStyleError(null);
+      } catch (err) {
+        setStyleError(err instanceof Error ? err.message : "Failed to save style settings.");
+      }
+    },
+    []
+  );
+
+  const debouncedPersistStyle = useDebounce(
+    (
+      nextAppearance: SubtitleStyleAppearance,
+      nextPreset: string,
+      nextHighlightOpacity: number
+    ) => {
+      void persistStyleSettings(nextAppearance, nextPreset, nextHighlightOpacity);
+    },
+    500
+  );
+
+  const handleAppearanceChange = (changes: Partial<SubtitleStyleAppearance>) => {
+    setAppearance((prev) => {
+      const next = { ...prev, ...changes };
+      const nextPreset = preset === "Custom" ? preset : "Custom";
+      debouncedPersistStyle(next, nextPreset, highlightOpacity);
+      return next;
+    });
+    if (preset !== "Custom") {
+      setPreset("Custom");
+    }
+  };
+
+  const handlePresetChange = (nextPreset: string) => {
+    setPreset(nextPreset);
+    debouncedPersistStyle(appearance, nextPreset, highlightOpacity);
+  };
+
+  const handleHighlightOpacityChange = (nextHighlightOpacity: number) => {
+    setHighlightOpacity(nextHighlightOpacity);
+    debouncedPersistStyle(appearance, preset, nextHighlightOpacity);
+  };
+
+  const handleResetPreset = () => {
+    void (async () => {
+      await persistStyleSettings(appearance, preset, highlightOpacity);
+      try {
+        const data = await fetchSettings();
+        applyStyleFromSettings(data);
+        setStyleError(null);
+      } catch (err) {
+        setStyleError(err instanceof Error ? err.message : "Failed to reload style settings.");
+      }
+    })();
+  };
+
+  const handleCancelEdit = React.useCallback(() => {
+    setEditingCueId(null);
+    setEditingText("");
+    setEditError(null);
+  }, []);
+
+  const handleSaveEdit = React.useCallback(async () => {
+    if (!projectId || !editingCueId) {
+      return;
+    }
+    const nextCues = cues.map((cue) =>
+      cue.id === editingCueId
+        ? {
+            ...cue,
+            text: editingText
+          }
+        : cue
+    );
+
+    setIsSavingCue(true);
+    try {
+      await updateProject(projectId, {
+        subtitles_srt_text: serializeSrt(nextCues)
+      });
+      setCues(nextCues);
+      setSelectedCueId(editingCueId);
+      setEditingCueId(null);
+      setEditingText("");
+      setEditError(null);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to save subtitle changes.");
+    } finally {
+      setIsSavingCue(false);
+    }
+  }, [cues, editingCueId, editingText, projectId]);
+
+  const handleCueClick = React.useCallback(
+    (cue: SrtCue) => {
+      if (isSavingCue) {
+        return;
+      }
+      setEditError(null);
+      const videoElement = videoRef.current;
+      const isPlaying = Boolean(videoElement && !videoElement.paused && !videoElement.ended);
+      if (isPlaying) {
+        videoElement?.pause();
+        setSelectedCueId(cue.id);
+        setEditingCueId(null);
+        setEditingText(cue.text);
+        return;
+      }
+      if (selectedCueId === cue.id) {
+        setEditingCueId(cue.id);
+        setEditingText(cue.text);
+        return;
+      }
+      setSelectedCueId(cue.id);
+      setEditingCueId(null);
+      setEditingText(cue.text);
+    },
+    [isSavingCue, selectedCueId]
+  );
 
   const openLeftPanel = () => {
     if (!showSubtitlesOverlay) {
@@ -152,17 +481,37 @@ const Workbench = () => {
   }, [leftPanelOpen, rightOverlayOpen, showSubtitlesOverlay]);
 
   React.useEffect(() => {
-    if (!isOverlayOpen) {
+    if (!isOverlayOpen && !isEditingCue) {
       return;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeOverlays();
+      if (event.key !== "Escape") {
+        return;
       }
+      if (isEditingCue) {
+        event.preventDefault();
+        handleCancelEdit();
+        return;
+      }
+      closeOverlays();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeOverlays, isOverlayOpen]);
+  }, [closeOverlays, handleCancelEdit, isEditingCue, isOverlayOpen]);
+
+  const handleEditorKeyDown = async (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      handleCancelEdit();
+      return;
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!isSavingCue) {
+        await handleSaveEdit();
+      }
+    }
+  };
 
   const handleSelectTab = (targetId: string) => {
     if (targetId === projectId) {
@@ -170,6 +519,32 @@ const Workbench = () => {
     }
     navigate(`/workbench/${encodeURIComponent(targetId)}`);
   };
+
+  const stylePanelContent = (
+    <>
+      {styleError && (
+        <div
+          className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+          data-testid="workbench-style-error"
+        >
+          {styleError}
+        </div>
+      )}
+      {isStyleLoading ? (
+        <p className="text-xs text-muted-foreground">Loading style controls...</p>
+      ) : (
+        <StyleControls
+          appearance={appearance}
+          preset={preset}
+          highlightOpacity={highlightOpacity}
+          onAppearanceChange={handleAppearanceChange}
+          onPresetChange={handlePresetChange}
+          onHighlightOpacityChange={handleHighlightOpacityChange}
+          onResetPreset={handleResetPreset}
+        />
+      )}
+    </>
+  );
 
   return (
     <div data-testid="workbench" className="flex h-[calc(100vh-3rem)] flex-col gap-4">
@@ -275,11 +650,67 @@ const Workbench = () => {
               data-testid="workbench-center-panel"
             >
               {hasVideoPreview ? (
-                <video
-                  className="h-full w-full rounded-md bg-black object-contain"
-                  controls
-                  src={previewSrc}
-                />
+                <div className="relative h-full w-full">
+                  <video
+                    ref={videoRef}
+                    className="h-full w-full rounded-md bg-black object-contain"
+                    controls
+                    src={previewSrc}
+                    onLoadedMetadata={(event) =>
+                      setCurrentTimeSeconds(event.currentTarget.currentTime || 0)
+                    }
+                    onTimeUpdate={(event) =>
+                      setCurrentTimeSeconds(event.currentTarget.currentTime || 0)
+                    }
+                    onSeeked={(event) => setCurrentTimeSeconds(event.currentTarget.currentTime || 0)}
+                  />
+                  {activeCue && (
+                    <div className="pointer-events-none absolute inset-0 flex items-end justify-center px-4 pb-14">
+                      {isEditingActiveCue ? (
+                        <textarea
+                          data-testid="workbench-subtitle-editor"
+                          className="pointer-events-auto w-full max-w-[720px] resize-none rounded-md border border-primary/70 bg-background/95 px-3 py-2 text-center text-base leading-snug text-foreground shadow-lg outline-none"
+                          value={editingText}
+                          onChange={(event) => setEditingText(event.target.value)}
+                          onKeyDown={handleEditorKeyDown}
+                          rows={2}
+                          autoFocus
+                          disabled={isSavingCue}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="workbench-active-subtitle"
+                          className={cn(
+                            "pointer-events-auto max-w-[720px] rounded-md px-3 py-2 text-center text-base font-medium leading-snug text-white shadow-lg transition",
+                            isActiveCueSelected
+                              ? "outline-2 outline-offset-2 outline-primary bg-black/55"
+                              : "bg-black/45 hover:bg-black/60"
+                          )}
+                          onClick={() => handleCueClick(activeCue)}
+                        >
+                          {activeCue.text}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {subtitleLoadError && (
+                    <div
+                      className="pointer-events-none absolute left-3 top-3 rounded-md border border-destructive/50 bg-destructive/15 px-2 py-1 text-xs text-destructive"
+                      data-testid="workbench-subtitles-error"
+                    >
+                      {subtitleLoadError}
+                    </div>
+                  )}
+                  {editError && (
+                    <div
+                      className="pointer-events-none absolute right-3 top-3 rounded-md border border-destructive/50 bg-destructive/15 px-2 py-1 text-xs text-destructive"
+                      data-testid="workbench-subtitle-save-error"
+                    >
+                      {editError}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="text-sm text-muted-foreground">Preview not available</div>
               )}
@@ -294,9 +725,7 @@ const Workbench = () => {
                   <h2 className="text-sm font-semibold">Style</h2>
                 </div>
                 <ScrollArea className="min-h-0 flex-1 px-4 py-3">
-                  <p className="text-xs text-muted-foreground">
-                    Placeholder — style controls will live here.
-                  </p>
+                  {stylePanelContent}
                 </ScrollArea>
               </section>
             )}
@@ -341,9 +770,7 @@ const Workbench = () => {
                 </Button>
               </div>
               <ScrollArea className="min-h-0 flex-1 px-4 py-3">
-                <p className="text-xs text-muted-foreground">
-                  Placeholder — style controls will live here.
-                </p>
+                {stylePanelContent}
               </ScrollArea>
             </aside>
           )}

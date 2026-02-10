@@ -95,14 +95,16 @@ Definition of done:
 - Deliverable:
   - Create new project from video
   - Open existing project list
-  - Open/close project tabs (no deletion required)
+  - Open/close project tabs
+  - Delete project from Project Hub with confirmation (project data only; source video file remains untouched)
   - Relink missing source video workflow
 - Acceptance criteria:
+  - Deleting a project removes its project record/artifacts and it no longer appears in the project list.
   - If source video is missing, app shows missing state and relink succeeds.
 
 1.3 Project status model
 - Deliverable:
-  - Status enum: Needs video / Needs subtitles / Ready / Exporting / Done / Missing file
+  - Status enum: Needs video / Needs subtitles / Ready / Exporting / Done / Missing file (API values: `needs_video` / `needs_subtitles` / `ready` / `exporting` / `done` / `missing_file`)
 - Acceptance criteria:
   - Status is correct for each stage and survives restart.
 
@@ -137,19 +139,20 @@ Definition of done:
 3.1 Workbench layout regions
 - Deliverable:
   - Center video preview
-  - Left “All subtitles” panel
+  - Left “All subtitles” panel (currently hidden/paused in implementation to protect preview size; overlay-only when re-enabled)
   - Right style inspector
 - Acceptance criteria:
   - Workbench tab shows these regions with stable sizing.
 
 3.2 Left panel responsive behavior
+Status: Deferred while left panel remains hidden/paused.
 - Deliverable:
   - Collapsed by default
   - Docked at wide widths, resizable, per-project persisted width
   - Overlay drawer under 1100px with scrim + Esc closes
   - Only one overlay open at a time (left vs right)
 - Acceptance criteria:
-  - Resize window around threshold: dock/overlay rules work exactly.
+  - Resize window around threshold: dock/overlay rules work exactly once left panel is re-enabled.
 
 3.3 Right panel responsive behavior
 - Deliverable:
@@ -161,7 +164,8 @@ Definition of done:
 Definition of done:
 - Workbench behaves correctly across window sizes and supports the unified workflow.
 
-### Milestone 4 — In-app subtitle text editing (core missing feature)
+### Milestone 4 — In-app subtitle text editing (partially implemented)
+Current status: Milestone 4.2 is implemented in Workbench; Milestones 4.1 and 4.3 remain.
 4.1 Left list editing
 - Deliverable:
   - Each row shows timestamps (read-only) + editable text
@@ -319,7 +323,9 @@ Definition of done:
 ## Completed
 - A short bullet list only (do not paste old plans here; those go in the archived appendices below).
 - Desktop shell/backend wiring complete: `/health` + `POST /jobs` + SSE events are live; UI can run pipeline jobs and Cancel works.
-- Backend project persistence complete: `/projects` endpoints + on-disk project folders + job `project_id` linkage.
+- Backend project persistence complete: `/projects` endpoints (`GET/POST`, `GET/PUT/DELETE /projects/{id}`, `GET /projects/{id}/subtitles`, `POST /projects/{id}/relink`) + on-disk project folders + job `project_id` linkage.
+- Project Hub delete flow complete: confirmed delete in UI, project-data-only removal, and backend cancel-then-delete behavior.
+- Workbench on-video edit + style pane complete: on-video Enter/Esc editing contract is live and Workbench style pane now renders real `StyleControls` (wide + narrow overlay).
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.

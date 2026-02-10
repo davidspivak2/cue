@@ -152,9 +152,21 @@ test("project hub card interactions", async ({ page }) => {
   await page.route("**://127.0.0.1:8765/projects/*", async (route) => {
     const request = route.request();
     const url = request.url();
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type"
+        }
+      });
+      return;
+    }
+    const projectId = url.split("/projects/")[1]?.split("/")[0];
+    const project = projects.find((entry) => entry.project_id === projectId);
+
     if (request.method() === "GET") {
-      const projectId = url.split("/projects/")[1]?.split("/")[0];
-      const project = projects.find((entry) => entry.project_id === projectId);
       if (!project) {
         await route.fulfill({
           status: 404,
@@ -171,6 +183,24 @@ test("project hub card interactions", async ({ page }) => {
       return;
     }
 
+    if (request.method() === "DELETE") {
+      if (!project) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "project_not_found" })
+        });
+        return;
+      }
+      projects = projects.filter((entry) => entry.project_id !== projectId);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, project_id: projectId, cancelled_job_ids: [] })
+      });
+      return;
+    }
+
     await route.continue();
   });
 
@@ -178,36 +208,26 @@ test("project hub card interactions", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New project" })).toBeVisible();
+  await expect(page.getByText("another.mp4")).toBeVisible();
+
+  await page.getByTestId("project-card-delete-project-3").click();
+  await expect(page.getByRole("heading", { name: "Delete project?" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByText("another.mp4")).toBeVisible();
+
+  const deleteRequest = page.waitForRequest(
+    (request) => request.url().includes("/projects/project-3") && request.method() === "DELETE"
+  );
+  await page.getByTestId("project-card-delete-project-3").click();
+  await page.getByRole("button", { name: "Delete project" }).click();
+  await deleteRequest;
+  await expect(page.getByText("another.mp4")).toHaveCount(0);
 
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
   await expect(page.getByTestId("workbench")).toBeVisible();
-  await expect(page.getByText("good.mp4")).toBeVisible();
   await expect(page.getByTestId("workbench-tabs")).toBeVisible();
   await expect(page.getByRole("tab", { name: "good.mp4" })).toBeVisible();
-  await page.getByRole("button", { name: "Back" }).click();
-  await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
-
-  await page.getByText("another.mp4").click();
-  await page.waitForURL("**/workbench/project-3");
-  await expect(page.getByRole("tab", { name: "good.mp4" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "another.mp4" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "another.mp4" })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
-
-  await page.getByRole("tab", { name: "good.mp4" }).click();
-  await page.waitForURL("**/workbench/project-1");
-  await expect(page.getByRole("tab", { name: "good.mp4" })).toHaveAttribute("aria-selected", "true");
-
-  await page.getByRole("tab", { name: "another.mp4" }).click();
-  await page.waitForURL("**/workbench/project-3");
-  await expect(page.getByRole("tab", { name: "another.mp4" })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
-
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
 
