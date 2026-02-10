@@ -176,11 +176,14 @@ Current status: Milestone 4.2 is implemented in Workbench; Milestones 4.1 and 4.
 
 4.2 On-video editing contract
 - Deliverable:
-  - Click subtitle while playing → pause + select
-  - Click again when paused → inline edit anchored at subtitle position
-  - Enter saves, Esc cancels
+  - Hover active subtitle → input-like shell + I-beam cursor
+  - Single click active subtitle while playing → pause + immediate inline edit
+  - Inline editor includes icon actions: Save (check), Undo, Cancel (x)
+  - Enter saves, Esc cancels, Ctrl/Cmd+Z undoes
+  - Save/Cancel exits edit mode and resumes playback from the paused position
 - Acceptance criteria:
-  - Interactions match exactly; no accidental exports of selection styling.
+  - Interactions match exactly (single-click edit + icon controls + keyboard parity).
+  - No accidental exports of selection styling.
 
 4.3 Selection styling contract
 - Deliverable:

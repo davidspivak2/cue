@@ -188,9 +188,14 @@ The redesign workflow is **in-app subtitle text editing only** (no external subt
    - Each row shows timestamps (read-only) + editable subtitle text.
    - Clicking a row seeks the video to that timestamp and selects the subtitle.
 2) **On-video editing**
-   - When video is **playing**: clicking the currently displayed subtitle **pauses** playback and **selects** it (no edit box yet).
-   - When **paused** and selected: clicking again enters **inline edit mode** anchored to the subtitle position.
-   - **Enter** saves, **Esc** cancels.
+   - Hovering the currently displayed subtitle shows an **input-like editing shell** and **I-beam text cursor** to signal editability.
+   - Clicking the currently displayed subtitle enters **inline edit mode** in one click (if playback is active, it pauses first).
+   - Inline edit mode is anchored to the subtitle position and exposes icon-only actions:
+     - **Save** (check icon): saves text and exits edit mode.
+     - **Undo** (undo icon): reverts the latest unsaved edit step.
+     - **Cancel** (x icon): discards unsaved changes and exits edit mode.
+   - **Enter** saves, **Esc** cancels, **Ctrl/Cmd+Z** undoes.
+   - On **Save** or **Cancel**, playback resumes from the paused timestamp when edit mode was entered from a playing state.
 
 **Selection highlight contract (never exported):**
 - Selected subtitle overlay shows a **thin accent outline** for UI selection only.

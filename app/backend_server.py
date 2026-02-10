@@ -60,6 +60,17 @@ app.add_middleware(
 )
 
 TERMINAL_STATUSES = {"completed", "cancelled", "error"}
+UI_ONLY_JOB_OPTION_KEYS = {
+    "selectedCueId",
+    "selected_cue_id",
+    "selectedCue",
+    "selected_cue",
+    "selection",
+    "selectionOutline",
+    "selection_outline",
+    "uiSelection",
+    "ui_selection",
+}
 
 
 @dataclass
@@ -398,8 +409,15 @@ def _build_runner_command(request: JobRequest) -> list[str]:
     ]
     if request.srt_path:
         command.extend(["--srt-path", request.srt_path])
-    if request.options:
-        command.extend(["--options-json", json.dumps(request.options)])
+    options = {
+        key: value
+        for key, value in request.options.items()
+        if isinstance(key, str)
+        and key not in UI_ONLY_JOB_OPTION_KEYS
+        and not key.startswith("ui_")
+    }
+    if options:
+        command.extend(["--options-json", json.dumps(options)])
     return command
 
 
