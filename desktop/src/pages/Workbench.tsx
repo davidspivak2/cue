@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Check, RotateCcw, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -171,6 +171,10 @@ const Workbench = () => {
   const isNarrow = width < 1100;
   const isTauriEnv = isTauri();
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const activeSubtitleRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const shouldResumePlaybackRef = React.useRef(false);
+  const editHistoryRef = React.useRef<string[]>([]);
+  const editHistoryIndexRef = React.useRef(0);
   const [project, setProject] = React.useState<ProjectManifest | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [subtitleLoadError, setSubtitleLoadError] = React.useState<string | null>(null);
@@ -188,6 +192,7 @@ const Workbench = () => {
   const [selectedCueId, setSelectedCueId] = React.useState<string | null>(null);
   const [editingCueId, setEditingCueId] = React.useState<string | null>(null);
   const [editingText, setEditingText] = React.useState("");
+  const [canUndoEdit, setCanUndoEdit] = React.useState(false);
   const [isSavingCue, setIsSavingCue] = React.useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
@@ -245,6 +250,10 @@ const Workbench = () => {
       setSelectedCueId(null);
       setEditingCueId(null);
       setEditingText("");
+      setCanUndoEdit(false);
+      editHistoryRef.current = [];
+      editHistoryIndexRef.current = 0;
+      shouldResumePlaybackRef.current = false;
       setSubtitleLoadError(null);
       return () => {
         active = false;
@@ -255,6 +264,10 @@ const Workbench = () => {
     setSelectedCueId(null);
     setEditingCueId(null);
     setEditingText("");
+    setCanUndoEdit(false);
+    editHistoryRef.current = [];
+    editHistoryIndexRef.current = 0;
+    shouldResumePlaybackRef.current = false;
     setSubtitleLoadError(null);
     fetchProjectSubtitles(projectId)
       .then((srtText) => {
@@ -334,6 +347,10 @@ const Workbench = () => {
     setCreateSubtitlesProgressMessage("");
     setCreateSubtitlesChecklist([]);
     setIsCreatingSubtitles(false);
+    setCanUndoEdit(false);
+    editHistoryRef.current = [];
+    editHistoryIndexRef.current = 0;
+    shouldResumePlaybackRef.current = false;
     setCreateSubtitlesJobStream((prev) => {
       prev?.close();
       return null;
@@ -347,6 +364,10 @@ const Workbench = () => {
     if (editingCueId && !cues.some((cue) => cue.id === editingCueId)) {
       setEditingCueId(null);
       setEditingText("");
+      setCanUndoEdit(false);
+      editHistoryRef.current = [];
+      editHistoryIndexRef.current = 0;
+      shouldResumePlaybackRef.current = false;
     }
   }, [cues, editingCueId, selectedCueId]);
 
@@ -619,6 +640,19 @@ const Workbench = () => {
   const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
 
   React.useEffect(() => {
+    if (!isEditingActiveCue) {
+      return;
+    }
+    const textarea = activeSubtitleRef.current;
+    if (!textarea) {
+      return;
+    }
+    if (document.activeElement !== textarea) {
+      textarea.focus();
+    }
+  }, [activeCue, isEditingActiveCue]);
+
+  React.useEffect(() => {
     if (hasSubtitles) {
       return;
     }
@@ -696,11 +730,91 @@ const Workbench = () => {
     })();
   };
 
+  const initializeEditHistory = React.useCallback((initialText: string) => {
+    editHistoryRef.current = [initialText];
+    editHistoryIndexRef.current = 0;
+    setCanUndoEdit(false);
+  }, []);
+
+  const updateEditHistory = React.useCallback((nextText: string) => {
+    const history = editHistoryRef.current;
+    const index = editHistoryIndexRef.current;
+    const truncatedHistory = history.slice(0, index + 1);
+    if (truncatedHistory[truncatedHistory.length - 1] === nextText) {
+      editHistoryRef.current = truncatedHistory;
+      editHistoryIndexRef.current = truncatedHistory.length - 1;
+      setCanUndoEdit(editHistoryIndexRef.current > 0);
+      return;
+    }
+    truncatedHistory.push(nextText);
+    editHistoryRef.current = truncatedHistory;
+    editHistoryIndexRef.current = truncatedHistory.length - 1;
+    setCanUndoEdit(editHistoryIndexRef.current > 0);
+  }, []);
+
+  const resetEditSessionState = React.useCallback(() => {
+    setCanUndoEdit(false);
+    editHistoryRef.current = [];
+    editHistoryIndexRef.current = 0;
+  }, []);
+
+  const resumePlaybackIfNeeded = React.useCallback(() => {
+    if (!shouldResumePlaybackRef.current) {
+      return;
+    }
+    shouldResumePlaybackRef.current = false;
+    const videoElement = videoRef.current;
+    if (!videoElement) {
+      return;
+    }
+    const playPromise = videoElement.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {});
+    }
+  }, []);
+
+  const beginEditingCue = React.useCallback(
+    (cue: SrtCue, resumePlaybackOnExit: boolean) => {
+      shouldResumePlaybackRef.current = resumePlaybackOnExit;
+      setSelectedCueId(cue.id);
+      setEditingCueId(cue.id);
+      setEditingText(cue.text);
+      setEditError(null);
+      initializeEditHistory(cue.text);
+    },
+    [initializeEditHistory]
+  );
+
+  const handleEditTextChange = React.useCallback(
+    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const nextText = event.target.value;
+      setEditingText(nextText);
+      updateEditHistory(nextText);
+    },
+    [updateEditHistory]
+  );
+
+  const handleUndoEdit = React.useCallback(() => {
+    if (isSavingCue) {
+      return;
+    }
+    const index = editHistoryIndexRef.current;
+    if (index <= 0) {
+      return;
+    }
+    const nextIndex = index - 1;
+    editHistoryIndexRef.current = nextIndex;
+    setEditingText(editHistoryRef.current[nextIndex] ?? "");
+    setCanUndoEdit(nextIndex > 0);
+  }, [isSavingCue]);
+
   const handleCancelEdit = React.useCallback(() => {
     setEditingCueId(null);
     setEditingText("");
     setEditError(null);
-  }, []);
+    resetEditSessionState();
+    resumePlaybackIfNeeded();
+  }, [resetEditSessionState, resumePlaybackIfNeeded]);
 
   const handleSaveEdit = React.useCallback(async () => {
     if (!projectId || !editingCueId) {
@@ -725,38 +839,28 @@ const Workbench = () => {
       setEditingCueId(null);
       setEditingText("");
       setEditError(null);
+      resetEditSessionState();
+      resumePlaybackIfNeeded();
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Failed to save subtitle changes.");
     } finally {
       setIsSavingCue(false);
     }
-  }, [cues, editingCueId, editingText, projectId]);
+  }, [cues, editingCueId, editingText, projectId, resetEditSessionState, resumePlaybackIfNeeded]);
 
   const handleCueClick = React.useCallback(
     (cue: SrtCue) => {
       if (isSavingCue) {
         return;
       }
-      setEditError(null);
       const videoElement = videoRef.current;
       const isPlaying = Boolean(videoElement && !videoElement.paused && !videoElement.ended);
       if (isPlaying) {
         videoElement?.pause();
-        setSelectedCueId(cue.id);
-        setEditingCueId(null);
-        setEditingText(cue.text);
-        return;
       }
-      if (selectedCueId === cue.id) {
-        setEditingCueId(cue.id);
-        setEditingText(cue.text);
-        return;
-      }
-      setSelectedCueId(cue.id);
-      setEditingCueId(null);
-      setEditingText(cue.text);
+      beginEditingCue(cue, isPlaying);
     },
-    [isSavingCue, selectedCueId]
+    [beginEditingCue, isSavingCue]
   );
 
   const openLeftPanel = () => {
@@ -810,6 +914,11 @@ const Workbench = () => {
   }, [closeOverlays, handleCancelEdit, isEditingCue, isOverlayOpen]);
 
   const handleEditorKeyDown = async (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      handleUndoEdit();
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       handleCancelEdit();
@@ -1026,32 +1135,79 @@ const Workbench = () => {
                   />
                   {activeCue && (
                     <div className="pointer-events-none absolute inset-0 flex items-end justify-center px-4 pb-14">
-                      {isEditingActiveCue ? (
+                      <div className="pointer-events-auto w-full max-w-[720px]">
                         <textarea
-                          data-testid="workbench-subtitle-editor"
-                          className="pointer-events-auto w-full max-w-[720px] resize-none rounded-md border border-primary/70 bg-background/95 px-3 py-2 text-center text-base leading-snug text-foreground shadow-lg outline-none"
-                          value={editingText}
-                          onChange={(event) => setEditingText(event.target.value)}
-                          onKeyDown={handleEditorKeyDown}
-                          rows={2}
-                          autoFocus
-                          disabled={isSavingCue}
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          data-testid="workbench-active-subtitle"
+                          ref={activeSubtitleRef}
+                          data-testid={isEditingActiveCue ? "workbench-subtitle-editor" : "workbench-active-subtitle"}
                           className={cn(
-                            "pointer-events-auto max-w-[720px] rounded-md px-3 py-2 text-center text-base font-medium leading-snug text-white shadow-lg transition",
-                            isActiveCueSelected
-                              ? "outline-2 outline-offset-2 outline-primary bg-black/55"
-                              : "bg-black/45 hover:bg-black/60"
+                            "w-full resize-none rounded-md px-3 py-2 text-center text-base leading-snug shadow-lg transition focus-visible:outline-none",
+                            "cursor-text",
+                            isEditingActiveCue
+                              ? "border border-primary/70 bg-background/95 text-foreground ring-1 ring-primary/45"
+                              : cn(
+                                  "border border-transparent bg-black/45 font-medium text-white",
+                                  "hover:border-primary/55 hover:bg-black/60 hover:ring-1 hover:ring-primary/40",
+                                  isActiveCueSelected
+                                    ? "outline-2 outline-offset-2 outline-primary border-primary/65 bg-black/55 ring-1 ring-primary/50"
+                                    : "outline-none"
+                                )
                           )}
-                          onClick={() => handleCueClick(activeCue)}
-                        >
-                          {activeCue.text}
-                        </button>
-                      )}
+                          value={isEditingActiveCue ? editingText : activeCue.text}
+                          onChange={handleEditTextChange}
+                          onClick={() => {
+                            if (!isEditingActiveCue) {
+                              handleCueClick(activeCue);
+                            }
+                          }}
+                          onKeyDown={isEditingActiveCue ? handleEditorKeyDown : undefined}
+                          rows={2}
+                          readOnly={!isEditingActiveCue || isSavingCue}
+                          aria-label="Active subtitle editor"
+                        />
+                        {isEditingActiveCue && (
+                          <div className="mt-2 flex items-center justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="icon"
+                              className="h-8 w-8 border border-border/70 bg-background/90"
+                              aria-label="Undo subtitle edit"
+                              title="Undo"
+                              data-testid="workbench-subtitle-undo"
+                              onClick={handleUndoEdit}
+                              disabled={isSavingCue || !canUndoEdit}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="icon"
+                              className="h-8 w-8 border border-border/70 bg-background/90"
+                              aria-label="Cancel subtitle edit"
+                              title="Cancel"
+                              data-testid="workbench-subtitle-cancel"
+                              onClick={handleCancelEdit}
+                              disabled={isSavingCue}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="default"
+                              size="icon"
+                              className="h-8 w-8"
+                              aria-label="Save subtitle edit"
+                              title="Save"
+                              data-testid="workbench-subtitle-save"
+                              onClick={() => void handleSaveEdit()}
+                              disabled={isSavingCue}
+                            >
+                              <Check className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                   {subtitleLoadError && (

@@ -295,7 +295,8 @@ const primeVideoState = async (page, { playing = true, currentTime = 1 } = {}) =
       }
       const state = {
         paused: !isPlaying,
-        pauseCalled: false
+        pauseCalled: false,
+        playCalled: false
       };
       Object.defineProperty(video, "__cueState", {
         configurable: true,
@@ -310,6 +311,11 @@ const primeVideoState = async (page, { playing = true, currentTime = 1 } = {}) =
       video.pause = () => {
         video.__cueState.pauseCalled = true;
         video.__cueState.paused = true;
+      };
+      video.play = () => {
+        video.__cueState.playCalled = true;
+        video.__cueState.paused = false;
+        return Promise.resolve();
       };
       video.currentTime = timeSeconds;
       video.dispatchEvent(new Event("timeupdate"));
@@ -408,9 +414,6 @@ test("on-video contract saves subtitle with Enter", async ({ page }) => {
       page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.pauseCalled))
     )
     .toBe(true);
-  await expect(subtitleButton).toHaveClass(/outline-primary/);
-
-  await subtitleButton.click();
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toBeVisible();
   await editor.fill("Edited subtitle line");
@@ -420,6 +423,11 @@ test("on-video contract saves subtitle with Enter", async ({ page }) => {
   await expect(subtitleButton).toContainText("Edited subtitle line");
   expect(api.getPutCallCount()).toBe(1);
   expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Edited subtitle line");
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(true);
 });
 
 test("on-video contract cancels edit with Escape", async ({ page }) => {
@@ -435,7 +443,6 @@ test("on-video contract cancels edit with Escape", async ({ page }) => {
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   await expect(subtitleButton).toBeVisible();
   await subtitleButton.click();
-  await subtitleButton.click();
 
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toBeVisible();
@@ -445,4 +452,135 @@ test("on-video contract cancels edit with Escape", async ({ page }) => {
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Original subtitle line");
   expect(api.getPutCallCount()).toBe(0);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(true);
+});
+
+test("on-video contract saves subtitle with Save icon", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: true, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await subtitleButton.click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill("Saved from icon button");
+  await page.getByTestId("workbench-subtitle-save").click();
+
+  await expect(editor).toHaveCount(0);
+  await expect(subtitleButton).toContainText("Saved from icon button");
+  expect(api.getPutCallCount()).toBe(1);
+  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Saved from icon button");
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(true);
+});
+
+test("on-video contract cancels edit with Cancel icon", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: true, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await subtitleButton.click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill("This should not save from icon");
+  await page.getByTestId("workbench-subtitle-cancel").click();
+
+  await expect(editor).toHaveCount(0);
+  await expect(subtitleButton).toContainText("Original subtitle line");
+  expect(api.getPutCallCount()).toBe(0);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(true);
+});
+
+test("on-video contract undo icon reverts unsaved edits", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await page.getByTestId("workbench-active-subtitle").click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  const undoButton = page.getByTestId("workbench-subtitle-undo");
+  await expect(editor).toBeVisible();
+  await expect(undoButton).toBeDisabled();
+
+  await editor.fill("First unsaved version");
+  await expect(undoButton).toBeEnabled();
+  await editor.fill("Second unsaved version");
+
+  await undoButton.click();
+  await expect(editor).toHaveValue("First unsaved version");
+  await undoButton.click();
+  await expect(editor).toHaveValue("Original subtitle line");
+});
+
+test("on-video contract supports keyboard undo shortcut", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await page.getByTestId("workbench-active-subtitle").click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill("Keyboard undo first");
+  await editor.fill("Keyboard undo second");
+  await editor.press("ControlOrMeta+z");
+  await expect(editor).toHaveValue("Keyboard undo first");
+});
+
+test("on-video editor controls render in dark theme", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await page.evaluate(() => {
+    document.documentElement.classList.add("dark");
+  });
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await page.getByTestId("workbench-active-subtitle").click();
+
+  await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-undo")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-cancel")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-save")).toBeVisible();
 });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from app import backend_server, project_store
@@ -59,3 +60,30 @@ def test_job_result_updates_project(tmp_path: Path, monkeypatch) -> None:
 
     manifest = project_store.get_project(project_id)
     assert manifest["latest_export"]["output_video_path"] == str(output_path)
+
+
+def test_runner_command_strips_ui_selection_options() -> None:
+    request = backend_server.JobRequest(
+        kind="create_video_with_subtitles",
+        input_path="in.mp4",
+        output_dir="out",
+        srt_path="subs.srt",
+        options={
+            "subtitle_mode": "word_highlight",
+            "highlight_color": "#FFD400",
+            "selected_cue_id": "cue-3",
+            "selectionOutline": True,
+            "ui_selection": {"cue": "cue-3"},
+        },
+    )
+
+    command = backend_server._build_runner_command(request)
+    assert "--options-json" in command
+    options_index = command.index("--options-json")
+    options_payload = json.loads(command[options_index + 1])
+
+    assert options_payload.get("subtitle_mode") == "word_highlight"
+    assert options_payload.get("highlight_color") == "#FFD400"
+    assert "selected_cue_id" not in options_payload
+    assert "selectionOutline" not in options_payload
+    assert "ui_selection" not in options_payload

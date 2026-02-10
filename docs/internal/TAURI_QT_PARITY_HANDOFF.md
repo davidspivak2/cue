@@ -271,8 +271,8 @@ Handoff outputs
 - Projects-to-Workbench entry refinement: Done (`New project` opens Workbench immediately; `needs_subtitles` cards include quick `Create subtitles` action).
 - Workbench no-subtitles empty state + create flow: Done (`No subtitles yet.` + single CTA; style hidden until subtitles exist; create-subtitles checklist/progress/cancel runs in Workbench).
 - Milestone 4.1 (left list editing): Deferred while subtitle list UI is hidden/paused.
-- Milestone 4.2 (on-video editing contract): Done
-- Milestone 4.3 (selection styling contract): Next
+- Milestone 4.2 (on-video editing contract): Done (single-click pause+edit, input-like hover affordance, icon actions, keyboard parity, and playback resume on Save/Cancel)
+- Milestone 4.3 (selection styling contract): Done for on-video path (selection accent is UI-only and export runner options drop UI-only selection keys)
 
 ---
 
@@ -294,6 +294,32 @@ Before you hand off
 
 Template (copy and fill; newest at top)
 Note: Entries are chronological snapshots. Older entries may mention gaps that were later resolved; use the newest entry plus sections 2 and 6 for current state.
+
+Date: 2026-02-10
+Agent: gpt-5.3-codex-xhigh
+Phase: Milestone 4 on-video UX polish + selection export guard
+Status: Done
+Summary:
+- Updated Workbench on-video editing UX for discoverability and speed:
+  - Hover state now presents an input-like shell with an I-beam cursor.
+  - Single click on active subtitle now pauses playback (when needed) and immediately enters inline edit mode.
+- Added explicit icon actions in edit mode (check/save, undo, x/cancel) with keyboard parity:
+  - Enter = Save, Esc = Cancel, Ctrl/Cmd+Z = Undo.
+  - Save/Cancel now exits edit mode and resumes playback when edit mode started from a playing state.
+- Added backend guard for selection non-leak:
+  - `_build_runner_command(...)` now strips UI-only selection keys from `options` before passing `--options-json` to the runner.
+- Updated contract docs to match the implemented interaction:
+  - `docs/internal/CUE_UX_UI_SPEC.md` E4 on-video editing rules.
+  - `docs/internal/ROADMAP.md` Milestone 4.2 deliverables + acceptance wording.
+  - Status board entry wording in this handoff doc.
+- Updated E2E coverage:
+  - `desktop/tests/e2e/workbench-shell.spec.ts` now covers one-click edit, icon save/cancel/undo, keyboard undo shortcut, and playback resume checks.
+- Tests run:
+  - `python -m pytest tests/test_backend_job_project_update.py`
+  - `npm run test:e2e -- tests/e2e/workbench-shell.spec.ts`
+  - `npm run build` (desktop)
+- Known gaps: Milestone 4.1 (left list editing) remains deferred while the left subtitles list UI is hidden/paused; list/on-video selection sync is validated fully once 4.1 is resumed.
+- Next best task: resume Milestone 4.1 (left list editing + selection/seek sync) while preserving the one-click on-video editing contract and export non-leak guarantees.
 
 Date: 2026-02-10
 Agent: gpt-5.3-codex-xhigh
