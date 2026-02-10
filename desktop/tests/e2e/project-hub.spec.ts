@@ -206,9 +206,17 @@ test("project hub card interactions", async ({ page }) => {
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New project" })).toBeVisible();
   await expect(page.getByText("another.mp4")).toBeVisible();
+  await expect(page.getByTestId("project-card-create-subtitles-project-1")).toBeVisible();
+  await expect(page.getByTestId("project-card-create-subtitles-project-3")).toHaveCount(0);
+
+  await page.getByTestId("project-card-create-subtitles-project-1").click();
+  await page.waitForURL("**/workbench/project-1");
+  await expect(page.getByTestId("workbench")).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
 
   await page.getByTestId("project-card-delete-project-3").click();
   await expect(page.getByRole("heading", { name: "Delete project?" })).toBeVisible();
@@ -229,7 +237,7 @@ test("project hub card interactions", async ({ page }) => {
   await expect(page.getByTestId("workbench-tabs")).toBeVisible();
   await expect(page.getByRole("tab", { name: "good.mp4" })).toBeVisible();
   await page.getByRole("button", { name: "Back" }).click();
-  await expect(page.getByRole("heading", { name: "Project Hub" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
 
   await page.getByText("missing.mp4").click();
   await expect(page.getByRole("heading", { name: "Video file not found" })).toBeVisible();

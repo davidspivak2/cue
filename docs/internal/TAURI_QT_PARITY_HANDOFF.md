@@ -44,15 +44,16 @@ Backend
 Desktop
 - `desktop/src/main.tsx` uses shadcn/Tailwind ThemeProvider (no MUI).
 - `desktop/src/components/AppLayout.tsx` uses shadcn layout + lucide icons, with a user-controlled collapsible sidebar (icon strip, persisted in localStorage).
-- `desktop/src/pages/ProjectHub.tsx` is the default route, supports project list/create/delete (with confirmation), and blocks missing-file projects with a relink prompt.
+- `desktop/src/pages/ProjectHub.tsx` is the default route (`Projects` label in UI), with header CTA `New project`, auto-open-to-Workbench on create, project list/create/delete (with confirmation), `needs_subtitles` per-card `Create subtitles` quick action, and relink flow for missing files.
 - `desktop/src/workbenchTabs.tsx` tracks open project tabs in memory; Workbench renders a tab strip.
-- `desktop/src/pages/Workbench.tsx` loads project detail, shows a real video preview (`<video controls>` + `convertFileSrc`), keeps Style docked on wide screens and overlay on narrow (<1100px), supports on-video subtitle select/edit interactions (pause/select on first click, inline edit on second click while paused, Enter save, Esc cancel), and now renders real `StyleControls` in both style panes (settings-backed).
+- `desktop/src/pages/Workbench.tsx` loads project detail and now has a strict no-subtitles empty state (`No subtitles yet.` + `Create subtitles` only). Style pane/drawer is hidden until subtitles exist. Create-subtitles runs directly in Workbench with checklist/progress/cancel and project-linked jobs.
 - `desktop/src/hooks/useWindowWidth.ts` provides exact 1100px breakpoint logic.
 - `desktop/src/pages/Home.tsx` implements the 5-state UI and Tauri file picker/drag-drop.
 - `desktop/src/pages/Review.tsx` provides the Review screen for style, preview, and export.
 - `desktop/src/pages/Settings.tsx` exists and matches Qt parity (no subtitle style section).
-- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout (wide vs narrow overlays) and on-video subtitle edit interactions.
-- `desktop/tests/e2e/project-hub.spec.ts` covers Project Hub card interactions, relink flow, and delete confirmation flow.
+- `desktop/src/jobsClient.ts` now supports optional `projectId` in create-subtitles/export job payloads (`project_id` API field).
+- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout, no-subtitles empty state, create-subtitles transition, and on-video subtitle edit interactions.
+- `desktop/tests/e2e/project-hub.spec.ts` covers Projects card interactions, relink flow, delete confirmation flow, and the per-card `Create subtitles` quick action.
 - `desktop/src-tauri/tauri.conf.json` enables capabilities and asset protocol scope for previews.
 - `desktop/package.json` has no `@mui` or `@emotion` deps.
 
@@ -262,11 +263,13 @@ Handoff outputs
 - Phase 6 - Tests and verification: Done (targeted backend + e2e tests run locally; full-suite coverage still incremental)
 - Tauri dev build unblock (capabilities/main.json): Done
 - Project system backend (Milestone 1 backend): Done (API + tests)
-- Project Hub UI (Milestone 2.1 + 2.2): Done (Project Hub screen + card interactions + relink prompt/validation)
-- Project Hub launch behavior (Milestone 2.3): Done
-- Project deletion with confirmation: Done (Project Hub delete action + confirmation + backend cancel-then-delete)
+- Projects UI (Milestone 2.1 + 2.2): Done (Projects screen + card interactions + relink prompt/validation)
+- Projects launch behavior (Milestone 2.3): Done
+- Project deletion with confirmation: Done (Projects delete action + confirmation + backend cancel-then-delete)
 - Workbench tabs/navigation: Done (tab strip + open/activate)
 - Workbench shell (Milestone 3.1): Done (preview + style docked/overlay; right style pane uses real controls; left subtitles list overlay remains hidden/paused)
+- Projects-to-Workbench entry refinement: Done (`New project` opens Workbench immediately; `needs_subtitles` cards include quick `Create subtitles` action).
+- Workbench no-subtitles empty state + create flow: Done (`No subtitles yet.` + single CTA; style hidden until subtitles exist; create-subtitles checklist/progress/cancel runs in Workbench).
 - Milestone 4.1 (left list editing): Deferred while subtitle list UI is hidden/paused.
 - Milestone 4.2 (on-video editing contract): Done
 - Milestone 4.3 (selection styling contract): Next
@@ -291,6 +294,29 @@ Before you hand off
 
 Template (copy and fill; newest at top)
 Note: Entries are chronological snapshots. Older entries may mention gaps that were later resolved; use the newest entry plus sections 2 and 6 for current state.
+
+Date: 2026-02-10
+Agent: gpt-5.3-codex-xhigh
+Phase: Projects/Workbench flow realignment + docs update
+Status: Done
+Summary:
+- Renamed user-facing `Project Hub` label to `Projects` in desktop UI and updated route-facing copy/tests accordingly.
+- Updated Projects flow:
+  - Header CTA is now `New project`.
+  - Creating a project auto-opens Workbench.
+  - `needs_subtitles` cards now show a secondary `Create subtitles` quick action that opens Workbench and auto-starts subtitle generation.
+- Updated Workbench no-subtitles behavior:
+  - Strict empty state with only `No subtitles yet.` and primary `Create subtitles`.
+  - No style pane/drawer until subtitles exist.
+  - Create-subtitles now runs in Workbench with checklist/progress/cancel.
+- Added project-linked job payload support in `desktop/src/jobsClient.ts` (`projectId` -> `project_id`).
+- Updated E2E coverage:
+  - `desktop/tests/e2e/project-hub.spec.ts`
+  - `desktop/tests/e2e/workbench-shell.spec.ts`
+- Tests run:
+  - `npm run test:e2e -- project-hub.spec.ts workbench-shell.spec.ts`
+- Known gaps: Milestone 4.3 selection styling contract still pending; left subtitles list editing (Milestone 4.1) remains deferred while list UI is hidden.
+- Next best task: implement Milestone 4.3 (selection styling contract) and verify selection accents never leak into export.
 
 Date: 2026-02-10
 Agent: gpt-5.3-codex-xhigh

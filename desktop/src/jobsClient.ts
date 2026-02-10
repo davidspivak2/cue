@@ -112,6 +112,7 @@ export type JobStartResult = JobEventStream & {
 export type CreateSubtitlesJobParams = {
   inputPath: string;
   outputDir: string;
+  projectId?: string;
   options?: Record<string, unknown>;
 };
 
@@ -119,6 +120,7 @@ export type CreateVideoWithSubtitlesJobParams = {
   inputPath: string;
   outputDir: string;
   srtPath: string;
+  projectId?: string;
   options?: Record<string, unknown>;
 };
 
@@ -127,6 +129,7 @@ type JobRequest = {
   input_path: string;
   output_dir: string;
   srt_path?: string;
+  project_id?: string;
   options?: Record<string, unknown>;
 };
 
@@ -223,6 +226,7 @@ export const createSubtitlesJob = async (
     kind: "create_subtitles",
     input_path: params.inputPath,
     output_dir: params.outputDir,
+    project_id: params.projectId,
     options: params.options ?? {}
   });
   return {
@@ -240,6 +244,7 @@ export const createVideoWithSubtitlesJob = async (
     input_path: params.inputPath,
     output_dir: params.outputDir,
     srt_path: params.srtPath,
+    project_id: params.projectId,
     options: params.options ?? {}
   });
   return {

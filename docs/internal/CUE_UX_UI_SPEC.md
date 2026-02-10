@@ -84,14 +84,14 @@ For project status and upcoming tasks, see `ROADMAP.md`.
 ## B) Top-level navigation model (Premiere Rush-like)
 
 ### B1) Pages (top-level)
-1) **Project Hub** (new, built from scratch)
+1) **Projects** (new, built from scratch; formerly labeled Project Hub)
 2) **Workbench** (per project, in tabs)
 3) **Settings** (existing page, restyled)
 
 ### B2) Global navigation rules
-- App launch **always** shows **Project Hub** (never auto-opens the last project).
+- App launch **always** shows **Projects** (never auto-opens the last project).
 - Multiple projects can be open **simultaneously as tabs** within the same app window (no multiple windows).
-- **Settings** is reachable from **Project Hub** and **Workbench** via a gear icon.
+- **Settings** is reachable from **Projects** and **Workbench** via a gear icon.
 - **Settings navigation is disabled** while long-running tasks are active (Create Subtitles / Export).
 - **Project tabs during long-running tasks (v1):**
   - Users **may switch** to other project tabs while any project is running Create Subtitles or Export.
@@ -99,8 +99,8 @@ For project status and upcoming tasks, see `ROADMAP.md`.
   - **Future (out of scope for v1):** allow concurrent Create Subtitles / Export across multiple projects simultaneously.
 
 ### B3) Back navigation rules
-- **Settings:** top-left “Back” returns to the previous page (Project Hub or Workbench).
-- **Workbench:** top-left “Back” returns to Project Hub (not in the bottom bar).
+- **Settings:** top-left “Back” returns to the previous page (Projects or Workbench).
+- **Workbench:** top-left “Back” returns to Projects (not in the bottom bar).
 
 ---
 
@@ -121,13 +121,13 @@ Each project persists:
 - Last-known status (e.g., Needs video, Ready, Exporting, Exported)
 
 ### C3) Missing source video behavior
-- If the source video is missing, the project **remains** in Project Hub.
+- If the source video is missing, the project **remains** in Projects.
 - The card shows a **“Relink”** action.
 - Relinking restores the project without data loss.
 
 ---
 
-## D) Project Hub (new screen)
+## D) Projects (new screen)
 
 ### D1) Layout
 - **Grid of thumbnail cards** (video thumbnails).
@@ -142,6 +142,7 @@ Each card shows:
 
 ### D3) Card interactions
 - Clicking a card **opens or activates** that project in a **Workbench tab**.
+- If status is **Needs subtitles**, the card includes a small secondary **“Create subtitles”** action in the metadata row; this action opens Workbench and starts subtitle generation.
 - Missing source video:
   - Card shows **“Relink”** action.
   - After relink, project remains intact and usable.
@@ -176,7 +177,7 @@ The Workbench is a **single unified** edit + style + preview + export surface fo
 - Styling capabilities remain conceptually the same, but controls are reorganized into **clean sections** with consistent spacing and hierarchy (Linear-style).
 - Preview reflects style changes **immediately**.
 
-Current implementation note (pre-Workbench): style controls live on the **Review subtitles** screen. After “Create subtitles” completes, the app navigates to `/review` for styling and export.
+Current implementation note: when a project has no subtitles yet, Workbench shows a strict empty state (`No subtitles yet.` + `Create subtitles`) and keeps style controls hidden until subtitles exist.
 
 ### E4) Subtitle editing requirements (explicit)
 Users can **edit subtitle text only**. Timestamps are visible but **not editable**.
@@ -277,7 +278,7 @@ Create Subtitles must output:
 
 ## I) State machine (explicit, implementation-friendly)
 
-### I1) Project Hub states
+### I1) Projects screen states
 
 | State | Description | Primary CTA (exact label) | Navigation enabled | Panel rules | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -294,7 +295,7 @@ Create Subtitles must output:
 | State | Description | Primary CTA (exact label) | Navigation enabled | Panel behavior | Notes |
 | --- | --- | --- | --- | --- | --- |
 | WB_NEEDS_VIDEO | Project exists but no linked video | **“Choose video…”** | Settings enabled (unless task running) | Panels closed/disabled | Workbench accessible via tab, but requires relink. |
-| WB_VIDEO_LINKED_READY | Video linked, ready to create subtitles | **“Create subtitles”** | Settings enabled (unless task running) | Left panel collapsed by default; right inspector available | Center preview shows video player. |
+| WB_VIDEO_LINKED_READY | Video linked, ready to create subtitles | **“Create subtitles”** | Settings enabled (unless task running) | Panels hidden; show strict empty state with only message + CTA | Center preview and style controls appear after subtitles are created. |
 | WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Matching individual words to speech”. |
 | WB_SUBTITLES_READY | Subtitles + word timings available | **“Create video with subtitles”** | Settings enabled | Left panel user-controlled; right inspector docked/overlay per width | Subtitle text editable; timestamps read-only. |
 | WB_EXPORTING | Export in progress | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Export uses existing artifacts only. |
@@ -344,7 +345,7 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 
 ## K) Copywriting glossary (approved strings)
 
-- “Project Hub”
+- “Projects”
 - “New project”
 - “Workbench”
 - “Settings”
