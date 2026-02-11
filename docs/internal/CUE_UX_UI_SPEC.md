@@ -85,13 +85,17 @@ For project status and upcoming tasks, see `ROADMAP.md`.
 
 ### B1) Pages (top-level)
 1) **Projects** (new, built from scratch; formerly labeled Project Hub)
-2) **Workbench** (per project, in tabs)
+2) **Editor** (per project, in tabs; route/state identifiers may still use Workbench naming internally)
 3) **Settings** (existing page, restyled)
 
 ### B2) Global navigation rules
 - App launch **always** shows **Projects** (never auto-opens the last project).
 - Multiple projects can be open **simultaneously as tabs** within the same app window (no multiple windows).
-- **Settings** is reachable from **Projects** and **Workbench** via a gear icon.
+- No persistent left sidebar in the redesign flow.
+- Global header contract is consistent across primary pages:
+  - Top-left: page title and Back affordance (when applicable).
+  - Top-right: Settings entry affordance (gear icon) when navigation is allowed.
+- **Settings** is reachable from **Projects** and **Editor** via a gear icon.
 - **Settings navigation is disabled** while long-running tasks are active (Create Subtitles / Export).
 - **Project tabs during long-running tasks (v1):**
   - Users **may switch** to other project tabs while any project is running Create Subtitles or Export.
@@ -99,8 +103,8 @@ For project status and upcoming tasks, see `ROADMAP.md`.
   - **Future (out of scope for v1):** allow concurrent Create Subtitles / Export across multiple projects simultaneously.
 
 ### B3) Back navigation rules
-- **Settings:** top-left “Back” returns to the previous page (Projects or Workbench).
-- **Workbench:** top-left “Back” returns to Projects (not in the bottom bar).
+- **Settings:** top-left “Back” returns to the previous page (Projects or Editor).
+- **Editor:** top-left “Back” returns to Projects (not in the bottom bar).
 
 ---
 
@@ -118,7 +122,7 @@ Each project persists:
 - Style configuration (all supported controls, for Static + Word highlight)
 - Word highlight timing artifacts (WhisperX output)
 - Export output reference (latest exported video path, if any)
-- Last-known status (e.g., Needs video, Ready, Exporting, Exported)
+- Last-known status (e.g., Needs video, Needs edits, Exporting, Done)
 
 ### C3) Missing source video behavior
 - If the source video is missing, the project **remains** in Projects.
@@ -132,29 +136,36 @@ Each project persists:
 ### D1) Layout
 - **Grid of thumbnail cards** (video thumbnails).
 - **Primary CTA:** “New project” (choose video) plus **drag-and-drop** on the entire hub surface.
-- **New project flow:** After selecting a video, open Workbench and start **Create subtitles** immediately (no extra click).
+- **New project flow:** After selecting a video, open Editor and start **Create subtitles** immediately (no extra click).
 
 ### D2) Project card content
 Each card shows:
 - Thumbnail
 - Filename (no full path)
 - Duration
-- Status label: **Ready / Exporting / Done / Missing file / Needs subtitles**
+- Status label: **Needs edits / Exporting / Done / Missing file / Needs subtitles**
 
 ### D3) Card interactions
-- Clicking a card **opens or activates** that project in a **Workbench tab**.
-- If status is **Needs subtitles**, the card includes a small secondary **“Create subtitles”** action in the metadata row; this action opens Workbench and starts subtitle generation.
+- Clicking a card **opens or activates** that project in an **Editor tab**.
+- If status is **Needs subtitles**, the card includes a small secondary **“Create subtitles”** action in the metadata row; this action opens Editor and starts subtitle generation.
 - Missing source video:
   - Card shows **“Relink”** action.
   - After relink, project remains intact and usable.
 
+### D4) Projects micro-interactions
+- Delete confirmation appears directly (no side-swoop animation).
+- Delete success feedback is a toast (temporary), not a sticky inline banner.
+- Empty state shows a single primary **“New project”** action inside the empty-state surface.
+- When the list is non-empty (no empty state), top-right **“New project”** appears as usual.
+
 ---
 
-## E) Workbench (new unified screen)
+## E) Editor (new unified screen; internal route/state names may still use Workbench)
 
-The Workbench is a **single unified** edit + style + preview + export surface for a project.
+The Editor is a **single unified** edit + style + preview + export surface for a project.
 
-### E1) Workbench layout regions
+### E1) Editor layout regions
+- **Header:** no duplicate app/page headings; Back in top-left; title in top-left flow; status shown next to video name.
 - **Center:** Video player with playback controls. Styled subtitles render **on the video** (preview is the truth).
 - **Right:** Style inspector.
 - **Left:** “All subtitles” panel (collapsible, resizable when docked).
@@ -176,9 +187,14 @@ The Workbench is a **single unified** edit + style + preview + export surface fo
 - **Wide window:** docked fixed-width inspector; vertically scrollable; **no horizontal scroll**.
 - **Narrow window:** inspector collapses and opens as an **overlay drawer** via a “Style” button.
 - Styling capabilities remain conceptually the same, but controls are reorganized into **clean sections** with consistent spacing and hierarchy (Linear-style).
+- Control modernization requirements:
+  - Background mode uses a segmented control (not plain radio rows).
+  - Color controls prioritize curated presets first, with custom picker secondary and optional advanced hex input.
+  - Slider controls keep clear label-to-control spacing and avoid visually dense stacking.
+  - Font list is curated for quality Hebrew rendering and visual distinction.
 - Preview reflects style changes **immediately**.
 
-Current implementation note: Workbench keeps the strict empty state (`No subtitles yet.` + `Create subtitles`) for manual entry points, while **New project** and **Needs subtitles → Create subtitles** quick actions auto-start subtitle generation so users do not click twice.
+Current implementation note: Editor keeps the strict empty state (`No subtitles yet.` + `Create subtitles`) for manual entry points, while **New project** and **Needs subtitles → Create subtitles** quick actions auto-start subtitle generation so users do not click twice.
 
 ### E4) Subtitle editing requirements (explicit)
 Users can **edit subtitle text only**. Timestamps are visible but **not editable**.
@@ -197,6 +213,7 @@ The redesign workflow is **in-app subtitle text editing only** (no external subt
      - **Cancel** (x icon): discards unsaved changes and exits edit mode.
    - **Enter** saves, **Esc** cancels, **Ctrl/Cmd+Z** undoes.
    - On **Save** or **Cancel**, playback resumes from the paused timestamp when edit mode was entered from a playing state.
+   - Save/Undo/Cancel controls must not shift subtitle vertical position when edit mode toggles.
 
 **Selection highlight contract (never exported):**
 - Selected subtitle overlay shows a **thin accent outline** for UI selection only.
@@ -204,12 +221,14 @@ The redesign workflow is **in-app subtitle text editing only** (no external subt
 - This highlight **must never** affect export styling.
 
 ### E5) Primary CTA and export rules
-- **Bottom action bar exists on Workbench** only in **WB_SUBTITLES_READY** and **WB_EXPORT_SUCCESS**.
+- **Bottom action bar exists in Editor** only in **WB_SUBTITLES_READY** and **WB_EXPORT_SUCCESS**.
 - Bottom bar contains **only** the primary CTA labeled exactly:
   - **“Create video with subtitles”**
 - In earlier states (e.g., **WB_VIDEO_LINKED_READY**), the primary CTA is a **normal primary button** in the main content area labeled **“Create subtitles”** (no bottom bar).
-- **No export settings** in Workbench. If export settings exist, they live in **Settings only**.
-- Export progress is shown as an **in-Workbench** state (not a separate page).
+- **No export settings** in Editor. If export settings exist, they live in **Settings only**.
+- Export progress is shown as an **in-Editor** state (not a separate page).
+- Playback-speed control must be discoverable from the main video-control surface (not only hidden overflow affordances).
+- Prefer additive playback-speed UI over full custom video-control rewrites unless parity issues force a deeper change.
 
 ---
 
@@ -226,7 +245,12 @@ Create Subtitles is **not complete** until **both** succeed:
 Progress checklist **must include** a step named exactly:
 - **“Matching individual words to speech”**
 
-### F2a) Cancellation behavior
+### F2a) Startup transparency requirement
+- Startup/preprocessing work (before first transcription tokens) must be surfaced in progress UI.
+- Users must never see a long unexplained 0% stall while work is active.
+- Checklist detail text follows the same inline label/detail pattern as export progress UI.
+
+### F2b) Cancellation behavior
 - Cancel must stop the current operation promptly.
 - Cancel must not trigger fallback/retry logic.
 - Cancel must be surfaced as a cancelled state (not as a failure/error).
@@ -254,15 +278,17 @@ Create Subtitles must output:
 
 ---
 
-## G) Export progress + success (in-Workbench)
+## G) Export progress + success (in-Editor)
 
 ### G1) During export
-- Show progress UI **within Workbench**:
+- Show progress UI **within Editor**:
   - Checklist + determinate progress bar + elapsed time + **Cancel**.
+- Checklist detail text appears inline to the right of each step label, separated by a dot.
 - **Disable editing/styling** while exporting.
+- If user leaves the page during an active task, progress remains visible from Projects and returns in-sync when reopening Editor.
 
 ### G2) On success (no separate Done screen)
-- Stay in Workbench and show an **in-place success state** with actions:
+- Stay in Editor and show an **in-place success state** with actions:
   - **Play video**
   - **Open folder**
 - User can continue editing/styling and export again.
@@ -280,6 +306,14 @@ Create Subtitles must output:
 - Diagnostics entry point is **Settings only**.
 - If any error-only diagnostics buttons are referenced elsewhere, they must be removed or redirected to Settings.
 
+### H3) Support actions in Settings (hosted logs)
+- Settings includes:
+  - **Copy diagnostics**
+  - **Send logs to support** (hosted receiver)
+- Before upload, show a short consent summary that explains exactly what is sent.
+- Sent payload excludes rendered video output and should redact sensitive local-path information where possible.
+- If upload fails, UI keeps a clear fallback path (`Copy diagnostics`) and a retry option.
+
 ---
 
 ## I) State machine (explicit, implementation-friendly)
@@ -288,64 +322,74 @@ Create Subtitles must output:
 
 | State | Description | Primary CTA (exact label) | Navigation enabled | Panel rules | Notes |
 | --- | --- | --- | --- | --- | --- |
-| HUB_EMPTY | No projects exist | **“New project”** | Settings enabled (unless task running) | No Workbench panels | Hub surface accepts drag & drop. |
-| HUB_HAS_PROJECTS | One or more projects exist | **“New project”** | Settings enabled (unless task running) | No Workbench panels | Cards open/activate Workbench tabs. |
-| HUB_PROJECT_MISSING_FILE | Project exists but source video missing | **“Relink”** (card action) | Settings enabled (unless task running) | No Workbench panels | Project stays in hub until relinked. |
+| HUB_EMPTY | No projects exist | **“New project”** | Settings enabled (unless task running) | No Editor panels | Hub surface accepts drag & drop. |
+| HUB_HAS_PROJECTS | One or more projects exist | **“New project”** | Settings enabled (unless task running) | No Editor panels | Cards open/activate Editor tabs. |
+| HUB_PROJECT_MISSING_FILE | Project exists but source video missing | **“Relink”** (card action) | Settings enabled (unless task running) | No Editor panels | Project stays in hub until relinked. |
 
-### I2) Workbench per-project states
+### I2) Editor per-project states (internal state IDs unchanged)
 
-**Overlay rules (apply to all Workbench states):**
+**Overlay rules (apply to all Editor states):**
 - If window width **< 1100px**, docked panels become overlay drawers.
 - Only **one overlay drawer** may be open at a time.
 
 | State | Description | Primary CTA (exact label) | Navigation enabled | Panel behavior | Notes |
 | --- | --- | --- | --- | --- | --- |
-| WB_NEEDS_VIDEO | Project exists but no linked video | **“Choose video…”** | Settings enabled (unless task running) | Panels closed/disabled | Workbench accessible via tab, but requires relink. |
+| WB_NEEDS_VIDEO | Project exists but no linked video | **“Choose video…”** | Settings enabled (unless task running) | Panels closed/disabled | Editor accessible via tab, but requires relink. |
 | WB_VIDEO_LINKED_READY | Video linked, ready to create subtitles | **“Create subtitles”** | Settings enabled (unless task running) | Panels hidden; show strict empty state with only message + CTA | Center preview and style controls appear after subtitles are created. |
-| WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Matching individual words to speech”. |
-| WB_SUBTITLES_READY | Subtitles + word timings available | **“Create video with subtitles”** | Settings enabled | Left panel user-controlled; right inspector docked/overlay per width | Subtitle text editable; timestamps read-only. |
-| WB_EXPORTING | Export in progress | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Export uses existing artifacts only. |
+| WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Matching individual words to speech”; Back is allowed and task continues in background. |
+| WB_SUBTITLES_READY | Subtitles + word timings available (user-facing status: Needs edits) | **“Create video with subtitles”** | Settings enabled | Left panel user-controlled; right inspector docked/overlay per width | Subtitle text editable; timestamps read-only. |
+| WB_EXPORTING | Export in progress | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Export uses existing artifacts only; Back is allowed and task continues in background. |
 | WB_EXPORT_SUCCESS | Export completed | **“Create video with subtitles”** | Settings enabled | Panels user-controlled | Show success UI with “Play video” + “Open folder”. |
 | WB_ERROR_RECOVERABLE | Recoverable error occurred | **Retry** (contextual) | Settings enabled (unless task running) | Panels user-controlled | Inline banner. |
 | WB_ERROR_BLOCKING | Blocking error occurred | **Try again** (modal) | Settings enabled (unless task running) | Panels closed while modal active | Modal can show “Show details”. |
 
-**Primary CTA label requirement:** The Workbench bottom bar **always** uses exactly **“Create video with subtitles”** when subtitles are ready or after successful export.
+**Primary CTA label requirement:** The Editor bottom bar **always** uses exactly **“Create video with subtitles”** when subtitles are ready or after successful export.
 
 ---
 
-## J) Settings page (restyled; behavior preserved)
+## J) Settings page (restyled + clarity-focused)
 
-Settings is a **full page** that replaces the current view. It uses the new design system but retains the existing controls and behaviors, with updated layout consistency only.
+Settings is a **full page** that replaces the current view. It uses the new design system and clarifies high-friction controls for non-technical users while preserving core pipeline behavior.
 
 ### J0) Legacy removal status (Subtitle Edit)
 - Subtitle Edit integration still exists in the legacy Qt UI, including the persisted config key **`subtitle_edit_path`**.
 - Removal is tracked in `docs/internal/ROADMAP.md` (Milestone 9.4). The redesign should not add new dependencies on Subtitle Edit.
 
-### J1) Performance
-- “Transcription quality” combo: Auto / Fast (int8) / Accurate (int16) / Ultra accurate (float32)
-- Helper text always visible.
-- Run summary line always visible.
+### J1) Transcription quality
+- Present quality options as **4 selectable cards** (not only a compact combo):
+  - **Auto** — “Decide for me based on my device and video.”
+  - **Fast (int8)** — “Quickest option; may miss or mis-hear some words.”
+  - **Accurate (int16)** — “Balanced quality and speed.”
+  - **Ultra accurate (float32)** — “Best accuracy, but slowest.”
+- Each card includes short helper copy visible by default.
+- If device profile is available, show **approximate** run-time guidance for a typical 5-minute clip.
+- Run summary line remains visible.
 
 ### J2) Save subtitles
 - Radio group: Same folder / Always save to this folder / Ask every time
-- Path row: single-line field + “Browse...”
+- Path row (single-line field + “Browse...”) appears directly under “Always save to this folder”.
 - Path field + Browse enabled only when policy = “Always save to this folder”.
 - Placeholder when unset: “No folder selected”.
 
-### J3) Punctuation
+### J3) Transcription assistance (merged)
 - Checkbox: “Improve punctuation automatically (recommended)”
+- Checkbox: “Clean up audio before transcription”
+- Extracted WAV files are auto-cleaned; no user-facing “keep WAV” toggle.
 - Behavior and rescue logic remain the same as current requirements.
 
-### J4) Audio
-- Checkbox: “Clean up audio before transcription”
-- Checkbox: “Keep extracted WAV file”
-- Helper text always visible.
+### J4) Appearance
+- Theme toggle is inside Settings: **Light / Dark / System**.
 
-### J5) Diagnostics (Settings only)
-- Master checkbox: “Enable diagnostics logging” (default OFF)
-- Secondary checkbox: “Write diagnostics on successful completion” (default OFF)
-- Include checkboxes for diagnostics categories.
-- Diagnostics JSON written next to SRT/output.
+### J5) Support and diagnostics (Settings only)
+- Primary support actions:
+  - **Send logs to support** (hosted receiver)
+  - **Copy diagnostics**
+- Send Logs flow requirements:
+  - Clear consent summary before upload.
+  - Exclude rendered output video from upload.
+  - Redact sensitive local-path information where possible.
+  - Show clear success/failure feedback with retry.
+- Advanced diagnostics toggles remain in Settings (not in error screens).
 
 ---
 
@@ -353,19 +397,21 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 
 - “Projects”
 - “New project”
-- “Workbench”
+- “Editor”
 - “Settings”
 - “Back”
 - “Choose video…”
 - “Create subtitles”
 - “Creating subtitles”
 - “Matching individual words to speech”
-- “Subtitles ready ✓”
+- “Needs edits”
+- “Subtitles created”
 - “Create video with subtitles”
 - “Exporting video”
 - “Play video”
 - “Open folder”
 - “Relink”
+- “Send logs”
 - “Try again”
 - “Show details”
 

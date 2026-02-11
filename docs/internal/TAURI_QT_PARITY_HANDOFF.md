@@ -1,6 +1,6 @@
 # Cue Tauri Migration - Qt Parity Multi-Agent Handoff Plan
 
-Last updated: 2026-02-10
+Last updated: 2026-02-11
 
 Owner: This document is the single source of truth for multi-agent handoff.
 Every agent must update it before handing work to another agent.
@@ -273,6 +273,7 @@ Handoff outputs
 - Milestone 4.1 (left list editing): Deferred while subtitle list UI is hidden/paused.
 - Milestone 4.2 (on-video editing contract): Done (single-click pause+edit, input-like hover affordance, icon actions, keyboard parity, and playback resume on Save/Cancel)
 - Milestone 4.3 (selection styling contract): Done for on-video path (selection accent is UI-only and export runner options drop UI-only selection keys)
+- 2026-02-11 roadmap/spec reprioritization sync: Done (Support UX v1 with hosted Send Logs, sidebar-removal navigation contract, settings clarity pass, progress continuity, and style-pane modernization documented)
 
 ---
 
@@ -294,6 +295,25 @@ Before you hand off
 
 Template (copy and fill; newest at top)
 Note: Entries are chronological snapshots. Older entries may mention gaps that were later resolved; use the newest entry plus sections 2 and 6 for current state.
+
+Date: 2026-02-11
+Agent: gpt-5.3-codex-xhigh
+Phase: Roadmap/spec prioritization sync
+Status: Done
+Summary:
+- Updated `docs/internal/ROADMAP.md` queue and milestone acceptance criteria to prioritize packaging gate, Support UX v1, clarity pass, sidebar removal, progress continuity, settings clarity, style modernization, and micro-interaction polish.
+- Added a coverage map linking requested UX items to scheduled roadmap milestones and explicit safeguards/regression checks/analytics guardrails.
+- Updated `docs/internal/CUE_UX_UI_SPEC.md` to reflect:
+  - user-facing `Editor` naming,
+  - no persistent sidebar navigation model,
+  - clearer status wording (`Needs edits`),
+  - progress transparency and background-task continuity,
+  - settings clarity updates (quality cards, grouped save-path controls, merged transcription-assist controls, theme toggle),
+  - hosted Send Logs contract (consent, redaction, fallback),
+  - style-pane modernization expectations.
+- Tests run: N/A (documentation-only update).
+- Known gaps: implementation work for these newly documented items is pending.
+- Next best task: execute queue item 1 (`PR13` packaging hardening/smoke) as a release stability gate before UX implementation slices.
 
 Date: 2026-02-10
 Agent: gpt-5.3-codex-xhigh

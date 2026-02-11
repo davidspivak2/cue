@@ -13,38 +13,105 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 ## Now / Next (Queue)
 (Use a numbered list. Status tags must be one of: NEXT, IN PROGRESS, BLOCKED, DONE.)
 
-1. [NEXT] PR12 — Error UX with details drawer + copy diagnostics
-   - Deliverable:
-     - Error UI includes a details drawer and a “Copy diagnostics” action.
-     - Diagnostics tools remain in Settings only (error UI may show details, not tools).
-   - Acceptance criteria:
-     - Trigger an error: user can open details drawer and copy the diagnostics text.
-     - No separate diagnostics “toolbox” appears on the error screen.
-   - UX spec reference: H) Error UX + Diagnostics
-
-2. [NEXT] PR13 — Packaging hardening / smoke tests
+1. [NEXT] PR13 — Packaging hardening / smoke tests
    - Deliverable:
      - Packaging flow hardened for release and smoke tests run against packaged builds.
    - Acceptance criteria:
      - Packaged build launches and completes the golden-path smoke test without regressions.
    - UX spec reference: N/A (engineering / packaging)
 
-3. [NEXT] PR15 — Copy polish + CTA reduction sweep
+2. [NEXT] PR12 — Support UX v1 (error details + copy diagnostics + hosted send logs)
+   - Deliverable:
+     - Error UI includes a details drawer and a “Copy diagnostics” action.
+     - Settings support surface includes hosted “Send logs” with explicit user consent.
+     - Diagnostics tools remain in Settings only (error UI may show details, not tools).
+   - Acceptance criteria:
+     - Trigger an error: user can open details drawer and copy diagnostics text.
+     - User can send logs via a hosted receiver after seeing a clear consent summary of what will be shared.
+     - Log payload excludes rendered video output and redacts sensitive local-path data where possible.
+     - If upload fails, user still has a visible fallback path (`Copy diagnostics`).
+   - UX spec reference: H) Error UX + Diagnostics; J) Settings page
+
+3. [NEXT] PR15 — Clarity pass (plain-language labels + CTA reduction)
    - Deliverable:
      - Copy polish applied and CTA reduction pass completed across UI surfaces.
+     - User-facing label updates include replacing technical wording (for example, Workbench/Editor naming) and ambiguous statuses (for example, `Ready`).
    - Acceptance criteria:
      - Strings match the approved copywriting glossary and CTA count is minimized per spec.
-   - UX spec reference: K) Copywriting glossary (approved strings)
+     - Project and Editor statuses read clearly for non-technical users, with no ambiguous standalone labels.
+   - UX spec reference: K) Copywriting glossary (approved strings); D) Projects; E) Editor
 
-4. [NEXT] Export optimization — cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
+4. [NEXT] Navigation simplification — remove global left sidebar and standardize top-level header behavior
+   - Deliverable:
+     - Global left sidebar is removed from the redesign flow.
+     - Header/back/title/status placement is consistent across Projects, Editor, and Settings.
+     - Settings entry remains discoverable from all primary surfaces when navigation is allowed.
+   - Acceptance criteria:
+     - App remains fully navigable without the left sidebar.
+     - No duplicate app/page headings or duplicated video-name labels appear in Editor.
+     - Editor back button appears in a consistent top-left location.
+   - UX spec reference: B) Top-level navigation model; E) Editor
+
+5. [NEXT] Progress truthfulness + continuity (Create Subtitles and Export)
+   - Deliverable:
+     - Progress surface reflects pre-transcription work instead of appearing stuck at 0%.
+     - If user leaves Editor during an active task, background progress remains visible from other pages.
+     - Checklist row detail text is displayed inline with clearer hierarchy.
+   - Acceptance criteria:
+     - Progress does not remain static at 0% during long startup phases without explanatory detail.
+     - User can navigate back to Projects and still see active-task state/progress.
+     - Editor progress copy and row details match actual backend work steps.
+   - UX spec reference: F) Create Subtitles pipeline contract; G) Export progress + success
+
+6. [NEXT] Settings clarity pass
+   - Deliverable:
+     - Transcription quality control is redesigned as clear choice cards with plain-language hints.
+     - “Always save to this folder” and its path controls are visually grouped.
+     - Punctuation + audio controls are merged into one understandable section.
+     - “Keep extracted WAV file” is removed; extracted WAV is auto-cleaned.
+     - Theme toggle is exposed in Settings.
+   - Acceptance criteria:
+     - Non-technical users can understand each transcription-quality option without prior knowledge.
+     - Save-folder controls are only shown/enabled where policy context is explicit.
+     - No user-facing control remains for keeping extracted WAV files.
+   - UX spec reference: J) Settings page
+
+7. [NEXT] Style pane modernization (usability + defaults)
+   - Deliverable:
+     - Style controls are reorganized for lower cognitive load (spacing, grouping, progressive disclosure).
+     - Background mode uses a segmented control pattern.
+     - Curated font set prioritizes reliable Hebrew rendering.
+     - Color controls support presets + custom picker, with optional hex entry for advanced users.
+     - Default color sets are revised per option so defaults remain legible and sensible.
+   - Acceptance criteria:
+     - Style pane is usable without opening advanced controls for common edits.
+     - Fonts listed in the control produce visibly distinct, supported rendering outcomes.
+     - Color controls provide predictable preset and custom behavior without regressions.
+   - UX spec reference: E) Editor; J) Settings page; K) Copywriting glossary
+
+8. [NEXT] Editor/Projects micro-interaction polish
+   - Deliverable:
+     - Delete dialog appears without side-swoop animation.
+     - Delete-success feedback uses toast behavior (not persistent inline banner).
+     - Empty Projects state shows one primary “New project” action.
+     - Edit action buttons do not shift subtitle layout when they appear.
+     - Editor status appears next to video name to strengthen meaning.
+     - Native video control affordances are simplified, including playback-speed discoverability.
+   - Acceptance criteria:
+     - Deleting a project produces transient confirmation and no sticky banner.
+     - Empty-state and non-empty-state CTA rules never show duplicate create actions.
+     - Entering subtitle edit mode does not cause disorienting subtitle jump.
+   - UX spec reference: D) Projects; E) Editor; G) Export progress + success
+
+9. [NEXT] Export optimization — cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
    - Deliverable:
      - Video stream info cached earlier; export path uses cheap revalidation.
      - “Getting video info” checklist row removed or adjusted if no longer accurate.
    - Acceptance criteria:
      - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
-   - UX spec reference: G) Export progress + success (in-Workbench)
+   - UX spec reference: G) Export progress + success (in-Editor)
 
-5. [DONE] Redesign Milestone 1 — Project system backend (persistence + multi-project)
+10. [DONE] Redesign Milestone 1 — Project system backend (persistence + multi-project)
    - Deliverable: app can create/open multiple projects with persisted state across restarts.
    - Acceptance criteria: see Milestone 1 checklist below.
    - UX spec reference: C) Project model (new backend capability; document behavior)
@@ -52,12 +119,15 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 ## Milestones (Ordered to Completion)
 
 ### Milestone 0 — Stabilization
-0.1 PR12 — Error UX + details drawer + copy diagnostics
+0.1 PR12 — Support UX v1 (error details + copy diagnostics + hosted send logs)
 - Deliverable:
   - Error UI includes a details drawer and a “Copy diagnostics” action.
+  - Settings provides a hosted “Send logs” support action with explicit consent and redaction summary.
   - Diagnostics tools remain in Settings only.
 - Acceptance criteria:
   - Trigger an error: user can open details drawer and copy diagnostics text.
+  - User can submit logs to hosted support without attaching video outputs.
+  - Upload failure path keeps a clear fallback (`Copy diagnostics`) visible.
   - No diagnostics tools appear outside Settings.
 
 0.2 PR13 — Packaging hardening / smoke tests
@@ -66,11 +136,13 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 - Acceptance criteria:
   - Packaged build launches and completes the golden-path smoke test without regressions.
 
-0.3 PR15 — Copy polish + CTA reduction sweep
+0.3 PR15 — Clarity pass (plain-language labels + CTA reduction sweep)
 - Deliverable:
   - Copy polish applied and CTA reduction pass completed across UI surfaces.
+  - Replace technical/ambiguous labels with plain-language wording.
 - Acceptance criteria:
   - Strings match the approved copywriting glossary and CTA count is minimized per spec.
+  - “Ready” and other ambiguous labels are replaced with user-meaningful statuses.
 
 0.4 Export optimization — cache video stream info earlier + cheap revalidate; adjust “Getting video info” checklist row if appropriate
 - Deliverable:
@@ -97,7 +169,7 @@ Definition of done:
   - Create new project from video
   - Open existing project list
   - Open/close project tabs
-  - Delete project from Project Hub with confirmation (project data only; source video file remains untouched)
+  - Delete project from Projects with confirmation (project data only; source video file remains untouched)
   - Relink missing source video workflow
 - Acceptance criteria:
   - Deleting a project removes its project record/artifacts and it no longer appears in the project list.
@@ -105,39 +177,59 @@ Definition of done:
 
 1.3 Project status model
 - Deliverable:
-  - Status enum: Needs video / Needs subtitles / Ready / Exporting / Done / Missing file (API values: `needs_video` / `needs_subtitles` / `ready` / `exporting` / `done` / `missing_file`)
+  - Status enum: Needs video / Needs subtitles / Needs edits / Exporting / Done / Missing file (API values remain `needs_video` / `needs_subtitles` / `ready` / `exporting` / `done` / `missing_file`; user-facing label for `ready` becomes “Needs edits”)
 - Acceptance criteria:
   - Status is correct for each stage and survives restart.
 
 Definition of done:
 - User can manage multiple projects across restarts and relink missing video without breaking the project.
 
-### Milestone 2 — Project Hub UI (new entry point)
-2.1 Project Hub screen
+### Milestone 2 — Projects UI (new entry point)
+2.1 Projects screen
 - Deliverable:
   - Grid of project cards, primary CTA “New project”, drag-and-drop onto hub
 - Acceptance criteria:
-  - Launch opens Project Hub; “New project” works; DnD works.
+  - Launch opens Projects; “New project” works; DnD works.
 
 2.2 Card content + interactions
 - Deliverable:
   - Thumbnail, filename (no full path), duration, status label
-  - Click opens/activates Workbench tab
+  - Click opens/activates Editor tab
   - Missing file shows Relink action
 - Acceptance criteria:
   - All card fields render and actions work.
 
 2.3 Launch behavior
 - Deliverable:
-  - App always launches to Project Hub (no auto-open last project)
+  - App always launches to Projects (no auto-open last project)
 - Acceptance criteria:
-  - Restart app: Project Hub is shown.
+  - Restart app: Projects is shown.
+
+2.4 Global shell simplification (sidebar removal)
+- Deliverable:
+  - Remove global left sidebar from the redesign flow.
+  - Use a consistent header contract across Projects, Editor, and Settings (top-left back behavior + stable title region + consistent settings affordance).
+  - Remove duplicated page/app headings and duplicate video-name label surfaces.
+- Acceptance criteria:
+  - Navigation remains clear without a left nav (Projects -> Editor -> Settings -> Back).
+  - Editor back button and title placement are consistent and stable across states.
+  - Settings remains reachable when not blocked by long-running task rules.
+
+2.5 Projects micro-interaction polish
+- Deliverable:
+  - Delete confirmation dialog appears without side-swoop entrance animation.
+  - Delete success uses toast feedback (not a persistent inline banner).
+  - Empty state and non-empty state never show duplicate “New project” actions.
+- Acceptance criteria:
+  - Deleting a project gives transient confirmation and the message auto-clears.
+  - Empty-state layout has one clear primary CTA.
+  - Standard (non-empty) layout keeps top-right “New project” behavior unchanged.
 
 Definition of done:
-- Project Hub is the stable home screen and projects open into Workbench.
+- Projects is the stable home screen and projects open into Editor.
 
-### Milestone 3 — Workbench shell (unified edit + style + preview + export)
-3.1 Workbench layout regions
+### Milestone 3 — Editor shell (unified edit + style + preview + export; internal route/state naming may still use Workbench)
+3.1 Editor layout regions
 - Deliverable:
   - Center video preview
   - Left “All subtitles” panel (currently hidden/paused in implementation to protect preview size; overlay-only when re-enabled)
@@ -162,8 +254,18 @@ Status: Deferred while left panel remains hidden/paused.
 - Acceptance criteria:
   - Narrow width: style panel becomes overlay; content still accessible.
 
+3.4 Editor header orientation fixes
+- Deliverable:
+  - Back button remains in the top-left header region.
+  - Page title is top-left aligned in the primary header flow.
+  - Status appears adjacent to video name for clear association.
+  - Duplicate workbench/video labels are removed.
+- Acceptance criteria:
+  - Users can identify page, current video, and status without scanning multiple header regions.
+  - Header layout remains stable across no-subtitles, in-progress, and ready/export states.
+
 Definition of done:
-- Workbench behaves correctly across window sizes and supports the unified workflow.
+- Editor behaves correctly across window sizes and supports the unified workflow.
 
 ### Milestone 4 — In-app subtitle text editing (partially implemented)
 Current status: Milestone 4.2 is implemented in Workbench, and Milestone 4.3 is implemented for the on-video path; Milestone 4.1 remains.
@@ -192,6 +294,12 @@ Current status: Milestone 4.2 is implemented in Workbench, and Milestone 4.3 is 
 - Acceptance criteria:
   - Export shows no selection outline.
 
+4.4 Edit action stability
+- Deliverable:
+  - Save/Undo/Cancel controls appear without pushing subtitle text vertically.
+- Acceptance criteria:
+  - Entering and exiting edit mode does not shift subtitle position unexpectedly.
+
 Definition of done:
 - User can fully edit subtitles in-app with the specified interactions.
 
@@ -205,8 +313,10 @@ Definition of done:
 5.2 Progress UI update
 - Deliverable:
   - Progress checklist includes “Matching individual words to speech”
+  - Pre-transcription startup work is surfaced instead of appearing idle at 0%.
 - Acceptance criteria:
   - Step appears and reports progress accurately.
+  - During startup, progress/detail text reflects active work (no unexplained 20-30s stall at 0%).
 
 5.3 Export behavior enforcement
 - Deliverable:
@@ -215,10 +325,17 @@ Definition of done:
 - Acceptance criteria:
   - Export path never silently runs WhisperX in normal success path.
 
+5.4 Progress detail readability contract
+- Deliverable:
+  - Checklist row detail text appears inline to the right of each step label with clear separation.
+- Acceptance criteria:
+  - Row label and detail are visually associated (single-line at common widths, with graceful wrap fallback).
+  - Detail text updates never shift checklist rows in a disorienting way.
+
 Definition of done:
 - Word highlight mode is ready immediately after subtitle creation; export uses existing timings.
 
-### Milestone 6 — Workbench CTAs + export UX (in-Workbench)
+### Milestone 6 — Editor CTAs + export UX (in-Editor)
 6.1 CTA placement rules
 - Deliverable:
   - Bottom action bar exists only in “Subtitles ready” and “Export success”
@@ -227,7 +344,7 @@ Definition of done:
 - Acceptance criteria:
   - UI matches these CTA rules across states.
 
-6.2 Export progress in Workbench
+6.2 Export progress in Editor
 - Deliverable:
   - Checklist + determinate progress + elapsed time + Cancel
   - Editing/styling disabled while exporting
@@ -241,13 +358,27 @@ Definition of done:
 - Acceptance criteria:
   - No separate “Done” screen required for success.
 
+6.4 Background task continuity when leaving Editor
+- Deliverable:
+  - If user clicks Back during active subtitle creation/export, task continues in the background unless explicitly cancelled.
+  - Projects surface shows active-task state so users can see work is still running.
+- Acceptance criteria:
+  - Back navigation does not silently abandon active work.
+  - User can return to the same project and see synchronized progress state.
+
+6.5 Playback-speed control discoverability
+- Deliverable:
+  - Playback speed is discoverable without relying on hidden overflow menu affordances.
+- Acceptance criteria:
+  - Users can change playback speed from the main video-control surface.
+
 Definition of done:
-- Export is a Workbench flow and matches the UX contract.
+- Export is an Editor flow and matches the UX contract.
 
 ### Milestone 7 — Settings integration rules + busy-state rules
 7.1 Settings navigation rules
 - Deliverable:
-  - Settings accessible from Project Hub + Workbench
+  - Settings accessible from Projects + Editor
   - Settings nav disabled during long tasks
 - Acceptance criteria:
   - Long task: Settings entry disabled with clear reason.
@@ -265,6 +396,25 @@ Definition of done:
   - Error UI may show details drawer but not diagnostics tools
 - Acceptance criteria:
   - No diagnostics tools appear outside Settings.
+
+7.4 Settings clarity restructure
+- Deliverable:
+  - Transcription quality is presented as four plain-language cards with helper hints.
+  - Save-subtitles path controls are grouped directly under “Always save to this folder”.
+  - Punctuation and audio controls are merged into one section with clear intent-first wording.
+  - “Keep extracted WAV file” control is removed (auto-delete behavior only).
+- Acceptance criteria:
+  - Users can explain option trade-offs without technical terms.
+  - Save-path controls are obviously tied to the selected policy.
+  - No setting remains that can preserve extracted WAV files.
+
+7.5 Theme and support access in Settings
+- Deliverable:
+  - Theme toggle (Light/Dark/System) is available in Settings.
+  - Hosted Send Logs action is available in Settings support area.
+- Acceptance criteria:
+  - Theme can be changed without leaving Settings.
+  - Send Logs flow includes consent summary and clear success/failure feedback.
 
 Definition of done:
 - App obeys navigation + busy-state rules.
@@ -288,13 +438,25 @@ Definition of done:
 - Acceptance criteria:
   - No old UI surfaces remain in the redesign flow.
 
+8.4 Style pane modernization pass
+- Deliverable:
+  - Replace dense or ambiguous style controls with clearer grouped controls and spacing.
+  - Use segmented control for background mode selection.
+  - Curate font list for visual distinction and Hebrew support.
+  - Standardize color option UX with presets + custom picker (+ optional advanced hex input).
+  - Define sensible default color sets per style option.
+- Acceptance criteria:
+  - Common style tasks are possible without opening advanced controls.
+  - Curated fonts visibly differ and apply consistently in preview/export.
+  - Color controls support preset, picker, and optional hex workflows without confusion.
+
 Definition of done:
 - UI consistently matches the UX spec visual system.
 
 ### Milestone 9 — Cleanup + ship readiness
-9.1 Remove obsolete screens/states replaced by Project Hub/Workbench
+9.1 Remove obsolete screens/states replaced by Projects/Editor
 - Deliverable:
-  - Old screens/states removed and replaced by Project Hub/Workbench flow.
+  - Old screens/states removed and replaced by Projects/Editor flow.
 - Acceptance criteria:
   - No obsolete screens or states remain accessible.
 
@@ -321,6 +483,47 @@ Definition of done:
 Definition of done:
 - All UX spec sections B–H are implemented; ROADMAP has no remaining redesign items.
 
+## Requested UX additions coverage map (2026-02-11)
+
+| Requested area | Existing coverage | Scheduled in roadmap |
+| --- | --- | --- |
+| Transcription quality clarity (cards, plain-language hints, run-time expectation cues) | Partial (`J1`) | Queue item 6, Milestone 7.4 |
+| Save-subtitles policy/path relationship clarity | Partial (`J2`) | Queue item 6, Milestone 7.4 |
+| Replace diagnostics-heavy settings UI with easy support path | Partial (`H`, `J5`) | Queue item 2, Milestone 0.1 + 7.5 |
+| Merge punctuation + audio controls; remove “keep extracted WAV” | Partial (`J3`, `J4`) | Queue item 6, Milestone 7.4 |
+| Remove sidebar and fix app-shell/title/back/status orientation | Partial (`B`, `E`) | Queue item 4, Milestone 2.4 + 3.4 |
+| Editor duplicated labels/name/status placement | Gap | Queue item 8, Milestone 3.4 |
+| Playback-speed discoverability without hidden menu reliance | Gap | Queue item 8, Milestone 6.5 |
+| Back during active work keeps processing and remains visible | Partial (`B2`, `I2`) | Queue item 5, Milestone 6.4 |
+| Progress 0% stall + row-detail readability | Partial (`F2`, `G1`) | Queue item 5, Milestone 5.2 + 5.4 |
+| Delete dialog animation + delete success toast | Gap | Queue item 8, Milestone 2.5 |
+| Empty-state duplicate CTA cleanup | Partial (`I1`) | Queue item 8, Milestone 2.5 |
+| Style pane control density/layout modernization | Partial (`E3`) | Queue item 7, Milestone 8.4 |
+| Curated Hebrew-friendly font list | Gap | Queue item 7, Milestone 8.4 |
+| Color UX redesign (presets + picker + optional hex) | Partial (`E3`) | Queue item 7, Milestone 8.4 |
+| Sensible per-option default color sets | Gap | Queue item 7, Milestone 8.4 |
+| Theme toggle in Settings | Partial (`A`, not surfaced in Settings contract) | Queue item 6, Milestone 7.5 |
+| Replace ambiguous status wording (e.g., `Ready`) | Partial (`D2`, `K`) | Queue item 3, Milestone 1.3 + 0.3 |
+| Edit controls should not push subtitles while editing | Gap | Queue item 8, Milestone 4.4 |
+
+## Cross-cutting safeguards, validation, and analytics
+
+- Safeguards:
+  - Keep export/rendering behavior unchanged unless explicitly called out by milestone acceptance criteria.
+  - Send Logs must be opt-in, redact sensitive local data where possible, and exclude rendered output video by default.
+  - If hosted log upload fails, keep local fallback actions (`Copy diagnostics`) available.
+- Regression tests (minimum):
+  - Projects -> Editor -> Settings -> Back navigation without sidebar.
+  - Create subtitles -> Back while running -> confirm background progress remains visible -> reopen project.
+  - Delete project -> transient toast appears -> no persistent banner remains.
+  - Settings clarity checks for transcription quality, save policy/path grouping, and theme toggle.
+  - Style pane checks for font list, color presets/picker behavior, and default-color sanity.
+- Lightweight analytics (privacy-preserving):
+  - Transcription-quality option selection distribution.
+  - Send Logs attempt/success/failure counts (no payload contents).
+  - Create-subtitles cancel rate and cancel stage.
+  - Back-during-active-task frequency and completion outcomes.
+
 ## Backlog (Unscheduled)
 - Keep this short; ideas go here only if they are explicitly not scheduled.
 
@@ -335,6 +538,7 @@ Definition of done:
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.
+- 2026-02-11 — Reprioritized queue to: packaging gate first, then Support UX v1, Clarity pass, sidebar removal, progress continuity, settings clarity, style modernization, and micro-interaction polish.
 - 2026-02-10 — User-facing label updated from "Project Hub" to "Projects"; no route/model change.
 - 2026-02-08 — Milestone 1 backend completed (projects storage + `/projects` API + job linkage) ahead of Project Hub UI.
 
