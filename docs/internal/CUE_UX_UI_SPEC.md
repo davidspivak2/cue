@@ -166,9 +166,13 @@ The Editor is a **single unified** edit + style + preview + export surface for a
 
 ### E1) Editor layout regions
 - **Header:** no duplicate app/page headings; Back in top-left; title in top-left flow; status shown next to video name.
+- **Project tabs:** open project tabs use browser/Figma-style attached-tab visuals (active tab reads as connected to the content surface, not a detached pill chip).
 - **Center:** Video player with playback controls. Styled subtitles render **on the video** (preview is the truth).
+- **Preview truthfulness:** subtitle overlay scales with the rendered video viewport during window resize (no fixed-size subtitle drift while video shrinks/grows).
+- **Preview/export style parity:** for the same project style, preview should remain materially consistent with export for core fields (font family, font size, shadow treatment, and relative placement intent).
 - **Right:** Style inspector.
 - **Left:** “All subtitles” panel (collapsible, resizable when docked).
+- **Cursor semantics:** interactive controls use pointer cursor feedback; text-entry surfaces use I-beam feedback.
 
 ### E2) Left “All subtitles” panel behavior
 - Default on first entry: **collapsed**.
@@ -186,6 +190,9 @@ The Editor is a **single unified** edit + style + preview + export surface for a
 ### E3) Right Style inspector behavior
 - **Wide window:** docked fixed-width inspector; vertically scrollable; **no horizontal scroll**.
 - **Narrow window:** inspector collapses and opens as an **overlay drawer** via a “Style” button.
+- Overlay close affordance uses an icon-only **X** control.
+- Wide layouts may expose a collapsed vertical strip entry point (icon button) that opens the style inspector as an overlay.
+- Style inspector scrollbar uses a thinner thumb-first treatment with minimal visual chrome, while preserving accessibility.
 - Styling capabilities remain conceptually the same, but controls are reorganized into **clean sections** with consistent spacing and hierarchy (Linear-style).
 - Control modernization requirements:
   - Background mode uses a segmented control (not plain radio rows).
@@ -212,8 +219,15 @@ The redesign workflow is **in-app subtitle text editing only** (no external subt
      - **Undo** (undo icon): reverts the latest unsaved edit step.
      - **Cancel** (x icon): discards unsaved changes and exits edit mode.
    - **Enter** saves, **Esc** cancels, **Ctrl/Cmd+Z** undoes.
+   - If user clicks **Play** during active inline edit, app auto-saves current text, exits edit mode, and resumes playback immediately.
    - On **Save** or **Cancel**, playback resumes from the paused timestamp when edit mode was entered from a playing state.
    - Save/Undo/Cancel controls must not shift subtitle vertical position when edit mode toggles.
+   - Inline editor must show the full cue text (including three-line cues) so no line becomes uneditable.
+   - Edit affordance should be obvious enough for first-time users while staying visually subtle during playback.
+
+**RTL edit contract (textarea only):**
+- In inline edit mode, Hebrew/RTL punctuation placement and arrow-key movement must remain intuitive and correct.
+- This rule applies to textarea behavior only; non-edit subtitle display and export rendering behavior should remain unchanged unless separately scheduled.
 
 **Selection highlight contract (never exported):**
 - Selected subtitle overlay shows a **thin accent outline** for UI selection only.
@@ -276,6 +290,11 @@ Create Subtitles must output:
 - Export uses the **already-generated artifacts** to burn subtitles (Static or Word highlight) and saves the MP4.
 - **Export precondition (Word highlight):** if Word highlight mode is selected and required word-timing artifacts are missing or stale, export **must block** and instruct the user to rerun **Create Subtitles** (or a clearly labeled retry action if exposed). Do not fall back to running WhisperX during export.
 
+### F6) Preview word-highlight sync rule
+- In-app preview highlighting should use the same timed-word artifact semantics used by export (when timed words are available).
+- Preview must not approximate highlight progression by evenly distributing words across full cue duration when timing artifacts exist.
+- Sync improvements here are preview-only scope; export timing behavior remains unchanged unless explicitly re-scoped.
+
 ---
 
 ## G) Export progress + success (in-Editor)
@@ -291,6 +310,7 @@ Create Subtitles must output:
 - Stay in Editor and show an **in-place success state** with actions:
   - **Play video**
   - **Open folder**
+- If either open action fails, user gets clear non-blocking feedback (never silent no-op).
 - User can continue editing/styling and export again.
 
 ---
@@ -339,7 +359,7 @@ Create Subtitles must output:
 | WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Matching individual words to speech”; Back is allowed and task continues in background. |
 | WB_SUBTITLES_READY | Subtitles + word timings available (user-facing status: Needs edits) | **“Create video with subtitles”** | Settings enabled | Left panel user-controlled; right inspector docked/overlay per width | Subtitle text editable; timestamps read-only. |
 | WB_EXPORTING | Export in progress | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Export uses existing artifacts only; Back is allowed and task continues in background. |
-| WB_EXPORT_SUCCESS | Export completed | **“Create video with subtitles”** | Settings enabled | Panels user-controlled | Show success UI with “Play video” + “Open folder”. |
+| WB_EXPORT_SUCCESS | Export completed | **“Create video with subtitles”** | Settings enabled | Panels user-controlled | Show success UI with “Play video” + “Open folder”; opener failures surface clear non-blocking feedback. |
 | WB_ERROR_RECOVERABLE | Recoverable error occurred | **Retry** (contextual) | Settings enabled (unless task running) | Panels user-controlled | Inline banner. |
 | WB_ERROR_BLOCKING | Blocking error occurred | **Try again** (modal) | Settings enabled (unless task running) | Panels closed while modal active | Modal can show “Show details”. |
 
