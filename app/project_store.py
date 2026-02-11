@@ -240,6 +240,14 @@ def _artifact_exists(manifest: dict[str, Any], key: str) -> bool:
     return path.exists()
 
 
+def _read_style_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    style_path = _artifact_path(manifest, "style_path")
+    if not style_path.exists():
+        return {}
+    style_data = _read_json_file(style_path)
+    return style_data if isinstance(style_data, dict) else {}
+
+
 def _compute_status(manifest: dict[str, Any], *, allow_exporting: bool = False) -> str:
     video = manifest.get("video") if isinstance(manifest.get("video"), dict) else {}
     video_path = video.get("path")
@@ -377,7 +385,43 @@ def get_project(project_id: str) -> dict[str, Any]:
         manifest = _read_manifest(project_id)
         manifest["status"] = _compute_status(manifest)
         _write_manifest(manifest)
-        return manifest
+        response = dict(manifest)
+        response["style"] = _read_style_from_manifest(manifest)
+        return response
+
+
+def get_project_style(project_id: str) -> dict[str, Any]:
+    with _STORE_LOCK:
+        _ensure_store()
+        manifest = _read_manifest(project_id)
+        return _read_style_from_manifest(manifest)
+
+
+def get_project_export_artifacts(project_id: str) -> dict[str, Optional[str]]:
+    with _STORE_LOCK:
+        _ensure_store()
+        manifest = _read_manifest(project_id)
+        video = manifest.get("video") if isinstance(manifest.get("video"), dict) else {}
+        video_path_value = video.get("path")
+        if not isinstance(video_path_value, str) or not video_path_value.strip():
+            raise HTTPException(status_code=422, detail="project_video_missing")
+        video_path = Path(video_path_value)
+        if not video_path.exists():
+            raise HTTPException(status_code=422, detail="project_video_not_found")
+        subtitles_path = _artifact_path(manifest, "subtitles_path")
+        if not subtitles_path.exists():
+            raise HTTPException(status_code=422, detail="project_subtitles_missing")
+        word_timings_path = _artifact_path(manifest, "word_timings_path")
+        style_path = _artifact_path(manifest, "style_path")
+        project_dir = _project_dir(project_id)
+        return {
+            "project_id": project_id,
+            "project_dir": str(project_dir),
+            "video_path": str(video_path),
+            "subtitles_path": str(subtitles_path),
+            "word_timings_path": str(word_timings_path) if word_timings_path.exists() else None,
+            "style_path": str(style_path) if style_path.exists() else None,
+        }
 
 
 def get_project_subtitles_text(project_id: str) -> str:
@@ -470,7 +514,9 @@ def update_project(
             _atomic_write_json(style_path, style)
         _write_manifest(manifest)
         _write_index(list_projects())
-        return manifest
+        response = dict(manifest)
+        response["style"] = _read_style_from_manifest(manifest)
+        return response
 
 
 def set_project_status(project_id: str, status: str) -> None:

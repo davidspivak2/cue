@@ -102,6 +102,8 @@ class JobRequest(BaseModel):
     input_path: Optional[str] = None
     output_dir: Optional[str] = None
     srt_path: Optional[str] = None
+    word_timings_path: Optional[str] = None
+    style_path: Optional[str] = None
     options: dict[str, Any] = Field(default_factory=dict)
     project_id: Optional[str] = None
 
@@ -243,6 +245,40 @@ def _merge_settings(base: dict[str, Any], update: dict[str, Any]) -> dict[str, A
         else:
             merged[key] = value
     return merged
+
+
+def _resolve_output_dir_for_export(
+    video_path: str,
+    requested_output_dir: Optional[str],
+) -> str:
+    if isinstance(requested_output_dir, str) and requested_output_dir.strip():
+        return requested_output_dir
+    settings = _read_settings_file()
+    save_policy = settings.get("save_policy")
+    if save_policy == "fixed_folder":
+        save_folder = settings.get("save_folder")
+        if isinstance(save_folder, str) and save_folder.strip():
+            return save_folder
+        raise HTTPException(status_code=422, detail="save_folder_required")
+    # For same_folder and ask_every_time, backend uses the source video folder.
+    return str(Path(video_path).parent)
+
+
+def _resolve_export_request_from_project(payload: JobRequest) -> None:
+    if payload.kind != "create_video_with_subtitles" or not payload.project_id:
+        return
+    artifacts = project_store.get_project_export_artifacts(payload.project_id)
+    video_path = artifacts.get("video_path")
+    subtitles_path = artifacts.get("subtitles_path")
+    if not isinstance(video_path, str) or not video_path:
+        raise HTTPException(status_code=422, detail="project_video_missing")
+    if not isinstance(subtitles_path, str) or not subtitles_path:
+        raise HTTPException(status_code=422, detail="project_subtitles_missing")
+    payload.input_path = video_path
+    payload.srt_path = subtitles_path
+    payload.output_dir = _resolve_output_dir_for_export(video_path, payload.output_dir)
+    payload.word_timings_path = artifacts.get("word_timings_path")
+    payload.style_path = artifacts.get("style_path")
 
 
 def _resolve_port() -> int:
@@ -409,6 +445,10 @@ def _build_runner_command(request: JobRequest) -> list[str]:
     ]
     if request.srt_path:
         command.extend(["--srt-path", request.srt_path])
+    if request.word_timings_path:
+        command.extend(["--word-timings-path", request.word_timings_path])
+    if request.style_path:
+        command.extend(["--style-path", request.style_path])
     options = {
         key: value
         for key, value in request.options.items()
@@ -670,6 +710,10 @@ async def _cancel_jobs_for_project(project_id: str) -> list[str]:
 @app.post("/jobs")
 async def create_job(payload: JobRequest) -> dict[str, str]:
     request_received_at = datetime.now(timezone.utc)
+    if payload.project_id:
+        project_store.get_project(payload.project_id)
+    if payload.kind == "create_video_with_subtitles" and payload.project_id:
+        _resolve_export_request_from_project(payload)
     if payload.kind in {"pipeline", "create_subtitles", "create_video_with_subtitles"}:
         if not payload.input_path:
             raise HTTPException(status_code=422, detail="input_path_required")
@@ -677,8 +721,6 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
             raise HTTPException(status_code=422, detail="output_dir_required")
     if payload.kind == "create_video_with_subtitles" and not payload.srt_path:
         raise HTTPException(status_code=422, detail="srt_path_required")
-    if payload.project_id:
-        project_store.get_project(payload.project_id)
 
     job_id = str(uuid.uuid4())
     job = JobState(

@@ -68,6 +68,8 @@ def test_runner_command_strips_ui_selection_options() -> None:
         input_path="in.mp4",
         output_dir="out",
         srt_path="subs.srt",
+        word_timings_path="subs.word_timings.json",
+        style_path="style.json",
         options={
             "subtitle_mode": "word_highlight",
             "highlight_color": "#FFD400",
@@ -78,6 +80,10 @@ def test_runner_command_strips_ui_selection_options() -> None:
     )
 
     command = backend_server._build_runner_command(request)
+    assert "--word-timings-path" in command
+    assert command[command.index("--word-timings-path") + 1] == "subs.word_timings.json"
+    assert "--style-path" in command
+    assert command[command.index("--style-path") + 1] == "style.json"
     assert "--options-json" in command
     options_index = command.index("--options-json")
     options_payload = json.loads(command[options_index + 1])

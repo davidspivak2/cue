@@ -144,6 +144,7 @@ class Worker(QtCore.QObject):
         video_path: Path,
         output_dir: Path,
         srt_path: Optional[Path] = None,
+        word_timings_path: Optional[Path] = None,
         transcription_settings: Optional[TranscriptionSettings] = None,
         subtitle_style: Optional[SubtitleStyle] = None,
         subtitle_mode: str = "static",
@@ -158,6 +159,7 @@ class Worker(QtCore.QObject):
         self.video_path = video_path
         self.output_dir = output_dir
         self.srt_path = srt_path
+        self.word_timings_path = word_timings_path
         self.transcription_settings = transcription_settings
         self.subtitle_style = subtitle_style
         self.subtitle_mode = subtitle_mode
@@ -179,7 +181,7 @@ class Worker(QtCore.QObject):
         self._last_audio_extract_command: Optional[list[str]] = None
         self._audio_path: Optional[Path] = None
         self._srt_path: Optional[Path] = None
-        self._word_timings_path: Optional[Path] = None
+        self._word_timings_path: Optional[Path] = word_timings_path
         self._output_video_path: Optional[Path] = None
         self._transcribe_command: Optional[str] = None
         self._burn_in_command: Optional[str] = None
@@ -830,7 +832,11 @@ class Worker(QtCore.QObject):
         if not srt_path.exists():
             raise FileNotFoundError(f"Subtitles file not found: {srt_path}")
         cues = parse_srt_file(srt_path)
-        self._ensure_word_timings_file(srt_path, cues)
+        self._ensure_word_timings_file(
+            srt_path,
+            cues,
+            create_if_missing=self.subtitle_mode != "word_highlight",
+        )
         self._log_word_timing_status(srt_path)
 
         output_path = self.output_dir / f"{self.video_path.stem}_subtitled.mp4"
@@ -2209,10 +2215,35 @@ class Worker(QtCore.QObject):
             return False
         return settings.categories.get(key, False)
 
-    def _ensure_word_timings_file(self, srt_path: Path, cues: list[SrtCue]) -> None:
-        word_timings_path = word_timings_path_for_srt(srt_path)
+    def _resolve_word_timings_path(self, srt_path: Path) -> Path:
+        if self.word_timings_path is not None:
+            return self.word_timings_path
+        derived_path = word_timings_path_for_srt(srt_path)
+        if derived_path.exists():
+            return derived_path
+        # Project artifacts use a fixed filename; keep backward compatibility.
+        if srt_path.name == "subtitles.srt":
+            project_fallback_path = srt_path.with_name("word_timings.json")
+            if project_fallback_path.exists():
+                self.signals.log.emit(
+                    f"Using project word timings fallback: {project_fallback_path}",
+                    True,
+                )
+                return project_fallback_path
+        return derived_path
+
+    def _ensure_word_timings_file(
+        self,
+        srt_path: Path,
+        cues: list[SrtCue],
+        *,
+        create_if_missing: bool = True,
+    ) -> None:
+        word_timings_path = self._resolve_word_timings_path(srt_path)
         self._word_timings_path = word_timings_path
         if word_timings_path.exists():
+            return
+        if not create_if_missing:
             return
         cue_payload = [
             (idx + 1, cue.start_seconds, cue.end_seconds, cue.text)
@@ -2236,7 +2267,10 @@ class Worker(QtCore.QObject):
             )
 
     def _log_word_timing_status(self, srt_path: Path) -> None:
-        word_timings_path = word_timings_path_for_srt(srt_path)
+        word_timings_path = self._word_timings_path or self._resolve_word_timings_path(
+            srt_path
+        )
+        self._word_timings_path = word_timings_path
         stale = is_word_timing_stale(word_timings_path, srt_path)
         self.signals.log.emit(f"Word timings: path={word_timings_path}", True)
         self.signals.log.emit(f"Word timings stale? {str(stale).lower()}", True)
@@ -3006,24 +3040,37 @@ class Worker(QtCore.QObject):
             self._update_export_alignment_progress(current, total)
 
     def _ensure_word_timings_ready_for_export(self, srt_path: Path, audio_path: Path) -> None:
-        plan = build_alignment_plan(
-            subtitle_mode=self.subtitle_mode,
-            srt_path=srt_path,
-            audio_path=audio_path,
-            language="he",
-            prefer_gpu=True,
-        )
-        self.signals.log.emit(
-            "Alignment needed? "
-            f"{str(plan.should_run).lower()} reason={plan.reason} (context=export)",
-            True,
-        )
-        if not plan.should_run:
+        del audio_path
+        if self.subtitle_mode != "word_highlight":
             return
-        raise RuntimeError(
-            "Word highlight timings are missing or out of date. "
-            "Please regenerate subtitles or re-time word highlights before exporting."
+        word_timings_path = self._word_timings_path or self._resolve_word_timings_path(
+            srt_path
         )
+        self._word_timings_path = word_timings_path
+        if not word_timings_path.exists():
+            raise RuntimeError(
+                "Word highlight timings are missing or out of date. "
+                "Please regenerate subtitles or re-time word highlights before exporting."
+            )
+        stale = is_word_timing_stale(word_timings_path, srt_path)
+        if stale:
+            raise RuntimeError(
+                "Word highlight timings are missing or out of date. "
+                "Please regenerate subtitles or re-time word highlights before exporting."
+            )
+        try:
+            doc = load_word_timings_json(word_timings_path)
+        except (WordTimingValidationError, OSError):
+            raise RuntimeError(
+                "Word highlight timings are missing or out of date. "
+                "Please regenerate subtitles or re-time word highlights before exporting."
+            )
+        total_words = sum(len(cue.words) for cue in doc.cues)
+        if total_words <= 0:
+            raise RuntimeError(
+                "Word highlight timings are missing or out of date. "
+                "Please regenerate subtitles or re-time word highlights before exporting."
+            )
 
     def _update_export_alignment_progress(self, current: int, total: int) -> None:
         if self._alignment_progress_context != "export":

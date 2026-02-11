@@ -26,6 +26,11 @@ export type ProjectArtifacts = {
   style_path?: string | null;
 };
 
+export type ProjectLatestExport = {
+  output_video_path?: string | null;
+  exported_at?: string | null;
+};
+
 export type ProjectManifest = {
   project_id: string;
   status: string;
@@ -33,6 +38,8 @@ export type ProjectManifest = {
   updated_at: string;
   video?: ProjectVideoInfo | null;
   artifacts?: ProjectArtifacts | null;
+  latest_export?: ProjectLatestExport | null;
+  style?: Record<string, unknown> | null;
 };
 
 export type ProjectUpdatePayload = {

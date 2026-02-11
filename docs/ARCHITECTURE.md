@@ -34,7 +34,8 @@ Cue is a desktop app with two main layers:
 - **Backend** — A Python FastAPI server (`app/backend_server.py`) that manages jobs, settings, and device info. Spawns pipeline workers as subprocesses.
 - **Pipeline** — The actual work: audio extraction (FFmpeg), transcription (faster-whisper), word alignment (WhisperX), and subtitle burn-in (FFmpeg with graphics overlay).
 
-There is also a **legacy Qt/PySide6 UI** (`app/main.py`) that predates the Tauri app. It is kept as a reference and will be removed once the Tauri app reaches full feature parity.
+There is also a **legacy Qt/PySide6 UI** (`app/main.py`) that predates the Tauri app.
+It is now reference-only. The active user flow is the Tauri app (`Projects -> Workbench -> Export`).
 
 ---
 
@@ -105,7 +106,7 @@ app/                              # Python backend and pipeline
 
 desktop/                          # Tauri + React desktop app
   src/                            # React frontend (TypeScript)
-    pages/                        # Home, Review, Settings screens
+    pages/                        # ProjectHub, Workbench, Settings screens
     components/                   # UI components (shadcn/Tailwind)
     jobsClient.ts                 # Backend job API client
     settingsClient.ts             # Backend settings API client
@@ -130,8 +131,8 @@ If you are new to the codebase, start here:
 1. **`app/backend_server.py`** — The FastAPI server that the desktop UI talks to. Defines job endpoints and SSE event streaming.
 2. **`app/workers.py`** — The heavy lifter. Handles audio extraction, transcription subprocess management, FFmpeg burn-in, and progress reporting.
 3. **`app/transcribe_worker.py`** — The transcription subprocess. Loads the Whisper model, runs transcription, applies punctuation rescue, and writes the SRT file.
-4. **`desktop/src/pages/Home.tsx`** — The main UI screen with the 5-state workflow (empty, video selected, working, subtitles ready, export done).
-5. **`desktop/src/pages/Review.tsx`** — The review screen for styling, preview, and export before burn-in.
+4. **`desktop/src/pages/Workbench.tsx`** — The unified editor/export surface. Handles subtitle creation, on-video text editing, styling, export progress, cancel, and success actions.
+5. **`desktop/src/pages/ProjectHub.tsx`** — The project list and entry point (`New project`, relink, delete, and quick create-subtitles actions).
 6. **`desktop/src/pages/Settings.tsx`** — The settings screen (transcription quality, save policy, audio options, diagnostics).
 
 ---
@@ -189,7 +190,7 @@ The desktop UI communicates with the Python backend over HTTP:
 | `/device` | GET | GPU/device info for the settings UI |
 
 Jobs emit typed SSE events: `started`, `checklist`, `progress`, `log`, `result`, `heartbeat`, `completed`, `cancelled`, `error`.
-`POST /jobs` accepts an optional `project_id` to associate job results with a saved project.
+`POST /jobs` accepts an optional `project_id`; for export jobs, `project_id` is the preferred contract and the backend resolves project artifacts (video, subtitles, style, word timings).
 
 ---
 
