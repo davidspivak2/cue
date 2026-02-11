@@ -260,20 +260,6 @@ const Home = () => {
     (path: string, file?: File | null) => {
       if (!path) {
         setError("Could not read this file path. Please try a different file.");
-        // #region agent log
-        fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            runId: "initial",
-            hypothesisId: "H5",
-            location: "desktop/src/pages/Home.tsx:266",
-            message: "Video selection failed because path was empty",
-            data: { hadFileObject: Boolean(file) },
-            timestamp: Date.now()
-          })
-        }).catch(() => {});
-        // #endregion
         return;
       }
       setError(null);
@@ -285,20 +271,6 @@ const Home = () => {
       setPreviewFramePath(null);
       resetJobState();
       setState("VIDEO_SELECTED");
-      // #region agent log
-      fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          runId: "initial",
-          hypothesisId: "H5",
-          location: "desktop/src/pages/Home.tsx:287",
-          message: "Video selection moved Home state to VIDEO_SELECTED",
-          data: { isPathPresent: true, hadFileObject: Boolean(file) },
-          timestamp: Date.now()
-        })
-      }).catch(() => {});
-      // #endregion
     },
     [resetJobState]
   );
@@ -312,20 +284,6 @@ const Home = () => {
     const resolvedPath = resolveVideoPath(file);
     if (!resolvedPath) {
       setError("Could not read this file path. Please try a different file.");
-      // #region agent log
-      fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          runId: "initial",
-          hypothesisId: "H5",
-          location: "desktop/src/pages/Home.tsx:311",
-          message: "Browser file input lacked a usable path",
-          data: { fileNameLength: file?.name?.length ?? 0 },
-          timestamp: Date.now()
-        })
-      }).catch(() => {});
-      // #endregion
       return;
     }
     handleVideoPathSelected(resolvedPath, file);
@@ -651,43 +609,6 @@ const Home = () => {
   const isWorking = state === "WORKING";
   const fileSelectedHandler = isTauriEnv ? undefined : handleVideoSelected;
   const choosePathHandler = isTauriEnv ? chooseVideoPath : undefined;
-
-  React.useEffect(() => {
-    // #region agent log
-    fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        runId: "initial",
-        hypothesisId: "H3",
-        location: "desktop/src/pages/Home.tsx:654",
-        message: "Home state snapshot for create-subtitles visibility",
-        data: {
-          pathname: location.pathname,
-          state,
-          isCreateSubtitlesVisible: state === "VIDEO_SELECTED",
-          hasVideoPath: Boolean(videoPath),
-          createSubtitlesLabel: legacyCopy.videoSelected.cta
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-    // #region agent log
-    fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        runId: "initial",
-        hypothesisId: "H4",
-        location: "desktop/src/pages/Home.tsx:674",
-        message: "Create-subtitles CTA label value",
-        data: { ctaText: legacyCopy.videoSelected.cta },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-  }, [location.pathname, state, videoPath]);
 
   return (
     <div className="space-y-6">

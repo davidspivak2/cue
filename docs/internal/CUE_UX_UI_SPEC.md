@@ -132,6 +132,7 @@ Each project persists:
 ### D1) Layout
 - **Grid of thumbnail cards** (video thumbnails).
 - **Primary CTA:** “New project” (choose video) plus **drag-and-drop** on the entire hub surface.
+- **New project flow:** After selecting a video, open Workbench and start **Create subtitles** immediately (no extra click).
 
 ### D2) Project card content
 Each card shows:
@@ -177,7 +178,7 @@ The Workbench is a **single unified** edit + style + preview + export surface fo
 - Styling capabilities remain conceptually the same, but controls are reorganized into **clean sections** with consistent spacing and hierarchy (Linear-style).
 - Preview reflects style changes **immediately**.
 
-Current implementation note: when a project has no subtitles yet, Workbench shows a strict empty state (`No subtitles yet.` + `Create subtitles`) and keeps style controls hidden until subtitles exist.
+Current implementation note: Workbench keeps the strict empty state (`No subtitles yet.` + `Create subtitles`) for manual entry points, while **New project** and **Needs subtitles → Create subtitles** quick actions auto-start subtitle generation so users do not click twice.
 
 ### E4) Subtitle editing requirements (explicit)
 Users can **edit subtitle text only**. Timestamps are visible but **not editable**.

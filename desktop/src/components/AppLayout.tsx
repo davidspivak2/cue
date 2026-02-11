@@ -29,38 +29,7 @@ const AppLayout = () => {
       return;
     }
     hasLaunchedRef.current = true;
-    // #region agent log
-    fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        runId: "initial",
-        hypothesisId: "H1",
-        location: "desktop/src/components/AppLayout.tsx:31",
-        message: "Initial route observed on app launch",
-        data: {
-          pathname: location.pathname,
-          willRedirectToRoot: location.pathname !== "/"
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
     if (location.pathname !== "/") {
-      // #region agent log
-      fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          runId: "initial",
-          hypothesisId: "H2",
-          location: "desktop/src/components/AppLayout.tsx:41",
-          message: "Redirecting non-root route to Projects",
-          data: { fromPathname: location.pathname, toPathname: "/" },
-          timestamp: Date.now()
-        })
-      }).catch(() => {});
-      // #endregion
       navigate("/", { replace: true });
     }
   }, [location.pathname, navigate]);

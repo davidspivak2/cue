@@ -56,6 +56,89 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   highlight_color: "#FFD400"
 };
 
+type PresetStyleDefaults = {
+  font_size: number;
+  outline: number;
+  shadow: number;
+  margin_v: number;
+  box_enabled: boolean;
+  box_opacity: number;
+  box_padding: number;
+};
+
+const PRESET_STYLE_DEFAULTS: Record<"Default" | "Large outline" | "Large outline + box", PresetStyleDefaults> =
+  {
+    Default: {
+      font_size: 34,
+      outline: 1.5,
+      shadow: 1,
+      margin_v: 28,
+      box_enabled: false,
+      box_opacity: 55,
+      box_padding: 8
+    },
+    "Large outline": {
+      font_size: 38,
+      outline: 2,
+      shadow: 1,
+      margin_v: 30,
+      box_enabled: false,
+      box_opacity: 55,
+      box_padding: 9
+    },
+    "Large outline + box": {
+      font_size: 38,
+      outline: 2,
+      shadow: 1,
+      margin_v: 30,
+      box_enabled: true,
+      box_opacity: 55,
+      box_padding: 9
+    }
+  };
+
+const applyPresetAppearance = (
+  source: SubtitleStyleAppearance,
+  presetName: string
+): SubtitleStyleAppearance => {
+  if (presetName === "Custom") {
+    return source;
+  }
+  const defaults =
+    presetName === "Large outline" || presetName === "Large outline + box"
+      ? PRESET_STYLE_DEFAULTS[presetName]
+      : PRESET_STYLE_DEFAULTS.Default;
+  return {
+    ...source,
+    font_family: DEFAULT_APPEARANCE.font_family,
+    font_size: defaults.font_size,
+    font_style: "regular",
+    text_color: DEFAULT_APPEARANCE.text_color,
+    text_opacity: 1,
+    letter_spacing: 0,
+    outline_enabled: defaults.outline > 0,
+    outline_width: defaults.outline,
+    outline_color: DEFAULT_APPEARANCE.outline_color,
+    shadow_enabled: defaults.shadow > 0,
+    shadow_strength: defaults.shadow,
+    shadow_offset_x: 0,
+    shadow_offset_y: 0,
+    shadow_color: DEFAULT_APPEARANCE.shadow_color,
+    shadow_opacity: 1,
+    background_mode: defaults.box_enabled ? "line" : "none",
+    line_bg_color: DEFAULT_APPEARANCE.line_bg_color,
+    line_bg_opacity: defaults.box_opacity / 100,
+    line_bg_padding: defaults.box_padding,
+    line_bg_radius: 0,
+    word_bg_color: DEFAULT_APPEARANCE.word_bg_color,
+    word_bg_opacity: DEFAULT_APPEARANCE.word_bg_opacity,
+    word_bg_padding: defaults.box_padding,
+    word_bg_radius: 0,
+    vertical_anchor: "bottom",
+    vertical_offset: defaults.margin_v
+  };
+};
+
 /* ---------- hooks ---------- */
 
 function useDebounce<T extends (...args: never[]) => void>(
@@ -121,6 +204,7 @@ const Review = () => {
   /* ── settings state ── */
   const [appearance, setAppearance] =
     React.useState<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
+  const customAppearanceRef = React.useRef<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
   const [preset, setPreset] = React.useState("Default");
   const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -146,7 +230,16 @@ const Review = () => {
           subtitle_mode: data.subtitle_mode ?? app.subtitle_mode,
           highlight_color: style.highlight_color ?? app.highlight_color
         });
-        setPreset(style.preset ?? "Default");
+        const resolvedPreset = style.preset ?? "Default";
+        setPreset(resolvedPreset);
+        if (resolvedPreset === "Custom") {
+          customAppearanceRef.current = {
+            ...DEFAULT_APPEARANCE,
+            ...app,
+            subtitle_mode: data.subtitle_mode ?? app.subtitle_mode,
+            highlight_color: style.highlight_color ?? app.highlight_color
+          };
+        }
         setHighlightOpacity(style.highlight_opacity ?? 1.0);
       })
       .catch((err) => {
@@ -254,6 +347,7 @@ const Review = () => {
   ) => {
     setAppearance((prev) => {
       const next = { ...prev, ...changes };
+      customAppearanceRef.current = next;
       debouncedPreview(next, highlightOpacity);
       debouncedPersist(next, preset, highlightOpacity);
       return next;
@@ -264,10 +358,17 @@ const Review = () => {
   };
 
   const handlePresetChange = (newPreset: string) => {
+    if (preset === "Custom") {
+      customAppearanceRef.current = appearance;
+    }
+    const nextAppearance =
+      newPreset === "Custom"
+        ? { ...customAppearanceRef.current }
+        : applyPresetAppearance(appearance, newPreset);
     setPreset(newPreset);
-    /* Let backend resolve the preset defaults via settings save cycle */
-    debouncedPersist(appearance, newPreset, highlightOpacity);
-    debouncedPreview(appearance, highlightOpacity);
+    setAppearance(nextAppearance);
+    debouncedPersist(nextAppearance, newPreset, highlightOpacity);
+    debouncedPreview(nextAppearance, highlightOpacity);
   };
 
   const handleHighlightOpacityChange = (opacity: number) => {

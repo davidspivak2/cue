@@ -105,6 +105,89 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   highlight_color: "#FFD400"
 };
 
+type PresetStyleDefaults = {
+  font_size: number;
+  outline: number;
+  shadow: number;
+  margin_v: number;
+  box_enabled: boolean;
+  box_opacity: number;
+  box_padding: number;
+};
+
+const PRESET_STYLE_DEFAULTS: Record<"Default" | "Large outline" | "Large outline + box", PresetStyleDefaults> =
+  {
+    Default: {
+      font_size: 34,
+      outline: 1.5,
+      shadow: 1,
+      margin_v: 28,
+      box_enabled: false,
+      box_opacity: 55,
+      box_padding: 8
+    },
+    "Large outline": {
+      font_size: 38,
+      outline: 2,
+      shadow: 1,
+      margin_v: 30,
+      box_enabled: false,
+      box_opacity: 55,
+      box_padding: 9
+    },
+    "Large outline + box": {
+      font_size: 38,
+      outline: 2,
+      shadow: 1,
+      margin_v: 30,
+      box_enabled: true,
+      box_opacity: 55,
+      box_padding: 9
+    }
+  };
+
+const applyPresetAppearance = (
+  source: SubtitleStyleAppearance,
+  presetName: string
+): SubtitleStyleAppearance => {
+  if (presetName === "Custom") {
+    return source;
+  }
+  const defaults =
+    presetName === "Large outline" || presetName === "Large outline + box"
+      ? PRESET_STYLE_DEFAULTS[presetName]
+      : PRESET_STYLE_DEFAULTS.Default;
+  return {
+    ...source,
+    font_family: DEFAULT_APPEARANCE.font_family,
+    font_size: defaults.font_size,
+    font_style: "regular",
+    text_color: DEFAULT_APPEARANCE.text_color,
+    text_opacity: 1,
+    letter_spacing: 0,
+    outline_enabled: defaults.outline > 0,
+    outline_width: defaults.outline,
+    outline_color: DEFAULT_APPEARANCE.outline_color,
+    shadow_enabled: defaults.shadow > 0,
+    shadow_strength: defaults.shadow,
+    shadow_offset_x: 0,
+    shadow_offset_y: 0,
+    shadow_color: DEFAULT_APPEARANCE.shadow_color,
+    shadow_opacity: 1,
+    background_mode: defaults.box_enabled ? "line" : "none",
+    line_bg_color: DEFAULT_APPEARANCE.line_bg_color,
+    line_bg_opacity: defaults.box_opacity / 100,
+    line_bg_padding: defaults.box_padding,
+    line_bg_radius: 0,
+    word_bg_color: DEFAULT_APPEARANCE.word_bg_color,
+    word_bg_opacity: DEFAULT_APPEARANCE.word_bg_opacity,
+    word_bg_padding: defaults.box_padding,
+    word_bg_radius: 0,
+    vertical_anchor: "bottom",
+    vertical_offset: defaults.margin_v
+  };
+};
+
 const MISSING_SUBTITLES_REASON_TEXT: Record<string, string> = {
   no_speech_in_gaps: "no speech in the missing part",
   rescue_transcribe_empty: "could not recover any text",
@@ -121,8 +204,43 @@ const WORD_HIGHLIGHT_REASON_TEXT: Record<string, string> = {
   align_output_invalid: "timing data was invalid"
 };
 
+const EDIT_UNDO_COALESCE_MS = 600;
+const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+const RTL_CHAR_PATTERN = /[\u0590-\u08FF]/;
+
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
   items.map((item) => ({ ...item, state: "pending" }));
+
+const clampOpacity = (value: number) => Math.max(0, Math.min(1, value));
+
+const colorWithOpacity = (hex: string, opacity: number) => {
+  if (!HEX_COLOR_PATTERN.test(hex)) {
+    return hex;
+  }
+  const red = Number.parseInt(hex.slice(1, 3), 16);
+  const green = Number.parseInt(hex.slice(3, 5), 16);
+  const blue = Number.parseInt(hex.slice(5, 7), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${clampOpacity(opacity)})`;
+};
+
+const buildOutlineShadows = (color: string, width: number) => {
+  const radius = Math.max(0, Math.round(width));
+  if (radius <= 0) {
+    return [] as string[];
+  }
+  const shadows: string[] = [];
+  for (let x = -radius; x <= radius; x += 1) {
+    for (let y = -radius; y <= radius; y += 1) {
+      if (x === 0 && y === 0) {
+        continue;
+      }
+      if (x * x + y * y <= radius * radius) {
+        shadows.push(`${x}px ${y}px 0 ${color}`);
+      }
+    }
+  }
+  return shadows;
+};
 
 const getPathSeparator = (value: string) => (value.includes("\\") ? "\\" : "/");
 
@@ -175,6 +293,7 @@ const Workbench = () => {
   const shouldResumePlaybackRef = React.useRef(false);
   const editHistoryRef = React.useRef<string[]>([]);
   const editHistoryIndexRef = React.useRef(0);
+  const lastHistoryCommitAtRef = React.useRef(0);
   const [project, setProject] = React.useState<ProjectManifest | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [subtitleLoadError, setSubtitleLoadError] = React.useState<string | null>(null);
@@ -185,6 +304,7 @@ const Workbench = () => {
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
   const [appearance, setAppearance] =
     React.useState<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
+  const customAppearanceRef = React.useRef<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
   const [preset, setPreset] = React.useState("Default");
   const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
   const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
@@ -253,6 +373,7 @@ const Workbench = () => {
       setCanUndoEdit(false);
       editHistoryRef.current = [];
       editHistoryIndexRef.current = 0;
+      lastHistoryCommitAtRef.current = 0;
       shouldResumePlaybackRef.current = false;
       setSubtitleLoadError(null);
       return () => {
@@ -267,6 +388,7 @@ const Workbench = () => {
     setCanUndoEdit(false);
     editHistoryRef.current = [];
     editHistoryIndexRef.current = 0;
+    lastHistoryCommitAtRef.current = 0;
     shouldResumePlaybackRef.current = false;
     setSubtitleLoadError(null);
     fetchProjectSubtitles(projectId)
@@ -293,13 +415,18 @@ const Workbench = () => {
   const applyStyleFromSettings = React.useCallback((data: SettingsConfig) => {
     const style = data.subtitle_style;
     const app = (style.appearance as SubtitleStyleAppearance | undefined) ?? DEFAULT_APPEARANCE;
-    setAppearance({
+    const resolvedAppearance = {
       ...DEFAULT_APPEARANCE,
       ...app,
       subtitle_mode: data.subtitle_mode ?? app.subtitle_mode,
       highlight_color: style.highlight_color ?? app.highlight_color
-    });
-    setPreset(style.preset ?? "Default");
+    };
+    const resolvedPreset = style.preset ?? "Default";
+    setAppearance(resolvedAppearance);
+    setPreset(resolvedPreset);
+    if (resolvedPreset === "Custom") {
+      customAppearanceRef.current = resolvedAppearance;
+    }
     setHighlightOpacity(style.highlight_opacity ?? 1.0);
   }, []);
 
@@ -350,6 +477,7 @@ const Workbench = () => {
     setCanUndoEdit(false);
     editHistoryRef.current = [];
     editHistoryIndexRef.current = 0;
+    lastHistoryCommitAtRef.current = 0;
     shouldResumePlaybackRef.current = false;
     setCreateSubtitlesJobStream((prev) => {
       prev?.close();
@@ -367,6 +495,7 @@ const Workbench = () => {
       setCanUndoEdit(false);
       editHistoryRef.current = [];
       editHistoryIndexRef.current = 0;
+      lastHistoryCommitAtRef.current = 0;
       shouldResumePlaybackRef.current = false;
     }
   }, [cues, editingCueId, selectedCueId]);
@@ -638,6 +767,68 @@ const Workbench = () => {
   const isEditingCue = editingCueId !== null;
   const isActiveCueSelected = activeCue ? selectedCueId === activeCue.id : false;
   const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
+  const hasStyledSubtitleBackground =
+    appearance.background_mode === "line" || appearance.background_mode === "word";
+
+  const subtitleVerticalClass =
+    appearance.vertical_anchor === "top"
+      ? "items-start"
+      : appearance.vertical_anchor === "middle"
+        ? "items-center"
+        : "items-end";
+
+  const subtitleOverlayPositionStyle = React.useMemo<React.CSSProperties>(() => {
+    const offsetPx = `${Math.max(0, appearance.vertical_offset)}px`;
+    let style: React.CSSProperties;
+    if (appearance.vertical_anchor === "top") {
+      style = { paddingTop: offsetPx };
+    } else if (appearance.vertical_anchor === "middle") {
+      style = { transform: `translateY(${Math.round(appearance.vertical_offset)}px)` };
+    } else {
+      style = { paddingBottom: offsetPx };
+    }
+    return style;
+  }, [appearance.vertical_anchor, appearance.vertical_offset]);
+
+  const subtitlePreviewTextStyle = React.useMemo<React.CSSProperties>(() => {
+    const style: React.CSSProperties = {
+      fontFamily: appearance.font_family || DEFAULT_APPEARANCE.font_family,
+      fontSize: `${Math.max(10, appearance.font_size)}px`,
+      fontWeight: appearance.font_style === "bold" ? 700 : 400,
+      fontStyle: appearance.font_style === "italic" ? "italic" : "normal",
+      letterSpacing: `${appearance.letter_spacing}px`,
+      color: colorWithOpacity(appearance.text_color, appearance.text_opacity)
+    };
+
+    const shadows: string[] = [];
+    if (appearance.outline_enabled && appearance.outline_width > 0) {
+      shadows.push(...buildOutlineShadows(appearance.outline_color, appearance.outline_width));
+    }
+    if (appearance.shadow_enabled && appearance.shadow_strength > 0) {
+      const blurRadius = Math.max(0, Math.round(appearance.shadow_strength * 1.5));
+      shadows.push(
+        `${appearance.shadow_offset_x}px ${appearance.shadow_offset_y}px ${blurRadius}px ${colorWithOpacity(
+          appearance.shadow_color,
+          appearance.shadow_opacity
+        )}`
+      );
+    }
+    if (shadows.length > 0) {
+      style.textShadow = shadows.join(", ");
+    }
+
+    const useLineBackground = appearance.background_mode === "line";
+    if (useLineBackground) {
+      const backgroundColor = colorWithOpacity(appearance.line_bg_color, appearance.line_bg_opacity);
+      const padding = appearance.line_bg_padding;
+      const radius = appearance.line_bg_radius;
+      style.backgroundColor = backgroundColor;
+      style.padding = `${Math.max(0, padding)}px`;
+      style.borderRadius = `${Math.max(0, radius)}px`;
+    }
+
+    return style;
+  }, [appearance]);
 
   React.useEffect(() => {
     if (!isEditingActiveCue) {
@@ -698,6 +889,7 @@ const Workbench = () => {
   const handleAppearanceChange = (changes: Partial<SubtitleStyleAppearance>) => {
     setAppearance((prev) => {
       const next = { ...prev, ...changes };
+      customAppearanceRef.current = next;
       const nextPreset = preset === "Custom" ? preset : "Custom";
       debouncedPersistStyle(next, nextPreset, highlightOpacity);
       return next;
@@ -708,8 +900,16 @@ const Workbench = () => {
   };
 
   const handlePresetChange = (nextPreset: string) => {
+    if (preset === "Custom") {
+      customAppearanceRef.current = appearance;
+    }
+    const nextAppearance =
+      nextPreset === "Custom"
+        ? { ...customAppearanceRef.current }
+        : applyPresetAppearance(appearance, nextPreset);
     setPreset(nextPreset);
-    debouncedPersistStyle(appearance, nextPreset, highlightOpacity);
+    setAppearance(nextAppearance);
+    debouncedPersistStyle(nextAppearance, nextPreset, highlightOpacity);
   };
 
   const handleHighlightOpacityChange = (nextHighlightOpacity: number) => {
@@ -733,22 +933,36 @@ const Workbench = () => {
   const initializeEditHistory = React.useCallback((initialText: string) => {
     editHistoryRef.current = [initialText];
     editHistoryIndexRef.current = 0;
+    lastHistoryCommitAtRef.current = Date.now();
     setCanUndoEdit(false);
   }, []);
 
   const updateEditHistory = React.useCallback((nextText: string) => {
+    const now = Date.now();
     const history = editHistoryRef.current;
     const index = editHistoryIndexRef.current;
     const truncatedHistory = history.slice(0, index + 1);
-    if (truncatedHistory[truncatedHistory.length - 1] === nextText) {
+    const previousText = truncatedHistory[truncatedHistory.length - 1] ?? "";
+    if (previousText === nextText) {
       editHistoryRef.current = truncatedHistory;
       editHistoryIndexRef.current = truncatedHistory.length - 1;
       setCanUndoEdit(editHistoryIndexRef.current > 0);
       return;
     }
-    truncatedHistory.push(nextText);
+    const lengthDelta = Math.abs(nextText.length - previousText.length);
+    const canCoalesceTypingBurst =
+      truncatedHistory.length > 1 &&
+      index === truncatedHistory.length - 1 &&
+      now - lastHistoryCommitAtRef.current < EDIT_UNDO_COALESCE_MS &&
+      lengthDelta <= 2;
+    if (canCoalesceTypingBurst) {
+      truncatedHistory[truncatedHistory.length - 1] = nextText;
+    } else {
+      truncatedHistory.push(nextText);
+    }
     editHistoryRef.current = truncatedHistory;
     editHistoryIndexRef.current = truncatedHistory.length - 1;
+    lastHistoryCommitAtRef.current = now;
     setCanUndoEdit(editHistoryIndexRef.current > 0);
   }, []);
 
@@ -756,6 +970,7 @@ const Workbench = () => {
     setCanUndoEdit(false);
     editHistoryRef.current = [];
     editHistoryIndexRef.current = 0;
+    lastHistoryCommitAtRef.current = 0;
   }, []);
 
   const resumePlaybackIfNeeded = React.useCallback(() => {
@@ -805,10 +1020,12 @@ const Workbench = () => {
     const nextIndex = index - 1;
     editHistoryIndexRef.current = nextIndex;
     setEditingText(editHistoryRef.current[nextIndex] ?? "");
+    lastHistoryCommitAtRef.current = Date.now();
     setCanUndoEdit(nextIndex > 0);
   }, [isSavingCue]);
 
   const handleCancelEdit = React.useCallback(() => {
+    setSelectedCueId(null);
     setEditingCueId(null);
     setEditingText("");
     setEditError(null);
@@ -835,7 +1052,7 @@ const Workbench = () => {
         subtitles_srt_text: serializeSrt(nextCues)
       });
       setCues(nextCues);
-      setSelectedCueId(editingCueId);
+      setSelectedCueId(null);
       setEditingCueId(null);
       setEditingText("");
       setEditError(null);
@@ -940,7 +1157,7 @@ const Workbench = () => {
   };
 
   const stylePanelContent = (
-    <>
+    <div className="px-4 pb-2 pl-5 pr-5">
       {styleError && (
         <div
           className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
@@ -962,7 +1179,7 @@ const Workbench = () => {
           onResetPreset={handleResetPreset}
         />
       )}
-    </>
+    </div>
   );
 
   return (
@@ -1119,7 +1336,7 @@ const Workbench = () => {
               data-testid="workbench-center-panel"
             >
               {hasVideoPreview ? (
-                <div className="relative h-full w-full">
+                <div className="relative h-full w-full overflow-hidden rounded-md">
                   <video
                     ref={videoRef}
                     className="h-full w-full rounded-md bg-black object-contain"
@@ -1133,37 +1350,119 @@ const Workbench = () => {
                     }
                     onSeeked={(event) => setCurrentTimeSeconds(event.currentTarget.currentTime || 0)}
                   />
-                  {activeCue && (
-                    <div className="pointer-events-none absolute inset-0 flex items-end justify-center px-4 pb-14">
+                  {activeCue && (() => {
+                    const lineCount = (activeCue.text.match(/\n/g) ?? []).length + 1;
+                    const cueSegments = activeCue.text.split(/(\s+)/);
+                    const cueWordCount = cueSegments.reduce(
+                      (count, segment) => count + (/\S/.test(segment) ? 1 : 0),
+                      0
+                    );
+                    const cueDuration = Math.max(0.001, activeCue.endSeconds - activeCue.startSeconds);
+                    const cueProgress = Math.max(
+                      0,
+                      Math.min(1, (currentTimeSeconds - activeCue.startSeconds) / cueDuration)
+                    );
+                    const highlightedWordIndex =
+                      appearance.subtitle_mode === "word_highlight" && cueWordCount > 0
+                        ? Math.min(cueWordCount - 1, Math.floor(cueProgress * cueWordCount))
+                        : -1;
+                    const highlightWordColor = colorWithOpacity(
+                      appearance.highlight_color,
+                      highlightOpacity
+                    );
+                    const wordPaddingX = Math.max(0, appearance.word_bg_padding / 2);
+                    const hasWordBackground = appearance.background_mode === "word";
+                    const hasRtlChars = RTL_CHAR_PATTERN.test(activeCue.text);
+                    const activeWordStyle: React.CSSProperties = hasWordBackground
+                      ? {
+                          backgroundColor: colorWithOpacity(
+                            appearance.word_bg_color,
+                            appearance.word_bg_opacity
+                          ),
+                          borderRadius: `${Math.max(0, appearance.word_bg_radius)}px`,
+                          boxShadow: `0 0 0 ${wordPaddingX}px ${colorWithOpacity(
+                            appearance.word_bg_color,
+                            appearance.word_bg_opacity
+                          )}`
+                        }
+                      : {};
+                    const subtitleDirection: "rtl" | "auto" = hasRtlChars ? "rtl" : "auto";
+                    return (
+                    <div
+                      className={cn(
+                        "pointer-events-none absolute inset-0 flex justify-center px-4",
+                        subtitleVerticalClass
+                      )}
+                      style={subtitleOverlayPositionStyle}
+                    >
                       <div className="pointer-events-auto w-full max-w-[720px]">
-                        <textarea
-                          ref={activeSubtitleRef}
-                          data-testid={isEditingActiveCue ? "workbench-subtitle-editor" : "workbench-active-subtitle"}
-                          className={cn(
-                            "w-full resize-none rounded-md px-3 py-2 text-center text-base leading-snug shadow-lg transition focus-visible:outline-none",
-                            "cursor-text",
-                            isEditingActiveCue
-                              ? "border border-primary/70 bg-background/95 text-foreground ring-1 ring-primary/45"
-                              : cn(
-                                  "border border-transparent bg-black/45 font-medium text-white",
-                                  "hover:border-primary/55 hover:bg-black/60 hover:ring-1 hover:ring-primary/40",
-                                  isActiveCueSelected
-                                    ? "outline-2 outline-offset-2 outline-primary border-primary/65 bg-black/55 ring-1 ring-primary/50"
-                                    : "outline-none"
-                                )
-                          )}
-                          value={isEditingActiveCue ? editingText : activeCue.text}
-                          onChange={handleEditTextChange}
-                          onClick={() => {
-                            if (!isEditingActiveCue) {
-                              handleCueClick(activeCue);
-                            }
-                          }}
-                          onKeyDown={isEditingActiveCue ? handleEditorKeyDown : undefined}
-                          rows={2}
-                          readOnly={!isEditingActiveCue || isSavingCue}
-                          aria-label="Active subtitle editor"
-                        />
+                        {isEditingActiveCue ? (
+                          <textarea
+                            ref={activeSubtitleRef}
+                            data-testid="workbench-subtitle-editor"
+                            className="w-full resize-none overflow-hidden rounded-md border border-primary/70 bg-background/25 px-3 py-2 text-center shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
+                            style={subtitlePreviewTextStyle}
+                            value={editingText}
+                            onChange={handleEditTextChange}
+                            onKeyDown={handleEditorKeyDown}
+                            rows={Math.max(2, Math.min(4, lineCount))}
+                            readOnly={isSavingCue}
+                            aria-label="Active subtitle editor"
+                          />
+                        ) : (
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            data-testid="workbench-active-subtitle"
+                            className={cn(
+                              "w-full cursor-text rounded-md border border-transparent bg-transparent px-3 py-2 text-center text-base font-medium leading-snug text-white shadow-lg transition focus-visible:outline-none hover:border-primary/55 hover:ring-1 hover:ring-primary/40",
+                              isActiveCueSelected
+                                ? "outline-2 outline-offset-2 outline-primary border-primary/65 ring-1 ring-primary/50"
+                                : "outline-none"
+                            )}
+                            style={subtitlePreviewTextStyle}
+                            onClick={() => handleCueClick(activeCue)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                handleCueClick(activeCue);
+                              }
+                            }}
+                            aria-label="Active subtitle editor"
+                          >
+                            <span
+                              className="whitespace-pre-wrap"
+                              dir={subtitleDirection}
+                              style={{ unicodeBidi: "plaintext" }}
+                            >
+                              {appearance.subtitle_mode === "word_highlight" && cueWordCount > 0
+                                ? (() => {
+                                    let seenWordIndex = -1;
+                                    return cueSegments.map((segment, idx) => {
+                                      const isWord = /\S/.test(segment);
+                                      if (isWord) {
+                                        seenWordIndex += 1;
+                                      }
+                                      const isActiveWord =
+                                        isWord && seenWordIndex === highlightedWordIndex;
+                                      return (
+                                        <span
+                                          key={`${idx}-${segment}`}
+                                          style={
+                                            isActiveWord
+                                              ? { ...activeWordStyle, color: highlightWordColor }
+                                              : undefined
+                                          }
+                                        >
+                                          {segment}
+                                        </span>
+                                      );
+                                    });
+                                  })()
+                                : activeCue.text}
+                            </span>
+                          </div>
+                        )}
                         {isEditingActiveCue && (
                           <div className="mt-2 flex items-center justify-end gap-2">
                             <Button
@@ -1209,7 +1508,8 @@ const Workbench = () => {
                         )}
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
                   {subtitleLoadError && (
                     <div
                       className="pointer-events-none absolute left-3 top-3 rounded-md border border-destructive/50 bg-destructive/15 px-2 py-1 text-xs text-destructive"
@@ -1234,15 +1534,19 @@ const Workbench = () => {
 
             {hasSubtitles && !isNarrow && (
               <section
-                className="flex min-h-0 w-80 shrink-0 flex-col rounded-lg border border-border bg-card"
+                className="flex min-h-0 w-88 shrink-0 flex-col rounded-lg border border-border bg-card xl:w-96"
                 data-testid="workbench-right-panel"
               >
                 <div className="border-b border-border px-4 py-2">
                   <h2 className="text-sm font-semibold">Style</h2>
                 </div>
-                <ScrollArea className="min-h-0 flex-1 px-4 py-3">
+                <div
+                  data-testid="workbench-style-scroll-panel"
+                  className="min-h-0 flex-1 overflow-x-visible overflow-y-auto py-3"
+                  style={{ scrollbarGutter: "stable" }}
+                >
                   {stylePanelContent}
-                </ScrollArea>
+                </div>
               </section>
             )}
           </div>
@@ -1276,7 +1580,7 @@ const Workbench = () => {
 
           {hasSubtitles && isNarrow && rightOverlayOpen && (
             <aside
-              className="fixed inset-y-0 right-0 z-50 flex w-[min(90vw,320px)] flex-col border-l border-border bg-card shadow-lg"
+              className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,360px)] flex-col border-l border-border bg-card shadow-lg"
               data-testid="workbench-right-drawer"
             >
               <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -1285,9 +1589,13 @@ const Workbench = () => {
                   Close
                 </Button>
               </div>
-              <ScrollArea className="min-h-0 flex-1 px-4 py-3">
+              <div
+                data-testid="workbench-style-scroll-drawer"
+                className="min-h-0 flex-1 overflow-x-visible overflow-y-auto py-3"
+                style={{ scrollbarGutter: "stable" }}
+              >
                 {stylePanelContent}
-              </ScrollArea>
+              </div>
             </aside>
           )}
         </>
