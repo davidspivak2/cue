@@ -267,9 +267,9 @@ Handoff outputs
 - Projects launch behavior (Milestone 2.3): Done
 - Project deletion with confirmation: Done (Projects delete action + confirmation + backend cancel-then-delete)
 - Workbench tabs/navigation: Done (tab strip + open/activate)
-- Workbench shell (Milestone 3.1): Done (preview + style docked/overlay; right style pane uses real controls; left subtitles list overlay remains hidden/paused)
-- Projects-to-Workbench entry refinement: Done (`New project` opens Workbench immediately; `needs_subtitles` cards include quick `Create subtitles` action).
-- Workbench no-subtitles empty state + create flow: Done (`No subtitles yet.` + single CTA; style hidden until subtitles exist; create-subtitles checklist/progress/cancel runs in Workbench).
+- Workbench shell (Milestone 3.1): Done (preview + style docked/overlay; right style pane uses real controls and now updates on-video subtitle preview styling immediately; left subtitles list overlay remains hidden/paused)
+- Projects-to-Workbench entry refinement: Done (`New project` now opens Workbench and auto-starts subtitle generation; `needs_subtitles` cards include quick `Create subtitles` action with auto-start).
+- Workbench no-subtitles empty state + create flow: Done (strict empty state exists for manual entry points; style hidden until subtitles exist; auto-start entry points skip double-clicking and go straight into create-subtitles progress).
 - Milestone 4.1 (left list editing): Deferred while subtitle list UI is hidden/paused.
 - Milestone 4.2 (on-video editing contract): Done (single-click pause+edit, input-like hover affordance, icon actions, keyboard parity, and playback resume on Save/Cancel)
 - Milestone 4.3 (selection styling contract): Done for on-video path (selection accent is UI-only and export runner options drop UI-only selection keys)
@@ -294,6 +294,24 @@ Before you hand off
 
 Template (copy and fill; newest at top)
 Note: Entries are chronological snapshots. Older entries may mention gaps that were later resolved; use the newest entry plus sections 2 and 6 for current state.
+
+Date: 2026-02-10
+Agent: gpt-5.3-codex-xhigh
+Phase: Workbench auto-start flow + style-preview parity fix
+Status: Done
+Summary:
+- Updated `New project` flow to pass Workbench auto-start state so selecting a video immediately enters create-subtitles progress (no second click on `Create subtitles`).
+- Wired Workbench subtitle preview rendering to style appearance state (font family, size, color/opacity, outline, shadow, vertical anchor/offset, and line/word background treatment), so style pane edits now visibly affect on-video subtitle preview immediately.
+- Kept on-video editing shell behavior intact while applying preview style only in non-edit mode (to preserve editor legibility and action controls).
+- Updated docs/spec status for the new behavior and current parity.
+- Updated E2E coverage in `desktop/tests/e2e/workbench-shell.spec.ts`:
+  - New project auto-start request assertion.
+  - Style controls -> preview appearance assertion (`Font size` updates subtitle preview).
+- Tests run:
+  - `npm run test:e2e -- tests/e2e/workbench-shell.spec.ts`
+  - `npm run build` (desktop)
+- Known gaps: Milestone 4.1 (left list editing + list/on-video selection sync) remains deferred while left subtitles list UI is hidden/paused.
+- Next best task: resume Milestone 4.1 by re-enabling left subtitles list editing and syncing list selection with on-video selection/seek behavior.
 
 Date: 2026-02-10
 Agent: gpt-5.3-codex-xhigh

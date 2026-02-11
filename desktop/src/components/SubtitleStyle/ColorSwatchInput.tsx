@@ -34,7 +34,7 @@ const ColorSwatchInput = ({
   };
 
   return (
-    <div className={cn("flex items-center gap-2", className)}>
+    <div className={cn("flex min-w-0 items-center gap-2", className)}>
       {swatches.map((swatch) => (
         <button
           key={swatch}
@@ -51,7 +51,7 @@ const ColorSwatchInput = ({
         />
       ))}
       <Input
-        className="h-7 w-24 px-2 font-mono text-xs"
+        className="h-7 w-20 px-2 font-mono text-xs"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commitDraft}

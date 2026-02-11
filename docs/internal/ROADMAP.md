@@ -166,7 +166,7 @@ Definition of done:
 - Workbench behaves correctly across window sizes and supports the unified workflow.
 
 ### Milestone 4 — In-app subtitle text editing (partially implemented)
-Current status: Milestone 4.2 is implemented in Workbench; Milestones 4.1 and 4.3 remain.
+Current status: Milestone 4.2 is implemented in Workbench, and Milestone 4.3 is implemented for the on-video path; Milestone 4.1 remains.
 4.1 Left list editing
 - Deliverable:
   - Each row shows timestamps (read-only) + editable text

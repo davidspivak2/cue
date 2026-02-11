@@ -230,7 +230,9 @@ const ProjectHub = () => {
           projectId: createdProject.project_id,
           title: resolveProjectTitle(createdProject)
         });
-        navigate(`/workbench/${encodeURIComponent(createdProject.project_id)}`);
+        navigate(`/workbench/${encodeURIComponent(createdProject.project_id)}`, {
+          state: { autoStartSubtitles: true }
+        });
       } catch (err) {
         showBanner("error", err instanceof Error ? err.message : "Failed to create project.");
       } finally {
@@ -529,29 +531,6 @@ const ProjectHub = () => {
 
   const showEmptyState = !isLoading && projects.length === 0;
   const enableRootDrop = !isTauriEnv && !showEmptyState && !isBusyOperation;
-
-  React.useEffect(() => {
-    // #region agent log
-    fetch("http://127.0.0.1:7243/ingest/6e1c142a-1f94-4f3d-a272-1b191dab3ef6", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        runId: "post-fix",
-        hypothesisId: "H6",
-        location: "desktop/src/pages/ProjectHub.tsx:520",
-        message: "Project Hub CTA labels rendered",
-        data: {
-          pathname: window.location.pathname,
-          headerCtaLabel: NEW_PROJECT_CTA,
-          emptyStateCtaLabel: NEW_PROJECT_CTA,
-          isLoading,
-          projectCount: projects.length
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-  }, [isLoading, projects.length]);
 
   return (
     <div

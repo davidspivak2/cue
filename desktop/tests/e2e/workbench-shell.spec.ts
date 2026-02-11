@@ -1,5 +1,15 @@
 import { expect, test } from "@playwright/test";
 
+const initMocks = () => {
+  Object.defineProperty(File.prototype, "path", {
+    configurable: true,
+    get() {
+      const name = this.name || "video.mp4";
+      return `C:\\\\fake\\\\${name}`;
+    }
+  });
+};
+
 const buildProjects = () => [
   {
     project_id: "project-1",
@@ -81,6 +91,7 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
   let putCallCount = 0;
   let lastPutPayload = null;
   let lastJobPayload = null;
+  let createdProjectCount = 0;
   let settings = buildSettings();
   const subtitlesByProject = new Map();
   if (typeof initialSrtText === "string") {
@@ -147,6 +158,39 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(projects)
+      });
+      return;
+    }
+    if (request.method() === "POST") {
+      createdProjectCount += 1;
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = JSON.parse(request.postData() ?? "{}");
+      } catch {
+        payload = {};
+      }
+      const videoPath =
+        typeof payload.video_path === "string" && payload.video_path
+          ? payload.video_path
+          : `C:\\fake\\created_${createdProjectCount}.mp4`;
+      const title = videoPath.split(/[/\\]/).pop() || `created_${createdProjectCount}.mp4`;
+      const now = "2026-02-09T00:00:00Z";
+      const createdProject = {
+        project_id: `project-new-${createdProjectCount}`,
+        title,
+        video_path: videoPath,
+        missing_video: false,
+        status: "needs_subtitles",
+        created_at: now,
+        updated_at: now,
+        duration_seconds: 65,
+        thumbnail_path: ""
+      };
+      projects = [createdProject, ...projects];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(createdProject)
       });
       return;
     }
@@ -394,6 +438,69 @@ test("workbench creates subtitles from empty state", async ({ page }) => {
   expect(api.getLastJobPayload()?.project_id).toBe("project-1");
 });
 
+test("new project auto-starts subtitle creation in Workbench", async ({ page }) => {
+  await page.addInitScript(initMocks);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects, null);
+
+  await page.goto("/");
+  const createJobRequest = page.waitForRequest(
+    (request) => request.url().includes("/jobs") && request.method() === "POST"
+  );
+  await page.getByTestId("new-project-input").setInputFiles({
+    name: "fresh.mp4",
+    mimeType: "video/mp4",
+    buffer: Buffer.from("fake")
+  });
+  await page.waitForURL("**/workbench/project-new-1");
+  const createRequest = await createJobRequest;
+  const createPayload = createRequest.postDataJSON() as { kind?: string; project_id?: string };
+
+  expect(createPayload.kind).toBe("create_subtitles");
+  expect(createPayload.project_id).toBe("project-new-1");
+  await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0);
+});
+
+test("style controls change subtitle preview appearance", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toBeVisible();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const node = document.querySelector("[data-testid='workbench-active-subtitle']");
+        if (!(node instanceof HTMLElement)) return "";
+        return getComputedStyle(node).fontSize;
+      })
+    )
+    .toBe("28px");
+
+  const fontSizeInput = page
+    .locator("label:has-text('Font size')")
+    .locator("xpath=../../input[@type='number']");
+  await fontSizeInput.fill("44");
+  await fontSizeInput.blur();
+
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const node = document.querySelector("[data-testid='workbench-active-subtitle']");
+        if (!(node instanceof HTMLElement)) return "";
+        return getComputedStyle(node).fontSize;
+      })
+    )
+    .toBe("44px");
+});
+
 test("on-video contract saves subtitle with Enter", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
@@ -421,6 +528,7 @@ test("on-video contract saves subtitle with Enter", async ({ page }) => {
 
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Edited subtitle line");
+  await expect(subtitleButton).not.toHaveClass(/outline-primary/);
   expect(api.getPutCallCount()).toBe(1);
   expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Edited subtitle line");
   await expect
@@ -451,6 +559,7 @@ test("on-video contract cancels edit with Escape", async ({ page }) => {
 
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Original subtitle line");
+  await expect(subtitleButton).not.toHaveClass(/outline-primary/);
   expect(api.getPutCallCount()).toBe(0);
   await expect
     .poll(async () =>
@@ -479,6 +588,7 @@ test("on-video contract saves subtitle with Save icon", async ({ page }) => {
 
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Saved from icon button");
+  await expect(subtitleButton).not.toHaveClass(/outline-primary/);
   expect(api.getPutCallCount()).toBe(1);
   expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Saved from icon button");
   await expect
@@ -508,6 +618,7 @@ test("on-video contract cancels edit with Cancel icon", async ({ page }) => {
 
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Original subtitle line");
+  await expect(subtitleButton).not.toHaveClass(/outline-primary/);
   expect(api.getPutCallCount()).toBe(0);
   await expect
     .poll(async () =>
@@ -535,6 +646,7 @@ test("on-video contract undo icon reverts unsaved edits", async ({ page }) => {
 
   await editor.fill("First unsaved version");
   await expect(undoButton).toBeEnabled();
+  await page.waitForTimeout(700);
   await editor.fill("Second unsaved version");
 
   await undoButton.click();
@@ -558,6 +670,7 @@ test("on-video contract supports keyboard undo shortcut", async ({ page }) => {
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toBeVisible();
   await editor.fill("Keyboard undo first");
+  await page.waitForTimeout(700);
   await editor.fill("Keyboard undo second");
   await editor.press("ControlOrMeta+z");
   await expect(editor).toHaveValue("Keyboard undo first");

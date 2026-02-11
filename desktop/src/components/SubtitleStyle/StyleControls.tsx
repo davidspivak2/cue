@@ -28,10 +28,33 @@ const PRESET_OPTIONS = [
   { value: "Custom", label: "Custom" }
 ];
 
+const FONT_FAMILY_OPTIONS = [
+  "Arial",
+  "Assistant",
+  "Inter",
+  "Roboto",
+  "Helvetica",
+  "Verdana",
+  "Tahoma",
+  "Trebuchet MS",
+  "Times New Roman",
+  "Georgia",
+  "Courier New"
+];
+
 const FONT_STYLE_OPTIONS = [
   { value: "regular", label: "Regular" },
   { value: "bold", label: "Bold" },
   { value: "italic", label: "Italic" }
+];
+
+const TEXT_COLOR_SWATCHES = [
+  "#FFFFFF",
+  "#FFD400",
+  "#46D9FF",
+  "#00FF66",
+  "#FF8A00",
+  "#FF5AA5"
 ];
 
 const VERTICAL_ANCHOR_OPTIONS = [
@@ -117,6 +140,19 @@ const StyleControls = ({
 
   const isWordHighlight = appearance.subtitle_mode === "word_highlight";
   const bgMode = appearance.background_mode;
+
+  React.useEffect(() => {
+    if (!isWordHighlight && bgMode === "word") {
+      patch({ background_mode: "none" });
+    }
+  }, [bgMode, isWordHighlight]);
+
+  const fontFamilyOptions = React.useMemo(() => {
+    if (FONT_FAMILY_OPTIONS.includes(appearance.font_family)) {
+      return FONT_FAMILY_OPTIONS;
+    }
+    return [appearance.font_family, ...FONT_FAMILY_OPTIONS];
+  }, [appearance.font_family]);
 
   return (
     <div className="space-y-5">
@@ -230,20 +266,22 @@ const StyleControls = ({
         <RadioGroup
           value={bgMode}
           onValueChange={(v) => patch({ background_mode: v })}
-          className="flex gap-3"
+          className="grid grid-cols-3 gap-2"
         >
           <div className="flex items-center gap-1.5">
             <RadioGroupItem id="bg-none" value="none" />
-            <Label htmlFor="bg-none" className="text-sm">None</Label>
+            <Label htmlFor="bg-none" className="whitespace-nowrap text-xs">None</Label>
           </div>
           <div className="flex items-center gap-1.5">
             <RadioGroupItem id="bg-line" value="line" />
-            <Label htmlFor="bg-line" className="text-sm">Around line</Label>
+            <Label htmlFor="bg-line" className="whitespace-nowrap text-xs">Around line</Label>
           </div>
-          <div className="flex items-center gap-1.5">
-            <RadioGroupItem id="bg-word" value="word" />
-            <Label htmlFor="bg-word" className="text-sm">Around word</Label>
-          </div>
+          {isWordHighlight && (
+            <div className="flex items-center gap-1.5">
+              <RadioGroupItem id="bg-word" value="word" />
+              <Label htmlFor="bg-word" className="whitespace-nowrap text-xs">Around word</Label>
+            </div>
+          )}
         </RadioGroup>
 
         {bgMode === "line" && (
@@ -332,11 +370,21 @@ const StyleControls = ({
               <div className="space-y-2">
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Font family</Label>
-                  <Input
-                    className="h-7 text-xs"
+                  <Select
                     value={appearance.font_family}
-                    onChange={(e) => patch({ font_family: e.target.value })}
-                  />
+                    onValueChange={(v) => patch({ font_family: v })}
+                  >
+                    <SelectTrigger className="h-7 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fontFamilyOptions.map((fontName) => (
+                        <SelectItem key={fontName} value={fontName}>
+                          {fontName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Font style</Label>
@@ -361,7 +409,7 @@ const StyleControls = ({
                   <ColorSwatchInput
                     value={appearance.text_color}
                     onChange={(c) => patch({ text_color: c })}
-                    swatches={["#FFFFFF", "#000000"]}
+                    swatches={TEXT_COLOR_SWATCHES}
                   />
                 </div>
                 <SliderRow
