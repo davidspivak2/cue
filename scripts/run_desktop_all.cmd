@@ -63,7 +63,7 @@ if not exist "%REPO%\scripts\run_backend_dev.cmd" (
   exit /b 1
 )
 
-start "Cue Backend" cmd /k ""%REPO%\scripts\run_backend_dev.cmd""
+start "Cue Backend" powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO%\scripts\run_backend_dev.ps1"
 
 echo Waiting for backend /health...
 set /a HEALTH_TRIES=60
