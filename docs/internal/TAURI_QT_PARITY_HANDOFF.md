@@ -10,6 +10,7 @@ Every agent must update it before handing work to another agent.
 ## 0) How to use this doc
 
 - Read sections 1 through 5 before starting any work.
+- Read `docs/internal/KNOWN_ISSUES.md` for current detailed bug repros, scope notes, and validation checklists.
 - Pick ONE phase to own at a time.
 - Update section 6 (Status board) and section 7 (Handoff log) before you hand off.
 - If reality differs from this doc, update this doc first, then proceed.

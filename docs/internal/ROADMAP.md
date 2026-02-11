@@ -5,6 +5,7 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 
 ## Rules
 - This file is the ONLY place to look for “what to do next”.
+- Detailed bug write-ups, repro steps, and issue-level validation notes live in `docs/internal/KNOWN_ISSUES.md`.
 - If work is not listed here, it is not scheduled.
 - The UX spec defines target behavior; this file defines implementation order and acceptance criteria.
 - Each work item must include: Status, Deliverable, Acceptance criteria, and UX spec reference (section name).
@@ -20,7 +21,46 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Packaged build launches and completes the golden-path smoke test without regressions.
    - UX spec reference: N/A (engineering / packaging)
 
-2. [NEXT] PR12 — Support UX v1 (error details + copy diagnostics + hosted send logs)
+2. [NEXT] Export success actions reliability (Workbench success strip)
+   - Deliverable:
+     - `Play video` and `Open folder` actions in Workbench success state reliably trigger OS open behavior in the desktop app.
+     - If open-path actions fail, users get immediate, visible, non-blocking feedback instead of silent no-op behavior.
+   - Acceptance criteria:
+     - After a successful export, `Play video` opens the latest exported file and `Open folder` opens the containing folder.
+     - Failure paths provide a clear retryable message without breaking the rest of the Editor flow.
+   - UX spec reference: G) Export progress + success (in-Editor)
+
+3. [NEXT] Preview truthfulness (style parity + responsive scaling)
+   - Deliverable:
+     - Preview subtitle styling is aligned with export output for core appearance fields (font family, font size, shadow treatment, and relative placement).
+     - Subtitle overlay scales proportionally with the video viewport when the app window is resized.
+   - Acceptance criteria:
+     - Resizing the app window changes subtitle size proportionally with video size (no fixed-size subtitle drift).
+     - Golden-path preview vs export checks show no material mismatch for font size/family/shadow rendering intent.
+   - UX spec reference: E) Editor; G) Export progress + success
+
+4. [NEXT] Preview word-highlight sync (preview-only)
+   - Deliverable:
+     - In-app preview highlight progression uses timed-word artifacts when available instead of evenly distributing highlight by cue duration.
+     - Export timing behavior remains unchanged by this item.
+   - Acceptance criteria:
+     - On known test clips, preview highlight transitions track spoken words without obvious lead/lag drift.
+     - Export output timing remains unchanged and regression-free.
+   - UX spec reference: F) Create Subtitles pipeline contract; E) Editor
+
+5. [NEXT] Subtitle edit-mode reliability (data integrity + RTL + play-resume behavior)
+   - Deliverable:
+     - Inline editor always shows full cue text (including three-line cues) so every line is editable.
+     - Edit textarea behavior for Hebrew/RTL text keeps punctuation placement and arrow-key movement intuitive.
+     - Clicking `Play` while edit mode is active auto-saves, exits edit mode, and resumes playback immediately.
+     - Edit affordance becomes more obvious while staying subtle and non-distracting.
+   - Acceptance criteria:
+     - Three-line cues are fully visible and editable in the inline textarea.
+     - RTL edit sessions keep comma/terminal punctuation placement correct and arrow-key navigation predictable.
+     - `Play` from active edit mode saves once, exits edit mode, and resumes playback without extra prompts.
+   - UX spec reference: E) Editor
+
+6. [NEXT] PR12 — Support UX v1 (error details + copy diagnostics + hosted send logs)
    - Deliverable:
      - Error UI includes a details drawer and a “Copy diagnostics” action.
      - Settings support surface includes hosted “Send logs” with explicit user consent.
@@ -32,7 +72,7 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - If upload fails, user still has a visible fallback path (`Copy diagnostics`).
    - UX spec reference: H) Error UX + Diagnostics; J) Settings page
 
-3. [NEXT] PR15 — Clarity pass (plain-language labels + CTA reduction)
+7. [NEXT] PR15 — Clarity pass (plain-language labels + CTA reduction)
    - Deliverable:
      - Copy polish applied and CTA reduction pass completed across UI surfaces.
      - User-facing label updates include replacing technical wording (for example, Workbench/Editor naming) and ambiguous statuses (for example, `Ready`).
@@ -41,7 +81,7 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Project and Editor statuses read clearly for non-technical users, with no ambiguous standalone labels.
    - UX spec reference: K) Copywriting glossary (approved strings); D) Projects; E) Editor
 
-4. [NEXT] Navigation simplification — remove global left sidebar and standardize top-level header behavior
+8. [NEXT] Navigation simplification — remove global left sidebar and standardize top-level header behavior
    - Deliverable:
      - Global left sidebar is removed from the redesign flow.
      - Header/back/title/status placement is consistent across Projects, Editor, and Settings.
@@ -52,7 +92,7 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Editor back button appears in a consistent top-left location.
    - UX spec reference: B) Top-level navigation model; E) Editor
 
-5. [NEXT] Progress truthfulness + continuity (Create Subtitles and Export)
+9. [NEXT] Progress truthfulness + continuity (Create Subtitles and Export)
    - Deliverable:
      - Progress surface reflects pre-transcription work instead of appearing stuck at 0%.
      - If user leaves Editor during an active task, background progress remains visible from other pages.
@@ -63,7 +103,7 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Editor progress copy and row details match actual backend work steps.
    - UX spec reference: F) Create Subtitles pipeline contract; G) Export progress + success
 
-6. [NEXT] Settings clarity pass
+10. [NEXT] Settings clarity pass
    - Deliverable:
      - Transcription quality control is redesigned as clear choice cards with plain-language hints.
      - “Always save to this folder” and its path controls are visually grouped.
@@ -76,20 +116,32 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - No user-facing control remains for keeping extracted WAV files.
    - UX spec reference: J) Settings page
 
-7. [NEXT] Style pane modernization (usability + defaults)
+11. [NEXT] Style pane modernization (usability + defaults + overlay affordances)
    - Deliverable:
      - Style controls are reorganized for lower cognitive load (spacing, grouping, progressive disclosure).
      - Background mode uses a segmented control pattern.
      - Curated font set prioritizes reliable Hebrew rendering.
      - Color controls support presets + custom picker, with optional hex entry for advanced users.
      - Default color sets are revised per option so defaults remain legible and sensible.
+     - Style overlay uses an icon-only `X` close affordance, and wide layout supports a collapsed vertical strip entry point that opens style as overlay.
+     - Style pane scrolling uses a thinner thumb-first treatment with reduced visual chrome.
    - Acceptance criteria:
      - Style pane is usable without opening advanced controls for common edits.
      - Fonts listed in the control produce visibly distinct, supported rendering outcomes.
      - Color controls provide predictable preset and custom behavior without regressions.
+     - Overlay close/open affordances are obvious and consistent across wide/narrow layouts.
    - UX spec reference: E) Editor; J) Settings page; K) Copywriting glossary
 
-8. [NEXT] Editor/Projects micro-interaction polish
+12. [NEXT] Editor shell affordance polish (tabs + cursor semantics)
+   - Deliverable:
+     - Open-project tabs in Editor use browser/Figma-style tab treatment (not pill chips).
+     - Interactive controls consistently use pointer cursor affordance, while text-editing surfaces retain I-beam behavior.
+   - Acceptance criteria:
+     - Active tab appears visually attached to the content surface and clearly distinct from inactive tabs.
+     - Cursor feedback matches interaction type across Editor controls with no regressions in text-edit zones.
+   - UX spec reference: E) Editor; I) State machine
+
+13. [NEXT] Editor/Projects micro-interaction polish
    - Deliverable:
      - Delete dialog appears without side-swoop animation.
      - Delete-success feedback uses toast behavior (not persistent inline banner).
@@ -103,7 +155,7 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Entering subtitle edit mode does not cause disorienting subtitle jump.
    - UX spec reference: D) Projects; E) Editor; G) Export progress + success
 
-9. [NEXT] Export optimization — cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
+14. [NEXT] Export optimization — cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
    - Deliverable:
      - Video stream info cached earlier; export path uses cheap revalidation.
      - “Getting video info” checklist row removed or adjusted if no longer accurate.
@@ -111,7 +163,7 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
    - UX spec reference: G) Export progress + success (in-Editor)
 
-10. [DONE] Redesign Milestone 1 — Project system backend (persistence + multi-project)
+15. [DONE] Redesign Milestone 1 — Project system backend (persistence + multi-project)
    - Deliverable: app can create/open multiple projects with persisted state across restarts.
    - Acceptance criteria: see Milestone 1 checklist below.
    - UX spec reference: C) Project model (new backend capability; document behavior)
@@ -150,6 +202,40 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
   - “Getting video info” checklist row removed or adjusted if no longer accurate.
 - Acceptance criteria:
   - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
+
+0.5 Export success actions reliability (Workbench success strip)
+- Deliverable:
+  - `Play video` and `Open folder` actions reliably open the expected file/folder in desktop app builds.
+  - Failure paths show clear user feedback instead of silent no-op behavior.
+- Acceptance criteria:
+  - Successful export state can open the latest output file and containing folder from Workbench.
+  - Open failures surface visible retryable feedback and do not break Editor state.
+
+0.6 Preview truthfulness: style parity + responsive scaling
+- Deliverable:
+  - Preview subtitle styling aligns with export styling intent for font family/size, shadow, and relative positioning.
+  - Subtitle overlay scales proportionally with the rendered video viewport during window resize.
+- Acceptance criteria:
+  - Resizing the window does not leave subtitles at a fixed size while video scales.
+  - Golden-path parity checks show no material preview/export mismatch in core style fields.
+
+0.7 Preview word-highlight sync (preview-only)
+- Deliverable:
+  - Preview highlight progression uses timed-word artifacts when available.
+  - Export timing logic remains unchanged by this milestone item.
+- Acceptance criteria:
+  - Preview highlight transitions track spoken words without obvious drift on known clips.
+  - Export timing remains correct and regression-free.
+
+0.8 Edit-mode reliability fixes (inline editor)
+- Deliverable:
+  - Inline editor displays full text for multi-line cues (including 3-line cues).
+  - RTL/Hebrew inline edit behavior preserves punctuation placement and intuitive arrow-key motion.
+  - Clicking `Play` during active edit auto-saves and exits edit mode before playback resumes.
+- Acceptance criteria:
+  - Three-line cues are fully visible/editable in edit mode.
+  - RTL punctuation and caret behavior are correct in edit textarea.
+  - `Play` from edit mode saves once, exits edit mode, and resumes playback immediately.
 
 Definition of done:
 - App is stable enough to proceed with refactors needed for redesign without frequent regressions.
@@ -264,6 +350,14 @@ Status: Deferred while left panel remains hidden/paused.
   - Users can identify page, current video, and status without scanning multiple header regions.
   - Header layout remains stable across no-subtitles, in-progress, and ready/export states.
 
+3.5 Editor tab strip clarity + cursor semantics
+- Deliverable:
+  - Open project tabs in Editor adopt browser/Figma-style attached-tab visuals (not pill chips).
+  - Interactive controls use pointer cursor affordance consistently; text-entry surfaces retain I-beam behavior.
+- Acceptance criteria:
+  - Active tab appears visually connected to content and clearly distinct from inactive tabs.
+  - Cursor affordances match interaction type without regressions in subtitle text-edit zones.
+
 Definition of done:
 - Editor behaves correctly across window sizes and supports the unified workflow.
 
@@ -299,6 +393,17 @@ Current status: Milestone 4.2 is implemented in Workbench, and Milestone 4.3 is 
   - Save/Undo/Cancel controls appear without pushing subtitle text vertically.
 - Acceptance criteria:
   - Entering and exiting edit mode does not shift subtitle position unexpectedly.
+
+4.5 Edit-mode reliability and discoverability
+- Deliverable:
+  - Inline editor always shows full cue text (including three-line cues) with no clipped lines.
+  - RTL/Hebrew edit behavior keeps punctuation placement and arrow-key movement intuitive.
+  - Clicking `Play` while inline edit is active auto-saves and exits edit mode before playback continues.
+  - Edit affordance remains subtle but easier to discover at first glance.
+- Acceptance criteria:
+  - Three-line cues are fully visible/editable in edit mode.
+  - RTL edit sessions keep punctuation placement/caret navigation correct.
+  - `Play` from edit mode saves once and resumes playback without extra prompts.
 
 Definition of done:
 - User can fully edit subtitles in-app with the specified interactions.
@@ -445,10 +550,14 @@ Definition of done:
   - Curate font list for visual distinction and Hebrew support.
   - Standardize color option UX with presets + custom picker (+ optional advanced hex input).
   - Define sensible default color sets per style option.
+  - Style overlay close control uses icon-only `X`; wide layout supports collapsed vertical strip entry to reopen style as overlay.
+  - Style pane scrollbar uses thinner thumb-first styling with reduced visual chrome.
 - Acceptance criteria:
   - Common style tasks are possible without opening advanced controls.
   - Curated fonts visibly differ and apply consistently in preview/export.
   - Color controls support preset, picker, and optional hex workflows without confusion.
+  - Overlay open/close affordances stay clear and consistent across wide/narrow layouts.
+  - Scroll behavior remains accessible with no horizontal-overflow regressions.
 
 Definition of done:
 - UI consistently matches the UX spec visual system.
@@ -487,38 +596,65 @@ Definition of done:
 
 | Requested area | Existing coverage | Scheduled in roadmap |
 | --- | --- | --- |
-| Transcription quality clarity (cards, plain-language hints, run-time expectation cues) | Partial (`J1`) | Queue item 6, Milestone 7.4 |
-| Save-subtitles policy/path relationship clarity | Partial (`J2`) | Queue item 6, Milestone 7.4 |
-| Replace diagnostics-heavy settings UI with easy support path | Partial (`H`, `J5`) | Queue item 2, Milestone 0.1 + 7.5 |
-| Merge punctuation + audio controls; remove “keep extracted WAV” | Partial (`J3`, `J4`) | Queue item 6, Milestone 7.4 |
-| Remove sidebar and fix app-shell/title/back/status orientation | Partial (`B`, `E`) | Queue item 4, Milestone 2.4 + 3.4 |
-| Editor duplicated labels/name/status placement | Gap | Queue item 8, Milestone 3.4 |
-| Playback-speed discoverability without hidden menu reliance | Gap | Queue item 8, Milestone 6.5 |
-| Back during active work keeps processing and remains visible | Partial (`B2`, `I2`) | Queue item 5, Milestone 6.4 |
-| Progress 0% stall + row-detail readability | Partial (`F2`, `G1`) | Queue item 5, Milestone 5.2 + 5.4 |
-| Delete dialog animation + delete success toast | Gap | Queue item 8, Milestone 2.5 |
-| Empty-state duplicate CTA cleanup | Partial (`I1`) | Queue item 8, Milestone 2.5 |
-| Style pane control density/layout modernization | Partial (`E3`) | Queue item 7, Milestone 8.4 |
-| Curated Hebrew-friendly font list | Gap | Queue item 7, Milestone 8.4 |
-| Color UX redesign (presets + picker + optional hex) | Partial (`E3`) | Queue item 7, Milestone 8.4 |
-| Sensible per-option default color sets | Gap | Queue item 7, Milestone 8.4 |
-| Theme toggle in Settings | Partial (`A`, not surfaced in Settings contract) | Queue item 6, Milestone 7.5 |
-| Replace ambiguous status wording (e.g., `Ready`) | Partial (`D2`, `K`) | Queue item 3, Milestone 1.3 + 0.3 |
-| Edit controls should not push subtitles while editing | Gap | Queue item 8, Milestone 4.4 |
+| Export success actions reliability (`Play video`, `Open folder`) | Partial (`G2` labels/spec present; reliability bug observed) | Queue item 2, Milestone 0.5 + 6.3 |
+| Preview style parity (font/size/shadow) vs export output | Gap | Queue item 3, Milestone 0.6 |
+| Preview subtitle scaling with video on window resize | Gap | Queue item 3, Milestone 0.6 |
+| Preview word-highlight drift while export timing is correct | Partial (`F`, `G`; export contract already enforced) | Queue item 4, Milestone 0.7 |
+| Three-line cue clipped/missing in inline edit textarea | Gap | Queue item 5, Milestone 0.8 + 4.5 |
+| RTL edit textarea punctuation/caret behavior (Hebrew) | Gap | Queue item 5, Milestone 0.8 + 4.5 |
+| Auto-save + exit edit mode when Play is clicked mid-edit | Gap | Queue item 5, Milestone 0.8 + 4.5 |
+| Subtitle edit affordance is too hidden | Partial (`E4` contract exists) | Queue item 5, Milestone 4.5 |
+| Transcription quality clarity (cards, plain-language hints, run-time expectation cues) | Partial (`J1`) | Queue item 10, Milestone 7.4 |
+| Save-subtitles policy/path relationship clarity | Partial (`J2`) | Queue item 10, Milestone 7.4 |
+| Replace diagnostics-heavy settings UI with easy support path | Partial (`H`, `J5`) | Queue item 6, Milestone 0.1 + 7.5 |
+| Merge punctuation + audio controls; remove “keep extracted WAV” | Partial (`J3`, `J4`) | Queue item 10, Milestone 7.4 |
+| Remove sidebar and fix app-shell/title/back/status orientation | Partial (`B`, `E`) | Queue item 8, Milestone 2.4 + 3.4 |
+| Editor duplicated labels/name/status placement | Gap | Queue item 13, Milestone 3.4 |
+| Browser/Figma-style Editor tab visuals | Gap | Queue item 12, Milestone 3.5 |
+| Pointer cursor affordance on interactive controls | Partial (`E4` I-beam rule exists only for subtitle text) | Queue item 12, Milestone 3.5 + 8.2 |
+| Playback-speed discoverability without hidden menu reliance | Gap | Queue item 13, Milestone 6.5 |
+| Back during active work keeps processing and remains visible | Partial (`B2`, `I2`) | Queue item 9, Milestone 6.4 |
+| Progress 0% stall + row-detail readability | Partial (`F2`, `G1`) | Queue item 9, Milestone 5.2 + 5.4 |
+| Delete dialog animation + delete success toast | Gap | Queue item 13, Milestone 2.5 |
+| Empty-state duplicate CTA cleanup | Partial (`I1`) | Queue item 13, Milestone 2.5 |
+| Style pane control density/layout modernization | Partial (`E3`) | Queue item 11, Milestone 8.4 |
+| Style overlay close affordance should be icon-only `X` | Gap | Queue item 11, Milestone 8.4 |
+| Wide-layout style pane collapsed strip + icon entry | Gap | Queue item 11, Milestone 8.4 |
+| Style pane scrollbar should be thinner thumb-only | Gap | Queue item 11, Milestone 8.4 |
+| Curated Hebrew-friendly font list | Gap | Queue item 11, Milestone 8.4 |
+| Color UX redesign (presets + picker + optional hex) | Partial (`E3`) | Queue item 11, Milestone 8.4 |
+| Sensible per-option default color sets | Gap | Queue item 11, Milestone 8.4 |
+| Theme toggle in Settings | Partial (`A`, not surfaced in Settings contract) | Queue item 10, Milestone 7.5 |
+| Replace ambiguous status wording (e.g., `Ready`) | Partial (`D2`, `K`) | Queue item 7, Milestone 1.3 + 0.3 |
+| Edit controls should not push subtitles while editing | Gap | Queue item 5, Milestone 4.4 |
 
 ## Cross-cutting safeguards, validation, and analytics
 
 - Safeguards:
   - Keep export/rendering behavior unchanged unless explicitly called out by milestone acceptance criteria.
+  - Keep export word-timing behavior unchanged while addressing preview-only highlight drift.
+  - Limit RTL punctuation/cursor fixes to inline edit textarea behavior; do not alter non-edit preview/export rendering unless explicitly scheduled.
+  - Export-success open actions (`Play video`, `Open folder`) must never fail silently; always surface clear retryable feedback.
   - Send Logs must be opt-in, redact sensitive local data where possible, and exclude rendered output video by default.
   - If hosted log upload fails, keep local fallback actions (`Copy diagnostics`) available.
 - Regression tests (minimum):
   - Projects -> Editor -> Settings -> Back navigation without sidebar.
   - Create subtitles -> Back while running -> confirm background progress remains visible -> reopen project.
+  - Export success state -> click `Play video` and `Open folder` -> verify open succeeds (or explicit error message appears).
+  - Preview/export parity check on golden clip for font family, font size, shadow, and relative subtitle placement.
+  - Resize Editor window -> verify subtitle overlay scales proportionally with video viewport.
+  - Preview word highlight sync check using known timing clip; confirm no obvious spoken-word drift.
+  - Inline edit multi-line check: 3-line cue remains fully visible/editable.
+  - RTL textarea check (Hebrew): punctuation placement and arrow-key behavior stay intuitive in edit mode.
+  - While inline edit is active, click Play -> verify auto-save + exit edit mode + immediate playback resume.
   - Delete project -> transient toast appears -> no persistent banner remains.
   - Settings clarity checks for transcription quality, save policy/path grouping, and theme toggle.
-  - Style pane checks for font list, color presets/picker behavior, and default-color sanity.
+  - Style pane checks for font list, color presets/picker behavior, default-color sanity, overlay `X` close affordance, collapsed-strip entry, and thin scrollbar usability.
 - Lightweight analytics (privacy-preserving):
+  - Export success actions click/success/failure counts (`Play video`, `Open folder`), without collecting opened paths.
+  - Preview/export parity mismatch report count (manual QA flag or lightweight telemetry event).
+  - Preview highlight drift report count (no subtitle text payloads).
+  - Inline edit auto-save-on-play usage count and failure count.
   - Transcription-quality option selection distribution.
   - Send Logs attempt/success/failure counts (no payload contents).
   - Create-subtitles cancel rate and cancel stage.
@@ -541,6 +677,9 @@ Definition of done:
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.
+- 2026-02-11 — Added `docs/internal/KNOWN_ISSUES.md` as the detailed issue tracker; `ROADMAP.md` remains the scheduling source of truth.
+- 2026-02-11 — Reprioritized queue to address: export success action reliability, preview truthfulness (style parity + resize scaling), preview-only word-highlight sync, and inline edit reliability (3-line visibility + RTL textarea + Play auto-save).
+- 2026-02-11 — Editor tab visuals should follow browser/Figma-style attached tabs; style overlay close affordance should use icon-only `X`.
 - 2026-02-11 — Reprioritized queue to: packaging gate first, then Support UX v1, Clarity pass, sidebar removal, progress continuity, settings clarity, style modernization, and micro-interaction polish.
 - 2026-02-10 — User-facing label updated from "Project Hub" to "Projects"; no route/model change.
 - 2026-02-08 — Milestone 1 backend completed (projects storage + `/projects` API + job linkage) ahead of Project Hub UI.
