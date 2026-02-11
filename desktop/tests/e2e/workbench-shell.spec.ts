@@ -20,9 +20,49 @@ const buildProjects = () => [
     created_at: "2026-02-09T00:00:00Z",
     updated_at: "2026-02-09T00:00:00Z",
     duration_seconds: 65,
-    thumbnail_path: ""
+    thumbnail_path: "",
+    latest_export: null
   }
 ];
+
+const DEFAULT_PROJECT_STYLE = {
+  subtitle_mode: "word_highlight",
+  subtitle_style: {
+    preset: "Default",
+    highlight_color: "#FFD400",
+    highlight_opacity: 1.0,
+    appearance: {
+      font_family: "Arial",
+      font_size: 28,
+      font_style: "regular",
+      text_color: "#FFFFFF",
+      text_opacity: 1.0,
+      letter_spacing: 0,
+      outline_enabled: true,
+      outline_width: 2,
+      outline_color: "#000000",
+      shadow_enabled: true,
+      shadow_strength: 1,
+      shadow_offset_x: 0,
+      shadow_offset_y: 0,
+      shadow_color: "#000000",
+      shadow_opacity: 1.0,
+      background_mode: "none",
+      line_bg_color: "#000000",
+      line_bg_opacity: 0.7,
+      line_bg_padding: 8,
+      line_bg_radius: 0,
+      word_bg_color: "#000000",
+      word_bg_opacity: 0.4,
+      word_bg_padding: 8,
+      word_bg_radius: 0,
+      vertical_anchor: "bottom",
+      vertical_offset: 28,
+      subtitle_mode: "word_highlight",
+      highlight_color: "#FFD400"
+    }
+  }
+};
 
 const buildManifest = (project) => ({
   project_id: project.project_id,
@@ -40,7 +80,8 @@ const buildManifest = (project) => ({
     word_timings_path: "word_timings.json",
     style_path: "style.json"
   },
-  latest_export: null
+  latest_export: project.latest_export ?? null,
+  style: project.style ?? DEFAULT_PROJECT_STYLE
 });
 
 const DEFAULT_SRT = "1\n00:00:00,000 --> 00:00:04,000\nOriginal subtitle line\n";
@@ -89,6 +130,7 @@ const buildSettings = () => ({
 
 const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
   let putCallCount = 0;
+  let subtitlePutCallCount = 0;
   let lastPutPayload = null;
   let lastJobPayload = null;
   let createdProjectCount = 0;
@@ -240,7 +282,15 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
         lastPutPayload = null;
       }
       if (lastPutPayload && typeof lastPutPayload.subtitles_srt_text === "string") {
+        subtitlePutCallCount += 1;
         subtitlesByProject.set(projectId, lastPutPayload.subtitles_srt_text);
+      }
+      if (lastPutPayload && typeof lastPutPayload.style === "object") {
+        projects = projects.map((entry) =>
+          entry.project_id === projectId
+            ? { ...entry, style: lastPutPayload.style, updated_at: "2026-02-09T00:05:00Z" }
+            : entry
+        );
       }
       await route.fulfill({
         status: 200,
@@ -280,18 +330,47 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
         ? lastJobPayload.project_id
         : projects[0]?.project_id) || "";
     const kind = lastJobPayload?.kind;
+    let heading = "Creating subtitles";
+    let eventsBody = "";
     if (kind === "create_subtitles" && payloadProjectId) {
       subtitlesByProject.set(payloadProjectId, GENERATED_SRT);
       const target = projects.find((entry) => entry.project_id === payloadProjectId);
       if (target) {
         target.status = "ready";
       }
+      heading = "Creating subtitles";
+      eventsBody = [
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "started", heading })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "progress", pct: 100, message: "Done" })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "completed", status: "completed" })}\n\n`
+      ].join("");
+    } else if (kind === "create_video_with_subtitles" && payloadProjectId) {
+      const outputPath = "C:\\fake\\good_subtitled.mp4";
+      const target = projects.find((entry) => entry.project_id === payloadProjectId);
+      if (target) {
+        target.status = "done";
+        target.latest_export = {
+          output_video_path: outputPath,
+          exported_at: "2026-02-09T00:06:00Z"
+        };
+      }
+      heading = "Creating video with subtitles";
+      eventsBody = [
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "started", heading })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "checklist", step_id: "get_video_info", state: "done" })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "checklist", step_id: "add_subtitles", state: "start" })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "progress", pct: 55, message: "Adding subtitles to video" })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "checklist", step_id: "add_subtitles", state: "done" })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "checklist", step_id: "save_video", state: "done" })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "result", payload: { output_path: outputPath } })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "completed", status: "completed" })}\n\n`
+      ].join("");
+    } else {
+      eventsBody = [
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "started", heading })}\n\n`,
+        `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "completed", status: "completed" })}\n\n`
+      ].join("");
     }
-    const eventsBody = [
-      `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "started", heading: "Creating subtitles" })}\n\n`,
-      `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "progress", pct: 100, message: "Done" })}\n\n`,
-      `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "completed", status: "completed" })}\n\n`
-    ].join("");
     eventsByJob.set(jobId, eventsBody);
     await route.fulfill({
       status: 200,
@@ -325,6 +404,7 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
 
   return {
     getPutCallCount: () => putCallCount,
+    getSubtitlePutCallCount: () => subtitlePutCallCount,
     getLastPutPayload: () => lastPutPayload,
     getLastJobPayload: () => lastJobPayload
   };
@@ -438,6 +518,40 @@ test("workbench creates subtitles from empty state", async ({ page }) => {
   expect(api.getLastJobPayload()?.project_id).toBe("project-1");
 });
 
+test("workbench exports video from the bottom action bar", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0].status = "ready";
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-export-panel")).toBeVisible();
+  const exportCta = page.getByTestId("workbench-export-cta");
+  await expect(exportCta).toBeEnabled();
+
+  const exportRequest = page.waitForRequest(
+    (request) => request.url().includes("/jobs") && request.method() === "POST"
+  );
+  await exportCta.click();
+  const request = await exportRequest;
+  const payload = request.postDataJSON() as {
+    kind?: string;
+    project_id?: string;
+    output_dir?: string;
+    srt_path?: string;
+  };
+  expect(payload.kind).toBe("create_video_with_subtitles");
+  expect(payload.project_id).toBe("project-1");
+  expect(payload.srt_path).toBeUndefined();
+
+  await expect(page.getByTestId("workbench-play-export-video")).toBeVisible();
+  await expect(page.getByTestId("workbench-open-export-folder")).toBeVisible();
+  expect(api.getLastJobPayload()?.project_id).toBe("project-1");
+});
+
 test("new project auto-starts subtitle creation in Workbench", async ({ page }) => {
   await page.addInitScript(initMocks);
   await page.setViewportSize({ width: 1300, height: 800 });
@@ -529,7 +643,7 @@ test("on-video contract saves subtitle with Enter", async ({ page }) => {
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Edited subtitle line");
   await expect(subtitleButton).not.toHaveClass(/outline-primary/);
-  expect(api.getPutCallCount()).toBe(1);
+  expect(api.getSubtitlePutCallCount()).toBe(1);
   expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Edited subtitle line");
   await expect
     .poll(async () =>
@@ -560,7 +674,7 @@ test("on-video contract cancels edit with Escape", async ({ page }) => {
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Original subtitle line");
   await expect(subtitleButton).not.toHaveClass(/outline-primary/);
-  expect(api.getPutCallCount()).toBe(0);
+  expect(api.getSubtitlePutCallCount()).toBe(0);
   await expect
     .poll(async () =>
       page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
@@ -589,7 +703,7 @@ test("on-video contract saves subtitle with Save icon", async ({ page }) => {
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Saved from icon button");
   await expect(subtitleButton).not.toHaveClass(/outline-primary/);
-  expect(api.getPutCallCount()).toBe(1);
+  expect(api.getSubtitlePutCallCount()).toBe(1);
   expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Saved from icon button");
   await expect
     .poll(async () =>
@@ -619,7 +733,7 @@ test("on-video contract cancels edit with Cancel icon", async ({ page }) => {
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Original subtitle line");
   await expect(subtitleButton).not.toHaveClass(/outline-primary/);
-  expect(api.getPutCallCount()).toBe(0);
+  expect(api.getSubtitlePutCallCount()).toBe(0);
   await expect
     .poll(async () =>
       page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))

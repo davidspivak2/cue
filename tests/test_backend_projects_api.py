@@ -35,6 +35,7 @@ def test_projects_endpoints(tmp_path: Path, monkeypatch) -> None:
 
         response = client.get(f"/projects/{project_id}")
         assert response.status_code == 200
+        assert isinstance(response.json().get("style"), dict)
 
         response = client.get(f"/projects/{project_id}/subtitles")
         assert response.status_code == 404
@@ -50,6 +51,17 @@ def test_projects_endpoints(tmp_path: Path, monkeypatch) -> None:
         response = client.get(f"/projects/{project_id}/subtitles")
         assert response.status_code == 200
         assert response.json().get("subtitles_srt_text") == subtitles_text
+
+        style_payload = {
+            "subtitle_mode": "static",
+            "subtitle_style": {"preset": "Default", "appearance": {"font_size": 32}},
+        }
+        response = client.put(
+            f"/projects/{project_id}",
+            json={"style": style_payload},
+        )
+        assert response.status_code == 200
+        assert response.json().get("style") == style_payload
 
         new_video = tmp_path / "input2.mp4"
         new_video.write_text("video2", encoding="utf-8")

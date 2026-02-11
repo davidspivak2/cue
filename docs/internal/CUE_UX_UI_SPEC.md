@@ -625,7 +625,7 @@ Settings are stored in `%LOCALAPPDATA%\Cue\config.json` and are loaded in `app/m
 | `subtitle_style.appearance` | (style model, internal) | Object with font, color, outline, shadow, background, and layout fields | Derived from preset/custom | Preview + export styling |
 | `subtitle_mode` | “Subtitle mode” | `word_highlight`, `static` | `word_highlight` | Selects word-highlight vs static rendering; export uses graphics overlay only |
 | `subtitle_style.highlight_color` | “Highlight color” | Hex color string | `#FFD400` | Word highlight styling (graphics overlay only) |
-| `subtitle_style.highlight_opacity` | “Highlight opacity” (slider in Review style pane, current; Workbench later) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
+| `subtitle_style.highlight_opacity` | “Highlight opacity” (slider in Workbench style pane) | 0.0–1.0 float | `1.0` | Word highlight styling (graphics overlay only) |
 
 Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - `app_system` → “App + system info”

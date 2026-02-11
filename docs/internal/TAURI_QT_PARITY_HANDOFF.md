@@ -18,7 +18,7 @@ Every agent must update it before handing work to another agent.
 
 ## 1) Non-negotiables (must follow)
 
-- The legacy Qt/PySide6 UI is the source of truth for workflow, copy, and checklist labels.
+- The legacy Qt/PySide6 UI is now reference-only for historical copy/checklist context.
 - The new UI is the Tauri + React app under `desktop/`.
 - Do NOT use MUI anywhere in the desktop app. Remove it now, not later.
 - Do not use text symbol icons (like check marks or gears). Use real icons from `lucide-react`.
@@ -29,7 +29,7 @@ Every agent must update it before handing work to another agent.
 
 ## 2) Current repo snapshot (verify and update)
 
-As of 2026-02-10, in this repo:
+As of 2026-02-11, in this repo:
 
 Backend
 - `app/backend_server.py` supports `create_subtitles` and `create_video_with_subtitles`, plus `/settings`, `/preview-style`, and `/device`.
@@ -40,20 +40,25 @@ Backend
   - Projects stored under app data `projects/` with `index.json` and per-project folders (`project.json`, `subtitles.srt`, `word_timings.json`, `style.json`).
   - New endpoints: `GET/POST /projects`, `GET/PUT/DELETE /projects/{project_id}`, `GET /projects/{project_id}/subtitles`, `POST /projects/{project_id}/relink`.
   - Jobs accept optional `project_id`; runner events update project state (`result` updates artifacts/export path, export `started` sets `exporting`, `cancelled`/`error` refresh project status).
+  - Export is now project-first: when `project_id` is provided for `create_video_with_subtitles`, backend resolves project video/subtitles/style/word-timings artifacts server-side; explicit path payloads remain compatible for migration.
+  - `project_store` now returns project style in project responses and exposes export-artifact resolution helpers for job creation.
 
 Desktop
 - `desktop/src/main.tsx` uses shadcn/Tailwind ThemeProvider (no MUI).
 - `desktop/src/components/AppLayout.tsx` uses shadcn layout + lucide icons, with a user-controlled collapsible sidebar (icon strip, persisted in localStorage).
 - `desktop/src/pages/ProjectHub.tsx` is the default route (`Projects` label in UI), with header CTA `New project`, auto-open-to-Workbench on create, project list/create/delete (with confirmation), `needs_subtitles` per-card `Create subtitles` quick action, and relink flow for missing files.
 - `desktop/src/workbenchTabs.tsx` tracks open project tabs in memory; Workbench renders a tab strip.
-- `desktop/src/pages/Workbench.tsx` loads project detail and now has a strict no-subtitles empty state (`No subtitles yet.` + `Create subtitles` only). Style pane/drawer is hidden until subtitles exist. Create-subtitles runs directly in Workbench with checklist/progress/cancel and project-linked jobs.
+- `desktop/src/pages/Workbench.tsx` is the active edit/export surface: strict no-subtitles empty state, on-video subtitle editing, style pane/drawer, and in-Workbench export CTA/progress/cancel/success.
+- Workbench export now runs entirely in-page (no legacy handoff): checklist + progress + cancel + success actions (`Play video`, `Open folder`, re-export).
+- Workbench style persistence is project-scoped (`PUT /projects/{id}` style payload) with fallback initialization from settings when a project has no saved style yet.
 - `desktop/src/hooks/useWindowWidth.ts` provides exact 1100px breakpoint logic.
-- `desktop/src/pages/Home.tsx` implements the 5-state UI and Tauri file picker/drag-drop.
-- `desktop/src/pages/Review.tsx` provides the Review screen for style, preview, and export.
+- `desktop/src/pages/Home.tsx` and `desktop/src/pages/Review.tsx` remain in the repo as legacy reference files but are no longer active routes in `App.tsx`.
 - `desktop/src/pages/Settings.tsx` exists and matches Qt parity (no subtitle style section).
-- `desktop/src/jobsClient.ts` now supports optional `projectId` in create-subtitles/export job payloads (`project_id` API field).
-- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout, no-subtitles empty state, create-subtitles transition, and on-video subtitle edit interactions.
+- `desktop/src/jobsClient.ts` supports project-first export payloads (`project_id` primary, explicit paths optional for compatibility).
+- Active app routes are now `/`, `/settings`, and `/workbench/:projectId`; `/legacy` and `/review` were removed from `App.tsx`.
+- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout, no-subtitles empty state, create-subtitles transition, on-video subtitle edit interactions, and Workbench export CTA flow.
 - `desktop/tests/e2e/project-hub.spec.ts` covers Projects card interactions, relink flow, delete confirmation flow, and the per-card `Create subtitles` quick action.
+- Legacy `desktop/tests/e2e/home.spec.ts` has been removed as part of active-route cleanup.
 - `desktop/src-tauri/tauri.conf.json` enables capabilities and asset protocol scope for previews.
 - `desktop/package.json` has no `@mui` or `@emotion` deps.
 
@@ -73,7 +78,7 @@ Primary files
 
 State machine (Home screen)
 `EMPTY -> VIDEO_SELECTED -> WORKING -> SUBTITLES_READY -> EXPORT_DONE`
-Note: after `create_subtitles` completes, the UI navigates to `/review` for styling and export. Home still owns the job state machine.
+Note: after `create_subtitles` completes, the user stays in Workbench for styling/edit/export. There is no active `/review` handoff.
 
 ---
 
@@ -260,7 +265,7 @@ Handoff outputs
 - Phase 3 - Home page Qt parity UI: Done
 - Phase 4 - Settings migration off MUI: Done (MUI removed from layout/settings/main)
 - Phase 5 - Remove MUI/Emotion and cleanup: Done
-- Phase 6 - Tests and verification: Done (targeted backend + e2e tests run locally; full-suite coverage still incremental)
+- Phase 6 - Tests and verification: Done (full backend pytest + full desktop Playwright suite + desktop build passed)
 - Tauri dev build unblock (capabilities/main.json): Done
 - Project system backend (Milestone 1 backend): Done (API + tests)
 - Projects UI (Milestone 2.1 + 2.2): Done (Projects screen + card interactions + relink prompt/validation)
@@ -273,6 +278,9 @@ Handoff outputs
 - Milestone 4.1 (left list editing): Deferred while subtitle list UI is hidden/paused.
 - Milestone 4.2 (on-video editing contract): Done (single-click pause+edit, input-like hover affordance, icon actions, keyboard parity, and playback resume on Save/Cancel)
 - Milestone 4.3 (selection styling contract): Done for on-video path (selection accent is UI-only and export runner options drop UI-only selection keys)
+- Workbench export-only migration (project-first API + Workbench export UX + project-scoped style + runner/worker style/timing consumption): Done
+- Legacy export route cleanup (`/legacy`, `/review` removed from active routing): Done
+- Export migration docs refresh (`ARCHITECTURE`, UX spec, roadmap, parity handoff, implementation playbook): Done
 - 2026-02-11 roadmap/spec reprioritization sync: Done (Support UX v1 with hosted Send Logs, sidebar-removal navigation contract, settings clarity pass, progress continuity, and style-pane modernization documented)
 
 ---
@@ -295,6 +303,36 @@ Before you hand off
 
 Template (copy and fill; newest at top)
 Note: Entries are chronological snapshots. Older entries may mention gaps that were later resolved; use the newest entry plus sections 2 and 6 for current state.
+
+Date: 2026-02-11
+Agent: gpt-5.3-codex-xhigh
+Phase: Workbench export-only migration implementation
+Status: Done
+Summary:
+- Implemented full Workbench export migration from `docs/internal/WORKBENCH_EXPORT_IMPLEMENTATION_PLAN.md`:
+  - backend project-first export contract and artifact resolution,
+  - runner/worker support for explicit project style + word timings,
+  - Workbench export CTA/progress/cancel/success UX,
+  - project-scoped style persistence with fallback initialization,
+  - active route cleanup removing `/legacy` and `/review` from `App.tsx`.
+- Added and updated coverage:
+  - Backend tests: `test_backend_server.py`, `test_backend_job_project_update.py`, `test_backend_projects_api.py`, and updated `test_align_worker.py` expectation.
+  - Desktop E2E: `workbench-shell.spec.ts` + `project-hub.spec.ts`; removed legacy `home.spec.ts`.
+- Updated docs for handoff continuity:
+  - `docs/ARCHITECTURE.md`
+  - `docs/internal/CUE_UX_UI_SPEC.md`
+  - `docs/internal/ROADMAP.md`
+  - `docs/internal/WORKBENCH_EXPORT_IMPLEMENTATION_PLAN.md`
+  - this handoff file.
+- Tests run:
+  - `python -m pytest` -> 45 passed
+  - `npm run build` (desktop) -> passed
+  - `npx playwright test` (desktop) -> 18 passed
+- Known gaps:
+  - Legacy `Home.tsx` / `Review.tsx` files still exist as reference-only code (inactive routes).
+  - Left subtitles list editing milestone remains deferred while list UI is hidden/paused.
+- Next best task:
+  - Start next roadmap slice from `docs/internal/ROADMAP.md` (packaging hardening/smoke gate), then continue prioritized UX queue.
 
 Date: 2026-02-11
 Agent: gpt-5.3-codex-xhigh

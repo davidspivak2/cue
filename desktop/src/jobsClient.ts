@@ -117,18 +117,20 @@ export type CreateSubtitlesJobParams = {
 };
 
 export type CreateVideoWithSubtitlesJobParams = {
-  inputPath: string;
-  outputDir: string;
-  srtPath: string;
+  inputPath?: string;
+  outputDir?: string;
+  srtPath?: string;
   projectId?: string;
   options?: Record<string, unknown>;
 };
 
 type JobRequest = {
   kind: JobKind;
-  input_path: string;
-  output_dir: string;
+  input_path?: string;
+  output_dir?: string;
   srt_path?: string;
+  word_timings_path?: string;
+  style_path?: string;
   project_id?: string;
   options?: Record<string, unknown>;
 };

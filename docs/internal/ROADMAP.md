@@ -531,6 +531,9 @@ Definition of done:
 - A short bullet list only (do not paste old plans here; those go in the archived appendices below).
 - Desktop shell/backend wiring complete: `/health` + `POST /jobs` + SSE events are live; UI can run pipeline jobs and Cancel works.
 - Backend project persistence complete: `/projects` endpoints (`GET/POST`, `GET/PUT/DELETE /projects/{id}`, `GET /projects/{id}/subtitles`, `POST /projects/{id}/relink`) + on-disk project folders + job `project_id` linkage.
+- Workbench export migration complete: export CTA/progress/cancel/success now run directly in Workbench with project-first `/jobs` payloads (`project_id`) and no user-facing handoff to legacy routes.
+- Project-scoped style export contract complete: Workbench style persists per project (`style.json`), and export consumes project style + project word timings.
+- Active routing cleanup complete: `/legacy` and `/review` were removed from `App.tsx`; Workbench is the only active editor/export flow.
 - Project Hub delete flow complete: confirmed delete in UI, project-data-only removal, and backend cancel-then-delete behavior.
 - Workbench on-video edit + style pane complete: on-video Enter/Esc editing contract is live and Workbench style pane now renders real `StyleControls` (wide + narrow overlay).
 - Projects entry flow update complete: top-right CTA is now `New project`, creating a project auto-opens its Workbench tab, and `needs_subtitles` cards now include a secondary `Create subtitles` action.

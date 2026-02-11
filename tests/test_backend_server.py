@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import backend_server
+from app import backend_server, project_store
+from app.paths import get_projects_dir
 
 
 def test_sse_stream_emits_result_payload(monkeypatch) -> None:
@@ -74,3 +78,55 @@ def test_sse_stream_emits_result_payload(monkeypatch) -> None:
         assert result_payload.get("log_path")
         assert any(event.get("type") == "completed" for event in events)
         assert all(event.get("job_id") == job_id for event in events)
+
+
+def _setup_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(project_store, "generate_thumbnail", lambda *args, **kwargs: None)
+    monkeypatch.setattr(project_store, "get_media_duration_seconds", lambda *args, **kwargs: None)
+    backend_server.JOBS.clear()
+
+
+def test_project_first_export_resolves_project_artifacts(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "source.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+
+    project_store.update_project(
+        project_id,
+        subtitles_srt_text="1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+        style={"subtitle_mode": "static", "subtitle_style": {"appearance": {"font_size": 34}}},
+    )
+    project_dir = get_projects_dir() / project_id
+    (project_dir / "word_timings.json").write_text("{}", encoding="utf-8")
+
+    request = backend_server.JobRequest(
+        kind="create_video_with_subtitles",
+        project_id=project_id,
+    )
+    backend_server._resolve_export_request_from_project(request)
+
+    assert request.input_path == str(video_path)
+    assert request.srt_path == str(project_dir / "subtitles.srt")
+    assert request.word_timings_path == str(project_dir / "word_timings.json")
+    assert request.style_path == str(project_dir / "style.json")
+    assert request.output_dir == str(video_path.parent)
+
+
+def test_project_first_export_requires_subtitles(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "source.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+
+    request = backend_server.JobRequest(
+        kind="create_video_with_subtitles",
+        project_id=project_id,
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        backend_server._resolve_export_request_from_project(request)
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "project_subtitles_missing"

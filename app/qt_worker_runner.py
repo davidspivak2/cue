@@ -114,6 +114,66 @@ def _resolve_settings(options: dict[str, Any]) -> RunnerSettings:
     )
 
 
+def _resolve_subtitle_style(
+    style_path: Optional[Path],
+    subtitle_mode: str,
+    highlight_color: str,
+    logger: logging.Logger,
+):
+    from app.subtitle_style import PRESET_DEFAULT, normalize_style_model, preset_defaults
+
+    fallback = preset_defaults(
+        PRESET_DEFAULT,
+        subtitle_mode=subtitle_mode,
+        highlight_color=highlight_color,
+    )
+    if style_path is None:
+        return fallback
+    if not style_path.exists():
+        logger.warning("Style file not found: %s", style_path)
+        return fallback
+    try:
+        raw_style = json.loads(style_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Style file is invalid JSON: %s", style_path)
+        return fallback
+    if not isinstance(raw_style, dict):
+        logger.warning("Style file must be an object: %s", style_path)
+        return fallback
+
+    appearance_raw: Any = raw_style
+    if isinstance(raw_style.get("subtitle_style"), dict):
+        style_payload = raw_style.get("subtitle_style")
+        if isinstance(raw_style.get("subtitle_mode"), str):
+            subtitle_mode = raw_style.get("subtitle_mode")
+        if isinstance(style_payload.get("highlight_color"), str):
+            highlight_color = style_payload.get("highlight_color")
+        if isinstance(style_payload.get("appearance"), dict):
+            appearance_raw = style_payload.get("appearance")
+        else:
+            appearance_raw = style_payload
+    else:
+        if isinstance(raw_style.get("subtitle_mode"), str):
+            subtitle_mode = raw_style.get("subtitle_mode")
+        if isinstance(raw_style.get("highlight_color"), str):
+            highlight_color = raw_style.get("highlight_color")
+        if isinstance(raw_style.get("appearance"), dict):
+            appearance_raw = raw_style.get("appearance")
+
+    fallback = preset_defaults(
+        PRESET_DEFAULT,
+        subtitle_mode=subtitle_mode,
+        highlight_color=highlight_color,
+    )
+    resolved_style = normalize_style_model(appearance_raw, fallback)
+    logger.info(
+        "Loaded style for export: %s mode=%s",
+        style_path,
+        resolved_style.subtitle_mode,
+    )
+    return resolved_style
+
+
 def _emit_heartbeat(emitter: EventEmitter, stop_event: threading.Event) -> None:
     while not stop_event.wait(HEARTBEAT_SECONDS):
         emitter.emit("heartbeat")
@@ -125,6 +185,8 @@ def main() -> int:
     parser.add_argument("--video-path", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--srt-path")
+    parser.add_argument("--word-timings-path")
+    parser.add_argument("--style-path")
     parser.add_argument("--options-json")
     args = parser.parse_args()
 
@@ -166,6 +228,8 @@ def main() -> int:
         return 1
 
     srt_path = Path(args.srt_path) if args.srt_path else None
+    word_timings_path = Path(args.word_timings_path) if args.word_timings_path else None
+    style_path = Path(args.style_path) if args.style_path else None
     if args.task == "burn_in" and (srt_path is None or not srt_path.exists()):
         emitter.emit(
             "error",
@@ -177,19 +241,21 @@ def main() -> int:
         return 1
 
     from app.progress import StepEvent
-    from app.subtitle_style import PRESET_DEFAULT, preset_style_defaults, style_model_from_preset
     from app.workers import TaskType, Worker
 
-    subtitle_style = style_model_from_preset(
-        preset_style_defaults(PRESET_DEFAULT),
-        subtitle_mode=settings.subtitle_mode,
-        highlight_color=settings.highlight_color,
+    subtitle_style = _resolve_subtitle_style(
+        style_path,
+        settings.subtitle_mode,
+        settings.highlight_color,
+        logger,
     )
+    resolved_subtitle_mode = subtitle_style.subtitle_mode
+    resolved_highlight_color = subtitle_style.highlight_color
 
     progress_controller = _build_progress_controller(
         task_type=args.task,
         transcription_settings=settings.transcription,
-        subtitle_mode=settings.subtitle_mode,
+        subtitle_mode=resolved_subtitle_mode,
     )
 
     cancel_requested = threading.Event()
@@ -267,10 +333,11 @@ def main() -> int:
         video_path=video_path,
         output_dir=output_dir,
         srt_path=srt_path,
+        word_timings_path=word_timings_path,
         transcription_settings=settings.transcription,
         subtitle_style=subtitle_style,
-        subtitle_mode=settings.subtitle_mode,
-        highlight_color=settings.highlight_color,
+        subtitle_mode=resolved_subtitle_mode,
+        highlight_color=resolved_highlight_color,
         highlight_opacity=None,
         diagnostics_settings=None,
         session_log_path=log_path,

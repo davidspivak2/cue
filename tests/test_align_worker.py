@@ -206,7 +206,8 @@ def test_build_alignment_plan_for_preview(tmp_path: Path) -> None:
         language="he",
     )
     assert plan.should_run is True
-    assert plan.command[1:3] == ["-m", "app.align_worker"]
+    assert plan.command[1] == "-u"
+    assert plan.command[2:4] == ["-m", "app.align_worker"]
 
 
 def test_alignment_plan_runs_when_word_timings_empty(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ArrowLeft, Check, RotateCcw, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -11,8 +12,17 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { buildGenerateChecklist, checklistStepIds } from "@/legacyCopy";
-import { createSubtitlesJob, JobEvent, JobEventStream } from "@/jobsClient";
+import {
+  buildExportChecklist,
+  buildGenerateChecklist,
+  checklistStepIds
+} from "@/legacyCopy";
+import {
+  createSubtitlesJob,
+  createVideoWithSubtitlesJob,
+  JobEvent,
+  JobEventStream
+} from "@/jobsClient";
 import {
   fetchProject,
   fetchProjectSubtitles,
@@ -25,8 +35,7 @@ import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
 import {
   fetchSettings,
   SettingsConfig,
-  SubtitleStyleAppearance,
-  updateSettings
+  SubtitleStyleAppearance
 } from "@/settingsClient";
 
 type WorkbenchLocationState = {
@@ -328,10 +337,19 @@ const Workbench = () => {
   );
   const [createSubtitlesJobStream, setCreateSubtitlesJobStream] =
     React.useState<JobEventStream | null>(null);
+  const [isExporting, setIsExporting] = React.useState(false);
+  const [exportError, setExportError] = React.useState<string | null>(null);
+  const [exportHeading, setExportHeading] = React.useState("Exporting video");
+  const [exportProgressPct, setExportProgressPct] = React.useState(0);
+  const [exportProgressMessage, setExportProgressMessage] = React.useState<string>("");
+  const [exportChecklist, setExportChecklist] = React.useState<ChecklistItem[]>([]);
+  const [exportJobStream, setExportJobStream] = React.useState<JobEventStream | null>(null);
+  const [exportOutputPath, setExportOutputPath] = React.useState<string | null>(null);
   const [projectReloadTick, setProjectReloadTick] = React.useState(0);
   const [subtitlesReloadTick, setSubtitlesReloadTick] = React.useState(0);
   const [pendingAutoStartSubtitles, setPendingAutoStartSubtitles] = React.useState(false);
   const handledAutoStartKeyRef = React.useRef<string | null>(null);
+  const styleBootstrapKeyRef = React.useRef<string | null>(null);
   const showSubtitlesOverlay = false;
 
   React.useEffect(() => {
@@ -348,6 +366,7 @@ const Workbench = () => {
       .then((data) => {
         if (!active) return;
         setProject(data);
+        setExportOutputPath(data.latest_export?.output_video_path ?? null);
         setError(null);
       })
       .catch((err) => {
@@ -430,6 +449,78 @@ const Workbench = () => {
     setHighlightOpacity(style.highlight_opacity ?? 1.0);
   }, []);
 
+  const applyStyleFromProject = React.useCallback((rawStyle: unknown): boolean => {
+    if (!rawStyle || typeof rawStyle !== "object") {
+      return false;
+    }
+    const root = rawStyle as Record<string, unknown>;
+    if (Object.keys(root).length === 0) {
+      return false;
+    }
+    const styleSection =
+      root.subtitle_style && typeof root.subtitle_style === "object"
+        ? (root.subtitle_style as Record<string, unknown>)
+        : root;
+    const rawAppearance =
+      styleSection.appearance && typeof styleSection.appearance === "object"
+        ? (styleSection.appearance as Record<string, unknown>)
+        : styleSection;
+    if (!rawAppearance || Object.keys(rawAppearance).length === 0) {
+      return false;
+    }
+
+    const styleMode =
+      typeof root.subtitle_mode === "string"
+        ? root.subtitle_mode
+        : typeof rawAppearance.subtitle_mode === "string"
+          ? rawAppearance.subtitle_mode
+          : undefined;
+    const highlightColor =
+      typeof styleSection.highlight_color === "string"
+        ? styleSection.highlight_color
+        : typeof root.highlight_color === "string"
+          ? root.highlight_color
+          : typeof rawAppearance.highlight_color === "string"
+            ? rawAppearance.highlight_color
+            : undefined;
+    const resolvedAppearance = {
+      ...DEFAULT_APPEARANCE,
+      ...(rawAppearance as unknown as SubtitleStyleAppearance),
+      subtitle_mode: styleMode ?? DEFAULT_APPEARANCE.subtitle_mode,
+      highlight_color: highlightColor ?? DEFAULT_APPEARANCE.highlight_color
+    };
+    const resolvedPreset =
+      typeof styleSection.preset === "string" ? styleSection.preset : "Default";
+    const resolvedOpacity =
+      typeof styleSection.highlight_opacity === "number"
+        ? styleSection.highlight_opacity
+        : 1.0;
+    setAppearance(resolvedAppearance);
+    setPreset(resolvedPreset);
+    if (resolvedPreset === "Custom") {
+      customAppearanceRef.current = resolvedAppearance;
+    }
+    setHighlightOpacity(resolvedOpacity);
+    return true;
+  }, []);
+
+  const buildProjectStylePayload = React.useCallback(
+    (
+      nextAppearance: SubtitleStyleAppearance,
+      nextPreset: string,
+      nextHighlightOpacity: number
+    ) => ({
+      subtitle_mode: nextAppearance.subtitle_mode,
+      subtitle_style: {
+        preset: nextPreset,
+        highlight_color: nextAppearance.highlight_color,
+        highlight_opacity: nextHighlightOpacity,
+        appearance: nextAppearance as unknown as Record<string, unknown>
+      }
+    }),
+    []
+  );
+
   React.useEffect(() => {
     let active = true;
     setIsStyleLoading(true);
@@ -437,21 +528,74 @@ const Workbench = () => {
       .then((data) => {
         if (!active) return;
         setSettings(data);
-        applyStyleFromSettings(data);
         setStyleError(null);
       })
       .catch((err) => {
         if (!active) return;
         setStyleError(err instanceof Error ? err.message : "Failed to load style settings.");
+        setIsStyleLoading(false);
       })
       .finally(() => {
         if (!active) return;
-        setIsStyleLoading(false);
-      });
+        if (!projectId) {
+          setIsStyleLoading(false);
+        }
+      })
     return () => {
       active = false;
     };
-  }, [applyStyleFromSettings]);
+  }, [projectId]);
+
+  React.useEffect(() => {
+    if (!projectId || !project || !settings) {
+      return;
+    }
+    const bootstrapKey = `${projectId}:${project.updated_at}`;
+    if (styleBootstrapKeyRef.current === bootstrapKey) {
+      return;
+    }
+    styleBootstrapKeyRef.current = bootstrapKey;
+    setIsStyleLoading(true);
+    const appliedProjectStyle = applyStyleFromProject(project.style);
+    if (appliedProjectStyle) {
+      setStyleError(null);
+      setIsStyleLoading(false);
+      return;
+    }
+
+    applyStyleFromSettings(settings);
+    const fallbackPayload = buildProjectStylePayload(
+      {
+        ...DEFAULT_APPEARANCE,
+        ...(settings.subtitle_style?.appearance as SubtitleStyleAppearance | undefined),
+        subtitle_mode: settings.subtitle_mode ?? DEFAULT_APPEARANCE.subtitle_mode,
+        highlight_color:
+          settings.subtitle_style?.highlight_color ?? DEFAULT_APPEARANCE.highlight_color
+      },
+      settings.subtitle_style?.preset ?? "Default",
+      settings.subtitle_style?.highlight_opacity ?? 1.0
+    );
+    void updateProject(projectId, { style: fallbackPayload })
+      .then(() => {
+        setStyleError(null);
+        setProjectReloadTick((prev) => prev + 1);
+      })
+      .catch((err) => {
+        setStyleError(
+          err instanceof Error ? err.message : "Failed to save project style settings."
+        );
+      })
+      .finally(() => {
+        setIsStyleLoading(false);
+      });
+  }, [
+    applyStyleFromProject,
+    applyStyleFromSettings,
+    buildProjectStylePayload,
+    project,
+    projectId,
+    settings
+  ]);
 
   React.useEffect(() => {
     if (!projectId) {
@@ -474,12 +618,23 @@ const Workbench = () => {
     setCreateSubtitlesProgressMessage("");
     setCreateSubtitlesChecklist([]);
     setIsCreatingSubtitles(false);
+    setExportError(null);
+    setExportHeading("Exporting video");
+    setExportProgressPct(0);
+    setExportProgressMessage("");
+    setExportChecklist([]);
+    setIsExporting(false);
+    setExportOutputPath(null);
     setCanUndoEdit(false);
     editHistoryRef.current = [];
     editHistoryIndexRef.current = 0;
     lastHistoryCommitAtRef.current = 0;
     shouldResumePlaybackRef.current = false;
     setCreateSubtitlesJobStream((prev) => {
+      prev?.close();
+      return null;
+    });
+    setExportJobStream((prev) => {
       prev?.close();
       return null;
     });
@@ -520,6 +675,12 @@ const Workbench = () => {
   }, [createSubtitlesJobStream]);
 
   React.useEffect(() => {
+    return () => {
+      exportJobStream?.close();
+    };
+  }, [exportJobStream]);
+
+  React.useEffect(() => {
     if (!incomingState?.autoStartSubtitles) {
       return;
     }
@@ -538,16 +699,20 @@ const Workbench = () => {
       keep_extracted_audio: config.keep_extracted_audio,
       punctuation_rescue_fallback_enabled: config.punctuation_rescue_fallback_enabled,
       vad_gap_rescue_enabled: true,
-      subtitle_mode: config.subtitle_mode,
-      highlight_color: config.subtitle_style?.highlight_color
+      subtitle_mode: appearance.subtitle_mode,
+      highlight_color: appearance.highlight_color
     };
-  }, []);
+  }, [appearance.highlight_color, appearance.subtitle_mode]);
 
   const resolveOutputDir = React.useCallback(
-    async (videoInputPath: string): Promise<string | null> => {
+    async (
+      videoInputPath: string,
+      reportError?: (message: string) => void
+    ): Promise<string | null> => {
       if (!settings) {
         return null;
       }
+      const setErrorMessage = reportError ?? (() => {});
       if (settings.save_policy === "same_folder") {
         return getDirName(videoInputPath);
       }
@@ -555,11 +720,11 @@ const Workbench = () => {
         if (settings.save_folder) {
           return settings.save_folder;
         }
-        setCreateSubtitlesError("Choose a folder in Settings to save your subtitles.");
+        setErrorMessage("Choose a folder in Settings to save your subtitles.");
         return null;
       }
       if (!isTauriEnv) {
-        setCreateSubtitlesError("Choose a folder in Settings to save your subtitles.");
+        setErrorMessage("Choose a folder in Settings to save your subtitles.");
         return null;
       }
       const selected = await openDialog({ directory: true, multiple: false });
@@ -604,6 +769,27 @@ const Workbench = () => {
     }
     return undefined;
   }, []);
+
+  const updateExportChecklist = React.useCallback(
+    (stepId: string, stateValue: string, reason?: string) => {
+      const mappedState =
+        stateValue === "start"
+          ? "active"
+          : stateValue === "done"
+            ? "done"
+            : stateValue === "skipped"
+              ? "skipped"
+              : stateValue === "failed"
+                ? "failed"
+                : "pending";
+      setExportChecklist((prev) =>
+        prev.map((item) =>
+          item.id === stepId ? { ...item, state: mappedState, detail: reason ?? item.detail } : item
+        )
+      );
+    },
+    []
+  );
 
   const handleCreateSubtitlesEvent = React.useCallback(
     (event: JobEvent) => {
@@ -663,7 +849,7 @@ const Workbench = () => {
   );
 
   const startCreateSubtitles = React.useCallback(async () => {
-    if (!projectId || !project?.video?.path || isCreatingSubtitles) {
+    if (!projectId || !project?.video?.path || isCreatingSubtitles || isExporting) {
       return;
     }
     if (!settings) {
@@ -671,7 +857,7 @@ const Workbench = () => {
       return;
     }
 
-    const resolvedOutputDir = await resolveOutputDir(project.video.path);
+    const resolvedOutputDir = await resolveOutputDir(project.video.path, setCreateSubtitlesError);
     if (!resolvedOutputDir) {
       return;
     }
@@ -714,6 +900,7 @@ const Workbench = () => {
     buildJobOptions,
     handleCreateSubtitlesEvent,
     isCreatingSubtitles,
+    isExporting,
     project,
     projectId,
     resolveOutputDir,
@@ -724,11 +911,154 @@ const Workbench = () => {
     await createSubtitlesJobStream?.cancel();
   }, [createSubtitlesJobStream]);
 
+  const handleExportEvent = React.useCallback(
+    (event: JobEvent) => {
+      if (event.type === "started") {
+        setExportHeading(event.heading ?? "Exporting video");
+        return;
+      }
+      if (event.type === "checklist") {
+        updateExportChecklist(event.step_id, event.state, resolveChecklistReason(event));
+        return;
+      }
+      if (event.type === "progress") {
+        if (typeof event.pct === "number") {
+          setExportProgressPct(event.pct);
+        }
+        if (event.message) {
+          setExportProgressMessage(event.message);
+        }
+        return;
+      }
+      if (event.type === "result") {
+        const payload = event.payload ?? {};
+        if (typeof payload.output_path === "string") {
+          setExportOutputPath(payload.output_path);
+        }
+        return;
+      }
+      if (event.type === "completed") {
+        setExportProgressPct(100);
+        setIsExporting(false);
+        setExportJobStream((prev) => {
+          prev?.close();
+          return null;
+        });
+        setProjectReloadTick((prev) => prev + 1);
+        return;
+      }
+      if (event.type === "cancelled") {
+        setExportProgressPct(0);
+        setExportProgressMessage("");
+        setIsExporting(false);
+        if (event.message) {
+          setExportError(event.message);
+        }
+        setExportJobStream((prev) => {
+          prev?.close();
+          return null;
+        });
+        return;
+      }
+      if (event.type === "error") {
+        setExportProgressPct(0);
+        setExportProgressMessage("");
+        setIsExporting(false);
+        setExportError(event.message ?? "Video export failed.");
+        setExportJobStream((prev) => {
+          prev?.close();
+          return null;
+        });
+      }
+    },
+    [resolveChecklistReason, updateExportChecklist]
+  );
+
+  const startExport = React.useCallback(async () => {
+    if (!projectId || !project?.video?.path || isExporting || isCreatingSubtitles) {
+      return;
+    }
+    if (!settings) {
+      setExportError("Settings are still loading. Please try again.");
+      return;
+    }
+    if (
+      appearance.subtitle_mode === "word_highlight" &&
+      (project.status === "needs_subtitles" || project.status === "missing_file")
+    ) {
+      setExportError(
+        "Word highlight export needs synced timings. Run Create subtitles again before exporting."
+      );
+      return;
+    }
+    const resolvedOutputDir = await resolveOutputDir(project.video.path, setExportError);
+    if (!resolvedOutputDir) {
+      return;
+    }
+
+    try {
+      await updateProject(projectId, {
+        style: buildProjectStylePayload(appearance, preset, highlightOpacity)
+      });
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Failed to save style before export.");
+      return;
+    }
+    setExportError(null);
+    setExportHeading("Exporting video");
+    setExportProgressPct(0);
+    setExportProgressMessage("Starting...");
+    setExportChecklist(defaultChecklist(buildExportChecklist()));
+    setIsExporting(true);
+    try {
+      const job = await createVideoWithSubtitlesJob(
+        {
+          projectId,
+          outputDir: resolvedOutputDir,
+          options: buildJobOptions(settings)
+        },
+        {
+          onEvent: handleExportEvent,
+          onError: () => {
+            setIsExporting(false);
+            setExportError("Connection lost while streaming job updates.");
+            setExportJobStream((prev) => {
+              prev?.close();
+              return null;
+            });
+          }
+        }
+      );
+      setExportJobStream(job);
+    } catch (err) {
+      setIsExporting(false);
+      setExportError(err instanceof Error ? err.message : "Failed to start video export.");
+    }
+  }, [
+    appearance.subtitle_mode,
+    buildProjectStylePayload,
+    buildJobOptions,
+    handleExportEvent,
+    isCreatingSubtitles,
+    isExporting,
+    preset,
+    project,
+    projectId,
+    resolveOutputDir,
+    settings,
+    appearance,
+    highlightOpacity
+  ]);
+
+  const cancelExport = React.useCallback(async () => {
+    await exportJobStream?.cancel();
+  }, [exportJobStream]);
+
   React.useEffect(() => {
     if (!pendingAutoStartSubtitles) {
       return;
     }
-    if (isLoading || !project || !settings || isCreatingSubtitles) {
+    if (isLoading || !project || !settings || isCreatingSubtitles || isExporting) {
       return;
     }
     setPendingAutoStartSubtitles(false);
@@ -739,6 +1069,7 @@ const Workbench = () => {
   }, [
     cues.length,
     isCreatingSubtitles,
+    isExporting,
     isLoading,
     pendingAutoStartSubtitles,
     project,
@@ -752,6 +1083,12 @@ const Workbench = () => {
   const videoPath = project?.video?.path ?? "";
   const previewSrc = videoPath ? (isTauriEnv ? convertFileSrc(videoPath) : videoPath) : "";
   const hasSubtitles = cues.length > 0;
+  const latestOutputPath = exportOutputPath ?? project?.latest_export?.output_video_path ?? null;
+  const canExport =
+    hasSubtitles &&
+    !isCreatingSubtitles &&
+    !isExporting &&
+    (project?.status === "ready" || project?.status === "done");
   const showNoSubtitlesState = !isLoading && !error && !subtitleLoadError && !hasSubtitles;
   const hasVideoPreview = Boolean(previewSrc);
   const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
@@ -769,6 +1106,19 @@ const Workbench = () => {
   const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
   const hasStyledSubtitleBackground =
     appearance.background_mode === "line" || appearance.background_mode === "word";
+
+  const openLatestOutputVideo = React.useCallback(async () => {
+    if (latestOutputPath) {
+      await openPath(latestOutputPath);
+    }
+  }, [latestOutputPath]);
+
+  const openLatestOutputFolder = React.useCallback(async () => {
+    if (!latestOutputPath) {
+      return;
+    }
+    await openPath(getDirName(latestOutputPath));
+  }, [latestOutputPath]);
 
   const subtitleVerticalClass =
     appearance.vertical_anchor === "top"
@@ -857,22 +1207,26 @@ const Workbench = () => {
       nextPreset: string,
       nextHighlightOpacity: number
     ) => {
+      if (!projectId) {
+        return;
+      }
       try {
-        await updateSettings({
-          subtitle_mode: nextAppearance.subtitle_mode,
-          subtitle_style: {
-            preset: nextPreset,
-            highlight_color: nextAppearance.highlight_color,
-            highlight_opacity: nextHighlightOpacity,
-            appearance: nextAppearance as unknown as Record<string, unknown>
+        await updateProject(
+          projectId,
+          {
+            style: buildProjectStylePayload(
+              nextAppearance,
+              nextPreset,
+              nextHighlightOpacity
+            )
           }
-        });
+        );
         setStyleError(null);
       } catch (err) {
         setStyleError(err instanceof Error ? err.message : "Failed to save style settings.");
       }
     },
-    []
+    [buildProjectStylePayload, projectId]
   );
 
   const debouncedPersistStyle = useDebounce(
@@ -887,6 +1241,9 @@ const Workbench = () => {
   );
 
   const handleAppearanceChange = (changes: Partial<SubtitleStyleAppearance>) => {
+    if (isExporting) {
+      return;
+    }
     setAppearance((prev) => {
       const next = { ...prev, ...changes };
       customAppearanceRef.current = next;
@@ -900,6 +1257,9 @@ const Workbench = () => {
   };
 
   const handlePresetChange = (nextPreset: string) => {
+    if (isExporting) {
+      return;
+    }
     if (preset === "Custom") {
       customAppearanceRef.current = appearance;
     }
@@ -913,21 +1273,23 @@ const Workbench = () => {
   };
 
   const handleHighlightOpacityChange = (nextHighlightOpacity: number) => {
+    if (isExporting) {
+      return;
+    }
     setHighlightOpacity(nextHighlightOpacity);
     debouncedPersistStyle(appearance, preset, nextHighlightOpacity);
   };
 
   const handleResetPreset = () => {
-    void (async () => {
-      await persistStyleSettings(appearance, preset, highlightOpacity);
-      try {
-        const data = await fetchSettings();
-        applyStyleFromSettings(data);
-        setStyleError(null);
-      } catch (err) {
-        setStyleError(err instanceof Error ? err.message : "Failed to reload style settings.");
-      }
-    })();
+    if (isExporting) {
+      return;
+    }
+    const targetPreset = preset === "Custom" ? "Default" : preset;
+    const nextAppearance = applyPresetAppearance(appearance, targetPreset);
+    setPreset(targetPreset);
+    setAppearance(nextAppearance);
+    customAppearanceRef.current = nextAppearance;
+    void persistStyleSettings(nextAppearance, targetPreset, highlightOpacity);
   };
 
   const initializeEditHistory = React.useCallback((initialText: string) => {
@@ -1010,7 +1372,7 @@ const Workbench = () => {
   );
 
   const handleUndoEdit = React.useCallback(() => {
-    if (isSavingCue) {
+    if (isSavingCue || isExporting) {
       return;
     }
     const index = editHistoryIndexRef.current;
@@ -1022,7 +1384,7 @@ const Workbench = () => {
     setEditingText(editHistoryRef.current[nextIndex] ?? "");
     lastHistoryCommitAtRef.current = Date.now();
     setCanUndoEdit(nextIndex > 0);
-  }, [isSavingCue]);
+  }, [isExporting, isSavingCue]);
 
   const handleCancelEdit = React.useCallback(() => {
     setSelectedCueId(null);
@@ -1034,7 +1396,7 @@ const Workbench = () => {
   }, [resetEditSessionState, resumePlaybackIfNeeded]);
 
   const handleSaveEdit = React.useCallback(async () => {
-    if (!projectId || !editingCueId) {
+    if (!projectId || !editingCueId || isExporting) {
       return;
     }
     const nextCues = cues.map((cue) =>
@@ -1063,11 +1425,19 @@ const Workbench = () => {
     } finally {
       setIsSavingCue(false);
     }
-  }, [cues, editingCueId, editingText, projectId, resetEditSessionState, resumePlaybackIfNeeded]);
+  }, [
+    cues,
+    editingCueId,
+    editingText,
+    isExporting,
+    projectId,
+    resetEditSessionState,
+    resumePlaybackIfNeeded
+  ]);
 
   const handleCueClick = React.useCallback(
     (cue: SrtCue) => {
-      if (isSavingCue) {
+      if (isSavingCue || isExporting) {
         return;
       }
       const videoElement = videoRef.current;
@@ -1077,7 +1447,7 @@ const Workbench = () => {
       }
       beginEditingCue(cue, isPlaying);
     },
-    [beginEditingCue, isSavingCue]
+    [beginEditingCue, isExporting, isSavingCue]
   );
 
   const openLeftPanel = () => {
@@ -1157,7 +1527,12 @@ const Workbench = () => {
   };
 
   const stylePanelContent = (
-    <div className="px-4 pb-2 pl-5 pr-5">
+    <div
+      className={cn(
+        "px-4 pb-2 pl-5 pr-5",
+        isExporting ? "pointer-events-none opacity-60" : ""
+      )}
+    >
       {styleError && (
         <div
           className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
@@ -1312,6 +1687,7 @@ const Workbench = () => {
                   variant="outline"
                   size="sm"
                   onClick={openLeftPanel}
+                  disabled={isExporting}
                   data-testid="workbench-open-left"
                 >
                   All subtitles
@@ -1322,6 +1698,7 @@ const Workbench = () => {
                   variant="outline"
                   size="sm"
                   onClick={openRightOverlay}
+                  disabled={isExporting}
                   data-testid="workbench-open-style"
                 >
                   Style
@@ -1406,7 +1783,7 @@ const Workbench = () => {
                             onChange={handleEditTextChange}
                             onKeyDown={handleEditorKeyDown}
                             rows={Math.max(2, Math.min(4, lineCount))}
-                            readOnly={isSavingCue}
+                            readOnly={isSavingCue || isExporting}
                             aria-label="Active subtitle editor"
                           />
                         ) : (
@@ -1474,7 +1851,7 @@ const Workbench = () => {
                               title="Undo"
                               data-testid="workbench-subtitle-undo"
                               onClick={handleUndoEdit}
-                              disabled={isSavingCue || !canUndoEdit}
+                              disabled={isSavingCue || isExporting || !canUndoEdit}
                             >
                               <RotateCcw className="h-4 w-4" />
                             </Button>
@@ -1487,7 +1864,7 @@ const Workbench = () => {
                               title="Cancel"
                               data-testid="workbench-subtitle-cancel"
                               onClick={handleCancelEdit}
-                              disabled={isSavingCue}
+                              disabled={isSavingCue || isExporting}
                             >
                               <X className="h-4 w-4" />
                             </Button>
@@ -1500,7 +1877,7 @@ const Workbench = () => {
                               title="Save"
                               data-testid="workbench-subtitle-save"
                               onClick={() => void handleSaveEdit()}
-                              disabled={isSavingCue}
+                              disabled={isSavingCue || isExporting}
                             >
                               <Check className="h-4 w-4" />
                             </Button>
@@ -1597,6 +1974,90 @@ const Workbench = () => {
                 {stylePanelContent}
               </div>
             </aside>
+          )}
+
+          {hasSubtitles && (
+            <section
+              className="rounded-lg border border-border bg-card p-4"
+              data-testid="workbench-export-panel"
+            >
+              {exportError && (
+                <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                  {exportError}
+                </div>
+              )}
+              {isExporting ? (
+                <div className="space-y-3">
+                  <p className="text-sm font-semibold text-foreground">{exportHeading}</p>
+                  {exportChecklist.length > 0 && (
+                    <Checklist items={exportChecklist} className="text-left" />
+                  )}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{Math.round(exportProgressPct)}%</span>
+                      <span className="truncate">{exportProgressMessage}</span>
+                    </div>
+                    <Progress value={exportProgressPct} />
+                  </div>
+                  <div className="flex justify-center">
+                    <Button
+                      variant="secondary"
+                      data-testid="workbench-cancel-export"
+                      onClick={() => void cancelExport()}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      Create video with subtitles
+                    </p>
+                    {latestOutputPath ? (
+                      <p className="truncate text-xs text-muted-foreground">
+                        Latest export: {latestOutputPath}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Export a final video with your current subtitles and style.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {latestOutputPath && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        data-testid="workbench-play-export-video"
+                        onClick={() => void openLatestOutputVideo()}
+                      >
+                        Play video
+                      </Button>
+                    )}
+                    {latestOutputPath && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        data-testid="workbench-open-export-folder"
+                        onClick={() => void openLatestOutputFolder()}
+                      >
+                        Open folder
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      data-testid="workbench-export-cta"
+                      onClick={() => void startExport()}
+                      disabled={!canExport}
+                    >
+                      Create video with subtitles
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </section>
           )}
         </>
       )}

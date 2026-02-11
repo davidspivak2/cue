@@ -10,6 +10,19 @@ const initMocks = () => {
   });
 };
 
+const DEFAULT_PROJECT_STYLE = {
+  subtitle_mode: "word_highlight",
+  subtitle_style: {
+    preset: "Default",
+    highlight_color: "#FFD400",
+    highlight_opacity: 1,
+    appearance: {
+      subtitle_mode: "word_highlight",
+      highlight_color: "#FFD400"
+    }
+  }
+};
+
 test("project hub card interactions", async ({ page }) => {
   await page.addInitScript(initMocks);
 
@@ -66,7 +79,8 @@ test("project hub card interactions", async ({ page }) => {
       word_timings_path: "word_timings.json",
       style_path: "style.json"
     },
-    latest_export: null
+    latest_export: null,
+    style: project.style ?? DEFAULT_PROJECT_STYLE
   });
 
   await page.route("**://127.0.0.1:8765/projects", async (route) => {
@@ -179,6 +193,33 @@ test("project hub card interactions", async ({ page }) => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(buildManifest(project))
+      });
+      return;
+    }
+
+    if (request.method() === "PUT") {
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = request.postDataJSON() as Record<string, unknown>;
+      } catch {
+        payload = {};
+      }
+      projects = projects.map((entry) =>
+        entry.project_id === projectId
+          ? {
+              ...entry,
+              style:
+                payload && typeof payload.style === "object"
+                  ? payload.style
+                  : entry.style ?? DEFAULT_PROJECT_STYLE
+            }
+          : entry
+      );
+      const updated = projects.find((entry) => entry.project_id === projectId) ?? project;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(buildManifest(updated))
       });
       return;
     }
