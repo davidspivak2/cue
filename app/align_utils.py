@@ -28,6 +28,19 @@ def audio_path_for_srt(srt_path: Path) -> Path:
     return srt_path.with_name(f"{srt_path.stem}_audio_for_whisper.wav")
 
 
+def _resolve_alignment_worker_command(
+    python_executable: Optional[str],
+) -> Optional[list[str]]:
+    if python_executable:
+        return [python_executable, "-u", "-m", "app.align_worker"]
+    if getattr(sys, "frozen", False):
+        align_worker_exe = Path(sys.executable).resolve().with_name("CueAlignWorker.exe")
+        if align_worker_exe.exists():
+            return [str(align_worker_exe)]
+        return None
+    return [sys.executable, "-u", "-m", "app.align_worker"]
+
+
 def build_alignment_plan(
     *,
     subtitle_mode: str,
@@ -78,7 +91,17 @@ def build_alignment_plan(
             prefer_gpu=prefer_gpu,
         )
 
-    command = [python_executable or sys.executable, "-u", "-m", "app.align_worker"]
+    command = _resolve_alignment_worker_command(python_executable)
+    if command is None:
+        return AlignmentPlan(
+            should_run=False,
+            command=[],
+            output_path=output_path,
+            reason="align_worker_missing",
+            device=device,
+            align_model=align_model,
+            prefer_gpu=prefer_gpu,
+        )
     command += [
         "--wav",
         str(audio_path),

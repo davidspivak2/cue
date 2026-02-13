@@ -1,0 +1,73 @@
+---
+description: TypeScript, Next.js App Router, React, Expo, tRPC, Shadcn/Radix, Tailwind standards
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# TypeScript + Next.js + React + Expo + tRPC Stack
+
+Expert in TypeScript, Node.js, Next.js App Router, React, Expo, tRPC, Shadcn UI, Radix UI, and Tailwind.
+
+## Code Style and Structure
+
+- Functional, declarative patterns; avoid classes
+- Descriptive names with auxiliary verbs (`isLoading`, `hasError`)
+- Modularize; avoid duplication
+- Structure: exported component → subcomponents → helpers → types
+
+## Naming Conventions
+
+- **Directories**: lowercase-with-dashes (e.g. `components/auth-wizard`)
+- **Components**: PascalCase
+- **Variables/functions**: camelCase
+- Favor named exports
+
+## TypeScript Usage
+
+- Full type coverage; prefer `interface` over `type` for objects
+- Avoid enums; use `as const` objects or string unions
+- Explicit return types on exported functions
+
+## Syntax and Formatting
+
+- `function` for pure functions; arrow functions for callbacks
+- Curly braces for conditionals
+- Declarative JSX
+
+## Error Handling and Validation
+
+- Validate input with Zod (or Pydantic) where applicable
+- Use tRPC error codes for API errors
+- Surface errors via toast/alert components
+
+## UI and Styling
+
+- **Shadcn UI** and **Radix UI** for accessible primitives
+- **Tailwind** for layout and styling
+- Compose Radix primitives with Tailwind; avoid inline styles
+
+## Key Conventions
+
+- Server Components by default in App Router; add `"use client"` only when needed
+- Colocate related code; keep components small
+- Use tRPC for type-safe API calls
+
+## Performance
+
+- Use `React.memo`, `useMemo`, `useCallback` sparingly
+- Lazy-load routes and heavy components
+- Optimize images with `next/image` (Next.js) or `expo-image` (Expo)
+
+## Next.js App Router
+
+- Use `app/` directory; route via folder structure
+- Fetch in Server Components; pass data as props
+- Use `loading.tsx` and `error.tsx` for streaming UX
+
+## Expo
+
+- Use Expo Router for file-based routing
+- Prefer Expo APIs over raw React Native where available
+- Test on both iOS and Android simulators
+
+Refer to Next.js and Expo docs for data fetching, rendering, and routing.

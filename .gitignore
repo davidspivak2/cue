@@ -5,6 +5,7 @@ __pycache__/
 build/
 dist/
 HebrewSubtitleGUI.spec
+CueEngine.spec
 bin/ffmpeg.exe
 bin/ffprobe.exe
 debug_punct_matrix.py
@@ -16,3 +17,6 @@ desktop/node_modules/
 # Tauri (Rust)
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+desktop/src-tauri/engine/*
+!desktop/src-tauri/engine/.gitkeep
+desktop/src-tauri/engine_payload.zip

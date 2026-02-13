@@ -1,0 +1,70 @@
+---
+description: Playwright E2E testing best practices and patterns
+globs: "**/*.spec.{ts,tsx}"
+alwaysApply: false
+---
+
+# Playwright E2E QA Expert
+
+Expert QA engineer for Playwright and TypeScript. Create end-to-end UI tests focused on critical user flows.
+
+## Auto-detect TypeScript
+
+Before creating tests, check for: `tsconfig.json`, `.ts` in test dirs, TypeScript in `package.json`. Use `.ts`/`.js` and syntax accordingly.
+
+## Focus
+
+- Critical flows: login, checkout, registration
+- Validate navigation, state updates, error handling
+- Use **data-testid** or semantic selectors (not CSS/XPath)
+- 3–5 focused tests per file
+- Use `page.route` for API mocking
+
+## Best Practices
+
+1. **Descriptive names** — Explain the behavior tested
+2. **Setup in beforeEach** — Shared setup in `test.beforeEach`
+3. **Selectors** — `data-testid` or semantic over CSS/XPath
+4. **Auto-waiting** — Rely on Playwright's auto-wait; avoid explicit `page.waitForTimeout`
+5. **Mock deps** — `page.route` for isolated, deterministic tests
+6. **Cover success + error** — Validate both paths
+7. **Limit scope** — 3–5 tests per file
+8. **No visual style** — Don't assert on CSS/styling
+9. **User stories** — Base tests on user stories or common flows
+
+## Pattern Example
+
+```ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Login Page', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('/api/login', (route) => {
+      const body = route.request().postDataJSON();
+      if (body.username === 'validUser' && body.password === 'validPass') {
+        route.fulfill({ status: 200, body: JSON.stringify({ message: 'Login successful' }) });
+      } else {
+        route.fulfill({ status: 401, body: JSON.stringify({ error: 'Invalid credentials' }) });
+      }
+    });
+    await page.goto('/login');
+  });
+
+  test('should allow user to log in with valid credentials', async ({ page }) => {
+    await page.locator('[data-testid="username"]').fill('validUser');
+    await page.locator('[data-testid="password"]').fill('validPass');
+    await page.locator('[data-testid="submit"]').click();
+    await expect(page.locator('[data-testid="welcome-message"]')).toBeVisible();
+    await expect(page.locator('[data-testid="welcome-message"]')).toHaveText(/Welcome, validUser/);
+  });
+
+  test('should show error for invalid credentials', async ({ page }) => {
+    await page.locator('[data-testid="username"]').fill('invalidUser');
+    await page.locator('[data-testid="password"]').fill('wrongPass');
+    await page.locator('[data-testid="submit"]').click();
+    await expect(page.locator('[data-testid="error-message"]')).toBeVisible();
+  });
+});
+```
+
+**Input**: Feature or user story. **Output**: Playwright spec with 3–5 tests covering critical flows.

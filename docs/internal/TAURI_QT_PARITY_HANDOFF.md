@@ -1,6 +1,6 @@
 # Cue Tauri Migration - Qt Parity Multi-Agent Handoff Plan
 
-Last updated: 2026-02-11
+Last updated: 2026-02-13
 
 Owner: This document is the single source of truth for multi-agent handoff.
 Every agent must update it before handing work to another agent.
@@ -283,6 +283,7 @@ Handoff outputs
 - Legacy export route cleanup (`/legacy`, `/review` removed from active routing): Done
 - Export migration docs refresh (`ARCHITECTURE`, UX spec, roadmap, parity handoff, implementation playbook): Done
 - 2026-02-11 roadmap/spec reprioritization sync: Done (Support UX v1 with hosted Send Logs, sidebar-removal navigation contract, settings clarity pass, progress continuity, and style-pane modernization documented)
+- PR13 packaging hardening/smoke tests: Done (packaged engine + MSI and NSIS installers build; smoke path passes)
 
 ---
 
@@ -304,6 +305,50 @@ Before you hand off
 
 Template (copy and fill; newest at top)
 Note: Entries are chronological snapshots. Older entries may mention gaps that were later resolved; use the newest entry plus sections 2 and 6 for current state.
+
+Date: 2026-02-13
+Agent: (docs update)
+Phase: PR13 packaging — NSIS blocker resolved
+Status: Done
+Summary:
+- NSIS blocker resolved; installer works. PR13 packaging acceptance criteria met. Docs updated (PR13 handoff, README, smoke test, roadmap, this handoff). The 2026-02-11 entry’s "Known gap / blocker" (NSIS) is now resolved.
+
+Date: 2026-02-11
+Agent: gpt-5.3-codex-xhigh
+Phase: PR13 packaging hardening + packaged smoke tests
+Status: Partial (MSI pass; NSIS blocked) — now resolved per 2026-02-13
+Summary:
+- Implemented packaged-engine build flow and outputs for `CueBackend.exe`, `CueRunner.exe`, `CueWorker.exe`, and `CueAlignWorker.exe` plus FFmpeg bundle sync into `desktop/src-tauri/engine/`.
+- Added frozen-aware subprocess routing:
+  - `app/backend_server.py` now prefers sibling `CueRunner.exe` when frozen.
+  - `app/align_utils.py` now prefers sibling `CueAlignWorker.exe` when frozen.
+- Bundled engine resources and backend lifecycle in Tauri:
+  - `desktop/src-tauri/tauri.conf.json` includes engine resources.
+  - `desktop/src-tauri/src/main.rs` auto-starts/stops packaged backend and writes sidecar logs under `%LOCALAPPDATA%\Cue\logs\`.
+- Added frontend startup resilience:
+  - `desktop/src/backendHealth.ts` wait/retry helper.
+  - `ProjectHub` and `Settings` wait for `/health` and show friendly startup messaging.
+- Added release/smoke tooling and docs:
+  - `scripts/build_engine.cmd`, `scripts/build_engine.ps1`, `scripts/build_release.cmd`
+  - `tools/pyinstaller.engine.spec.in`
+  - `tools/smoke_test_packaged_backend.py`
+  - `docs/internal/SMOKE_TEST_PACKAGED.md`
+- Tests and validation run:
+  - `python -m pytest tests/test_backend_server.py tests/test_backend_job_project_update.py`
+  - `python -m pytest tests/test_align_worker.py`
+  - `npm run build` (desktop)
+  - `cargo check` (desktop/src-tauri)
+  - `scripts/build_engine.cmd`
+  - `npm run tauri build -- --bundles msi`
+  - `scripts/build_release.cmd` (fallback path validated)
+  - `python tools/smoke_test_packaged_backend.py --video "C:\Users\david\Desktop\test_30s.mp4" --output-dir "C:\Cue_extra\smoke_packaged"` (`SMOKE_RESULT=PASS`)
+- Known gap / blocker:
+  - NSIS installer build fails during `makensis` with:
+    - `Internal compiler error #12345: error mmapping file (..., 33554432) is out of range.`
+    - `failed to bundle project \`The system cannot find the file specified. (os error 2)\``
+  - MSI installer path is currently the working release route.
+- Next best task:
+  - Resolve NSIS packaging failure while preserving MSI output and packaged smoke parity.
 
 Date: 2026-02-11
 Agent: gpt-5.3-codex-xhigh

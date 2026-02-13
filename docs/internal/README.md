@@ -3,6 +3,7 @@
 These documents are internal development references used during active development.
 
 - **ROADMAP.md** — Task tracking, milestones, and acceptance criteria.
+- **PR13_PACKAGING_HANDOFF.md** — Current PR13 packaging status and continuation runbook (MSI and NSIS installers working).
 - **CUE_UX_UI_SPEC.md** — UX/UI design contract for the redesign.
 - **TAURI_QT_PARITY_HANDOFF.md** — Multi-agent handoff tracking for the Tauri migration.
 - **TAURI_REACT_OVERHAUL_PLAN.md** — Desktop UI architecture and migration plan.

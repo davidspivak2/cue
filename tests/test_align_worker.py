@@ -175,6 +175,44 @@ def test_alignment_handles_segment_mismatch(
     assert [word.text for word in doc.cues[1].words] == ["שלום", "עולם"]
 
 
+def test_alignment_falls_back_to_estimated_when_align_model_load_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    srt_path = tmp_path / "fallback.srt"
+    wav_path = tmp_path / "fallback.wav"
+    output_path = tmp_path / "fallback.word_timings.json"
+    _write_srt(
+        srt_path,
+        "1\n00:00:00,000 --> 00:00:02,000\nשלום עולם\n",
+    )
+    wav_path.write_bytes(b"")
+
+    def load_audio(_path: str):
+        return "audio"
+
+    def load_align_model(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise IndexError("list index out of range")
+
+    def align(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return {"segments": []}
+
+    stub = SimpleNamespace(load_audio=load_audio, load_align_model=load_align_model, align=align)
+    monkeypatch.setitem(__import__("sys").modules, "whisperx", stub)
+
+    config = AlignmentConfig(
+        wav_path=wav_path,
+        srt_path=srt_path,
+        output_path=output_path,
+        language="he",
+        prefer_gpu=False,
+        device="cpu",
+        align_model=None,
+    )
+    run_alignment(config)
+    doc = load_word_timings_json(output_path)
+    assert sum(len(cue.words) for cue in doc.cues) > 0
+
+
 def test_build_alignment_plan_for_preview(tmp_path: Path) -> None:
     srt_path = tmp_path / "sample.srt"
     audio_path = tmp_path / "sample_audio_for_whisper.wav"

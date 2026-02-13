@@ -1,0 +1,27 @@
+---
+description: React component workflow — check existing, v0.dev prompt, then adapt to project
+globs: desktop/**/*.tsx
+alwaysApply: false
+---
+
+# React Component Workflow
+
+When you need a React component:
+
+1. **Clarify** the component's purpose, functionality, and design. Think step by step.
+
+2. **Check for existing components** in:
+   - `desktop/src/components` (app components)
+   - `desktop/src/components/ui` (shadcn primitives)
+
+3. **If it doesn't exist**, create a detailed prompt for v0.dev, then adapt the result:
+   - **Prompt content**: Component name and purpose, props and types, styling/behavior, Tailwind CSS, TypeScript.
+   - **URL**: Encode the prompt and use: `[ComponentName](https://v0.dev/chat?q={encoded_prompt})` (provide the clickable link).
+   - **Example prompt**: "Create a React component named {ComponentName} using TypeScript and Tailwind CSS. It should {description}. Props: {list with types}. {styling/behavior notes}. Provide full component code."
+
+4. **After generating**, adapt to this project:
+   - **Imports**: shadcn/ui from `@/components/ui/`, app-specific components from `@/components`.
+   - Follow existing patterns in `desktop/src/components`.
+   - Add any needed custom logic or state.
+
+Replace placeholders like `{ComponentName}` and path aliases with the actual values used in the project.
