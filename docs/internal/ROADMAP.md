@@ -14,11 +14,14 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 ## Now / Next (Queue)
 (Use a numbered list. Status tags must be one of: NEXT, IN PROGRESS, BLOCKED, DONE.)
 
-1. [NEXT] PR13 — Packaging hardening / smoke tests
+1. [DONE] PR13 — Packaging hardening / smoke tests
    - Deliverable:
      - Packaging flow hardened for release and smoke tests run against packaged builds.
+   - Current status:
+     - MSI and NSIS installer builds work; packaged smoke path passes.
    - Acceptance criteria:
      - Packaged build launches and completes the golden-path smoke test without regressions.
+     - NSIS `.exe` installer build succeeds without relying on MSI-only fallback.
    - UX spec reference: N/A (engineering / packaging)
 
 2. [NEXT] Export success actions reliability (Workbench success strip)
@@ -185,8 +188,11 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 0.2 PR13 — Packaging hardening / smoke tests
 - Deliverable:
   - Packaging flow hardened for release and smoke tests run against packaged builds.
+- Current status:
+  - MSI and NSIS builds pass; packaged smoke flow passes.
 - Acceptance criteria:
   - Packaged build launches and completes the golden-path smoke test without regressions.
+  - NSIS `.exe` build succeeds in the default `npm run tauri build` path.
 
 0.3 PR15 — Clarity pass (plain-language labels + CTA reduction sweep)
 - Deliverable:

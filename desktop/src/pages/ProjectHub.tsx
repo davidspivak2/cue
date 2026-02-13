@@ -26,6 +26,7 @@ import {
   relinkProject
 } from "@/projectsClient";
 import { useWorkbenchTabs } from "@/workbenchTabs";
+import { waitForBackendHealthy } from "@/backendHealth";
 
 type FileWithPath = File & { path?: string };
 
@@ -170,6 +171,7 @@ const ProjectHub = () => {
   const { closeTab, openOrActivateTab } = useWorkbenchTabs();
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isBackendStarting, setIsBackendStarting] = React.useState(true);
   const [banner, setBanner] = React.useState<Banner | null>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
@@ -198,15 +200,24 @@ const ProjectHub = () => {
 
   const loadProjects = React.useCallback(async () => {
     setIsLoading(true);
+    setIsBackendStarting(true);
     try {
+      await waitForBackendHealthy();
+      setIsBackendStarting(false);
       const data = await fetchProjects();
       setProjects(data);
     } catch (err) {
       setBanner({
         type: "error",
-        message: err instanceof Error ? err.message : "Failed to load projects."
+        message:
+          err instanceof Error && err.message === "backend_start_timeout"
+            ? "Cue is still starting in the background. Please wait a moment and try again."
+            : err instanceof Error
+              ? err.message
+              : "Failed to load projects."
       });
     } finally {
+      setIsBackendStarting(false);
       setIsLoading(false);
     }
   }, []);
@@ -601,7 +612,7 @@ const ProjectHub = () => {
 
       {isLoading && (
         <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
-          Loading projects…
+          {isBackendStarting ? "Starting the engine..." : "Loading projects..."}
         </div>
       )}
 

@@ -47,14 +47,17 @@ PROJECT_DELETE_CANCEL_TIMEOUT_SECONDS = 3.0
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+ALLOWED_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "tauri://localhost",
-    ],
+    allow_origins=ALLOWED_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -430,12 +433,30 @@ async def _run_pipeline_job(job: JobState, request: JobRequest) -> None:
         )
 
 
+def _resolve_frozen_sibling_executable(exe_name: str) -> Optional[Path]:
+    if not getattr(sys, "frozen", False):
+        return None
+    candidate = Path(sys.executable).resolve().with_name(exe_name)
+    if candidate.exists():
+        return candidate
+    return None
+
+
 def _build_runner_command(request: JobRequest) -> list[str]:
     task = "generate_srt" if request.kind == "create_subtitles" else "burn_in"
-    command = [
-        sys.executable,
-        "-m",
-        "app.qt_worker_runner",
+    if getattr(sys, "frozen", False):
+        runner_exe = _resolve_frozen_sibling_executable("CueRunner.exe")
+        if runner_exe is None:
+            expected_path = Path(sys.executable).resolve().with_name("CueRunner.exe")
+            raise RuntimeError(f"Missing packaged runner executable: {expected_path}")
+        command = [str(runner_exe)]
+    else:
+        command = [
+            sys.executable,
+            "-m",
+            "app.qt_worker_runner",
+        ]
+    command += [
         "--task",
         task,
         "--video-path",
@@ -514,7 +535,21 @@ async def _run_runner_job(job: JobState, request: JobRequest) -> None:
     job.status = "running"
     if job.started_at is None:
         job.started_at = datetime.now(timezone.utc)
-    command = _build_runner_command(request)
+    try:
+        command = _build_runner_command(request)
+    except Exception as exc:  # noqa: BLE001
+        job.status = "error"
+        job.finished_at = datetime.now(timezone.utc)
+        _enqueue_event(
+            job,
+            _build_event(
+                job.job_id,
+                "error",
+                status=job.status,
+                message=f"Failed to prepare runner command: {exc}",
+            ),
+        )
+        return
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"

@@ -20,6 +20,7 @@ import {
   SettingsConfig,
   updateSettings
 } from "@/settingsClient";
+import { waitForBackendHealthy } from "@/backendHealth";
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends Record<string, unknown> ? DeepPartial<T[K]> : T[K];
@@ -94,27 +95,42 @@ const Settings = () => {
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isBackendStarting, setIsBackendStarting] = React.useState(true);
   const [gpuAvailable, setGpuAvailable] = React.useState<boolean | null>(null);
 
   React.useEffect(() => {
     let active = true;
-    fetchSettings()
-      .then((data) => {
+    const run = async () => {
+      try {
+        setIsBackendStarting(true);
+        await waitForBackendHealthy();
+        if (!active) {
+          return;
+        }
+        setIsBackendStarting(false);
+        const data = await fetchSettings();
         if (active) {
           setSettings(data);
           setError(null);
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         if (active) {
-          setError(err instanceof Error ? err.message : "Failed to load settings.");
+          setError(
+            err instanceof Error && err.message === "backend_start_timeout"
+              ? "Cue is still starting in the background. Please wait a moment and try again."
+              : err instanceof Error
+                ? err.message
+                : "Failed to load settings."
+          );
         }
-      })
-      .finally(() => {
+      } finally {
         if (active) {
+          setIsBackendStarting(false);
           setIsLoading(false);
         }
-      });
+      }
+    };
+    void run();
     return () => {
       active = false;
     };
@@ -176,7 +192,11 @@ const Settings = () => {
   };
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading settings...</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        {isBackendStarting ? "Starting the engine..." : "Loading settings..."}
+      </p>
+    );
   }
 
   if (!settings) {

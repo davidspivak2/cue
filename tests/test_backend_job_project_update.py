@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app import backend_server, project_store
 from app.paths import get_projects_dir
 
@@ -93,3 +95,21 @@ def test_runner_command_strips_ui_selection_options() -> None:
     assert "selected_cue_id" not in options_payload
     assert "selectionOutline" not in options_payload
     assert "ui_selection" not in options_payload
+
+
+def test_runner_command_frozen_requires_sibling_runner_executable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    frozen_backend_exe = tmp_path / "CueBackend.exe"
+    frozen_backend_exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(backend_server.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(backend_server.sys, "executable", str(frozen_backend_exe))
+
+    request = backend_server.JobRequest(
+        kind="create_subtitles",
+        input_path="in.mp4",
+        output_dir="out",
+    )
+
+    with pytest.raises(RuntimeError, match="Missing packaged runner executable"):
+        backend_server._build_runner_command(request)

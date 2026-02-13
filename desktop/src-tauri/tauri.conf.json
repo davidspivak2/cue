@@ -29,6 +29,8 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],
+    "resources": ["engine_payload.zip"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
     "windows": {
       "wix": {
         "language": "en-US"

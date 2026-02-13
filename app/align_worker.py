@@ -7,6 +7,7 @@ from pathlib import Path
 import math
 import re
 import sys
+import traceback
 from typing import Any, Callable, Optional
 
 from .alignment_words import count_alignment_words_in_cues, tokenize_alignment_words
@@ -427,17 +428,22 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
     import whisperx
 
     audio = whisperx.load_audio(str(config.wav_path))
-    model_a, metadata = _load_align_model(config.language, device, config.align_model)
-    _print("ALIGN_STAGE stage=full_align_start")
-    align_result = whisperx.align(
-        segments,
-        model_a,
-        metadata,
-        audio,
-        device,
-        return_char_alignments=False,
-    )
-    aligned_segments = align_result.get("segments", [])
+    try:
+        model_a, metadata = _load_align_model(config.language, device, config.align_model)
+        _print("ALIGN_STAGE stage=full_align_start")
+        align_result = whisperx.align(
+            segments,
+            model_a,
+            metadata,
+            audio,
+            device,
+            return_char_alignments=False,
+        )
+        aligned_segments = align_result.get("segments", [])
+    except Exception as exc:  # noqa: BLE001
+        # Keep subtitle generation alive when WhisperX align model loading fails in packaged runs.
+        _print(f"ALIGN_FALLBACK mode=estimated reason=align_runtime_error detail={exc}")
+        aligned_segments = _build_estimated_segments(cues, config.language)
     (
         segments_total,
         segments_with_words,
@@ -613,6 +619,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
     except Exception as exc:  # noqa: BLE001
         _print(f"ALIGN_ERROR {exc}")
+        _eprint(traceback.format_exc())
         return 1
     return 0
 
