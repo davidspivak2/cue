@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ArrowLeft, Check, RotateCcw, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -34,6 +34,7 @@ import { useWorkbenchTabs } from "@/workbenchTabs";
 import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
 import {
   fetchSettings,
+  previewOverlay,
   SettingsConfig,
   SubtitleStyleAppearance
 } from "@/settingsClient";
@@ -251,12 +252,76 @@ const buildOutlineShadows = (color: string, width: number) => {
   return shadows;
 };
 
+const normalizePathInput = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const quote = trimmed[0];
+  const isQuoted = (quote === '"' || quote === "'") && trimmed.endsWith(quote);
+  if (isQuoted) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+};
+
 const getPathSeparator = (value: string) => (value.includes("\\") ? "\\" : "/");
 
 const getDirName = (value: string) => {
-  const parts = value.split(/[/\\]/);
+  const normalized = normalizePathInput(value);
+  if (!normalized) {
+    return "";
+  }
+  const parts = normalized.split(/[/\\]/);
   parts.pop();
-  return parts.join(getPathSeparator(value));
+  const separator = getPathSeparator(normalized);
+  const dir = parts.join(separator);
+  if (/^[a-zA-Z]:$/.test(dir)) {
+    return `${dir}${separator}`;
+  }
+  return dir;
+};
+
+const buildPathCandidates = (value: string): string[] => {
+  const normalized = normalizePathInput(value);
+  if (!normalized) {
+    return [];
+  }
+  const candidates = [normalized];
+  if (/^[a-zA-Z]:\\/.test(normalized)) {
+    candidates.push(normalized.replace(/\\/g, "/"));
+  } else if (/^[a-zA-Z]:\//.test(normalized)) {
+    candidates.push(normalized.replace(/\//g, "\\"));
+  }
+  return [...new Set(candidates)];
+};
+
+const describeOpenError = (error: unknown): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    const details = error as Record<string, unknown>;
+    const messageKeys = ["message", "error", "reason", "details"];
+    for (const key of messageKeys) {
+      const value = details[key];
+      if (typeof value === "string" && value.trim()) {
+        return value;
+      }
+    }
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== "{}") {
+        return serialized;
+      }
+    } catch {
+      // Ignore serialization errors and use generic fallback.
+    }
+  }
+  return "No additional error details were provided.";
 };
 
 function useDebounce<T extends (...args: never[]) => void>(
@@ -317,6 +382,8 @@ const Workbench = () => {
   const [preset, setPreset] = React.useState("Default");
   const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
   const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
+  const [videoNaturalSize, setVideoNaturalSize] = React.useState({ width: 0, height: 0 });
+  const [subtitleOverlayPath, setSubtitleOverlayPath] = React.useState<string | null>(null);
   const [cues, setCues] = React.useState<SrtCue[]>([]);
   const [selectedCueId, setSelectedCueId] = React.useState<string | null>(null);
   const [editingCueId, setEditingCueId] = React.useState<string | null>(null);
@@ -345,11 +412,13 @@ const Workbench = () => {
   const [exportChecklist, setExportChecklist] = React.useState<ChecklistItem[]>([]);
   const [exportJobStream, setExportJobStream] = React.useState<JobEventStream | null>(null);
   const [exportOutputPath, setExportOutputPath] = React.useState<string | null>(null);
+  const [openActionError, setOpenActionError] = React.useState<string | null>(null);
   const [projectReloadTick, setProjectReloadTick] = React.useState(0);
   const [subtitlesReloadTick, setSubtitlesReloadTick] = React.useState(0);
   const [pendingAutoStartSubtitles, setPendingAutoStartSubtitles] = React.useState(false);
   const handledAutoStartKeyRef = React.useRef<string | null>(null);
   const styleBootstrapKeyRef = React.useRef<string | null>(null);
+  const overlayRequestKeyRef = React.useRef<string | null>(null);
   const showSubtitlesOverlay = false;
 
   React.useEffect(() => {
@@ -619,12 +688,16 @@ const Workbench = () => {
     setCreateSubtitlesChecklist([]);
     setIsCreatingSubtitles(false);
     setExportError(null);
+    setOpenActionError(null);
     setExportHeading("Exporting video");
     setExportProgressPct(0);
     setExportProgressMessage("");
     setExportChecklist([]);
     setIsExporting(false);
     setExportOutputPath(null);
+    setSubtitleOverlayPath(null);
+    setVideoNaturalSize({ width: 0, height: 0 });
+    overlayRequestKeyRef.current = null;
     setCanUndoEdit(false);
     editHistoryRef.current = [];
     editHistoryIndexRef.current = 0;
@@ -1035,7 +1108,6 @@ const Workbench = () => {
       setExportError(err instanceof Error ? err.message : "Failed to start video export.");
     }
   }, [
-    appearance.subtitle_mode,
     buildProjectStylePayload,
     buildJobOptions,
     handleExportEvent,
@@ -1104,21 +1176,195 @@ const Workbench = () => {
   const isEditingCue = editingCueId !== null;
   const isActiveCueSelected = activeCue ? selectedCueId === activeCue.id : false;
   const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
-  const hasStyledSubtitleBackground =
-    appearance.background_mode === "line" || appearance.background_mode === "word";
-
-  const openLatestOutputVideo = React.useCallback(async () => {
-    if (latestOutputPath) {
-      await openPath(latestOutputPath);
+  const activeCueLineCount = activeCue ? (activeCue.text.match(/\n/g) ?? []).length + 1 : 1;
+  const cueSegments = React.useMemo(
+    () => (activeCue ? activeCue.text.split(/(\s+)/) : []),
+    [activeCue]
+  );
+  const cueWordCount = React.useMemo(
+    () => cueSegments.reduce((count, segment) => count + (/\S/.test(segment) ? 1 : 0), 0),
+    [cueSegments]
+  );
+  const highlightedWordIndex = React.useMemo(() => {
+    if (!activeCue || appearance.subtitle_mode !== "word_highlight" || cueWordCount <= 0) {
+      return null;
     }
-  }, [latestOutputPath]);
+    const cueDuration = Math.max(0.001, activeCue.endSeconds - activeCue.startSeconds);
+    const cueProgress = Math.max(
+      0,
+      Math.min(1, (currentTimeSeconds - activeCue.startSeconds) / cueDuration)
+    );
+    return Math.min(cueWordCount - 1, Math.floor(cueProgress * cueWordCount));
+  }, [activeCue, appearance.subtitle_mode, cueWordCount, currentTimeSeconds]);
+  const highlightWordColor = colorWithOpacity(appearance.highlight_color, highlightOpacity);
+  const wordPaddingX = Math.max(0, appearance.word_bg_padding / 2);
+  const hasWordBackground = appearance.background_mode === "word";
+  const activeCueHasRtlChars = activeCue ? RTL_CHAR_PATTERN.test(activeCue.text) : false;
+  const subtitleDirection: "rtl" | "auto" = activeCueHasRtlChars ? "rtl" : "auto";
+  const activeWordStyle: React.CSSProperties = hasWordBackground
+    ? {
+        backgroundColor: colorWithOpacity(appearance.word_bg_color, appearance.word_bg_opacity),
+        borderRadius: `${Math.max(0, appearance.word_bg_radius)}px`,
+        boxShadow: `0 0 0 ${wordPaddingX}px ${colorWithOpacity(
+          appearance.word_bg_color,
+          appearance.word_bg_opacity
+        )}`
+      }
+    : {};
+  const subtitleOverlaySrc = React.useMemo(() => {
+    if (!subtitleOverlayPath) {
+      return null;
+    }
+    return isTauriEnv ? convertFileSrc(subtitleOverlayPath) : subtitleOverlayPath;
+  }, [isTauriEnv, subtitleOverlayPath]);
+  const shouldRenderOverlayImage = Boolean(subtitleOverlaySrc && activeCue && !isEditingActiveCue);
+  const shouldHideInteractiveSubtitlePreview = Boolean(
+    subtitleOverlaySrc && activeCue && !isEditingActiveCue
+  );
+
+  React.useEffect(() => {
+    setSubtitleOverlayPath(null);
+    setVideoNaturalSize({ width: 0, height: 0 });
+    overlayRequestKeyRef.current = null;
+  }, [videoPath]);
+
+  React.useEffect(() => {
+    if (
+      !isTauriEnv ||
+      !activeCue ||
+      isEditingActiveCue ||
+      videoNaturalSize.width <= 0 ||
+      videoNaturalSize.height <= 0
+    ) {
+      setSubtitleOverlayPath(null);
+      overlayRequestKeyRef.current = null;
+      return;
+    }
+
+    const requestPayload = {
+      width: videoNaturalSize.width,
+      height: videoNaturalSize.height,
+      subtitle_text: activeCue.text,
+      highlight_word_index: highlightedWordIndex,
+      subtitle_style: appearance,
+      subtitle_mode: appearance.subtitle_mode,
+      highlight_color: appearance.highlight_color,
+      highlight_opacity: highlightOpacity
+    };
+    const requestKey = JSON.stringify(requestPayload);
+    if (overlayRequestKeyRef.current === requestKey) {
+      return;
+    }
+    overlayRequestKeyRef.current = requestKey;
+
+    let cancelled = false;
+    void previewOverlay(requestPayload)
+      .then((result) => {
+        if (cancelled || overlayRequestKeyRef.current !== requestKey) {
+          return;
+        }
+        if (typeof result.overlay_path === "string" && result.overlay_path) {
+          setSubtitleOverlayPath(result.overlay_path);
+          return;
+        }
+        setSubtitleOverlayPath(null);
+      })
+      .catch((err) => {
+        if (cancelled || overlayRequestKeyRef.current !== requestKey) {
+          return;
+        }
+        setSubtitleOverlayPath(null);
+        console.error("Failed to render subtitle preview overlay.", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeCue,
+    appearance,
+    highlightOpacity,
+    highlightedWordIndex,
+    isEditingActiveCue,
+    isTauriEnv,
+    videoNaturalSize.height,
+    videoNaturalSize.width
+  ]);
+
+  const openSystemPath = React.useCallback(
+    async (rawPath: string) => {
+      if (!isTauriEnv) {
+        throw new Error("Open actions are only available in the desktop app runtime.");
+      }
+      const candidates = buildPathCandidates(rawPath);
+      if (candidates.length === 0) {
+        throw new Error("No path was available to open.");
+      }
+      let lastError: unknown = null;
+      for (const candidate of candidates) {
+        try {
+          await openPath(candidate);
+          return;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError ?? new Error("Unable to open the requested path.");
+    },
+    [isTauriEnv]
+  );
+  const openLatestOutputVideo = React.useCallback(async () => {
+    if (!latestOutputPath) {
+      return;
+    }
+    setOpenActionError(null);
+    try {
+      await openSystemPath(latestOutputPath);
+    } catch (err) {
+      const detail = describeOpenError(err);
+      setOpenActionError(`Could not open video: ${detail}`);
+      console.error("Failed to open exported video.", { path: latestOutputPath, error: err });
+    }
+  }, [latestOutputPath, openSystemPath]);
 
   const openLatestOutputFolder = React.useCallback(async () => {
     if (!latestOutputPath) {
       return;
     }
-    await openPath(getDirName(latestOutputPath));
-  }, [latestOutputPath]);
+    const normalizedOutputPath = normalizePathInput(latestOutputPath);
+    const folderPath = getDirName(normalizedOutputPath);
+    if (!folderPath) {
+      setOpenActionError("Could not open folder: Unable to determine the export folder path.");
+      return;
+    }
+    setOpenActionError(null);
+    try {
+      await openSystemPath(folderPath);
+      return;
+    } catch (openErr) {
+      if (isTauriEnv) {
+        try {
+          await revealItemInDir(normalizedOutputPath);
+          return;
+        } catch (revealErr) {
+          const detail = describeOpenError(revealErr);
+          setOpenActionError(`Could not open folder: ${detail}`);
+          console.error("Failed to reveal exported video in folder.", {
+            outputPath: normalizedOutputPath,
+            folderPath,
+            error: revealErr
+          });
+          return;
+        }
+      }
+      const detail = describeOpenError(openErr);
+      setOpenActionError(`Could not open folder: ${detail}`);
+      console.error("Failed to open export folder.", {
+        outputPath: normalizedOutputPath,
+        folderPath,
+        error: openErr
+      });
+    }
+  }, [isTauriEnv, latestOutputPath, openSystemPath]);
 
   const subtitleVerticalClass =
     appearance.vertical_anchor === "top"
@@ -1719,52 +1965,28 @@ const Workbench = () => {
                     className="h-full w-full rounded-md bg-black object-contain"
                     controls
                     src={previewSrc}
-                    onLoadedMetadata={(event) =>
-                      setCurrentTimeSeconds(event.currentTarget.currentTime || 0)
-                    }
+                    onLoadedMetadata={(event) => {
+                      const element = event.currentTarget;
+                      setCurrentTimeSeconds(element.currentTime || 0);
+                      setVideoNaturalSize({
+                        width: Math.max(0, Math.round(element.videoWidth || 0)),
+                        height: Math.max(0, Math.round(element.videoHeight || 0))
+                      });
+                    }}
                     onTimeUpdate={(event) =>
                       setCurrentTimeSeconds(event.currentTarget.currentTime || 0)
                     }
                     onSeeked={(event) => setCurrentTimeSeconds(event.currentTarget.currentTime || 0)}
                   />
-                  {activeCue && (() => {
-                    const lineCount = (activeCue.text.match(/\n/g) ?? []).length + 1;
-                    const cueSegments = activeCue.text.split(/(\s+)/);
-                    const cueWordCount = cueSegments.reduce(
-                      (count, segment) => count + (/\S/.test(segment) ? 1 : 0),
-                      0
-                    );
-                    const cueDuration = Math.max(0.001, activeCue.endSeconds - activeCue.startSeconds);
-                    const cueProgress = Math.max(
-                      0,
-                      Math.min(1, (currentTimeSeconds - activeCue.startSeconds) / cueDuration)
-                    );
-                    const highlightedWordIndex =
-                      appearance.subtitle_mode === "word_highlight" && cueWordCount > 0
-                        ? Math.min(cueWordCount - 1, Math.floor(cueProgress * cueWordCount))
-                        : -1;
-                    const highlightWordColor = colorWithOpacity(
-                      appearance.highlight_color,
-                      highlightOpacity
-                    );
-                    const wordPaddingX = Math.max(0, appearance.word_bg_padding / 2);
-                    const hasWordBackground = appearance.background_mode === "word";
-                    const hasRtlChars = RTL_CHAR_PATTERN.test(activeCue.text);
-                    const activeWordStyle: React.CSSProperties = hasWordBackground
-                      ? {
-                          backgroundColor: colorWithOpacity(
-                            appearance.word_bg_color,
-                            appearance.word_bg_opacity
-                          ),
-                          borderRadius: `${Math.max(0, appearance.word_bg_radius)}px`,
-                          boxShadow: `0 0 0 ${wordPaddingX}px ${colorWithOpacity(
-                            appearance.word_bg_color,
-                            appearance.word_bg_opacity
-                          )}`
-                        }
-                      : {};
-                    const subtitleDirection: "rtl" | "auto" = hasRtlChars ? "rtl" : "auto";
-                    return (
+                  {shouldRenderOverlayImage && (
+                    <img
+                      className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                      src={subtitleOverlaySrc ?? ""}
+                      alt="Subtitle preview overlay"
+                      data-testid="workbench-subtitle-overlay"
+                    />
+                  )}
+                  {activeCue && (
                     <div
                       className={cn(
                         "pointer-events-none absolute inset-0 flex justify-center px-4",
@@ -1782,7 +2004,7 @@ const Workbench = () => {
                             value={editingText}
                             onChange={handleEditTextChange}
                             onKeyDown={handleEditorKeyDown}
-                            rows={Math.max(2, Math.min(4, lineCount))}
+                            rows={Math.max(2, Math.min(4, activeCueLineCount))}
                             readOnly={isSavingCue || isExporting}
                             aria-label="Active subtitle editor"
                           />
@@ -1793,6 +2015,7 @@ const Workbench = () => {
                             data-testid="workbench-active-subtitle"
                             className={cn(
                               "w-full cursor-text rounded-md border border-transparent bg-transparent px-3 py-2 text-center text-base font-medium leading-snug text-white shadow-lg transition focus-visible:outline-none hover:border-primary/55 hover:ring-1 hover:ring-primary/40",
+                              shouldHideInteractiveSubtitlePreview && "opacity-0",
                               isActiveCueSelected
                                 ? "outline-2 outline-offset-2 outline-primary border-primary/65 ring-1 ring-primary/50"
                                 : "outline-none"
@@ -1885,8 +2108,7 @@ const Workbench = () => {
                         )}
                       </div>
                     </div>
-                    );
-                  })()}
+                  )}
                   {subtitleLoadError && (
                     <div
                       className="pointer-events-none absolute left-3 top-3 rounded-md border border-destructive/50 bg-destructive/15 px-2 py-1 text-xs text-destructive"
@@ -1984,6 +2206,14 @@ const Workbench = () => {
               {exportError && (
                 <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                   {exportError}
+                </div>
+              )}
+              {openActionError && (
+                <div
+                  className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+                  data-testid="workbench-open-action-error"
+                >
+                  {openActionError}
                 </div>
               )}
               {isExporting ? (

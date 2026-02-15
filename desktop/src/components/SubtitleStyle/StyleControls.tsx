@@ -145,7 +145,8 @@ const StyleControls = ({
     if (!isWordHighlight && bgMode === "word") {
       patch({ background_mode: "none" });
     }
-  }, [bgMode, isWordHighlight]);
+    // patch is stable; omitting to avoid unnecessary resets
+  }, [bgMode, isWordHighlight]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fontFamilyOptions = React.useMemo(() => {
     if (FONT_FAMILY_OPTIONS.includes(appearance.font_family)) {

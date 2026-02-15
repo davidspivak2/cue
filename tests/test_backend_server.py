@@ -80,6 +80,89 @@ def test_sse_stream_emits_result_payload(monkeypatch) -> None:
         assert all(event.get("job_id") == job_id for event in events)
 
 
+def test_create_subtitles_job_updates_project_and_subtitles_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Critical path: POST create_subtitles with project_id, mock result, then project has SRT."""
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+
+    srt_path = tmp_path / "out.srt"
+    srt_content = "1\n00:00:00,000 --> 00:00:02,000\nHello world\n"
+    srt_path.write_text(srt_content, encoding="utf-8")
+    word_timings_path = tmp_path / "out.word_timings.json"
+    word_timings_path.write_text("{}", encoding="utf-8")
+
+    async def fake_run_runner_job(
+        job: backend_server.JobState,
+        request: backend_server.JobRequest,
+    ) -> None:
+        job.status = "running"
+        job.started_at = datetime.now(timezone.utc)
+        backend_server._enqueue_event(job, backend_server._build_event(job.job_id, "started"))
+        result_payload = {
+            "srt_path": str(srt_path),
+            "word_timings_path": str(word_timings_path),
+            "log_path": str(tmp_path / "session.log"),
+        }
+        backend_server._enqueue_event(
+            job,
+            backend_server._build_event(job.job_id, "result", payload=result_payload),
+        )
+        backend_server._maybe_update_project_from_runner_event(
+            request, "result", {"payload": result_payload}
+        )
+        job.status = "completed"
+        job.finished_at = datetime.now(timezone.utc)
+        backend_server._enqueue_event(
+            job,
+            backend_server._build_event(job.job_id, "completed", status=job.status),
+        )
+
+    monkeypatch.setattr(backend_server, "_run_runner_job", fake_run_runner_job)
+
+    with TestClient(backend_server.app) as client:
+        response = client.post(
+            "/jobs",
+            json={
+                "kind": "create_subtitles",
+                "input_path": str(video_path),
+                "output_dir": str(tmp_path),
+                "project_id": project_id,
+            },
+        )
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+
+        events: list[dict[str, Any]] = []
+        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
+            for line in stream.iter_lines():
+                if not line:
+                    continue
+                if line.startswith("data: "):
+                    data = line[6:]
+                elif line.startswith("data:"):
+                    data = line[5:]
+                else:
+                    continue
+                events.append(json.loads(data.strip()))
+                if events[-1].get("type") == "completed":
+                    break
+
+        assert any(e.get("type") == "completed" for e in events)
+
+        sub_response = client.get(f"/projects/{project_id}/subtitles")
+        assert sub_response.status_code == 200
+        assert sub_response.json()["subtitles_srt_text"].strip() == srt_content.strip()
+
+        project_dir = get_projects_dir() / project_id
+        assert (project_dir / "subtitles.srt").exists()
+        assert (project_dir / "subtitles.srt").read_text(encoding="utf-8").strip() == srt_content.strip()
+
+
 def _setup_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(project_store, "generate_thumbnail", lambda *args, **kwargs: None)
@@ -130,3 +213,33 @@ def test_project_first_export_requires_subtitles(tmp_path: Path, monkeypatch) ->
         backend_server._resolve_export_request_from_project(request)
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail == "project_subtitles_missing"
+
+
+def test_preview_overlay_returns_existing_cached_png(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("PySide6")
+    _setup_env(tmp_path, monkeypatch)
+
+    payload = {
+        "width": 640,
+        "height": 360,
+        "subtitle_text": "Preview parity check",
+        "highlight_word_index": 0,
+        "subtitle_style": {},
+        "subtitle_mode": "word_highlight",
+        "highlight_color": "#FFD400",
+        "highlight_opacity": 1.0,
+    }
+
+    with TestClient(backend_server.app) as client:
+        first = client.post("/preview-overlay", json=payload)
+        assert first.status_code == 200
+        first_path = first.json().get("overlay_path")
+        assert isinstance(first_path, str) and first_path
+        first_file = Path(first_path)
+        assert first_file.exists()
+        assert first_file.suffix.lower() == ".png"
+
+        second = client.post("/preview-overlay", json=payload)
+        assert second.status_code == 200
+        second_path = second.json().get("overlay_path")
+        assert second_path == first_path

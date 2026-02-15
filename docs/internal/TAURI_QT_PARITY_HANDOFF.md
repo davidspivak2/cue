@@ -7,6 +7,22 @@ Every agent must update it before handing work to another agent.
 
 ---
 
+## Current State (overwrite this section on each handoff)
+
+**Last shipped:** Queue item 3 (`Preview truthfulness`) is now complete: KI-002 and KI-003 are closed. Workbench playback preview now uses backend Qt-rendered subtitle overlays for export-parity styling and responsive scaling. Backend adds `/preview-overlay` with cached transparent overlay rendering; Workbench keeps HTML subtitle UI for edit interactions and falls back safely if overlay requests fail. Tests/docs were updated for the image-overlay preview path.
+
+**Next actionable task:** See `docs/internal/ROADMAP.md` and `docs/internal/KNOWN_ISSUES.md`. Queue item 4 is next: KI-004 (`Preview word-highlight sync`) to align preview highlight timing with timed-word artifacts while keeping export timing unchanged.
+
+**Gotchas (3–5):** (1) Cue uses **Tauri + React** (not Svelte, not Next.js); (2) No MUI — use shadcn/Tailwind and lucide-react only; (3) Config and projects live in **app data dir** (see `app/paths.py`); (4) **Cue_extra** folder holds `backend_port.txt` and is used by run scripts; (5) Workbench tabs are **in-memory** (no persistence); closing the app clears open tabs.
+
+**Run locally:** Windows: `scripts\run_desktop_all.cmd`. From repo root it installs deps, starts the backend, then launches the Tauri app. Alternative: start backend manually, then from `desktop/` run `npm run tauri dev`.
+
+**Outside this repo:** **Cue_extra** (e.g. `C:\Cue_extra`) for backend port file; **FFmpeg** in `bin/` or system PATH; app data dir for projects and `config.json`. See `docs/CONTRIBUTING.md` for setup.
+
+**Cursor rules pruned (2026-02-13):** Removed rules targeting unused stacks: `typescript-nextjs-expo-trpc-stack`, `typescript-nextjs-expert`, `tauri-svelte-typescript-desktop` (Svelte). Kept: conventional-commits, playwright-e2e-qa, python-*, typescript-react-tailwind, react-component-v0-workflow, logging, plain-english.
+
+---
+
 ## 0) How to use this doc
 
 - Read sections 1 through 5 before starting any work.
@@ -14,6 +30,15 @@ Every agent must update it before handing work to another agent.
 - Pick ONE phase to own at a time.
 - Update section 6 (Status board) and section 7 (Handoff log) before you hand off.
 - If reality differs from this doc, update this doc first, then proceed.
+
+### Definition of Done / Handoff checklist
+
+Before marking work done or handing off:
+
+1. **No debug instrumentation left** — Grep for `agent log`, `hypothesis`, `_append_debug`, and debug log paths; remove or gate behind `CUE_DEBUG_WORKER` (or similar) with a comment.
+2. **Lint passes with zero errors and zero warnings** — Run from repo root: `cd desktop && npm run lint`; `python -m ruff check app tests tools`; `cd desktop/src-tauri && cargo clippy`. See `docs/CONTRIBUTING.md` for details.
+3. **Build and tests** — `npm run build` (in `desktop/`) passes; run `pytest` and, if applicable, `npm run test:e2e` (with dev server).
+4. **If you added debug scaffolding during this session** — Remove it before marking done (or move it behind a debug flag and document why it stays).
 
 ---
 
@@ -33,7 +58,7 @@ Every agent must update it before handing work to another agent.
 As of 2026-02-11, in this repo:
 
 Backend
-- `app/backend_server.py` supports `create_subtitles` and `create_video_with_subtitles`, plus `/settings`, `/preview-style`, and `/device`.
+- `app/backend_server.py` supports `create_subtitles` and `create_video_with_subtitles`, plus `/settings`, `/preview-style`, `/preview-overlay`, and `/device`.
 - `app/qt_worker_runner.py` exists and emits JSONL events.
 - `app/workers.py` includes ffmpeg watchdog + audio filter fallback and safer transcription subprocess handling.
 - Settings stored in `config.json` under the app data dir (same as Qt).
@@ -50,6 +75,7 @@ Desktop
 - `desktop/src/pages/ProjectHub.tsx` is the default route (`Projects` label in UI), with header CTA `New project`, auto-open-to-Workbench on create, project list/create/delete (with confirmation), `needs_subtitles` per-card `Create subtitles` quick action, and relink flow for missing files.
 - `desktop/src/workbenchTabs.tsx` tracks open project tabs in memory; Workbench renders a tab strip.
 - `desktop/src/pages/Workbench.tsx` is the active edit/export surface: strict no-subtitles empty state, on-video subtitle editing, style pane/drawer, and in-Workbench export CTA/progress/cancel/success.
+- Workbench playback preview now uses backend-rendered subtitle overlay images (`/preview-overlay`) for renderer parity and responsive scaling; on-video HTML subtitle UI remains for editing interactions.
 - Workbench export now runs entirely in-page (no legacy handoff): checklist + progress + cancel + success actions (`Play video`, `Open folder`, re-export).
 - Workbench style persistence is project-scoped (`PUT /projects/{id}` style payload) with fallback initialization from settings when a project has no saved style yet.
 - `desktop/src/hooks/useWindowWidth.ts` provides exact 1100px breakpoint logic.
@@ -57,7 +83,7 @@ Desktop
 - `desktop/src/pages/Settings.tsx` exists and matches Qt parity (no subtitle style section).
 - `desktop/src/jobsClient.ts` supports project-first export payloads (`project_id` primary, explicit paths optional for compatibility).
 - Active app routes are now `/`, `/settings`, and `/workbench/:projectId`; `/legacy` and `/review` were removed from `App.tsx`.
-- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout, no-subtitles empty state, create-subtitles transition, on-video subtitle edit interactions, and Workbench export CTA flow.
+- `desktop/tests/e2e/workbench-shell.spec.ts` covers Workbench shell layout, no-subtitles empty state, create-subtitles transition, on-video subtitle edit interactions, image-overlay preview mocks/assertions, and Workbench export CTA flow.
 - `desktop/tests/e2e/project-hub.spec.ts` covers Projects card interactions, relink flow, delete confirmation flow, and the per-card `Create subtitles` quick action.
 - Legacy `desktop/tests/e2e/home.spec.ts` has been removed as part of active-route cleanup.
 - `desktop/src-tauri/tauri.conf.json` enables capabilities and asset protocol scope for previews.
@@ -284,6 +310,8 @@ Handoff outputs
 - Export migration docs refresh (`ARCHITECTURE`, UX spec, roadmap, parity handoff, implementation playbook): Done
 - 2026-02-11 roadmap/spec reprioritization sync: Done (Support UX v1 with hosted Send Logs, sidebar-removal navigation contract, settings clarity pass, progress continuity, and style-pane modernization documented)
 - PR13 packaging hardening/smoke tests: Done (packaged engine + MSI and NSIS installers build; smoke path passes)
+- Queue item 2 / KI-001 export success actions reliability: Done (desktop validation complete; `Play video` and `Open folder` work, and open failures are surfaced in-UI)
+- Queue item 3 / KI-002 + KI-003 preview truthfulness: Done (Qt-rendered overlay preview path merged; renderer parity + resize scaling validated)
 
 ---
 
@@ -305,6 +333,35 @@ Before you hand off
 
 Template (copy and fill; newest at top)
 Note: Entries are chronological snapshots. Older entries may mention gaps that were later resolved; use the newest entry plus sections 2 and 6 for current state.
+
+Date: 2026-02-13
+Agent: gpt-5.3-codex-xhigh
+Phase: Queue item 3 / KI-002 + KI-003 preview truthfulness
+Status: Done
+Summary:
+- Closed KI-002 and KI-003 with an exact-parity playback preview path in Workbench.
+- Added backend `POST /preview-overlay` in `app/backend_server.py` using `render_graphics_preview(...)` with cache-keyed transparent PNG outputs.
+- Added frontend overlay client in `desktop/src/settingsClient.ts` and integrated Workbench overlay rendering in `desktop/src/pages/Workbench.tsx` (`object-contain`, video-native dimensions, HTML-edit fallback path).
+- Updated tests:
+  - `tests/test_backend_server.py` adds overlay endpoint cache/path coverage.
+  - `desktop/tests/e2e/workbench-shell.spec.ts` adds `/preview-overlay` mocks and stable assertions for image-overlay preview mode.
+- Validation run in this session:
+  - `python -m pytest tests/test_backend_server.py` (pass)
+  - `cd desktop && npm run lint` (pass)
+  - `cd desktop && npx playwright test tests/e2e/workbench-shell.spec.ts` (pass; 14 tests)
+- Next best task: Queue item 4 / KI-004 (`Preview word-highlight sync`) to drive preview highlight timing from timed-word artifacts.
+
+Date: 2026-02-13
+Agent: gpt-5.3-codex-xhigh
+Phase: Queue item 2 / KI-001 export success actions reliability
+Status: Done
+Summary:
+- Closed KI-001: Workbench export success-strip actions now reliably handle `Play video` and `Open folder`.
+- Implemented robust opener handling in `desktop/src/pages/Workbench.tsx` (error surfacing, path normalization, and folder reveal fallback).
+- Updated opener capability scopes in `desktop/src-tauri/capabilities/main.json` so exported videos in user folders (including Desktop) are allowed.
+- User validation confirmed current behavior: `Open folder` and `Play video` now work.
+- Docs updated to reflect completed state in `KNOWN_ISSUES.md`, `ROADMAP.md`, and this handoff file.
+- Next best task: Queue item 3 (`Preview truthfulness`), starting with KI-002 (style parity) and KI-003 (preview scaling).
 
 Date: 2026-02-13
 Agent: (docs update)

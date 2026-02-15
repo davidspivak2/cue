@@ -4,13 +4,13 @@ import argparse
 import datetime
 import json
 import logging
-import os
 import sys
 import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+from app.progress import ProgressController
 
 
 HEARTBEAT_SECONDS = 10.0
@@ -74,8 +74,8 @@ def _build_progress_controller(
     task_type: str,
     transcription_settings: object | None,
     subtitle_mode: str,
-) -> "ProgressController":
-    from app.progress import ProgressController, ProgressStep
+) -> ProgressController:
+    from app.progress import ProgressStep
     from app.workers import TaskType, TranscriptionSettings
 
     if task_type == TaskType.GENERATE_SRT:

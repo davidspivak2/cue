@@ -96,10 +96,26 @@ export type PreviewStyleResponse = {
   preview_path: string;
 };
 
+export type PreviewOverlayRequest = {
+  width: number;
+  height: number;
+  subtitle_text: string;
+  highlight_word_index?: number | null;
+  subtitle_style: Partial<SubtitleStyleAppearance>;
+  subtitle_mode: string;
+  highlight_color: string;
+  highlight_opacity: number;
+};
+
+export type PreviewOverlayResponse = {
+  overlay_path: string;
+};
+
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const SETTINGS_URL = `${BACKEND_BASE_URL}/settings`;
 const DEVICE_URL = `${BACKEND_BASE_URL}/device`;
 const PREVIEW_STYLE_URL = `${BACKEND_BASE_URL}/preview-style`;
+const PREVIEW_OVERLAY_URL = `${BACKEND_BASE_URL}/preview-overlay`;
 
 const ensureOk = async (response: Response) => {
   if (response.ok) {
@@ -143,4 +159,16 @@ export const previewStyle = async (
   });
   await ensureOk(response);
   return (await response.json()) as PreviewStyleResponse;
+};
+
+export const previewOverlay = async (
+  request: PreviewOverlayRequest
+): Promise<PreviewOverlayResponse> => {
+  const response = await fetch(PREVIEW_OVERLAY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request)
+  });
+  await ensureOk(response);
+  return (await response.json()) as PreviewOverlayResponse;
 };

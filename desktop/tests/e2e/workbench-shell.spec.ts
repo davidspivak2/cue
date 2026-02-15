@@ -182,6 +182,19 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
     await route.continue();
   });
 
+  await page.route("**://127.0.0.1:8765/preview-overlay", async (route) => {
+    const request = route.request();
+    if (request.method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ overlay_path: "C:\\fake\\overlay_preview.png" })
+    });
+  });
+
   await page.route("**://127.0.0.1:8765/projects", async (route) => {
     const request = route.request();
     if (request.method() === "OPTIONS") {
@@ -579,7 +592,7 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
 test("style controls change subtitle preview appearance", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
-  await mockProjects(page, projects);
+  const api = await mockProjects(page, projects);
 
   await page.goto("/");
   await page.getByText("good.mp4").click();
@@ -587,16 +600,7 @@ test("style controls change subtitle preview appearance", async ({ page }) => {
 
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
-  await expect(subtitleButton).toBeVisible();
-  await expect
-    .poll(async () =>
-      page.evaluate(() => {
-        const node = document.querySelector("[data-testid='workbench-active-subtitle']");
-        if (!(node instanceof HTMLElement)) return "";
-        return getComputedStyle(node).fontSize;
-      })
-    )
-    .toBe("28px");
+  await expect(subtitleButton).toHaveCount(1);
 
   const fontSizeInput = page
     .locator("label:has-text('Font size')")
@@ -605,14 +609,12 @@ test("style controls change subtitle preview appearance", async ({ page }) => {
   await fontSizeInput.blur();
 
   await expect
-    .poll(async () =>
-      page.evaluate(() => {
-        const node = document.querySelector("[data-testid='workbench-active-subtitle']");
-        if (!(node instanceof HTMLElement)) return "";
-        return getComputedStyle(node).fontSize;
-      })
-    )
-    .toBe("44px");
+    .poll(() => {
+      const payload = api.getLastPutPayload();
+      const style = payload?.style?.subtitle_style?.appearance;
+      return style?.font_size ?? null;
+    })
+    .toBe(44);
 });
 
 test("on-video contract saves subtitle with Enter", async ({ page }) => {

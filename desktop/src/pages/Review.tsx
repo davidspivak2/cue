@@ -548,7 +548,7 @@ const Review = () => {
                   Subtitle text editing
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Coming soon — you'll be able to edit individual subtitle lines here.
+                  Coming soon — you&apos;ll be able to edit individual subtitle lines here.
                 </p>
               </div>
             </TabsContent>

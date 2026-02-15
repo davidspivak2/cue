@@ -20,3 +20,6 @@ desktop/src-tauri/gen/
 desktop/src-tauri/engine/*
 !desktop/src-tauri/engine/.gitkeep
 desktop/src-tauri/engine_payload.zip
+
+# Cursor IDE debug artifacts
+.cursor/debug.log

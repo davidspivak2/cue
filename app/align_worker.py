@@ -501,7 +501,6 @@ def run_alignment(config: AlignmentConfig) -> WordTimingDocument:
                     aligned,
                     chunk_start,
                 )
-        mapped_segments = chunked_segments
         aligned_segments = [segment for segment in chunked_segments if segment is not None]
         if not _has_usable_word_timings(aligned_segments):
             if count_alignment_words_in_cues(cues, config.language) > 0:

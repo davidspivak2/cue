@@ -187,9 +187,17 @@ Notes:
 - Qt-based tests auto-create a `QApplication`. If PySide6 is not installed, those tests are skipped automatically.
 - Set `RUN_TESTS_NO_PAUSE=1` to skip the final pause in non-interactive runs on Windows.
 
+### Linting
+
+Lint must pass with zero errors and zero warnings before merge:
+
+- **Frontend (desktop):** From repo root, `cd desktop` then `npm run lint` (ESLint).
+- **Python (app, tests, tools):** From repo root, `python -m ruff check app tests tools`.
+- **Rust (Tauri):** From repo root, `cd desktop/src-tauri` then `cargo clippy`.
+
 ### CI
 
-There is no CI pipeline configured yet. Run tests locally before opening a PR.
+There is no CI pipeline configured yet. Run tests and lint locally before opening a PR.
 
 ---
 

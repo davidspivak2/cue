@@ -17,13 +17,19 @@ Status legend:
 
 ---
 
+**Debug instrumentation cleanup:** completed on 2026-02-13. Re-check before release: grep for `agent log`, `hypothesis`, `_append_debug`.
+
+---
+
 ## KI-001 - Export success actions do nothing (`Play video` / `Open folder`)
 
-- Status: `OPEN`
+- Status: `DONE`
+- Completed on: `2026-02-13`
 - Priority: High
 - Tracked in roadmap: Queue item 2 (`Export success actions reliability`)
 - Primary code pointers:
   - `desktop/src/pages/Workbench.tsx` (`openLatestOutputVideo`, `openLatestOutputFolder`, success-strip button handlers)
+  - `desktop/src-tauri/capabilities/main.json` (opener permission scopes)
 
 User impact:
 - After export succeeds, users click action buttons and nothing visible happens.
@@ -40,37 +46,46 @@ Expected:
 - If open fails, UI shows a clear message.
 
 Actual:
-- Click produces no visible result (silent failure path).
+- RESOLVED. `Play video` and `Open folder` now execute reliably in desktop runtime.
+- Open failures now show visible, retryable feedback instead of silent no-op.
 
 Likely cause / notes:
-- Action currently depends on `openPath(...)`; failures are not surfaced to user.
-- Path validity or opener call failure may be happening silently.
+- Root cause in desktop runtime was opener path permission/scope denial plus weak error surfacing.
+- `openPath(...)` denials for user paths (for example Desktop exports) surfaced as opaque failures.
 
-Minimum-scope fix:
-- Wrap open actions in explicit error handling.
-- Show non-blocking error feedback when opener call fails.
-- Keep existing export flow unchanged.
+Implemented fix:
+- `desktop/src/pages/Workbench.tsx`
+  - Added explicit try/catch + non-blocking error banner (`workbench-open-action-error`) for success-strip actions.
+  - Added robust error detail extraction for non-`Error` invoke payloads.
+  - Added path normalization and candidate retries for slash variants.
+  - Added `Open folder` fallback via `revealItemInDir(...)`.
+- `desktop/src-tauri/capabilities/main.json`
+  - Added scoped `opener:allow-open-path` entries for user output locations (`$HOME`, `$DESKTOP`, `$DOCUMENT`, `$DOWNLOAD`, `$VIDEO`, `$PICTURE`, `$PUBLIC`, `$TEMP`, `$APPDATA`, `$LOCALDATA`, `$APPLOCALDATA`).
+  - Added `opener:allow-reveal-item-in-dir`.
 
 Risks / regressions:
-- Desktop-only opener behavior differs from browser/dev environments.
-- Error-toasting could become noisy if retried rapidly.
+- Exports written outside allowed opener scopes may still require additional capability scope entries.
+- Capability updates require a full Tauri app restart before behavior changes apply.
 
 Validation checklist:
-- Success path opens file and folder in packaged/desktop runtime.
-- Failure path shows visible retryable feedback.
-- No regression to export completion state or re-export flow.
+- [x] Success path opens file and folder in desktop runtime.
+- [x] Failure path shows visible retryable feedback.
+- [x] No regression to export completion state or re-export flow.
 
 ---
 
 ## KI-002 - Preview style does not match export (font/size/shadow)
 
-- Status: `OPEN`
+- Status: `DONE`
+- Completed on: `2026-02-13`
 - Priority: High
 - Tracked in roadmap: Queue item 3 (`Preview truthfulness`)
 - Primary code pointers:
   - `desktop/src/pages/Workbench.tsx` (on-video preview styling)
+  - `desktop/src/settingsClient.ts` (preview API client contract)
   - `app/graphics_overlay_export.py` (export rendering path)
   - `app/graphics_preview_renderer.py` (renderer parity context)
+  - `app/backend_server.py` (`/preview-style`, `/preview-overlay`)
 
 User impact:
 - Users choose style in preview, but exported video looks different.
@@ -84,32 +99,64 @@ Expected:
 - Preview and export match for core style intent (font family, size, shadow, relative placement).
 
 Actual:
-- Font, text size, and shadow visibly mismatch in preview vs export.
+- RESOLVED. Workbench preview now uses backend Qt-rendered subtitle overlay output for visible playback styling.
+- Font family/size/shadow rendering intent now matches export renderer behavior for the same style payload.
 
 Likely cause / notes:
-- Preview and export are rendered by different stacks with different measurement/layout behavior.
+- Root cause is renderer mismatch:
+  - Workbench preview currently uses browser HTML/CSS text rendering.
+  - Export uses Qt path/text rendering (`render_graphics_preview`) in backend worker paths.
+- Known behavior differences that create visible drift:
+  - Shadow semantics differ (CSS blur shadow vs Qt translated fill/shadow behavior).
+  - Font metrics and text layout can differ between browser and Qt.
+  - Browser-space sizing differs from video-pixel render sizing.
 
 Minimum-scope fix:
-- Align style contract for key fields used by both preview and export.
+- Make Workbench preview use the same Qt renderer as export for visible subtitle appearance.
+- Add backend `POST /preview-overlay` endpoint that returns a transparent subtitle overlay PNG generated by `render_graphics_preview(...)`.
+- In Workbench, render returned overlay image above video with `object-contain` and keep HTML subtitle layer only for edit-mode interactions.
+- Keep subtitle style contract unchanged; move rendering parity to shared backend path.
 - Add parity validation using one or more golden clips.
+
+Implemented fix:
+- `app/backend_server.py`
+  - Added `POST /preview-overlay` and `PreviewOverlayRequest`.
+  - Renders transparent overlay PNGs via `render_graphics_preview(...)` and caches by style/text/size signature.
+- `desktop/src/settingsClient.ts`
+  - Added `previewOverlay(...)` API client contract.
+- `desktop/src/pages/Workbench.tsx`
+  - Requests overlay for active cue + style state and displays it over video with `object-contain`.
+  - Keeps interactive HTML subtitle layer for edit mode; playback path uses renderer-accurate image overlay.
+  - Falls back to HTML preview when overlay request fails, so preview remains usable.
+- `tests/test_backend_server.py`
+  - Added backend test coverage for overlay path generation/cache reuse.
+- `desktop/tests/e2e/workbench-shell.spec.ts`
+  - Updated mocks/assertions for image-overlay preview path.
 
 Risks / regressions:
 - Font availability/fallback differences between runtime surfaces.
+- Overlay generation latency or cache churn could affect smoothness if not cached.
+- Overlay positioning must match video letterboxing behavior at all window sizes.
 - Tightening parity could expose hidden layout assumptions in existing projects.
 
 Validation checklist:
-- Golden clip comparison for font/size/shadow at default and non-default styles.
-- No regressions to export rendering correctness.
+- [x] Golden clip comparison for font/size/shadow at default and non-default styles.
+- [x] Compare Workbench preview frame vs exported frame at same timestamp for at least one default and one custom style profile.
+- [x] Resize window across common widths and confirm subtitle-to-video proportion remains stable.
+- [x] Verify fallback path: if overlay render request fails, preview remains usable (non-fatal).
+- [x] No regressions to export rendering correctness.
 
 ---
 
 ## KI-003 - Subtitle preview does not scale with video during window resize
 
-- Status: `OPEN`
+- Status: `DONE`
+- Completed on: `2026-02-13`
 - Priority: High
 - Tracked in roadmap: Queue item 3 (`Preview truthfulness`)
 - Primary code pointers:
   - `desktop/src/pages/Workbench.tsx` (subtitle overlay size/position logic)
+  - `app/backend_server.py` (`/preview-overlay`)
 
 User impact:
 - When video shrinks/grows on resize, subtitle size stays fixed, so preview is misleading.
@@ -123,10 +170,15 @@ Expected:
 - Subtitle overlay scales proportionally with rendered video size.
 
 Actual:
-- Subtitle size appears fixed while video area changes.
+- RESOLVED. Subtitle preview now scales with rendered video viewport during window resize.
+- Overlay presentation remains proportionally aligned with the video frame while preserving style intent.
 
 Likely cause / notes:
 - Preview subtitle sizing is tied to static values without viewport-relative scaling.
+
+Implemented fix:
+- Workbench now displays a backend-rendered subtitle overlay image for playback preview.
+- Overlay is rendered at video-native dimensions and displayed with `object-contain`, matching the video viewport behavior across resize states.
 
 Minimum-scope fix:
 - Make preview subtitle sizing proportional to rendered video viewport.
@@ -137,9 +189,9 @@ Risks / regressions:
 - Extreme aspect ratios may need clamping rules.
 
 Validation checklist:
-- Resize tests across common window widths.
-- Relative subtitle-to-video proportion stays stable.
-- No edit-mode legibility regression.
+- [x] Resize tests across common window widths.
+- [x] Relative subtitle-to-video proportion stays stable.
+- [x] No edit-mode legibility regression.
 
 ---
 

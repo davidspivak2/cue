@@ -24,19 +24,25 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - NSIS `.exe` installer build succeeds without relying on MSI-only fallback.
    - UX spec reference: N/A (engineering / packaging)
 
-2. [NEXT] Export success actions reliability (Workbench success strip)
+2. [DONE] Export success actions reliability (Workbench success strip)
    - Deliverable:
      - `Play video` and `Open folder` actions in Workbench success state reliably trigger OS open behavior in the desktop app.
      - If open-path actions fail, users get immediate, visible, non-blocking feedback instead of silent no-op behavior.
+   - Current status:
+     - Completed on 2026-02-13.
+     - Workbench success-strip handlers now surface explicit failure details, include folder reveal fallback, and opener scope permissions cover common user output paths.
    - Acceptance criteria:
      - After a successful export, `Play video` opens the latest exported file and `Open folder` opens the containing folder.
      - Failure paths provide a clear retryable message without breaking the rest of the Editor flow.
    - UX spec reference: G) Export progress + success (in-Editor)
 
-3. [NEXT] Preview truthfulness (style parity + responsive scaling)
+3. [DONE] Preview truthfulness (style parity + responsive scaling)
    - Deliverable:
      - Preview subtitle styling is aligned with export output for core appearance fields (font family, font size, shadow treatment, and relative placement).
      - Subtitle overlay scales proportionally with the video viewport when the app window is resized.
+   - Current status:
+     - Completed on 2026-02-13.
+     - Workbench playback preview now uses backend Qt-rendered overlay frames (`/preview-overlay`) for renderer parity and responsive scaling.
    - Acceptance criteria:
      - Resizing the app window changes subtitle size proportionally with video size (no fixed-size subtitle drift).
      - Golden-path preview vs export checks show no material mismatch for font size/family/shadow rendering intent.
@@ -213,6 +219,8 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 - Deliverable:
   - `Play video` and `Open folder` actions reliably open the expected file/folder in desktop app builds.
   - Failure paths show clear user feedback instead of silent no-op behavior.
+- Current status:
+  - Done on 2026-02-13 (`desktop/src/pages/Workbench.tsx` + opener capability scopes in `desktop/src-tauri/capabilities/main.json`).
 - Acceptance criteria:
   - Successful export state can open the latest output file and containing folder from Workbench.
   - Open failures surface visible retryable feedback and do not break Editor state.
@@ -221,6 +229,8 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 - Deliverable:
   - Preview subtitle styling aligns with export styling intent for font family/size, shadow, and relative positioning.
   - Subtitle overlay scales proportionally with the rendered video viewport during window resize.
+- Current status:
+  - Done on 2026-02-13 (`app/backend_server.py` `/preview-overlay`, `desktop/src/pages/Workbench.tsx` overlay render path, and related tests).
 - Acceptance criteria:
   - Resizing the window does not leave subtitles at a fixed size while video scales.
   - Golden-path parity checks show no material preview/export mismatch in core style fields.
@@ -602,7 +612,7 @@ Definition of done:
 
 | Requested area | Existing coverage | Scheduled in roadmap |
 | --- | --- | --- |
-| Export success actions reliability (`Play video`, `Open folder`) | Partial (`G2` labels/spec present; reliability bug observed) | Queue item 2, Milestone 0.5 + 6.3 |
+| Export success actions reliability (`Play video`, `Open folder`) | Done (success-strip open actions validated; explicit failure feedback in place) | Queue item 2 (DONE), Milestone 0.5 + 6.3 |
 | Preview style parity (font/size/shadow) vs export output | Gap | Queue item 3, Milestone 0.6 |
 | Preview subtitle scaling with video on window resize | Gap | Queue item 3, Milestone 0.6 |
 | Preview word-highlight drift while export timing is correct | Partial (`F`, `G`; export contract already enforced) | Queue item 4, Milestone 0.7 |

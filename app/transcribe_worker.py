@@ -928,18 +928,20 @@ def _enable_faulthandler() -> None:
 
 def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     _enable_faulthandler()
-    _print(f"Executable: {sys.executable}")
-    _print(f"Args: {sys.argv}")
-    _print(f"Frozen: {getattr(sys, 'frozen', False)}")
-    _print(f"MEIPASS: {getattr(sys, '_MEIPASS', '')}")
-    _print(f"CWD: {os.getcwd()}")
-    _print(f"sys.path[:5]: {sys.path[:5]}")
-    path_value = os.environ.get("PATH", "")
-    _print(f"PATH length: {len(path_value)}")
-    _print(f"PATH head: {path_value[:300]}")
-    _print(
-        f"PATH has _MEIPASS/_internal: {'_MEIPASS' in path_value or '_internal' in path_value}"
-    )
+    # Debug-only: PyInstaller/runtime diagnostics for worker startup failures. Set CUE_DEBUG_WORKER=1 to enable.
+    if os.environ.get("CUE_DEBUG_WORKER"):
+        _print(f"Executable: {sys.executable}")
+        _print(f"Args: {sys.argv}")
+        _print(f"Frozen: {getattr(sys, 'frozen', False)}")
+        _print(f"MEIPASS: {getattr(sys, '_MEIPASS', '')}")
+        _print(f"CWD: {os.getcwd()}")
+        _print(f"sys.path[:5]: {sys.path[:5]}")
+        path_value = os.environ.get("PATH", "")
+        _print(f"PATH length: {len(path_value)}")
+        _print(f"PATH head: {path_value[:300]}")
+        _print(
+            f"PATH has _MEIPASS/_internal: {'_MEIPASS' in path_value or '_internal' in path_value}"
+        )
     parser = argparse.ArgumentParser(description="Whisper transcription worker")
     parser.add_argument("--wav")
     parser.add_argument("--srt")
@@ -987,18 +989,21 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     try:
         _stabilize_runtime()
         if not args.print_transcribe_config:
-            _print("ABOUT_TO_IMPORT_WHISPER")
+            # Debug-only: import/version diagnostics for troubleshooting. Set CUE_DEBUG_WORKER=1 to enable.
+            if os.environ.get("CUE_DEBUG_WORKER"):
+                _print("ABOUT_TO_IMPORT_WHISPER")
             try:
                 import ctranslate2
                 import faster_whisper
                 import tokenizers
                 import av
 
-                _print(f"faster_whisper: {getattr(faster_whisper, '__version__', 'unknown')}")
-                _print(f"ctranslate2: {getattr(ctranslate2, '__version__', 'unknown')}")
-                _print(f"tokenizers: {getattr(tokenizers, '__version__', 'unknown')}")
-                _print(f"ctranslate2.__file__: {getattr(ctranslate2, '__file__', 'unknown')}")
-                _print(f"av.__file__: {getattr(av, '__file__', 'unknown')}")
+                if os.environ.get("CUE_DEBUG_WORKER"):
+                    _print(f"faster_whisper: {getattr(faster_whisper, '__version__', 'unknown')}")
+                    _print(f"ctranslate2: {getattr(ctranslate2, '__version__', 'unknown')}")
+                    _print(f"tokenizers: {getattr(tokenizers, '__version__', 'unknown')}")
+                    _print(f"ctranslate2.__file__: {getattr(ctranslate2, '__file__', 'unknown')}")
+                    _print(f"av.__file__: {getattr(av, '__file__', 'unknown')}")
             except Exception as exc:  # noqa: BLE001
                 _print(f"ERROR importing whisper deps: {exc}")
         _print("READY")
