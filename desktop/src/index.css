@@ -84,6 +84,6 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: "Assistant", "Arial", "Helvetica", "DejaVu Sans", "Liberation Sans", "Noto Sans", "Sans Serif", sans-serif;
   }
 }
