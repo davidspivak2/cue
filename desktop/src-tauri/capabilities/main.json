@@ -9,6 +9,22 @@
     "core:event:allow-listen",
     "dialog:default",
     "dialog:allow-open",
-    "opener:allow-open-path"
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$VIDEO/**" },
+        { "path": "$PICTURE/**" },
+        { "path": "$PUBLIC/**" },
+        { "path": "$TEMP/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$LOCALDATA/**" },
+        { "path": "$APPLOCALDATA/**" }
+      ]
+    },
+    "opener:allow-reveal-item-in-dir"
   ]
 }

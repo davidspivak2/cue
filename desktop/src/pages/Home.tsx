@@ -78,7 +78,7 @@ const getStem = (value: string) => {
 };
 
 const joinPath = (dir: string, file: string) => {
-  const trimmed = dir.replace(/[\\\/]$/, "");
+  const trimmed = dir.replace(/[/\\]$/, "");
   return `${trimmed}${getPathSeparator(dir)}${file}`;
 };
 
@@ -192,7 +192,8 @@ const Home = () => {
         onError: () => setError("Connection lost while streaming job updates.")
       }
     ).then((job) => setJobStream(job));
-  }, [settings, videoPath]);
+    // Intentionally omit handleJobEvent, resetJobState to avoid re-subscribing on every callback change
+  }, [settings, videoPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
     if (state !== "WORKING" || jobStartRef.current === null) {
@@ -308,7 +309,7 @@ const Home = () => {
       if (typeof selected === "string" && selected) {
         handleVideoPathSelected(selected, null);
       }
-    } catch (error) {
+    } catch {
       setError("Could not open the file picker. Please try again.");
     }
   }, [handleVideoPathSelected, isTauriEnv]);

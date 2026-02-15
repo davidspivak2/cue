@@ -1,0 +1,23 @@
+[project]
+name = "cue"
+version = "0.1.0"
+description = "Cue desktop app — create subtitles for any video using AI"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["app", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Qt app must be ensured before importing FastAPI/other deps; imports after _ensure_qt_app() are intentional.
+"app/backend_server.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

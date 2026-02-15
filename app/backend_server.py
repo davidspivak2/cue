@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# Qt app must be ensured before other imports that may use Qt. Imports below are intentional.
 def _ensure_qt_app() -> None:
     try:
         from PySide6 import QtGui
@@ -119,6 +120,17 @@ class PreviewStyleRequest(BaseModel):
     video_path: str
     srt_path: str
     timestamp: Optional[float] = None
+    subtitle_style: dict[str, Any] = Field(default_factory=dict)
+    subtitle_mode: str = "word_highlight"
+    highlight_color: str = "#FFD400"
+    highlight_opacity: float = 1.0
+
+
+class PreviewOverlayRequest(BaseModel):
+    width: int
+    height: int
+    subtitle_text: str = ""
+    highlight_word_index: Optional[int] = None
     subtitle_style: dict[str, Any] = Field(default_factory=dict)
     subtitle_mode: str = "word_highlight"
     highlight_color: str = "#FFD400"
@@ -998,6 +1010,78 @@ def preview_style(payload: PreviewStyleRequest) -> dict[str, Any]:
 
     result.image.save(str(output_path), "PNG")
     return {"preview_path": str(output_path)}
+
+
+@app.post("/preview-overlay")
+def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
+    import hashlib as _hashlib
+
+    from .graphics_preview_renderer import render_graphics_preview
+    from .paths import get_preview_frames_dir
+    from .subtitle_style import normalize_style_model, preset_defaults, style_model_to_dict
+
+    width = int(payload.width)
+    height = int(payload.height)
+    if width <= 0 or height <= 0:
+        raise HTTPException(status_code=422, detail="invalid_overlay_dimensions")
+    if width > 7680 or height > 4320:
+        raise HTTPException(status_code=422, detail="overlay_dimensions_too_large")
+
+    fallback = preset_defaults(
+        "Default",
+        subtitle_mode=payload.subtitle_mode,
+        highlight_color=payload.highlight_color,
+    )
+    style = normalize_style_model(payload.subtitle_style, fallback)
+    resolved_highlight_color = payload.highlight_color
+    resolved_highlight_opacity = max(0.0, min(float(payload.highlight_opacity), 1.0))
+
+    signature = json.dumps(
+        {
+            "width": width,
+            "height": height,
+            "subtitle_text": payload.subtitle_text,
+            "highlight_word_index": payload.highlight_word_index,
+            "style": style_model_to_dict(style),
+            "subtitle_mode": payload.subtitle_mode,
+            "highlight_color": resolved_highlight_color,
+            "highlight_opacity": resolved_highlight_opacity,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    cache_key = _hashlib.sha1(signature.encode("utf-8")).hexdigest()
+    output_path = get_preview_frames_dir() / f"_overlay_{cache_key}.png"
+    if output_path.exists():
+        return {"overlay_path": str(output_path)}
+
+    try:
+        from PySide6 import QtCore as _QtCore
+        from PySide6 import QtGui as _QtGui
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"PySide6 not available: {exc}",
+        ) from exc
+
+    frame = _QtGui.QImage(width, height, _QtGui.QImage.Format_RGBA8888)
+    if frame.isNull():
+        raise HTTPException(status_code=500, detail="overlay_frame_init_failed")
+    frame.fill(_QtCore.Qt.transparent)
+
+    result = render_graphics_preview(
+        frame,
+        subtitle_text=payload.subtitle_text,
+        style=style,
+        subtitle_mode=payload.subtitle_mode,
+        highlight_color=resolved_highlight_color,
+        highlight_opacity=resolved_highlight_opacity,
+        highlight_word_index=payload.highlight_word_index,
+    )
+    if not result.image.save(str(output_path), "PNG"):
+        raise HTTPException(status_code=500, detail="overlay_save_failed")
+    return {"overlay_path": str(output_path)}
 
 
 @app.get("/device")

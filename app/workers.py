@@ -1183,7 +1183,6 @@ class Worker(QtCore.QObject):
         )
         self._process = process
         stderr_tail: deque[str] = deque(maxlen=50)
-        stdout_tail: deque[str] = deque(maxlen=50)
         log_lock = threading.Lock()
         output_lock = threading.Lock()
         last_output_time = time.monotonic()
@@ -2643,9 +2642,9 @@ class Worker(QtCore.QObject):
                 return total_words
 
             try:
-                total_words = _execute_alignment_run()
+                _execute_alignment_run()
                 return StepState.DONE, "Matching complete"
-            except AlignmentError as exc:
+            except AlignmentError:
                 if self._cancelled.is_set():
                     raise CancelledError("Operation cancelled.")
                 if allow_cpu_retry and not force_cpu:

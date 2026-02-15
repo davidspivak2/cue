@@ -293,7 +293,7 @@ const ProjectHub = () => {
       if (typeof selected === "string" && selected) {
         await handleCreateProject(selected);
       }
-    } catch (dialogError) {
+    } catch {
       showBanner("error", "Could not open the file picker. Please try again.");
     }
   }, [handleCreateProject, isBusyOperation, isCreating, isTauriEnv, showBanner]);
@@ -451,7 +451,7 @@ const ProjectHub = () => {
             const selectedFileName = getFileName(selected);
             await handleRelinkSelection(project, selected, selectedFileName, duration);
           }
-        } catch (dialogError) {
+        } catch {
           showBanner("error", "Could not open the file picker. Please try again.");
         }
         return;
@@ -626,7 +626,7 @@ const ProjectHub = () => {
           >
             <p className="text-lg font-semibold text-foreground">No projects yet</p>
             <p className="text-sm text-muted-foreground">
-              Drop a video anywhere on this screen or use "{NEW_PROJECT_CTA}".
+              Drop a video anywhere on this screen or use &quot;{NEW_PROJECT_CTA}&quot;.
             </p>
             <Button
               variant="secondary"
