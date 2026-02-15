@@ -94,6 +94,10 @@ export type PreviewStyleRequest = {
 
 export type PreviewStyleResponse = {
   preview_path: string;
+  cached?: boolean;
+  requested_font_family?: string;
+  resolved_font_family?: string;
+  font_fallback_used?: boolean;
 };
 
 export type PreviewOverlayRequest = {
@@ -109,6 +113,10 @@ export type PreviewOverlayRequest = {
 
 export type PreviewOverlayResponse = {
   overlay_path: string;
+  cached?: boolean;
+  requested_font_family?: string;
+  resolved_font_family?: string;
+  font_fallback_used?: boolean;
 };
 
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";

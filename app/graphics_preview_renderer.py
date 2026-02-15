@@ -4,6 +4,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 import re
 import time
 from typing import Iterable, Optional, TypeVar
@@ -26,12 +27,25 @@ _WORD_RE = re.compile(r"\S+")
 LAYOUT_CACHE_MAX_ENTRIES = 128
 PATH_CACHE_MAX_ENTRIES = 256
 _T = TypeVar("_T")
+logger = logging.getLogger(__name__)
+
+FONT_FALLBACK_CHAIN = (
+    DEFAULT_FONT_NAME,
+    "Helvetica",
+    "DejaVu Sans",
+    "Liberation Sans",
+    "Noto Sans",
+    "Sans Serif",
+)
 
 
 @dataclass(frozen=True)
 class GraphicsPreviewResult:
     image: QtGui.QImage
     highlight_word_index: Optional[int]
+    requested_font_family: str
+    resolved_font_family: str
+    font_fallback_used: bool
 
 
 class LRUCache:
@@ -199,10 +213,18 @@ def render_graphics_preview(
     rendered = QtGui.QImage(frame)
     if rendered.isNull():
         raise ValueError("Preview frame image is empty")
+    requested_font_family = style.font_family or DEFAULT_FONT_NAME
     if not subtitle_text.strip():
-        return GraphicsPreviewResult(rendered, None)
+        return GraphicsPreviewResult(
+            image=rendered,
+            highlight_word_index=None,
+            requested_font_family=requested_font_family,
+            resolved_font_family=requested_font_family,
+            font_fallback_used=False,
+        )
 
-    font = QtGui.QFont(style.font_family or DEFAULT_FONT_NAME, int(round(style.font_size)))
+    resolved_font_family, font_fallback_used = _resolve_qt_font_family(requested_font_family)
+    font = QtGui.QFont(resolved_font_family, int(round(style.font_size)))
     if style.font_style == "bold":
         font.setBold(True)
     elif style.font_style == "italic":
@@ -369,8 +391,45 @@ def render_graphics_preview(
     if perf_stats and render_start is not None:
         perf_stats.total_render_seconds += time.perf_counter() - render_start
     return GraphicsPreviewResult(
-        rendered, highlight_selection.index if highlight_selection else None
+        image=rendered,
+        highlight_word_index=highlight_selection.index if highlight_selection else None,
+        requested_font_family=requested_font_family,
+        resolved_font_family=resolved_font_family,
+        font_fallback_used=font_fallback_used,
     )
+
+
+def _resolve_qt_font_family(requested_font_family: str) -> tuple[str, bool]:
+    requested = requested_font_family.strip() or DEFAULT_FONT_NAME
+    db = QtGui.QFontDatabase()
+    available_lookup = {family.casefold(): family for family in db.families()}
+
+    fallback_candidates = [
+        requested,
+        *(font for font in FONT_FALLBACK_CHAIN if font.casefold() != requested.casefold()),
+    ]
+    for candidate in fallback_candidates:
+        resolved = available_lookup.get(candidate.casefold())
+        if resolved is None:
+            continue
+        fallback_used = resolved.casefold() != requested.casefold()
+        if fallback_used:
+            logger.warning(
+                "Requested subtitle font family '%s' unavailable in Qt; using fallback '%s'.",
+                requested,
+                resolved,
+            )
+            logger.debug("Subtitle font fallback candidates: %s", fallback_candidates)
+        return resolved, fallback_used
+
+    default_font = QtGui.QFont().defaultFamily() or DEFAULT_FONT_NAME
+    logger.warning(
+        "No subtitle fallback fonts found in Qt database for '%s'; using default '%s'.",
+        requested,
+        default_font,
+    )
+    logger.debug("Subtitle font fallback candidates: %s", fallback_candidates)
+    return default_font, True
 
 
 @dataclass(frozen=True)
