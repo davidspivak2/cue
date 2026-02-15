@@ -975,7 +975,7 @@ def preview_style(payload: PreviewStyleRequest) -> dict[str, Any]:
 
     output_path = preview_dir / f"{cache_key}.png"
     if output_path.exists():
-        return {"preview_path": str(output_path)}
+        return {"preview_path": str(output_path), "cached": True}
 
     raw_key = _hashlib.sha1(
         f"{video_path}|{int(timestamp * 1000)}|1280".encode()
@@ -1009,7 +1009,13 @@ def preview_style(payload: PreviewStyleRequest) -> dict[str, Any]:
     )
 
     result.image.save(str(output_path), "PNG")
-    return {"preview_path": str(output_path)}
+    return {
+        "preview_path": str(output_path),
+        "cached": False,
+        "requested_font_family": result.requested_font_family,
+        "resolved_font_family": result.resolved_font_family,
+        "font_fallback_used": result.font_fallback_used,
+    }
 
 
 @app.post("/preview-overlay")
@@ -1054,7 +1060,7 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
     cache_key = _hashlib.sha1(signature.encode("utf-8")).hexdigest()
     output_path = get_preview_frames_dir() / f"_overlay_{cache_key}.png"
     if output_path.exists():
-        return {"overlay_path": str(output_path)}
+        return {"overlay_path": str(output_path), "cached": True}
 
     try:
         from PySide6 import QtCore as _QtCore
@@ -1081,7 +1087,13 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
     )
     if not result.image.save(str(output_path), "PNG"):
         raise HTTPException(status_code=500, detail="overlay_save_failed")
-    return {"overlay_path": str(output_path)}
+    return {
+        "overlay_path": str(output_path),
+        "cached": False,
+        "requested_font_family": result.requested_font_family,
+        "resolved_font_family": result.resolved_font_family,
+        "font_fallback_used": result.font_fallback_used,
+    }
 
 
 @app.get("/device")

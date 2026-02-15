@@ -30,16 +30,11 @@ const PRESET_OPTIONS = [
 
 const FONT_FAMILY_OPTIONS = [
   "Arial",
-  "Assistant",
-  "Inter",
-  "Roboto",
   "Helvetica",
-  "Verdana",
-  "Tahoma",
-  "Trebuchet MS",
-  "Times New Roman",
-  "Georgia",
-  "Courier New"
+  "DejaVu Sans",
+  "Liberation Sans",
+  "Noto Sans",
+  "Sans Serif"
 ];
 
 const FONT_STYLE_OPTIONS = [
