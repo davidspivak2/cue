@@ -383,6 +383,13 @@ const Workbench = () => {
   const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
   const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
   const [videoNaturalSize, setVideoNaturalSize] = React.useState({ width: 0, height: 0 });
+  const [displayedVideoRect, setDisplayedVideoRect] = React.useState({
+    width: 0,
+    height: 0,
+    offsetX: 0,
+    offsetY: 0,
+    scale: 1
+  });
   const [subtitleOverlayPath, setSubtitleOverlayPath] = React.useState<string | null>(null);
   const [cues, setCues] = React.useState<SrtCue[]>([]);
   const [selectedCueId, setSelectedCueId] = React.useState<string | null>(null);
@@ -1374,36 +1381,49 @@ const Workbench = () => {
         : "items-end";
 
   const subtitleOverlayPositionStyle = React.useMemo<React.CSSProperties>(() => {
-    const offsetPx = `${Math.max(0, appearance.vertical_offset)}px`;
+    const offsetPx = `${Math.max(0, appearance.vertical_offset * displayedVideoRect.scale)}px`;
     let style: React.CSSProperties;
     if (appearance.vertical_anchor === "top") {
       style = { paddingTop: offsetPx };
     } else if (appearance.vertical_anchor === "middle") {
-      style = { transform: `translateY(${Math.round(appearance.vertical_offset)}px)` };
+      style = { transform: `translateY(${Math.round(appearance.vertical_offset * displayedVideoRect.scale)}px)` };
     } else {
       style = { paddingBottom: offsetPx };
     }
     return style;
-  }, [appearance.vertical_anchor, appearance.vertical_offset]);
+  }, [appearance.vertical_anchor, appearance.vertical_offset, displayedVideoRect.scale]);
+
+  const displayedVideoGeometryStyle = React.useMemo<React.CSSProperties>(
+    () => ({
+      left: `${displayedVideoRect.offsetX}px`,
+      top: `${displayedVideoRect.offsetY}px`,
+      width: `${displayedVideoRect.width}px`,
+      height: `${displayedVideoRect.height}px`
+    }),
+    [displayedVideoRect.height, displayedVideoRect.offsetX, displayedVideoRect.offsetY, displayedVideoRect.width]
+  );
 
   const subtitlePreviewTextStyle = React.useMemo<React.CSSProperties>(() => {
+    const typographyScale = displayedVideoRect.scale;
     const style: React.CSSProperties = {
       fontFamily: appearance.font_family || DEFAULT_APPEARANCE.font_family,
-      fontSize: `${Math.max(10, appearance.font_size)}px`,
+      fontSize: `${Math.max(10 * typographyScale, appearance.font_size * typographyScale)}px`,
       fontWeight: appearance.font_style === "bold" ? 700 : 400,
       fontStyle: appearance.font_style === "italic" ? "italic" : "normal",
-      letterSpacing: `${appearance.letter_spacing}px`,
+      letterSpacing: `${appearance.letter_spacing * typographyScale}px`,
       color: colorWithOpacity(appearance.text_color, appearance.text_opacity)
     };
 
     const shadows: string[] = [];
     if (appearance.outline_enabled && appearance.outline_width > 0) {
-      shadows.push(...buildOutlineShadows(appearance.outline_color, appearance.outline_width));
+      shadows.push(
+        ...buildOutlineShadows(appearance.outline_color, appearance.outline_width * typographyScale)
+      );
     }
     if (appearance.shadow_enabled && appearance.shadow_strength > 0) {
-      const blurRadius = Math.max(0, Math.round(appearance.shadow_strength * 1.5));
+      const blurRadius = Math.max(0, Math.round(appearance.shadow_strength * typographyScale * 1.5));
       shadows.push(
-        `${appearance.shadow_offset_x}px ${appearance.shadow_offset_y}px ${blurRadius}px ${colorWithOpacity(
+        `${appearance.shadow_offset_x * typographyScale}px ${appearance.shadow_offset_y * typographyScale}px ${blurRadius}px ${colorWithOpacity(
           appearance.shadow_color,
           appearance.shadow_opacity
         )}`
@@ -1416,15 +1436,78 @@ const Workbench = () => {
     const useLineBackground = appearance.background_mode === "line";
     if (useLineBackground) {
       const backgroundColor = colorWithOpacity(appearance.line_bg_color, appearance.line_bg_opacity);
-      const padding = appearance.line_bg_padding;
-      const radius = appearance.line_bg_radius;
+      const padding = appearance.line_bg_padding * typographyScale;
+      const radius = appearance.line_bg_radius * typographyScale;
       style.backgroundColor = backgroundColor;
       style.padding = `${Math.max(0, padding)}px`;
       style.borderRadius = `${Math.max(0, radius)}px`;
     }
 
     return style;
-  }, [appearance]);
+  }, [appearance, displayedVideoRect.scale]);
+
+  React.useEffect(() => {
+    const videoElement = videoRef.current;
+    if (!videoElement) {
+      return;
+    }
+
+    const updateGeometry = () => {
+      const sourceWidth = Math.max(0, Math.round(videoElement.videoWidth || videoNaturalSize.width || 0));
+      const sourceHeight = Math.max(0, Math.round(videoElement.videoHeight || videoNaturalSize.height || 0));
+      const clientWidth = Math.max(0, videoElement.clientWidth || 0);
+      const clientHeight = Math.max(0, videoElement.clientHeight || 0);
+
+      if (sourceWidth <= 0 || sourceHeight <= 0 || clientWidth <= 0 || clientHeight <= 0) {
+        setDisplayedVideoRect((previous) =>
+          previous.width === 0 &&
+          previous.height === 0 &&
+          previous.offsetX === 0 &&
+          previous.offsetY === 0 &&
+          previous.scale === 1
+            ? previous
+            : {
+                width: 0,
+                height: 0,
+                offsetX: 0,
+                offsetY: 0,
+                scale: 1
+              }
+        );
+        return;
+      }
+
+      const scale = Math.min(clientWidth / sourceWidth, clientHeight / sourceHeight);
+      const width = sourceWidth * scale;
+      const height = sourceHeight * scale;
+      const offsetX = (clientWidth - width) / 2;
+      const offsetY = (clientHeight - height) / 2;
+
+      setDisplayedVideoRect((previous) => {
+        const next = { width, height, offsetX, offsetY, scale };
+        const hasMeaningfulChange =
+          Math.abs(previous.width - next.width) > 0.5 ||
+          Math.abs(previous.height - next.height) > 0.5 ||
+          Math.abs(previous.offsetX - next.offsetX) > 0.5 ||
+          Math.abs(previous.offsetY - next.offsetY) > 0.5 ||
+          Math.abs(previous.scale - next.scale) > 0.001;
+        return hasMeaningfulChange ? next : previous;
+      });
+    };
+
+    updateGeometry();
+
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateGeometry) : null;
+    observer?.observe(videoElement);
+    window.addEventListener("resize", updateGeometry);
+    videoElement.addEventListener("loadeddata", updateGeometry);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updateGeometry);
+      videoElement.removeEventListener("loadeddata", updateGeometry);
+    };
+  }, [videoNaturalSize.height, videoNaturalSize.width]);
 
   React.useEffect(() => {
     if (!isEditingActiveCue) {
@@ -1980,7 +2063,8 @@ const Workbench = () => {
                   />
                   {shouldRenderOverlayImage && (
                     <img
-                      className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                      className="pointer-events-none absolute"
+                      style={displayedVideoGeometryStyle}
                       src={subtitleOverlaySrc ?? ""}
                       alt="Subtitle preview overlay"
                       data-testid="workbench-subtitle-overlay"
@@ -1989,12 +2073,12 @@ const Workbench = () => {
                   {activeCue && (
                     <div
                       className={cn(
-                        "pointer-events-none absolute inset-0 flex justify-center px-4",
+                        "pointer-events-none absolute flex justify-center",
                         subtitleVerticalClass
                       )}
-                      style={subtitleOverlayPositionStyle}
+                      style={{ ...displayedVideoGeometryStyle, ...subtitleOverlayPositionStyle }}
                     >
-                      <div className="pointer-events-auto w-full max-w-[720px]">
+                      <div className="pointer-events-auto w-full">
                         {isEditingActiveCue ? (
                           <textarea
                             ref={activeSubtitleRef}
