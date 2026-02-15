@@ -217,6 +217,7 @@ const WORD_HIGHLIGHT_REASON_TEXT: Record<string, string> = {
 const EDIT_UNDO_COALESCE_MS = 600;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const RTL_CHAR_PATTERN = /[\u0590-\u08FF]/;
+const MAX_OUTLINE_SHADOW_RADIUS = 10;
 
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
   items.map((item) => ({ ...item, state: "pending" }));
@@ -1416,8 +1417,12 @@ const Workbench = () => {
 
     const shadows: string[] = [];
     if (appearance.outline_enabled && appearance.outline_width > 0) {
+      const scaledOutlineWidth = Math.min(
+        MAX_OUTLINE_SHADOW_RADIUS,
+        appearance.outline_width * typographyScale
+      );
       shadows.push(
-        ...buildOutlineShadows(appearance.outline_color, appearance.outline_width * typographyScale)
+        ...buildOutlineShadows(appearance.outline_color, scaledOutlineWidth)
       );
     }
     if (appearance.shadow_enabled && appearance.shadow_strength > 0) {
