@@ -617,6 +617,69 @@ test("style controls change subtitle preview appearance", async ({ page }) => {
     .toBe(44);
 });
 
+test("vertical anchor middle offset matches overlay direction in wide and narrow layouts", async ({ page }) => {
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  const getSubtitleTop = async () =>
+    page.evaluate(() => {
+      const subtitle = document.querySelector("[data-testid='workbench-active-subtitle']");
+      if (!(subtitle instanceof HTMLElement)) {
+        return null;
+      }
+      return subtitle.getBoundingClientRect().top;
+    });
+
+  const setAnchor = async (anchorLabel: "Top" | "Middle" | "Bottom") => {
+    const anchorTrigger = page
+      .locator("div:has(> label:text-is('Vertical position'))")
+      .locator("button[role='combobox']");
+    await anchorTrigger.click();
+    await page.getByRole("option", { name: anchorLabel }).click();
+  };
+
+  const setVerticalOffset = async (value: string) => {
+    const offsetInput = page
+      .locator("label:has-text('Vertical offset')")
+      .locator("xpath=../../input[@type='number']");
+    await offsetInput.fill(value);
+    await offsetInput.blur();
+  };
+
+  for (const viewport of [
+    { width: 1300, height: 800 },
+    { width: 900, height: 800 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await page.getByText("good.mp4").click();
+    await page.waitForURL("**/workbench/project-1");
+    await primeVideoState(page, { playing: false, currentTime: 1.2 });
+    await expect(page.getByTestId("workbench-active-subtitle")).toBeVisible();
+
+    await setAnchor("Middle");
+    await setVerticalOffset("20");
+    const middleTopAt20 = await getSubtitleTop();
+    expect(middleTopAt20).not.toBeNull();
+
+    await setVerticalOffset("80");
+    const middleTopAt80 = await getSubtitleTop();
+    expect(middleTopAt80).not.toBeNull();
+    expect(middleTopAt80 ?? 0).toBeLessThan(middleTopAt20 ?? 0);
+
+    await setAnchor("Top");
+    await setVerticalOffset("24");
+    const topAnchorTop = await getSubtitleTop();
+    expect(topAnchorTop).not.toBeNull();
+
+    await setAnchor("Bottom");
+    await setVerticalOffset("24");
+    const bottomAnchorTop = await getSubtitleTop();
+    expect(bottomAnchorTop).not.toBeNull();
+    expect(bottomAnchorTop ?? 0).toBeGreaterThan(topAnchorTop ?? 0);
+  }
+});
+
 test("on-video contract saves subtitle with Enter", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
