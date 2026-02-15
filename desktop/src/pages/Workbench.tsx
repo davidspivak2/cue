@@ -1382,12 +1382,13 @@ const Workbench = () => {
         : "items-end";
 
   const subtitleOverlayPositionStyle = React.useMemo<React.CSSProperties>(() => {
-    const offsetPx = `${Math.max(0, appearance.vertical_offset * displayedVideoRect.scale)}px`;
+    const scaledOffset = Math.max(0, appearance.vertical_offset * displayedVideoRect.scale);
+    const offsetPx = `${scaledOffset}px`;
     let style: React.CSSProperties;
     if (appearance.vertical_anchor === "top") {
       style = { paddingTop: offsetPx };
     } else if (appearance.vertical_anchor === "middle") {
-      style = { transform: `translateY(${Math.round(appearance.vertical_offset * displayedVideoRect.scale)}px)` };
+      style = { transform: `translateY(-${Math.round(scaledOffset)}px)` };
     } else {
       style = { paddingBottom: offsetPx };
     }
@@ -2077,6 +2078,7 @@ const Workbench = () => {
                     )}
                     {activeCue && (
                       <div
+                        data-testid="workbench-subtitle-overlay-position-layer"
                         className={cn(
                           "pointer-events-none absolute inset-0 flex justify-center",
                           subtitleVerticalClass
