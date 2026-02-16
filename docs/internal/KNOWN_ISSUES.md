@@ -317,11 +317,13 @@ Validation checklist:
 
 ## KI-007 - Clicking Play during edit should auto-save and exit edit mode
 
-- Status: `OPEN`
+- Status: `FIXED`
 - Priority: Medium
 - Tracked in roadmap: Queue item 5 (`Subtitle edit-mode reliability`)
 - Primary code pointers:
   - `desktop/src/pages/Workbench.tsx` (play/pause controls + inline edit save flow)
+
+**Resolution:** Added `onPlay` handler to the video element. When Play is triggered (native controls or space key) while in edit mode, the handler pauses the video, sets `shouldResumePlaybackRef`, and calls `handleSaveEdit`. On success, edit mode exits and playback resumes; on failure, `editError` banner shows and user stays in edit mode. E2E test: `on-video contract saves and resumes when Play is clicked during edit`.
 
 User impact:
 - Current behavior can leave users unsure whether edits are saved when resuming playback.

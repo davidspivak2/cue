@@ -1288,6 +1288,40 @@ test("on-video contract cancels edit with Cancel icon", async ({ page }) => {
     .toBe(true);
 });
 
+test("on-video contract saves and resumes when Play is clicked during edit", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: true, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toBeVisible();
+  await subtitleButton.click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill("Saved via Play button during edit");
+
+  await page.evaluate(() => {
+    document.querySelector("video")?.dispatchEvent(new Event("play", { bubbles: true }));
+  });
+
+  await expect(editor).toHaveCount(0);
+  await expect(subtitleButton).toContainText("Saved via Play button during edit");
+  await expect(subtitleButton).not.toHaveClass(/outline-primary/);
+  expect(api.getSubtitlePutCallCount()).toBe(1);
+  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Saved via Play button during edit");
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(true);
+});
+
 test("on-video contract undo icon reverts unsaved edits", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
