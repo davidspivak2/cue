@@ -10,6 +10,19 @@ const initMocks = () => {
   });
 };
 
+const initTauriRuntimeMock = () => {
+  Object.defineProperty(globalThis, "isTauri", {
+    configurable: true,
+    value: true
+  });
+  Object.defineProperty(globalThis, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {
+      convertFileSrc: (filePath) => `data:,${encodeURIComponent(String(filePath ?? ""))}`
+    }
+  });
+};
+
 const buildProjects = () => [
   {
     project_id: "project-1",
@@ -86,6 +99,8 @@ const buildManifest = (project) => ({
 
 const DEFAULT_SRT = "1\n00:00:00,000 --> 00:00:04,000\nOriginal subtitle line\n";
 const GENERATED_SRT = "1\n00:00:00,000 --> 00:00:03,000\nGenerated subtitle line\n";
+const LONG_HEBREW_SRT =
+  "1\n00:00:00,000 --> 00:00:04,000\nאז אני רוצה ברשותכם להתחיל בקטע קצר כדי להדגים את שבירת השורה ולוודא שהטקסט נעטף לפחות לשתי שורות\n";
 
 const getProjectIdFromUrl = (url) => url.split("/projects/")[1]?.split("/")[0] ?? "";
 const getJobIdFromEventsUrl = (url) => url.split("/jobs/")[1]?.split("/")[0] ?? "";
@@ -423,9 +438,12 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
   };
 };
 
-const primeVideoState = async (page, { playing = true, currentTime = 1 } = {}) => {
+const primeVideoState = async (
+  page,
+  { playing = true, currentTime = 1, videoWidth = 1280, videoHeight = 720 } = {}
+) => {
   await page.evaluate(
-    ({ isPlaying, timeSeconds }) => {
+    ({ isPlaying, timeSeconds, mediaWidth, mediaHeight }) => {
       const video = document.querySelector("video");
       if (!video) {
         return;
@@ -433,11 +451,25 @@ const primeVideoState = async (page, { playing = true, currentTime = 1 } = {}) =
       const state = {
         paused: !isPlaying,
         pauseCalled: false,
-        playCalled: false
+        playCalled: false,
+        videoWidth: mediaWidth,
+        videoHeight: mediaHeight
       };
       Object.defineProperty(video, "__cueState", {
         configurable: true,
         value: state
+      });
+      Object.defineProperty(video, "videoWidth", {
+        configurable: true,
+        get() {
+          return video.__cueState.videoWidth;
+        }
+      });
+      Object.defineProperty(video, "videoHeight", {
+        configurable: true,
+        get() {
+          return video.__cueState.videoHeight;
+        }
       });
       Object.defineProperty(video, "paused", {
         configurable: true,
@@ -455,10 +487,75 @@ const primeVideoState = async (page, { playing = true, currentTime = 1 } = {}) =
         return Promise.resolve();
       };
       video.currentTime = timeSeconds;
+      video.dispatchEvent(new Event("loadedmetadata"));
+      video.dispatchEvent(new Event("loadeddata"));
       video.dispatchEvent(new Event("timeupdate"));
     },
-    { isPlaying: playing, timeSeconds: currentTime }
+    { isPlaying: playing, timeSeconds: currentTime, mediaWidth: videoWidth, mediaHeight: videoHeight }
   );
+};
+
+const readClientRect = async (locator) =>
+  locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      top: rect.top,
+      left: rect.left,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height
+    };
+  });
+
+const readTypographyMetrics = async (locator) =>
+  locator.evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return {
+      fontFamily: style.fontFamily,
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      letterSpacing: style.letterSpacing,
+      direction: style.direction,
+      boxSizing: style.boxSizing,
+      paddingLeft: style.paddingLeft,
+      paddingRight: style.paddingRight
+    };
+  });
+
+const ensureAdvancedStyleControlsVisible = async (page) => {
+  const verticalPositionLabel = page.locator("label:has-text('Vertical position')");
+  if ((await verticalPositionLabel.count()) > 0) {
+    return;
+  }
+  const openStyleButton = page.getByTestId("workbench-open-style");
+  if ((await openStyleButton.count()) > 0 && (await openStyleButton.isVisible())) {
+    await openStyleButton.click();
+  }
+  const advancedButton = page.getByRole("button", { name: "Advanced" });
+  if ((await advancedButton.count()) === 0) {
+    return;
+  }
+  await advancedButton.click();
+  await expect(verticalPositionLabel).toBeVisible();
+};
+
+const setVerticalAnchor = async (page, anchorLabel: "Top" | "Middle" | "Bottom") => {
+  await ensureAdvancedStyleControlsVisible(page);
+  const anchorTrigger = page
+    .locator("div:has(> label:text-is('Vertical position'))")
+    .locator("button[role='combobox']");
+  await anchorTrigger.click();
+  await page.getByRole("option", { name: anchorLabel }).click();
+};
+
+const setVerticalOffset = async (page, value: string) => {
+  await ensureAdvancedStyleControlsVisible(page);
+  const offsetInput = page
+    .locator("label:has-text('Vertical offset')")
+    .locator("xpath=../../input[@type='number']");
+  await offsetInput.fill(value);
+  await offsetInput.blur();
 };
 
 test("workbench shell wide layout", async ({ page }) => {
@@ -630,22 +727,6 @@ test("vertical anchor middle offset matches overlay direction in wide and narrow
       return subtitle.getBoundingClientRect().top;
     });
 
-  const setAnchor = async (anchorLabel: "Top" | "Middle" | "Bottom") => {
-    const anchorTrigger = page
-      .locator("div:has(> label:text-is('Vertical position'))")
-      .locator("button[role='combobox']");
-    await anchorTrigger.click();
-    await page.getByRole("option", { name: anchorLabel }).click();
-  };
-
-  const setVerticalOffset = async (value: string) => {
-    const offsetInput = page
-      .locator("label:has-text('Vertical offset')")
-      .locator("xpath=../../input[@type='number']");
-    await offsetInput.fill(value);
-    await offsetInput.blur();
-  };
-
   for (const viewport of [
     { width: 1300, height: 800 },
     { width: 900, height: 800 }
@@ -655,29 +736,184 @@ test("vertical anchor middle offset matches overlay direction in wide and narrow
     await page.getByText("good.mp4").click();
     await page.waitForURL("**/workbench/project-1");
     await primeVideoState(page, { playing: false, currentTime: 1.2 });
-    await expect(page.getByTestId("workbench-active-subtitle")).toBeVisible();
+    await expect(page.getByTestId("workbench-active-subtitle")).toHaveCount(1);
 
-    await setAnchor("Middle");
-    await setVerticalOffset("20");
+    await setVerticalAnchor(page, "Middle");
+    await setVerticalOffset(page, "20");
     const middleTopAt20 = await getSubtitleTop();
     expect(middleTopAt20).not.toBeNull();
 
-    await setVerticalOffset("80");
+    await setVerticalOffset(page, "80");
     const middleTopAt80 = await getSubtitleTop();
     expect(middleTopAt80).not.toBeNull();
     expect(middleTopAt80 ?? 0).toBeLessThan(middleTopAt20 ?? 0);
 
-    await setAnchor("Top");
-    await setVerticalOffset("24");
+    await setVerticalAnchor(page, "Top");
+    await setVerticalOffset(page, "24");
     const topAnchorTop = await getSubtitleTop();
     expect(topAnchorTop).not.toBeNull();
 
-    await setAnchor("Bottom");
-    await setVerticalOffset("24");
+    await setVerticalAnchor(page, "Bottom");
+    await setVerticalOffset(page, "24");
     const bottomAnchorTop = await getSubtitleTop();
     expect(bottomAnchorTop).not.toBeNull();
     expect(bottomAnchorTop ?? 0).toBeGreaterThan(topAnchorTop ?? 0);
   }
+});
+
+test("edit overlay geometry matches preview subtitle and controls do not shift editor", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects, LONG_HEBREW_SRT);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await setVerticalAnchor(page, "Bottom");
+  await setVerticalOffset(page, "63");
+  const fontSizeInput = page
+    .locator("label:has-text('Font size')")
+    .locator("xpath=../../input[@type='number']");
+  await fontSizeInput.fill("66");
+  await fontSizeInput.blur();
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  const previewRect = await readClientRect(subtitleButton);
+  const previewTypography = await readTypographyMetrics(subtitleButton);
+  const previewLineHeight = Number.parseFloat(previewTypography.lineHeight);
+  expect(Number.isFinite(previewLineHeight)).toBe(true);
+  expect(previewRect.height).toBeGreaterThan(previewLineHeight * 1.5);
+
+  await subtitleButton.evaluate((element) => {
+    if (element instanceof HTMLElement) {
+      element.click();
+    }
+  });
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  const controls = page.getByTestId("workbench-subtitle-editor-controls");
+  await expect(editor).toHaveCount(1);
+  await expect(controls).toHaveCount(1);
+
+  const editorRectOnEnter = await readClientRect(editor);
+  const editorTypography = await readTypographyMetrics(editor);
+  expect(Math.abs(editorRectOnEnter.top - previewRect.top)).toBeLessThanOrEqual(2);
+  expect(Math.abs(editorRectOnEnter.bottom - previewRect.bottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(editorRectOnEnter.left - previewRect.left)).toBeLessThanOrEqual(2);
+  expect(Math.abs(editorRectOnEnter.width - previewRect.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(editorRectOnEnter.height - previewRect.height)).toBeLessThanOrEqual(2);
+  expect(editorTypography.fontFamily).toBe(previewTypography.fontFamily);
+  expect(editorTypography.fontSize).toBe(previewTypography.fontSize);
+  expect(editorTypography.lineHeight).toBe(previewTypography.lineHeight);
+  expect(editorTypography.letterSpacing).toBe(previewTypography.letterSpacing);
+  expect(editorTypography.direction).toBe(previewTypography.direction);
+  expect(editorTypography.boxSizing).toBe(previewTypography.boxSizing);
+  expect(editorTypography.paddingLeft).toBe(previewTypography.paddingLeft);
+  expect(editorTypography.paddingRight).toBe(previewTypography.paddingRight);
+
+  await page.waitForTimeout(50);
+  const editorRectAfterControls = await readClientRect(editor);
+  expect(Math.abs(editorRectAfterControls.top - editorRectOnEnter.top)).toBeLessThanOrEqual(1);
+  expect(Math.abs(editorRectAfterControls.left - editorRectOnEnter.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(editorRectAfterControls.width - editorRectOnEnter.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(editorRectAfterControls.height - editorRectOnEnter.height)).toBeLessThanOrEqual(1);
+});
+
+test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated line height", async ({
+  page
+}) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects, LONG_HEBREW_SRT);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await setVerticalAnchor(page, "Bottom");
+  await setVerticalOffset(page, "63");
+
+  const fontSizeInput = page
+    .locator("label:has-text('Font size')")
+    .locator("xpath=../../input[@type='number']");
+  await fontSizeInput.fill("66");
+  await fontSizeInput.blur();
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  const previewRect = await readClientRect(subtitleButton);
+
+  await subtitleButton.evaluate((element) => {
+    if (element instanceof HTMLElement) {
+      element.click();
+    }
+  });
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toHaveCount(1);
+  const editorRect = await readClientRect(editor);
+  const editorTypography = await readTypographyMetrics(editor);
+  expect(Math.abs(editorRect.top - previewRect.top)).toBeLessThanOrEqual(2);
+  expect(Math.abs(editorRect.bottom - previewRect.bottom)).toBeLessThanOrEqual(1);
+
+  const fontSizePx = Number.parseFloat(editorTypography.fontSize);
+  const lineHeightPx = Number.parseFloat(editorTypography.lineHeight);
+  expect(Number.isFinite(fontSizePx)).toBe(true);
+  expect(Number.isFinite(lineHeightPx)).toBe(true);
+  expect(Math.abs(lineHeightPx / fontSizePx - 1.125)).toBeLessThanOrEqual(0.02);
+});
+
+test("editor controls flip above when bottom anchor has no room and below when room exists", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await setVerticalAnchor(page, "Bottom");
+  await setVerticalOffset(page, "0");
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  await subtitleButton.evaluate((element) => {
+    if (element instanceof HTMLElement) {
+      element.click();
+    }
+  });
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  const controls = page.getByTestId("workbench-subtitle-editor-controls");
+  await expect(editor).toHaveCount(1);
+  await expect(controls).toHaveCount(1);
+
+  const editorRectAtBottom = await readClientRect(editor);
+  const controlsRectAtBottom = await readClientRect(controls);
+  expect(controlsRectAtBottom.bottom).toBeLessThanOrEqual(editorRectAtBottom.top + 1);
+
+  await page.getByTestId("workbench-subtitle-cancel").click();
+  await expect(editor).toHaveCount(0);
+
+  await setVerticalOffset(page, "120");
+  await subtitleButton.evaluate((element) => {
+    if (element instanceof HTMLElement) {
+      element.click();
+    }
+  });
+  await expect(editor).toHaveCount(1);
+  await expect(controls).toHaveCount(1);
+
+  const editorRectWithRoom = await readClientRect(editor);
+  const controlsRectWithRoom = await readClientRect(controls);
+  expect(controlsRectWithRoom.top).toBeGreaterThanOrEqual(editorRectWithRoom.bottom - 1);
 });
 
 test("on-video contract saves subtitle with Enter", async ({ page }) => {
