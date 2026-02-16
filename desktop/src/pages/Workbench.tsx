@@ -218,6 +218,10 @@ const EDIT_UNDO_COALESCE_MS = 600;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const RTL_CHAR_PATTERN = /[\u0590-\u08FF]/;
 const MAX_OUTLINE_SHADOW_RADIUS = 10;
+const SUBTITLE_EDITOR_CONTROLS_GAP_PX = 8;
+const QT_POINT_TO_CSS_PX = 96 / 72;
+const WEB_SUBTITLE_LINE_HEIGHT_RATIO = 1.375;
+const QT_SUBTITLE_LINE_HEIGHT_RATIO = 1.125;
 
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
   items.map((item) => ({ ...item, state: "pending" }));
@@ -365,6 +369,8 @@ const Workbench = () => {
   const isTauriEnv = isTauri();
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const activeSubtitleRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const subtitleOverlayPositionLayerRef = React.useRef<HTMLDivElement | null>(null);
+  const subtitleEditorControlsRef = React.useRef<HTMLDivElement | null>(null);
   const shouldResumePlaybackRef = React.useRef(false);
   const editHistoryRef = React.useRef<string[]>([]);
   const editHistoryIndexRef = React.useRef(0);
@@ -396,6 +402,8 @@ const Workbench = () => {
   const [selectedCueId, setSelectedCueId] = React.useState<string | null>(null);
   const [editingCueId, setEditingCueId] = React.useState<string | null>(null);
   const [editingText, setEditingText] = React.useState("");
+  const [subtitleEditorControlsPlacement, setSubtitleEditorControlsPlacement] =
+    React.useState<"above" | "below">("below");
   const [canUndoEdit, setCanUndoEdit] = React.useState(false);
   const [isSavingCue, setIsSavingCue] = React.useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
@@ -1184,7 +1192,6 @@ const Workbench = () => {
   const isEditingCue = editingCueId !== null;
   const isActiveCueSelected = activeCue ? selectedCueId === activeCue.id : false;
   const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
-  const activeCueLineCount = activeCue ? (activeCue.text.match(/\n/g) ?? []).length + 1 : 1;
   const cueSegments = React.useMemo(
     () => (activeCue ? activeCue.text.split(/(\s+)/) : []),
     [activeCue]
@@ -1388,7 +1395,7 @@ const Workbench = () => {
     if (appearance.vertical_anchor === "top") {
       style = { paddingTop: offsetPx };
     } else if (appearance.vertical_anchor === "middle") {
-      style = { transform: `translateY(-${Math.round(scaledOffset)}px)` };
+      style = { transform: `translateY(-${scaledOffset}px)` };
     } else {
       style = { paddingBottom: offsetPx };
     }
@@ -1406,13 +1413,19 @@ const Workbench = () => {
   );
 
   const subtitlePreviewTextStyle = React.useMemo<React.CSSProperties>(() => {
-    const typographyScale = displayedVideoRect.scale;
+    const visualScale = displayedVideoRect.scale;
+    const fontScale = isTauriEnv ? visualScale * QT_POINT_TO_CSS_PX : visualScale;
+    const computedFontSizePx = Math.max(10 * fontScale, appearance.font_size * fontScale);
+    const lineHeightRatio = isTauriEnv
+      ? QT_SUBTITLE_LINE_HEIGHT_RATIO
+      : WEB_SUBTITLE_LINE_HEIGHT_RATIO;
     const style: React.CSSProperties = {
       fontFamily: appearance.font_family || DEFAULT_APPEARANCE.font_family,
-      fontSize: `${Math.max(10 * typographyScale, appearance.font_size * typographyScale)}px`,
+      fontSize: `${computedFontSizePx}px`,
+      lineHeight: `${computedFontSizePx * lineHeightRatio}px`,
       fontWeight: appearance.font_style === "bold" ? 700 : 400,
       fontStyle: appearance.font_style === "italic" ? "italic" : "normal",
-      letterSpacing: `${appearance.letter_spacing * typographyScale}px`,
+      letterSpacing: `${appearance.letter_spacing * visualScale}px`,
       color: colorWithOpacity(appearance.text_color, appearance.text_opacity)
     };
 
@@ -1420,16 +1433,16 @@ const Workbench = () => {
     if (appearance.outline_enabled && appearance.outline_width > 0) {
       const scaledOutlineWidth = Math.min(
         MAX_OUTLINE_SHADOW_RADIUS,
-        appearance.outline_width * typographyScale
+        appearance.outline_width * visualScale
       );
       shadows.push(
         ...buildOutlineShadows(appearance.outline_color, scaledOutlineWidth)
       );
     }
     if (appearance.shadow_enabled && appearance.shadow_strength > 0) {
-      const blurRadius = Math.max(0, Math.round(appearance.shadow_strength * typographyScale * 1.5));
+      const blurRadius = Math.max(0, Math.round(appearance.shadow_strength * visualScale * 1.5));
       shadows.push(
-        `${appearance.shadow_offset_x * typographyScale}px ${appearance.shadow_offset_y * typographyScale}px ${blurRadius}px ${colorWithOpacity(
+        `${appearance.shadow_offset_x * visualScale}px ${appearance.shadow_offset_y * visualScale}px ${blurRadius}px ${colorWithOpacity(
           appearance.shadow_color,
           appearance.shadow_opacity
         )}`
@@ -1442,15 +1455,25 @@ const Workbench = () => {
     const useLineBackground = appearance.background_mode === "line";
     if (useLineBackground) {
       const backgroundColor = colorWithOpacity(appearance.line_bg_color, appearance.line_bg_opacity);
-      const padding = appearance.line_bg_padding * typographyScale;
-      const radius = appearance.line_bg_radius * typographyScale;
+      const padding = appearance.line_bg_padding * visualScale;
+      const radius = appearance.line_bg_radius * visualScale;
       style.backgroundColor = backgroundColor;
       style.padding = `${Math.max(0, padding)}px`;
       style.borderRadius = `${Math.max(0, radius)}px`;
     }
 
     return style;
-  }, [appearance, displayedVideoRect.scale]);
+  }, [appearance, displayedVideoRect.scale, isTauriEnv]);
+
+  const subtitleEditorTextStyle = React.useMemo<React.CSSProperties>(
+    () => ({
+      ...subtitlePreviewTextStyle,
+      boxSizing: "border-box",
+      margin: 0,
+      border: "none"
+    }),
+    [subtitlePreviewTextStyle]
+  );
 
   React.useEffect(() => {
     const videoElement = videoRef.current;
@@ -1527,6 +1550,40 @@ const Workbench = () => {
       textarea.focus();
     }
   }, [activeCue, isEditingActiveCue]);
+
+  React.useLayoutEffect(() => {
+    if (!isEditingActiveCue) {
+      return;
+    }
+    const textarea = activeSubtitleRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, subtitleEditorTextStyle]);
+
+  React.useLayoutEffect(() => {
+    if (!isEditingActiveCue) {
+      setSubtitleEditorControlsPlacement("below");
+      return;
+    }
+    const positionLayer = subtitleOverlayPositionLayerRef.current;
+    const textarea = activeSubtitleRef.current;
+    const controls = subtitleEditorControlsRef.current;
+    if (!positionLayer || !textarea || !controls) {
+      return;
+    }
+    const positionLayerRect = positionLayer.getBoundingClientRect();
+    const textareaRect = textarea.getBoundingClientRect();
+    const controlsHeight = controls.offsetHeight;
+    const spaceBelow = positionLayerRect.bottom - textareaRect.bottom;
+    const requiredBelowSpace = controlsHeight + SUBTITLE_EDITOR_CONTROLS_GAP_PX;
+    const nextPlacement = spaceBelow < requiredBelowSpace ? "above" : "below";
+    setSubtitleEditorControlsPlacement((previous) =>
+      previous === nextPlacement ? previous : nextPlacement
+    );
+  }, [appearance, displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, subtitleEditorTextStyle]);
 
   React.useEffect(() => {
     if (hasSubtitles) {
@@ -2078,6 +2135,7 @@ const Workbench = () => {
                     )}
                     {activeCue && (
                       <div
+                        ref={subtitleOverlayPositionLayerRef}
                         data-testid="workbench-subtitle-overlay-position-layer"
                         className={cn(
                           "pointer-events-none absolute inset-0 flex justify-center",
@@ -2086,119 +2144,133 @@ const Workbench = () => {
                         style={subtitleOverlayPositionStyle}
                       >
                         <div className="pointer-events-auto w-full">
-                          {isEditingActiveCue ? (
-                            <textarea
-                              ref={activeSubtitleRef}
-                              data-testid="workbench-subtitle-editor"
-                              className="w-full resize-none overflow-hidden rounded-md border border-primary/70 bg-background/25 px-3 py-2 text-center shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
-                              style={subtitlePreviewTextStyle}
-                              value={editingText}
-                              onChange={handleEditTextChange}
-                              onKeyDown={handleEditorKeyDown}
-                              rows={Math.max(2, Math.min(4, activeCueLineCount))}
-                              readOnly={isSavingCue || isExporting}
-                              aria-label="Active subtitle editor"
-                            />
-                          ) : (
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              data-testid="workbench-active-subtitle"
-                              className={cn(
-                                "w-full cursor-text rounded-md border border-transparent bg-transparent px-3 py-2 text-center text-base font-medium leading-snug text-white shadow-lg transition focus-visible:outline-none hover:border-primary/55 hover:ring-1 hover:ring-primary/40",
-                                shouldHideInteractiveSubtitlePreview && "opacity-0",
-                                isActiveCueSelected
-                                  ? "outline-2 outline-offset-2 outline-primary border-primary/65 ring-1 ring-primary/50"
-                                  : "outline-none"
-                              )}
-                              style={subtitlePreviewTextStyle}
-                              onClick={() => handleCueClick(activeCue)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.preventDefault();
-                                  handleCueClick(activeCue);
-                                }
-                              }}
-                              aria-label="Active subtitle editor"
-                            >
-                              <span
-                                className="whitespace-pre-wrap"
+                          <div className="relative w-full">
+                            {isEditingActiveCue ? (
+                              <textarea
+                                ref={activeSubtitleRef}
+                                data-testid="workbench-subtitle-editor"
+                                className="m-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/25 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
+                                style={subtitleEditorTextStyle}
+                                value={editingText}
+                                onChange={handleEditTextChange}
+                                onKeyDown={handleEditorKeyDown}
+                                rows={1}
+                                wrap="soft"
+                                readOnly={isSavingCue || isExporting}
+                                aria-label="Active subtitle editor"
                                 dir={subtitleDirection}
-                                style={{ unicodeBidi: "plaintext" }}
+                              />
+                            ) : (
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                data-testid="workbench-active-subtitle"
+                                className={cn(
+                                  "m-0 w-full cursor-text box-border rounded-md border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:ring-1 hover:ring-primary/40",
+                                  shouldHideInteractiveSubtitlePreview && "opacity-0",
+                                  isActiveCueSelected
+                                    ? "outline-2 outline-offset-2 outline-primary ring-1 ring-primary/50"
+                                    : "outline-none"
+                                )}
+                                style={subtitlePreviewTextStyle}
+                                onClick={() => handleCueClick(activeCue)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    handleCueClick(activeCue);
+                                  }
+                                }}
+                                aria-label="Active subtitle editor"
+                                dir={subtitleDirection}
                               >
-                                {appearance.subtitle_mode === "word_highlight" && cueWordCount > 0
-                                  ? (() => {
-                                      let seenWordIndex = -1;
-                                      return cueSegments.map((segment, idx) => {
-                                        const isWord = /\S/.test(segment);
-                                        if (isWord) {
-                                          seenWordIndex += 1;
-                                        }
-                                        const isActiveWord =
-                                          isWord && seenWordIndex === highlightedWordIndex;
-                                        return (
-                                          <span
-                                            key={`${idx}-${segment}`}
-                                            style={
-                                              isActiveWord
-                                                ? { ...activeWordStyle, color: highlightWordColor }
-                                                : undefined
-                                            }
-                                          >
-                                            {segment}
-                                          </span>
-                                        );
-                                      });
-                                    })()
-                                  : activeCue.text}
-                              </span>
+                                <span
+                                  className="whitespace-pre-wrap"
+                                  dir={subtitleDirection}
+                                  style={{ unicodeBidi: "plaintext" }}
+                                >
+                                  {appearance.subtitle_mode === "word_highlight" && cueWordCount > 0
+                                    ? (() => {
+                                        let seenWordIndex = -1;
+                                        return cueSegments.map((segment, idx) => {
+                                          const isWord = /\S/.test(segment);
+                                          if (isWord) {
+                                            seenWordIndex += 1;
+                                          }
+                                          const isActiveWord =
+                                            isWord && seenWordIndex === highlightedWordIndex;
+                                          return (
+                                            <span
+                                              key={`${idx}-${segment}`}
+                                              style={
+                                                isActiveWord
+                                                  ? { ...activeWordStyle, color: highlightWordColor }
+                                                  : undefined
+                                              }
+                                            >
+                                              {segment}
+                                            </span>
+                                          );
+                                        });
+                                      })()
+                                    : activeCue.text}
+                                </span>
+                              </div>
+                            )}
+                            {isEditingActiveCue && (
+                              <div
+                                ref={subtitleEditorControlsRef}
+                                data-testid="workbench-subtitle-editor-controls"
+                                className={cn(
+                                  "absolute z-10 flex items-center justify-end gap-2",
+                                  subtitleEditorControlsPlacement === "below"
+                                    ? "left-1/2 top-full mt-2 -translate-x-1/2"
+                                    : "left-1/2 bottom-full mb-2 -translate-x-1/2"
+                                )}
+                              >
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="icon"
+                                  className="h-8 w-8 border border-border/70 bg-background/90"
+                                  aria-label="Undo subtitle edit"
+                                  title="Undo"
+                                  data-testid="workbench-subtitle-undo"
+                                  onClick={handleUndoEdit}
+                                  disabled={isSavingCue || isExporting || !canUndoEdit}
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="icon"
+                                  className="h-8 w-8 border border-border/70 bg-background/90"
+                                  aria-label="Cancel subtitle edit"
+                                  title="Cancel"
+                                  data-testid="workbench-subtitle-cancel"
+                                  onClick={handleCancelEdit}
+                                  disabled={isSavingCue || isExporting}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="default"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  aria-label="Save subtitle edit"
+                                  title="Save"
+                                  data-testid="workbench-subtitle-save"
+                                  onClick={() => void handleSaveEdit()}
+                                  disabled={isSavingCue || isExporting}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
                             </div>
-                          )}
-                          {isEditingActiveCue && (
-                            <div className="mt-2 flex items-center justify-end gap-2">
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="icon"
-                              className="h-8 w-8 border border-border/70 bg-background/90"
-                              aria-label="Undo subtitle edit"
-                              title="Undo"
-                              data-testid="workbench-subtitle-undo"
-                              onClick={handleUndoEdit}
-                              disabled={isSavingCue || isExporting || !canUndoEdit}
-                            >
-                              <RotateCcw className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="icon"
-                              className="h-8 w-8 border border-border/70 bg-background/90"
-                              aria-label="Cancel subtitle edit"
-                              title="Cancel"
-                              data-testid="workbench-subtitle-cancel"
-                              onClick={handleCancelEdit}
-                              disabled={isSavingCue || isExporting}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="default"
-                              size="icon"
-                              className="h-8 w-8"
-                              aria-label="Save subtitle edit"
-                              title="Save"
-                              data-testid="workbench-subtitle-save"
-                              onClick={() => void handleSaveEdit()}
-                              disabled={isSavingCue || isExporting}
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
                     )}
                   </div>
                   {subtitleLoadError && (
