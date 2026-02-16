@@ -542,6 +542,121 @@ Validation checklist:
 
 ---
 
+## KI-013 - Installer appears to hang until user approves UAC
+
+- Status: `OPEN`
+- Priority: High
+- Tracked in roadmap: Queue item 16 (`Installer polish (Windows, NSIS)`)
+- Primary code pointers:
+  - `desktop/src-tauri/tauri.conf.json` (installer configuration)
+  - NSIS installer script/template assets used by Tauri packaging
+
+User impact:
+- On install, users can think setup is frozen and abandon installation before approving the Windows permission prompt.
+
+Repro steps:
+1. Build and run the NSIS installer on Windows.
+2. Click `Install`.
+3. Observe that visible progress appears stalled until UAC is approved.
+
+Expected:
+- Installer communicates that a Windows security prompt may appear and clearly indicates it is waiting for permission (for example, "You may see a Windows security prompt - please choose Yes" or "Waiting for permission...").
+
+Actual:
+- Installer appears stuck with no clear wait-state guidance until UAC approval is completed.
+
+Likely cause / notes:
+- UAC handoff phase is not reflected in installer UI copy/state.
+
+Minimum-scope fix:
+- Add explicit UAC-wait messaging/state during the permission-gated phase before install progress continues.
+
+Risks / regressions:
+- Copy/state changes must not conflict with existing NSIS flow timing.
+
+Validation checklist:
+- Installer shows explicit UAC guidance at the permission gate.
+- UI no longer appears frozen while waiting for approval.
+
+---
+
+## KI-014 - Installer progress text does not match actual phase
+
+- Status: `OPEN`
+- Priority: Medium
+- Tracked in roadmap: Queue item 16 (`Installer polish (Windows, NSIS)`)
+- Primary code pointers:
+  - NSIS installer script/template text resources
+  - Packaging configuration for phase labels/messages
+
+User impact:
+- Misleading progress messages reduce trust because users cannot tell what the installer is actually doing.
+
+Repro steps:
+1. Run the NSIS installer on Windows.
+2. Start installation and watch progress text through all phases.
+3. Compare shown text to actual operations (copying files, creating shortcuts, finalization).
+
+Expected:
+- Progress messages match the active install phase (for example, copying files, creating shortcuts).
+
+Actual:
+- Progress copy is unclear or does not reliably match the current installer phase.
+
+Likely cause / notes:
+- Installer message labels are static or loosely mapped to real phase transitions.
+
+Minimum-scope fix:
+- Align progress-text updates to concrete NSIS phase transitions and remove misleading labels.
+
+Risks / regressions:
+- Incorrect hook points could leave stale status text during edge cases.
+
+Validation checklist:
+- Phase text updates at each major installer step.
+- Observed progress copy matches actual installer work.
+
+---
+
+## KI-015 - SRT and word_timings.json retained for diagnostics when diagnostics disabled
+
+- Status: `OPEN`
+- Priority: High
+- Tracked in roadmap: Queue item 17 (`Diagnostics leftovers cleanup (diagnostics disabled)`)
+- Primary code pointers:
+  - `app/backend_server.py` (diagnostics/settings wiring)
+  - `app/workers.py` and artifact retention/cleanup paths
+
+User impact:
+- Users who disabled diagnostics still get diagnostics-only leftovers in project paths, which is unexpected and adds clutter.
+
+Repro steps:
+1. In Settings, disable diagnostics.
+2. Process a video through Create subtitles.
+3. Inspect the project folder for retained SRT and `word_timings.json` artifacts that exist only for diagnostics retention.
+
+Expected:
+- When diagnostics are disabled, diagnostics-only SRT and `word_timings.json` artifacts are not created or retained.
+- Project artifacts required for normal editing/export can still exist.
+
+Actual:
+- SRT and `word_timings.json` leftovers are still present from diagnostics retention paths even with diagnostics disabled.
+
+Likely cause / notes:
+- Diagnostics-off gating is incomplete around artifact creation/retention paths.
+
+Minimum-scope fix:
+- Gate diagnostics-only artifact creation/retention behind diagnostics-enabled checks while preserving required edit/export artifacts.
+
+Risks / regressions:
+- Cleanup changes must not remove artifacts needed by normal project editing/export behavior.
+
+Validation checklist:
+- With diagnostics disabled, no diagnostics-only SRT/`word_timings.json` leftovers remain.
+- Editing/export flows continue to work with required project artifacts intact.
+
+---
+
 ## Capture checklist for issue evidence
 
 - Export success strip click behavior recording (`Play video`, `Open folder`).
