@@ -2280,6 +2280,14 @@ const Workbench = () => {
     [beginEditingCue, isExporting, isSavingCue]
   );
 
+  const handleVideoPlay = React.useCallback(() => {
+    if (!isEditingCue) return;
+    const videoElement = videoRef.current;
+    if (videoElement) videoElement.pause();
+    shouldResumePlaybackRef.current = true;
+    if (!isSavingCue) void handleSaveEdit();
+  }, [isEditingCue, isSavingCue, handleSaveEdit]);
+
   const openLeftPanel = () => {
     if (!showSubtitlesOverlay) {
       return;
@@ -2558,6 +2566,7 @@ const Workbench = () => {
                     className="h-full w-full rounded-md bg-black object-contain"
                     controls
                     src={previewSrc}
+                    onPlay={handleVideoPlay}
                     onLoadedMetadata={(event) => {
                       const element = event.currentTarget;
                       setCurrentTimeSeconds(element.currentTime || 0);
