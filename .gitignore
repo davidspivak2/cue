@@ -23,3 +23,5 @@ desktop/src-tauri/engine_payload.zip
 
 # Cursor IDE debug artifacts
 .cursor/debug.log
+**/test-results/**
+desktop/test-results/.last-run.json

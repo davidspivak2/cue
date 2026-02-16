@@ -11,6 +11,13 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 - Each work item must include: Status, Deliverable, Acceptance criteria, and UX spec reference (section name).
 - Example UX spec reference format: UX spec reference: H) Error UX + Diagnostics
 
+## Planned changes / additions
+- Queue item 16: Installer polish (Windows, NSIS) - branding assets, Program Files default path, x64-only stance, UAC wait-state messaging, phase-accurate progress copy, completed-screen polish, and optional shortcut/license steps.
+- Queue item 9: Remove the right-side step/status label above progress bars in both Create subtitles and Export while keeping the percentage and progress bar.
+- Queue item 11: Workbench overlay textarea styling update so subtitle text input looks and behaves like a proper textarea while preserving overlay legibility.
+- Queue item 11: Fonts reliability fix plus curated subtitle font set that supports both Hebrew and English, including documentation of system-vs-bundled loading.
+- Queue item 17: Diagnostics leftovers cleanup so diagnostics-only SRT and `word_timings.json` are not retained when diagnostics are disabled.
+
 ## Now / Next (Queue)
 (Use a numbered list. Status tags must be one of: NEXT, IN PROGRESS, BLOCKED, DONE.)
 
@@ -103,13 +110,15 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 
 9. [NEXT] Progress truthfulness + continuity (Create Subtitles and Export)
    - Deliverable:
-     - Progress surface reflects pre-transcription work instead of appearing stuck at 0%.
-     - If user leaves Editor during an active task, background progress remains visible from other pages.
-     - Checklist row detail text is displayed inline with clearer hierarchy.
+      - Progress surface reflects pre-transcription work instead of appearing stuck at 0%.
+      - If user leaves Editor during an active task, background progress remains visible from other pages.
+      - Checklist row detail text is displayed inline with clearer hierarchy.
+      - Remove the right-side step/status label above the progress bar in both Create subtitles (Home) and Export (Workbench), while keeping the percentage and progress bar.
    - Acceptance criteria:
-     - Progress does not remain static at 0% during long startup phases without explanatory detail.
-     - User can navigate back to Projects and still see active-task state/progress.
-     - Editor progress copy and row details match actual backend work steps.
+      - Progress does not remain static at 0% during long startup phases without explanatory detail.
+      - User can navigate back to Projects and still see active-task state/progress.
+      - Editor progress copy and row details match actual backend work steps.
+      - In both Create subtitles and Export progress UI, the right-side step/status label above the bar is removed and percentage plus progress bar remain visible.
    - UX spec reference: F) Create Subtitles pipeline contract; G) Export progress + success
 
 10. [NEXT] Settings clarity pass
@@ -127,18 +136,22 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
 
 11. [NEXT] Style pane modernization (usability + defaults + overlay affordances)
    - Deliverable:
-     - Style controls are reorganized for lower cognitive load (spacing, grouping, progressive disclosure).
-     - Background mode uses a segmented control pattern.
-     - Curated font set prioritizes reliable Hebrew rendering.
-     - Color controls support presets + custom picker, with optional hex entry for advanced users.
-     - Default color sets are revised per option so defaults remain legible and sensible.
-     - Style overlay uses an icon-only `X` close affordance, and wide layout supports a collapsed vertical strip entry point that opens style as overlay.
-     - Style pane scrolling uses a thinner thumb-first treatment with reduced visual chrome.
+      - Style controls are reorganized for lower cognitive load (spacing, grouping, progressive disclosure).
+      - Background mode uses a segmented control pattern.
+      - Font application issues are fixed, and the curated subtitle font list includes only fonts that support both Hebrew and English.
+      - Font list documentation explains font loading source per font (system-installed vs bundled).
+      - Color controls support presets + custom picker, with optional hex entry for advanced users.
+      - Default color sets are revised per option so defaults remain legible and sensible.
+      - Style overlay uses an icon-only `X` close affordance, and wide layout supports a collapsed vertical strip entry point that opens style as overlay.
+      - Style pane scrolling uses a thinner thumb-first treatment with reduced visual chrome.
+      - Workbench subtitle overlay textarea styling is updated to look and behave like a clear text input (border/background/focus ring) while keeping subtitle legibility over video.
    - Acceptance criteria:
-     - Style pane is usable without opening advanced controls for common edits.
-     - Fonts listed in the control produce visibly distinct, supported rendering outcomes.
-     - Color controls provide predictable preset and custom behavior without regressions.
-     - Overlay close/open affordances are obvious and consistent across wide/narrow layouts.
+      - Style pane is usable without opening advanced controls for common edits.
+      - Fonts listed in the control produce visibly distinct, supported rendering outcomes for both Hebrew and English subtitle content.
+      - Font list documentation exists and accurately states whether each listed font is system-loaded or bundled.
+      - Color controls provide predictable preset and custom behavior without regressions.
+      - Overlay close/open affordances are obvious and consistent across wide/narrow layouts.
+      - Overlay textarea in Workbench has clear editable/input affordance and visible focus state without reducing subtitle readability.
    - UX spec reference: E) Editor; J) Settings page; K) Copywriting glossary
 
 12. [NEXT] Editor shell affordance polish (tabs + cursor semantics)
@@ -176,6 +189,37 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
    - Deliverable: app can create/open multiple projects with persisted state across restarts.
    - Acceptance criteria: see Milestone 1 checklist below.
    - UX spec reference: C) Project model (new backend capability; document behavior)
+
+16. [NEXT] Installer polish (Windows, NSIS)
+   - Deliverable:
+      - Installer welcome/completed visuals use more familiar Cue branding instead of the red CD-ROM style image where image slots are configurable.
+      - Replace the installer top-right image (below close button) and top-bar left icon (generic computer) with Cue branding/icon where the installer template supports replacement.
+      - Default install location is changed to `Program Files`.
+      - Installer packaging remains x64-only; no x32 build is added unless a concrete requirement appears.
+      - Installer UI clearly communicates UAC approval requirement (for example, "You may see a Windows security prompt - please choose Yes" or "Waiting for permission...") so the install does not appear hung.
+      - Installer progress text matches the actual phase (for example, copying files, creating shortcuts).
+      - Remove grey rectangular background from the `Launch Cue` control on the completed screen.
+      - Evaluate and optionally add installer checkboxes/steps for Start menu shortcut, desktop shortcut, and optional license acceptance.
+   - Acceptance criteria:
+      - Installer branding assets/icons are updated in supported template slots and red CD-ROM art is no longer used in those slots.
+      - Fresh installs default to `Program Files` on Windows.
+      - NSIS build remains x64-only by default.
+      - During UAC wait state, installer shows explicit guidance instead of appearing stalled.
+      - Progress copy updates as phases change and reflects the active installer step.
+      - Completed-screen `Launch Cue` control no longer has a grey rectangular background.
+      - If optional shortcut/license steps are present, they are clearly labeled and do not break the default install flow.
+   - UX spec reference: N/A (installer UX polish)
+
+17. [NEXT] Diagnostics leftovers cleanup (diagnostics disabled)
+   - Deliverable:
+      - When diagnostics are disabled, diagnostics-only retention of SRT and `word_timings.json` is removed.
+      - Project artifacts required for normal editing/export may still be present.
+      - No diagnostics-only code path creates or keeps extra copies of subtitle timing artifacts when diagnostics are disabled.
+   - Acceptance criteria:
+      - With diagnostics disabled in Settings, processing a project does not create or retain diagnostics-only SRT/`word_timings.json` leftovers.
+      - Editing/export-required project artifacts remain available and functional.
+      - Diagnostics-only retention paths are confirmed disabled by code review and validation checks.
+   - UX spec reference: H) Error UX + Diagnostics; J) Settings page
 
 ## Milestones (Ordered to Completion)
 
@@ -622,6 +666,7 @@ Definition of done:
 | Subtitle edit affordance is too hidden | Partial (`E4` contract exists) | Queue item 5, Milestone 4.5 |
 | Transcription quality clarity (cards, plain-language hints, run-time expectation cues) | Partial (`J1`) | Queue item 10, Milestone 7.4 |
 | Save-subtitles policy/path relationship clarity | Partial (`J2`) | Queue item 10, Milestone 7.4 |
+| Diagnostics leftovers (no diagnostics-only retention when disabled) | Gap | Queue item 17 |
 | Replace diagnostics-heavy settings UI with easy support path | Partial (`H`, `J5`) | Queue item 6, Milestone 0.1 + 7.5 |
 | Merge punctuation + audio controls; remove “keep extracted WAV” | Partial (`J3`, `J4`) | Queue item 10, Milestone 7.4 |
 | Remove sidebar and fix app-shell/title/back/status orientation | Partial (`B`, `E`) | Queue item 8, Milestone 2.4 + 3.4 |
@@ -631,13 +676,16 @@ Definition of done:
 | Playback-speed discoverability without hidden menu reliance | Gap | Queue item 13, Milestone 6.5 |
 | Back during active work keeps processing and remains visible | Partial (`B2`, `I2`) | Queue item 9, Milestone 6.4 |
 | Progress 0% stall + row-detail readability | Partial (`F2`, `G1`) | Queue item 9, Milestone 5.2 + 5.4 |
+| Remove step label above progress bar (Create subtitles + Export) | Gap | Queue item 9 |
+| Installer polish (Windows, NSIS) | Gap | Queue item 16 |
 | Delete dialog animation + delete success toast | Gap | Queue item 13, Milestone 2.5 |
 | Empty-state duplicate CTA cleanup | Partial (`I1`) | Queue item 13, Milestone 2.5 |
 | Style pane control density/layout modernization | Partial (`E3`) | Queue item 11, Milestone 8.4 |
+| Overlay textarea styling (Workbench) | Gap | Queue item 11 |
 | Style overlay close affordance should be icon-only `X` | Gap | Queue item 11, Milestone 8.4 |
 | Wide-layout style pane collapsed strip + icon entry | Gap | Queue item 11, Milestone 8.4 |
 | Style pane scrollbar should be thinner thumb-only | Gap | Queue item 11, Milestone 8.4 |
-| Curated Hebrew-friendly font list | Gap | Queue item 11, Milestone 8.4 |
+| Fonts (fix + Hebrew/English curation) | Gap | Queue item 11 |
 | Color UX redesign (presets + picker + optional hex) | Partial (`E3`) | Queue item 11, Milestone 8.4 |
 | Sensible per-option default color sets | Gap | Queue item 11, Milestone 8.4 |
 | Theme toggle in Settings | Partial (`A`, not surfaced in Settings contract) | Queue item 10, Milestone 7.5 |
