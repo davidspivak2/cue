@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import DropZone from "@/components/DropZone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogClose,
@@ -56,6 +57,8 @@ const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v"]);
 const MAX_DURATION_DIFF_SECONDS = 3;
 const NEW_PROJECT_CTA = "New project";
 const CREATE_SUBTITLES_CTA = "Create subtitles";
+const ACTIVE_TASK_POLL_MS = 2500;
+const IDLE_TASK_POLL_MS = 10000;
 
 const formatDuration = (durationSeconds?: number | null) => {
   if (durationSeconds === null || durationSeconds === undefined) {
@@ -166,6 +169,29 @@ const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean)
   return useTauri ? convertFileSrc(path) : path;
 };
 
+const resolveTaskHeading = (project: ProjectSummary) => {
+  const heading = project.active_task?.heading;
+  if (typeof heading === "string" && heading.trim()) {
+    return heading;
+  }
+  if (project.active_task?.kind === "create_video_with_subtitles") {
+    return "Exporting video";
+  }
+  return "Creating subtitles";
+};
+
+const resolveTaskDetail = (project: ProjectSummary) => {
+  const checklist = Array.isArray(project.active_task?.checklist) ? project.active_task.checklist : [];
+  const activeRow =
+    checklist.find((row) => row.state === "active") ??
+    checklist.find((row) => row.id === project.active_task?.step_id);
+  if (activeRow?.detail && activeRow.detail.trim()) {
+    return activeRow.detail.trim();
+  }
+  const message = project.active_task?.message;
+  return typeof message === "string" ? message.trim() : "";
+};
+
 const ProjectHub = () => {
   const navigate = useNavigate();
   const { closeTab, openOrActivateTab } = useWorkbenchTabs();
@@ -186,6 +212,7 @@ const ProjectHub = () => {
   );
   const [busyProjectId, setBusyProjectId] = React.useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null);
+  const [dismissedNoticeIds, setDismissedNoticeIds] = React.useState<Set<string>>(new Set());
   const inputRef = React.useRef<HTMLInputElement>(null);
   const relinkInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -225,6 +252,30 @@ const ProjectHub = () => {
   React.useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+
+  React.useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+    let cancelled = false;
+    const pollDelay = projects.some((project) => Boolean(project.active_task))
+      ? ACTIVE_TASK_POLL_MS
+      : IDLE_TASK_POLL_MS;
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await fetchProjects();
+        if (!cancelled) {
+          setProjects(data);
+        }
+      } catch {
+        // Best-effort background polling only.
+      }
+    }, pollDelay);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isLoading, projects]);
 
   const handleCreateProject = React.useCallback(
     async (videoPath: string) => {
@@ -416,7 +467,7 @@ const ProjectHub = () => {
         showBanner("error", "Unsupported file type. Choose an MP4, MKV, MOV, or M4V file.");
         return;
       }
-    const warnings = buildRelinkWarnings(project, selectedFileName, selectedDuration);
+      const warnings = buildRelinkWarnings(project, selectedFileName, selectedDuration);
       if (warnings.length > 0) {
         setRelinkWarning({ project, path: selectedPath, reasons: warnings });
         return;
@@ -543,6 +594,14 @@ const ProjectHub = () => {
   const showEmptyState = !isLoading && projects.length === 0;
   const enableRootDrop = !isTauriEnv && !showEmptyState && !isBusyOperation;
 
+  const dismissTaskNotice = (noticeId: string) => {
+    setDismissedNoticeIds((prev) => {
+      const next = new Set(prev);
+      next.add(noticeId);
+      return next;
+    });
+  };
+
   return (
     <div
       data-testid="project-hub"
@@ -653,6 +712,17 @@ const ProjectHub = () => {
             const isBusy =
               busyProjectId === project.project_id || deletingProjectId === project.project_id;
             const cardDisabled = isBusyOperation;
+            const activeTaskPct =
+              typeof project.active_task?.pct === "number"
+                ? Math.max(0, Math.min(100, project.active_task.pct))
+                : 0;
+            const activeTaskDetail = resolveTaskDetail(project);
+            const activeTaskHeading = resolveTaskHeading(project);
+            const taskNotice = project.task_notice;
+            const shouldShowTaskNotice =
+              !!taskNotice &&
+              typeof taskNotice.notice_id === "string" &&
+              !dismissedNoticeIds.has(taskNotice.notice_id);
             return (
               <div
                 key={project.project_id}
@@ -722,7 +792,9 @@ const ProjectHub = () => {
                     <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                       {project.title || "Untitled project"}
                     </p>
-                    {project.status === "needs_subtitles" && !project.missing_video && (
+                    {project.status === "needs_subtitles" &&
+                      !project.missing_video &&
+                      !project.active_task && (
                       <Button
                         type="button"
                         variant="secondary"
@@ -744,6 +816,48 @@ const ProjectHub = () => {
                   </div>
                   {durationLabel && (
                     <p className="text-xs text-muted-foreground">{durationLabel}</p>
+                  )}
+                  {project.active_task && (
+                    <div
+                      className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-2"
+                      data-testid={`project-card-active-task-${project.project_id}`}
+                    >
+                      <p className="text-xs font-medium text-foreground">{activeTaskHeading}</p>
+                      {activeTaskDetail && (
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {activeTaskDetail}
+                        </p>
+                      )}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span>{Math.round(activeTaskPct)}%</span>
+                        </div>
+                        <Progress value={activeTaskPct} />
+                      </div>
+                    </div>
+                  )}
+                  {shouldShowTaskNotice && taskNotice && (
+                    <div
+                      className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive"
+                      data-testid={`project-card-task-notice-${project.project_id}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span>{taskNotice.message}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 shrink-0 text-destructive hover:text-destructive"
+                          aria-label="Dismiss task notice"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            dismissTaskNotice(taskNotice.notice_id);
+                          }}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>

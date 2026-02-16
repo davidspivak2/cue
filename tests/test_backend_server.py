@@ -243,3 +243,31 @@ def test_preview_overlay_returns_existing_cached_png(tmp_path: Path, monkeypatch
         assert second.status_code == 200
         second_path = second.json().get("overlay_path")
         assert second_path == first_path
+
+
+def test_enqueue_event_bounds_queue_without_dropping_terminal() -> None:
+    job = backend_server.JobState(
+        job_id="job-queue-limit",
+        status="running",
+        created_at=datetime.now(timezone.utc),
+    )
+    original_limit = backend_server.MAX_JOB_EVENT_QUEUE_SIZE
+    backend_server.MAX_JOB_EVENT_QUEUE_SIZE = 5
+    try:
+        for idx in range(8):
+            backend_server._enqueue_event(
+                job,
+                backend_server._build_event(job.job_id, "progress", pct=idx, message=f"p{idx}"),
+            )
+        assert job.event_queue.qsize() <= 5
+
+        backend_server._enqueue_event(
+            job,
+            backend_server._build_event(job.job_id, "completed", status="completed"),
+        )
+        buffered: list[dict[str, Any]] = []
+        while not job.event_queue.empty():
+            buffered.append(job.event_queue.get_nowait())
+        assert any(event.get("type") == "completed" for event in buffered)
+    finally:
+        backend_server.MAX_JOB_EVENT_QUEUE_SIZE = original_limit

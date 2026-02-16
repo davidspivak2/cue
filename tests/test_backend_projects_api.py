@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -130,3 +130,197 @@ def test_delete_project_cancels_running_job(tmp_path: Path, monkeypatch) -> None
         assert job.cancel_event.is_set() is True
 
     backend_server.JOBS.clear()
+
+
+def test_projects_include_active_task_snapshot(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "active.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    with TestClient(backend_server.app) as client:
+        create_response = client.post("/projects", json={"video_path": str(video_path)})
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+
+        running_job = backend_server.JobState(
+            job_id="job-active-1",
+            status="running",
+            created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+            kind="create_subtitles",
+            project_id=project_id,
+            cancel_event=asyncio.Event(),
+        )
+        backend_server.JOBS[running_job.job_id] = running_job
+        backend_server._enqueue_event(
+            running_job,
+            backend_server._build_event(
+                running_job.job_id,
+                "started",
+                heading="Creating subtitles",
+            ),
+        )
+        backend_server._enqueue_event(
+            running_job,
+            backend_server._build_event(
+                running_job.job_id,
+                "checklist",
+                step_id="load_model",
+                state="start",
+                reason_text="Loading weights",
+            ),
+        )
+        backend_server._enqueue_event(
+            running_job,
+            backend_server._build_event(
+                running_job.job_id,
+                "progress",
+                step_id="load_model",
+                pct=12,
+                message="Loading AI model",
+            ),
+        )
+
+        list_response = client.get("/projects")
+        assert list_response.status_code == 200
+        summary = next(
+            item for item in list_response.json() if item["project_id"] == project_id
+        )
+        active_task = summary.get("active_task")
+        assert isinstance(active_task, dict)
+        assert active_task.get("job_id") == running_job.job_id
+        assert active_task.get("kind") == "create_subtitles"
+        assert active_task.get("heading") == "Creating subtitles"
+        assert active_task.get("pct") == 12
+        checklist = active_task.get("checklist") or []
+        assert checklist
+        assert checklist[0].get("id") == "load_model"
+        assert checklist[0].get("state") == "active"
+        assert checklist[0].get("detail") == "Loading AI model"
+
+        detail_response = client.get(f"/projects/{project_id}")
+        assert detail_response.status_code == 200
+        detail_active_task = detail_response.json().get("active_task")
+        assert isinstance(detail_active_task, dict)
+        assert detail_active_task.get("job_id") == running_job.job_id
+
+
+def test_create_job_returns_conflict_when_project_task_already_running(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "conflict.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    with TestClient(backend_server.app) as client:
+        create_response = client.post("/projects", json={"video_path": str(video_path)})
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+
+        running_job = backend_server.JobState(
+            job_id="job-conflict-1",
+            status="running",
+            created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+            kind="create_subtitles",
+            project_id=project_id,
+            cancel_event=asyncio.Event(),
+        )
+        backend_server.JOBS[running_job.job_id] = running_job
+
+        conflict_response = client.post(
+            "/jobs",
+            json={
+                "kind": "create_subtitles",
+                "input_path": str(video_path),
+                "output_dir": str(tmp_path),
+                "project_id": project_id,
+            },
+        )
+        assert conflict_response.status_code == 409
+        payload = conflict_response.json().get("detail", {})
+        assert payload.get("error") == "project_job_conflict"
+        assert payload.get("project_id") == project_id
+        assert payload.get("job_id") == running_job.job_id
+        assert payload.get("kind") == "create_subtitles"
+
+
+def test_projects_include_task_notice_for_terminal_error(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "notice.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    with TestClient(backend_server.app) as client:
+        create_response = client.post("/projects", json={"video_path": str(video_path)})
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+
+        job = backend_server.JobState(
+            job_id="job-notice-1",
+            status="running",
+            created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+            kind="create_video_with_subtitles",
+            project_id=project_id,
+            cancel_event=asyncio.Event(),
+        )
+        backend_server.JOBS[job.job_id] = job
+        job.status = "error"
+        job.finished_at = datetime.now(timezone.utc)
+        backend_server._enqueue_event(
+            job,
+            backend_server._build_event(
+                job.job_id,
+                "error",
+                status="error",
+                message="Export failed in test",
+            ),
+        )
+
+        list_response = client.get("/projects")
+        assert list_response.status_code == 200
+        summary = next(
+            item for item in list_response.json() if item["project_id"] == project_id
+        )
+        notice = summary.get("task_notice")
+        assert isinstance(notice, dict)
+        assert notice.get("job_id") == job.job_id
+        assert notice.get("status") == "error"
+        assert notice.get("message") == "Export failed in test"
+
+
+def test_expired_task_notice_is_not_returned(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "notice-expired.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    with TestClient(backend_server.app) as client:
+        create_response = client.post("/projects", json={"video_path": str(video_path)})
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+
+        expired_at = datetime.now(timezone.utc) - timedelta(
+            seconds=backend_server.TASK_NOTICE_TTL_SECONDS + 5
+        )
+        backend_server.PROJECT_TASK_NOTICES[project_id] = {
+            "notice_id": "expired-notice-1",
+            "project_id": project_id,
+            "job_id": "job-expired",
+            "kind": "create_subtitles",
+            "status": "error",
+            "message": "old notice",
+            "created_at": expired_at.isoformat(),
+            "finished_at": expired_at.isoformat(),
+        }
+
+        list_response = client.get("/projects")
+        assert list_response.status_code == 200
+        summary = next(
+            item for item in list_response.json() if item["project_id"] == project_id
+        )
+        assert "task_notice" not in summary
+        assert project_id not in backend_server.PROJECT_TASK_NOTICES

@@ -1,6 +1,37 @@
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const PROJECTS_URL = `${BACKEND_BASE_URL}/projects`;
 
+export type ActiveTaskChecklistItem = {
+  id: string;
+  label: string;
+  state?: string | null;
+  detail?: string | null;
+};
+
+export type ActiveTaskSummary = {
+  job_id: string;
+  kind: string;
+  status: string;
+  heading?: string | null;
+  message?: string | null;
+  pct?: number | null;
+  step_id?: string | null;
+  started_at?: string | null;
+  updated_at?: string | null;
+  checklist?: ActiveTaskChecklistItem[] | null;
+};
+
+export type TaskNotice = {
+  notice_id: string;
+  project_id?: string | null;
+  job_id?: string | null;
+  kind?: string | null;
+  status: string;
+  message: string;
+  created_at: string;
+  finished_at?: string | null;
+};
+
 export type ProjectSummary = {
   project_id: string;
   title: string;
@@ -11,6 +42,8 @@ export type ProjectSummary = {
   updated_at: string;
   duration_seconds?: number | null;
   thumbnail_path?: string | null;
+  active_task?: ActiveTaskSummary | null;
+  task_notice?: TaskNotice | null;
 };
 
 export type ProjectVideoInfo = {
@@ -40,6 +73,8 @@ export type ProjectManifest = {
   artifacts?: ProjectArtifacts | null;
   latest_export?: ProjectLatestExport | null;
   style?: Record<string, unknown> | null;
+  active_task?: ActiveTaskSummary | null;
+  task_notice?: TaskNotice | null;
 };
 
 export type ProjectUpdatePayload = {
