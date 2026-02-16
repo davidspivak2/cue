@@ -75,6 +75,22 @@ UI_ONLY_JOB_OPTION_KEYS = {
     "uiSelection",
     "ui_selection",
 }
+ACTIVE_TASK_JOB_KINDS = {"create_subtitles", "create_video_with_subtitles"}
+MAX_JOB_EVENT_QUEUE_SIZE = 600
+TASK_NOTICE_TTL_SECONDS = 600
+CHECKLIST_LABEL_BY_STEP_ID = {
+    "extract_audio": "Extracting audio",
+    "load_model": "Loading AI model",
+    "detect_language": "Detecting language",
+    "write_subtitles": "Writing subtitles",
+    "fix_punctuation": "Reviewing punctuation",
+    "fix_missing_subtitles": "Checking for missed speech",
+    "timing_word_highlights": "Matching individual words to speech",
+    "preparing_preview": "Preparing preview",
+    "get_video_info": "Getting video info",
+    "add_subtitles": "Adding subtitles to video",
+    "save_video": "Saving video",
+}
 
 
 @dataclass
@@ -91,9 +107,17 @@ class JobState:
     sse_client_connected: bool = False
     task: Optional[asyncio.Task[None]] = None
     process: Optional[asyncio.subprocess.Process] = None
+    snapshot_heading: Optional[str] = None
+    snapshot_message: Optional[str] = None
+    snapshot_pct: Optional[float] = None
+    snapshot_step_id: Optional[str] = None
+    snapshot_updated_at: Optional[str] = None
+    snapshot_checklist_order: list[str] = field(default_factory=list)
+    snapshot_checklist: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 JOBS: dict[str, JobState] = {}
+PROJECT_TASK_NOTICES: dict[str, dict[str, Any]] = {}
 
 
 class JobRequest(BaseModel):
@@ -314,6 +338,172 @@ def _now_ts() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _job_timestamp(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
+def _checklist_label(step_id: str) -> str:
+    label = CHECKLIST_LABEL_BY_STEP_ID.get(step_id)
+    if label:
+        return label
+    return step_id.replace("_", " ").strip().title()
+
+
+def _ensure_snapshot_checklist_step(job: JobState, step_id: str) -> dict[str, Any]:
+    row = job.snapshot_checklist.get(step_id)
+    if row is None:
+        row = {
+            "id": step_id,
+            "label": _checklist_label(step_id),
+            "state": "pending",
+            "detail": None,
+        }
+        job.snapshot_checklist[step_id] = row
+        job.snapshot_checklist_order.append(step_id)
+    elif not isinstance(row.get("label"), str) or not str(row.get("label")).strip():
+        row["label"] = _checklist_label(step_id)
+    return row
+
+
+def _cleanup_task_notices() -> None:
+    now = datetime.now(timezone.utc)
+    expired_project_ids: list[str] = []
+    for project_id, notice in PROJECT_TASK_NOTICES.items():
+        ts_text = notice.get("created_at")
+        if not isinstance(ts_text, str):
+            expired_project_ids.append(project_id)
+            continue
+        try:
+            created_at = datetime.fromisoformat(ts_text)
+        except ValueError:
+            expired_project_ids.append(project_id)
+            continue
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        if (now - created_at).total_seconds() > TASK_NOTICE_TTL_SECONDS:
+            expired_project_ids.append(project_id)
+    for project_id in expired_project_ids:
+        PROJECT_TASK_NOTICES.pop(project_id, None)
+
+
+def _set_project_task_notice(job: JobState, event: dict[str, Any]) -> None:
+    if not job.project_id:
+        return
+    message = event.get("message")
+    if isinstance(message, str) and message.strip():
+        detail = message.strip()
+    elif str(event.get("type")) == "cancelled":
+        detail = "Operation cancelled."
+    else:
+        detail = "Task failed."
+    PROJECT_TASK_NOTICES[job.project_id] = {
+        "notice_id": uuid.uuid4().hex,
+        "project_id": job.project_id,
+        "job_id": job.job_id,
+        "kind": job.kind,
+        "status": str(event.get("type") or job.status),
+        "message": detail,
+        "created_at": _now_ts(),
+        "finished_at": _job_timestamp(job.finished_at),
+    }
+
+
+def _get_project_task_notice(project_id: str) -> Optional[dict[str, Any]]:
+    _cleanup_task_notices()
+    notice = PROJECT_TASK_NOTICES.get(project_id)
+    if not notice:
+        return None
+    return dict(notice)
+
+
+def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
+    event_type = str(event.get("type") or "")
+    event_ts = event.get("ts")
+    if isinstance(event_ts, str) and event_ts:
+        job.snapshot_updated_at = event_ts
+    else:
+        job.snapshot_updated_at = _now_ts()
+
+    if event_type == "started":
+        if isinstance(event.get("heading"), str) and str(event.get("heading")).strip():
+            job.snapshot_heading = str(event.get("heading")).strip()
+        if isinstance(event.get("message"), str) and str(event.get("message")).strip():
+            job.snapshot_message = str(event.get("message")).strip()
+        if job.project_id:
+            PROJECT_TASK_NOTICES.pop(job.project_id, None)
+        return
+
+    if event_type == "checklist":
+        step_id = event.get("step_id")
+        if isinstance(step_id, str) and step_id:
+            row = _ensure_snapshot_checklist_step(job, step_id)
+            state = str(event.get("state") or "")
+            if state == "start":
+                row["state"] = "active"
+                job.snapshot_step_id = step_id
+            elif state in {"done", "skipped", "failed"}:
+                row["state"] = state
+            reason_text = event.get("reason_text")
+            if isinstance(reason_text, str):
+                detail = reason_text.strip()
+                row["detail"] = detail or None
+                if detail:
+                    job.snapshot_message = detail
+            if row.get("state") == "active":
+                job.snapshot_step_id = step_id
+        return
+
+    if event_type == "progress":
+        pct = event.get("pct")
+        if isinstance(pct, (int, float)):
+            clamped = max(0.0, min(float(pct), 100.0))
+            job.snapshot_pct = clamped
+        step_id = event.get("step_id")
+        message = event.get("message")
+        if isinstance(step_id, str) and step_id:
+            row = _ensure_snapshot_checklist_step(job, step_id)
+            if row.get("state") in {"pending", None, ""}:
+                row["state"] = "active"
+            if row.get("state") == "active":
+                job.snapshot_step_id = step_id
+            if isinstance(message, str):
+                detail = message.strip()
+                row["detail"] = detail or row.get("detail")
+        if isinstance(message, str) and message.strip():
+            job.snapshot_message = message.strip()
+        return
+
+    if event_type in TERMINAL_STATUSES:
+        message = event.get("message")
+        if isinstance(message, str) and message.strip():
+            job.snapshot_message = message.strip()
+        if event_type in {"cancelled", "error"}:
+            _set_project_task_notice(job, event)
+
+
+def _prune_job_event_queue(job: JobState) -> None:
+    if job.event_queue.qsize() < MAX_JOB_EVENT_QUEUE_SIZE:
+        return
+    buffered: list[dict[str, Any]] = []
+    dropped = False
+    while True:
+        try:
+            event = job.event_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        event_type = str(event.get("type") or "")
+        if not dropped and event_type not in TERMINAL_STATUSES:
+            dropped = True
+            continue
+        buffered.append(event)
+    if not dropped and buffered:
+        buffered = buffered[1:]
+    for event in buffered:
+        job.event_queue.put_nowait(event)
+
+
 def _build_event(job_id: str, event_type: str, **fields: Any) -> dict[str, Any]:
     payload = {"job_id": job_id, "ts": _now_ts(), "type": event_type}
     payload.update(fields)
@@ -321,6 +511,8 @@ def _build_event(job_id: str, event_type: str, **fields: Any) -> dict[str, Any]:
 
 
 def _enqueue_event(job: JobState, event: dict[str, Any]) -> None:
+    _update_job_snapshot(job, event)
+    _prune_job_event_queue(job)
     job.event_queue.put_nowait(event)
 
 
@@ -724,6 +916,78 @@ def _jobs_for_project(project_id: str) -> list[JobState]:
     ]
 
 
+def _active_job_for_project(project_id: str) -> Optional[JobState]:
+    active_jobs = [
+        job
+        for job in JOBS.values()
+        if job.project_id == project_id
+        and job.kind in ACTIVE_TASK_JOB_KINDS
+        and job.status == "running"
+    ]
+    if not active_jobs:
+        return None
+    active_jobs.sort(
+        key=lambda job: (
+            job.started_at or job.created_at,
+            job.created_at,
+        ),
+        reverse=True,
+    )
+    return active_jobs[0]
+
+
+def _serialize_active_task(job: JobState) -> dict[str, Any]:
+    checklist: list[dict[str, Any]] = []
+    for step_id in job.snapshot_checklist_order:
+        row = job.snapshot_checklist.get(step_id, {})
+        checklist.append(
+            {
+                "id": step_id,
+                "label": (
+                    str(row.get("label")).strip()
+                    if isinstance(row.get("label"), str)
+                    else _checklist_label(step_id)
+                ),
+                "state": (
+                    str(row.get("state")).strip()
+                    if isinstance(row.get("state"), str) and str(row.get("state")).strip()
+                    else "pending"
+                ),
+                "detail": (
+                    str(row.get("detail")).strip()
+                    if isinstance(row.get("detail"), str) and str(row.get("detail")).strip()
+                    else None
+                ),
+            }
+        )
+    return {
+        "job_id": job.job_id,
+        "kind": job.kind,
+        "status": job.status,
+        "heading": job.snapshot_heading,
+        "message": job.snapshot_message,
+        "pct": job.snapshot_pct,
+        "step_id": job.snapshot_step_id,
+        "started_at": _job_timestamp(job.started_at),
+        "updated_at": job.snapshot_updated_at or _now_ts(),
+        "checklist": checklist,
+    }
+
+
+def _attach_project_runtime_fields(
+    payload: dict[str, Any],
+    project_id: str,
+) -> dict[str, Any]:
+    response = dict(payload)
+    active_job = _active_job_for_project(project_id)
+    if active_job is not None:
+        response["active_task"] = _serialize_active_task(active_job)
+    notice = _get_project_task_notice(project_id)
+    if notice is not None:
+        response["task_notice"] = notice
+    return response
+
+
 async def _cancel_jobs_for_project(project_id: str) -> list[str]:
     target_jobs = _jobs_for_project(project_id)
     if not target_jobs:
@@ -759,6 +1023,20 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
     request_received_at = datetime.now(timezone.utc)
     if payload.project_id:
         project_store.get_project(payload.project_id)
+    if payload.project_id and payload.kind in ACTIVE_TASK_JOB_KINDS:
+        existing = _active_job_for_project(payload.project_id)
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "project_job_conflict",
+                    "project_id": payload.project_id,
+                    "job_id": existing.job_id,
+                    "kind": existing.kind,
+                    "status": existing.status,
+                    "events_url": f"http://{HOST}:{PORT}/jobs/{existing.job_id}/events",
+                },
+            )
     if payload.kind == "create_video_with_subtitles" and payload.project_id:
         _resolve_export_request_from_project(payload)
     if payload.kind in {"pipeline", "create_subtitles", "create_video_with_subtitles"}:
@@ -859,7 +1137,14 @@ def list_projects() -> list[dict[str, Any]]:
     }
     active_ids = active_project_ids or None
     summaries = project_store.list_projects(active_ids)
-    return [summary.model_dump() for summary in summaries]
+    response: list[dict[str, Any]] = []
+    for summary in summaries:
+        payload = summary.model_dump()
+        project_id = payload.get("project_id")
+        if isinstance(project_id, str) and project_id:
+            payload = _attach_project_runtime_fields(payload, project_id)
+        response.append(payload)
+    return response
 
 
 @app.post("/projects")
@@ -869,7 +1154,8 @@ def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
 
 @app.get("/projects/{project_id}")
 def get_project(project_id: str) -> dict[str, Any]:
-    return project_store.get_project(project_id)
+    payload = project_store.get_project(project_id)
+    return _attach_project_runtime_fields(payload, project_id)
 
 
 @app.get("/projects/{project_id}/subtitles")
@@ -895,6 +1181,7 @@ def relink_project(project_id: str, payload: ProjectRelinkRequest) -> dict[str, 
 @app.delete("/projects/{project_id}")
 async def delete_project(project_id: str) -> dict[str, Any]:
     cancelled_job_ids = await _cancel_jobs_for_project(project_id)
+    PROJECT_TASK_NOTICES.pop(project_id, None)
     project_store.delete_project(project_id)
     return {
         "ok": True,

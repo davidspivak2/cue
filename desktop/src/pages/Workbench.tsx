@@ -18,8 +18,11 @@ import {
   checklistStepIds
 } from "@/legacyCopy";
 import {
+  attachToJobEvents,
+  cancelJob,
   createSubtitlesJob,
   createVideoWithSubtitlesJob,
+  JobConflictError,
   JobEvent,
   JobEventStream
 } from "@/jobsClient";
@@ -222,9 +225,98 @@ const SUBTITLE_EDITOR_CONTROLS_GAP_PX = 8;
 const QT_POINT_TO_CSS_PX = 96 / 72;
 const WEB_SUBTITLE_LINE_HEIGHT_RATIO = 1.375;
 const QT_SUBTITLE_LINE_HEIGHT_RATIO = 1.125;
+const ACTIVE_TASK_SYNC_POLL_MS = 2500;
 
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
   items.map((item) => ({ ...item, state: "pending" }));
+
+const isChecklistState = (value: unknown): value is NonNullable<ChecklistItem["state"]> =>
+  value === "pending" ||
+  value === "active" ||
+  value === "done" ||
+  value === "skipped" ||
+  value === "failed";
+
+const normalizeChecklistState = (value: unknown): NonNullable<ChecklistItem["state"]> => {
+  if (value === "start") {
+    return "active";
+  }
+  if (isChecklistState(value)) {
+    return value;
+  }
+  return "pending";
+};
+
+const applyProgressMessageToChecklist = (
+  items: ChecklistItem[],
+  stepId: string | null | undefined,
+  message: string | null | undefined
+): ChecklistItem[] => {
+  if (!message || !message.trim()) {
+    return items;
+  }
+  const detail = message.trim();
+  let matchedById = false;
+  let firstActiveIndex = -1;
+  const updated = items.map((item, index) => {
+    if (item.state === "active" && firstActiveIndex === -1) {
+      firstActiveIndex = index;
+    }
+    if (!stepId || item.id !== stepId) {
+      return item;
+    }
+    matchedById = true;
+    const nextState = item.state === "pending" || !item.state ? "active" : item.state;
+    return { ...item, state: nextState, detail };
+  });
+  if (matchedById) {
+    return updated;
+  }
+  if (firstActiveIndex >= 0) {
+    const next = [...updated];
+    next[firstActiveIndex] = { ...next[firstActiveIndex], detail };
+    return next;
+  }
+  return updated;
+};
+
+const asString = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+const asNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
+const buildChecklistFromActiveTask = (activeTask: ProjectManifest["active_task"]): ChecklistItem[] => {
+  if (!activeTask || !Array.isArray(activeTask.checklist)) {
+    return [];
+  }
+  return activeTask.checklist
+    .filter((row): row is NonNullable<typeof row> => !!row && typeof row.id === "string")
+    .map((row) => ({
+      id: row.id,
+      label: typeof row.label === "string" && row.label.trim() ? row.label : row.id,
+      state: normalizeChecklistState(row.state),
+      detail: typeof row.detail === "string" && row.detail.trim() ? row.detail.trim() : undefined
+    }));
+};
+
+const formatElapsedSince = (startedAt: string | null): string => {
+  if (!startedAt) {
+    return "";
+  }
+  const startedMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedMs)) {
+    return "";
+  }
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return `Elapsed ${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+};
 
 const clampOpacity = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -420,6 +512,11 @@ const Workbench = () => {
   );
   const [createSubtitlesJobStream, setCreateSubtitlesJobStream] =
     React.useState<JobEventStream | null>(null);
+  const createSubtitlesJobIdRef = React.useRef<string | null>(null);
+  const [createSubtitlesStartedAt, setCreateSubtitlesStartedAt] = React.useState<string | null>(
+    null
+  );
+  const [createSubtitlesElapsedText, setCreateSubtitlesElapsedText] = React.useState("");
   const [isExporting, setIsExporting] = React.useState(false);
   const [exportError, setExportError] = React.useState<string | null>(null);
   const [exportHeading, setExportHeading] = React.useState("Exporting video");
@@ -427,6 +524,9 @@ const Workbench = () => {
   const [exportProgressMessage, setExportProgressMessage] = React.useState<string>("");
   const [exportChecklist, setExportChecklist] = React.useState<ChecklistItem[]>([]);
   const [exportJobStream, setExportJobStream] = React.useState<JobEventStream | null>(null);
+  const exportJobIdRef = React.useRef<string | null>(null);
+  const [exportStartedAt, setExportStartedAt] = React.useState<string | null>(null);
+  const [exportElapsedText, setExportElapsedText] = React.useState("");
   const [exportOutputPath, setExportOutputPath] = React.useState<string | null>(null);
   const [openActionError, setOpenActionError] = React.useState<string | null>(null);
   const [projectReloadTick, setProjectReloadTick] = React.useState(0);
@@ -446,7 +546,7 @@ const Workbench = () => {
         active = false;
       };
     }
-    setIsLoading(true);
+    setIsLoading((prev) => (project?.project_id === projectId && prev === false ? false : true));
     fetchProject(projectId)
       .then((data) => {
         if (!active) return;
@@ -465,7 +565,7 @@ const Workbench = () => {
     return () => {
       active = false;
     };
-  }, [projectId, projectReloadTick]);
+  }, [project?.project_id, projectId, projectReloadTick]);
 
   React.useEffect(() => {
     let active = true;
@@ -703,6 +803,8 @@ const Workbench = () => {
     setCreateSubtitlesProgressMessage("");
     setCreateSubtitlesChecklist([]);
     setIsCreatingSubtitles(false);
+    setCreateSubtitlesStartedAt(null);
+    createSubtitlesJobIdRef.current = null;
     setExportError(null);
     setOpenActionError(null);
     setExportHeading("Exporting video");
@@ -710,6 +812,8 @@ const Workbench = () => {
     setExportProgressMessage("");
     setExportChecklist([]);
     setIsExporting(false);
+    setExportStartedAt(null);
+    exportJobIdRef.current = null;
     setExportOutputPath(null);
     setSubtitleOverlayPath(null);
     setVideoNaturalSize({ width: 0, height: 0 });
@@ -768,6 +872,36 @@ const Workbench = () => {
       exportJobStream?.close();
     };
   }, [exportJobStream]);
+
+  React.useEffect(() => {
+    if (!isCreatingSubtitles || !createSubtitlesStartedAt) {
+      setCreateSubtitlesElapsedText("");
+      return;
+    }
+    const tick = () => {
+      setCreateSubtitlesElapsedText(formatElapsedSince(createSubtitlesStartedAt));
+    };
+    tick();
+    const timer = window.setInterval(tick, 500);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [createSubtitlesStartedAt, isCreatingSubtitles]);
+
+  React.useEffect(() => {
+    if (!isExporting || !exportStartedAt) {
+      setExportElapsedText("");
+      return;
+    }
+    const tick = () => {
+      setExportElapsedText(formatElapsedSince(exportStartedAt));
+    };
+    tick();
+    const timer = window.setInterval(tick, 500);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [exportStartedAt, isExporting]);
 
   React.useEffect(() => {
     if (!incomingState?.autoStartSubtitles) {
@@ -847,14 +981,16 @@ const Workbench = () => {
     if (event.type !== "checklist") {
       return undefined;
     }
-    if (event.reason_text) {
-      return event.reason_text;
+    const reasonText = asNonEmptyString(event.reason_text);
+    if (reasonText) {
+      return reasonText;
     }
-    if (event.step_id === checklistStepIds.fixMissingSubtitles && event.reason_code) {
-      return MISSING_SUBTITLES_REASON_TEXT[event.reason_code];
+    const reasonCode = asString(event.reason_code);
+    if (event.step_id === checklistStepIds.fixMissingSubtitles && reasonCode) {
+      return MISSING_SUBTITLES_REASON_TEXT[reasonCode];
     }
-    if (event.step_id === checklistStepIds.timingWordHighlights && event.reason_code) {
-      return WORD_HIGHLIGHT_REASON_TEXT[event.reason_code];
+    if (event.step_id === checklistStepIds.timingWordHighlights && reasonCode) {
+      return WORD_HIGHLIGHT_REASON_TEXT[reasonCode];
     }
     return undefined;
   }, []);
@@ -883,25 +1019,41 @@ const Workbench = () => {
   const handleCreateSubtitlesEvent = React.useCallback(
     (event: JobEvent) => {
       if (event.type === "started") {
-        setCreateSubtitlesHeading(event.heading ?? "Creating subtitles");
+        setCreateSubtitlesHeading(asNonEmptyString(event.heading) ?? "Creating subtitles");
+        setCreateSubtitlesStartedAt(asString(event.ts) ?? new Date().toISOString());
         return;
       }
       if (event.type === "checklist") {
-        updateCreateChecklist(event.step_id, event.state, resolveChecklistReason(event));
+        const stepId = asString(event.step_id);
+        const state = asString(event.state);
+        if (!stepId || !state) {
+          return;
+        }
+        updateCreateChecklist(stepId, state, resolveChecklistReason(event));
         return;
       }
       if (event.type === "progress") {
         if (typeof event.pct === "number") {
           setCreateSubtitlesProgressPct(event.pct);
         }
-        if (event.message) {
-          setCreateSubtitlesProgressMessage(event.message);
+        const message = asString(event.message);
+        if (message) {
+          setCreateSubtitlesProgressMessage(message);
         }
+        setCreateSubtitlesChecklist((prev) =>
+          applyProgressMessageToChecklist(
+            prev,
+            typeof event.step_id === "string" ? event.step_id : null,
+            message
+          )
+        );
         return;
       }
       if (event.type === "completed") {
         setCreateSubtitlesProgressPct(100);
         setIsCreatingSubtitles(false);
+        setCreateSubtitlesStartedAt(null);
+        createSubtitlesJobIdRef.current = null;
         setCreateSubtitlesJobStream((prev) => {
           prev?.close();
           return null;
@@ -914,8 +1066,11 @@ const Workbench = () => {
         setCreateSubtitlesProgressPct(0);
         setCreateSubtitlesProgressMessage("");
         setIsCreatingSubtitles(false);
-        if (event.message) {
-          setCreateSubtitlesError(event.message);
+        setCreateSubtitlesStartedAt(null);
+        createSubtitlesJobIdRef.current = null;
+        const message = asNonEmptyString(event.message);
+        if (message) {
+          setCreateSubtitlesError(message);
         }
         setCreateSubtitlesJobStream((prev) => {
           prev?.close();
@@ -927,7 +1082,9 @@ const Workbench = () => {
         setCreateSubtitlesProgressPct(0);
         setCreateSubtitlesProgressMessage("");
         setIsCreatingSubtitles(false);
-        setCreateSubtitlesError(event.message ?? "Subtitle generation failed.");
+        setCreateSubtitlesStartedAt(null);
+        createSubtitlesJobIdRef.current = null;
+        setCreateSubtitlesError(asNonEmptyString(event.message) ?? "Subtitle generation failed.");
         setCreateSubtitlesJobStream((prev) => {
           prev?.close();
           return null;
@@ -935,6 +1092,38 @@ const Workbench = () => {
       }
     },
     [resolveChecklistReason, updateCreateChecklist]
+  );
+
+  const attachCreateSubtitlesStream = React.useCallback(
+    (jobId: string, eventsUrl?: string) => {
+      if (!jobId) {
+        return;
+      }
+      if (createSubtitlesJobStream?.jobId === jobId) {
+        return;
+      }
+      createSubtitlesJobStream?.close();
+      const stream = attachToJobEvents(
+        jobId,
+        {
+          onEvent: handleCreateSubtitlesEvent,
+          onError: () => {
+            setCreateSubtitlesJobStream((prev) => {
+              if (prev?.jobId === jobId) {
+                prev.close();
+                return null;
+              }
+              return prev;
+            });
+            setProjectReloadTick((prev) => prev + 1);
+          }
+        },
+        eventsUrl
+      );
+      createSubtitlesJobIdRef.current = jobId;
+      setCreateSubtitlesJobStream(stream);
+    },
+    [createSubtitlesJobStream, handleCreateSubtitlesEvent]
   );
 
   const startCreateSubtitles = React.useCallback(async () => {
@@ -957,6 +1146,7 @@ const Workbench = () => {
     setCreateSubtitlesProgressMessage("Starting...");
     setCreateSubtitlesChecklist(defaultChecklist(buildGenerateChecklist(settings)));
     setIsCreatingSubtitles(true);
+    setCreateSubtitlesStartedAt(new Date().toISOString());
 
     try {
       const job = await createSubtitlesJob(
@@ -969,23 +1159,43 @@ const Workbench = () => {
         {
           onEvent: handleCreateSubtitlesEvent,
           onError: () => {
-            setIsCreatingSubtitles(false);
-            setCreateSubtitlesError("Connection lost while streaming job updates.");
             setCreateSubtitlesJobStream((prev) => {
               prev?.close();
               return null;
             });
+            setCreateSubtitlesProgressMessage("Syncing progress...");
+            setCreateSubtitlesChecklist((prev) =>
+              applyProgressMessageToChecklist(prev, null, "Connection lost. Syncing progress...")
+            );
+            setProjectReloadTick((prev) => prev + 1);
           }
         }
       );
+      createSubtitlesJobIdRef.current = job.jobId;
       setCreateSubtitlesJobStream(job);
     } catch (err) {
+      if (err instanceof JobConflictError) {
+        if (err.conflict.kind === "create_subtitles") {
+          setCreateSubtitlesError(null);
+          setIsCreatingSubtitles(true);
+          createSubtitlesJobIdRef.current = err.conflict.job_id;
+          attachCreateSubtitlesStream(err.conflict.job_id, err.conflict.events_url);
+          setProjectReloadTick((prev) => prev + 1);
+          return;
+        }
+        setIsCreatingSubtitles(false);
+        setCreateSubtitlesStartedAt(null);
+        setCreateSubtitlesError("Another task is already running for this project.");
+        return;
+      }
       setIsCreatingSubtitles(false);
+      setCreateSubtitlesStartedAt(null);
       setCreateSubtitlesError(
         err instanceof Error ? err.message : "Failed to start subtitle generation."
       );
     }
   }, [
+    attachCreateSubtitlesStream,
     buildJobOptions,
     handleCreateSubtitlesEvent,
     isCreatingSubtitles,
@@ -997,31 +1207,59 @@ const Workbench = () => {
   ]);
 
   const cancelCreateSubtitles = React.useCallback(async () => {
-    await createSubtitlesJobStream?.cancel();
-  }, [createSubtitlesJobStream]);
+    const jobId =
+      createSubtitlesJobStream?.jobId ??
+      createSubtitlesJobIdRef.current ??
+      (typeof project?.active_task?.job_id === "string" ? project.active_task.job_id : null);
+    if (!jobId) {
+      return;
+    }
+    if (createSubtitlesJobStream?.jobId === jobId) {
+      await createSubtitlesJobStream.cancel();
+      return;
+    }
+    await cancelJob(jobId);
+  }, [createSubtitlesJobStream, project?.active_task?.job_id]);
 
   const handleExportEvent = React.useCallback(
     (event: JobEvent) => {
       if (event.type === "started") {
-        setExportHeading(event.heading ?? "Exporting video");
+        setExportHeading(asNonEmptyString(event.heading) ?? "Exporting video");
+        setExportStartedAt(asString(event.ts) ?? new Date().toISOString());
         return;
       }
       if (event.type === "checklist") {
-        updateExportChecklist(event.step_id, event.state, resolveChecklistReason(event));
+        const stepId = asString(event.step_id);
+        const state = asString(event.state);
+        if (!stepId || !state) {
+          return;
+        }
+        updateExportChecklist(stepId, state, resolveChecklistReason(event));
         return;
       }
       if (event.type === "progress") {
         if (typeof event.pct === "number") {
           setExportProgressPct(event.pct);
         }
-        if (event.message) {
-          setExportProgressMessage(event.message);
+        const message = asString(event.message);
+        if (message) {
+          setExportProgressMessage(message);
         }
+        setExportChecklist((prev) =>
+          applyProgressMessageToChecklist(
+            prev,
+            typeof event.step_id === "string" ? event.step_id : null,
+            message
+          )
+        );
         return;
       }
       if (event.type === "result") {
-        const payload = event.payload ?? {};
-        if (typeof payload.output_path === "string") {
+        const payload =
+          event.payload && typeof event.payload === "object"
+            ? (event.payload as Record<string, unknown>)
+            : null;
+        if (payload && typeof payload.output_path === "string") {
           setExportOutputPath(payload.output_path);
         }
         return;
@@ -1029,6 +1267,8 @@ const Workbench = () => {
       if (event.type === "completed") {
         setExportProgressPct(100);
         setIsExporting(false);
+        setExportStartedAt(null);
+        exportJobIdRef.current = null;
         setExportJobStream((prev) => {
           prev?.close();
           return null;
@@ -1040,8 +1280,11 @@ const Workbench = () => {
         setExportProgressPct(0);
         setExportProgressMessage("");
         setIsExporting(false);
-        if (event.message) {
-          setExportError(event.message);
+        setExportStartedAt(null);
+        exportJobIdRef.current = null;
+        const message = asNonEmptyString(event.message);
+        if (message) {
+          setExportError(message);
         }
         setExportJobStream((prev) => {
           prev?.close();
@@ -1053,7 +1296,9 @@ const Workbench = () => {
         setExportProgressPct(0);
         setExportProgressMessage("");
         setIsExporting(false);
-        setExportError(event.message ?? "Video export failed.");
+        setExportStartedAt(null);
+        exportJobIdRef.current = null;
+        setExportError(asNonEmptyString(event.message) ?? "Video export failed.");
         setExportJobStream((prev) => {
           prev?.close();
           return null;
@@ -1061,6 +1306,38 @@ const Workbench = () => {
       }
     },
     [resolveChecklistReason, updateExportChecklist]
+  );
+
+  const attachExportStream = React.useCallback(
+    (jobId: string, eventsUrl?: string) => {
+      if (!jobId) {
+        return;
+      }
+      if (exportJobStream?.jobId === jobId) {
+        return;
+      }
+      exportJobStream?.close();
+      const stream = attachToJobEvents(
+        jobId,
+        {
+          onEvent: handleExportEvent,
+          onError: () => {
+            setExportJobStream((prev) => {
+              if (prev?.jobId === jobId) {
+                prev.close();
+                return null;
+              }
+              return prev;
+            });
+            setProjectReloadTick((prev) => prev + 1);
+          }
+        },
+        eventsUrl
+      );
+      exportJobIdRef.current = jobId;
+      setExportJobStream(stream);
+    },
+    [exportJobStream, handleExportEvent]
   );
 
   const startExport = React.useCallback(async () => {
@@ -1099,6 +1376,7 @@ const Workbench = () => {
     setExportProgressMessage("Starting...");
     setExportChecklist(defaultChecklist(buildExportChecklist()));
     setIsExporting(true);
+    setExportStartedAt(new Date().toISOString());
     try {
       const job = await createVideoWithSubtitlesJob(
         {
@@ -1109,21 +1387,41 @@ const Workbench = () => {
         {
           onEvent: handleExportEvent,
           onError: () => {
-            setIsExporting(false);
-            setExportError("Connection lost while streaming job updates.");
             setExportJobStream((prev) => {
               prev?.close();
               return null;
             });
+            setExportProgressMessage("Syncing progress...");
+            setExportChecklist((prev) =>
+              applyProgressMessageToChecklist(prev, null, "Connection lost. Syncing progress...")
+            );
+            setProjectReloadTick((prev) => prev + 1);
           }
         }
       );
+      exportJobIdRef.current = job.jobId;
       setExportJobStream(job);
     } catch (err) {
+      if (err instanceof JobConflictError) {
+        if (err.conflict.kind === "create_video_with_subtitles") {
+          setExportError(null);
+          setIsExporting(true);
+          exportJobIdRef.current = err.conflict.job_id;
+          attachExportStream(err.conflict.job_id, err.conflict.events_url);
+          setProjectReloadTick((prev) => prev + 1);
+          return;
+        }
+        setIsExporting(false);
+        setExportStartedAt(null);
+        setExportError("Subtitles are still being created for this project.");
+        return;
+      }
       setIsExporting(false);
+      setExportStartedAt(null);
       setExportError(err instanceof Error ? err.message : "Failed to start video export.");
     }
   }, [
+    attachExportStream,
     buildProjectStylePayload,
     buildJobOptions,
     handleExportEvent,
@@ -1139,8 +1437,148 @@ const Workbench = () => {
   ]);
 
   const cancelExport = React.useCallback(async () => {
-    await exportJobStream?.cancel();
-  }, [exportJobStream]);
+    const jobId =
+      exportJobStream?.jobId ??
+      exportJobIdRef.current ??
+      (typeof project?.active_task?.job_id === "string" ? project.active_task.job_id : null);
+    if (!jobId) {
+      return;
+    }
+    if (exportJobStream?.jobId === jobId) {
+      await exportJobStream.cancel();
+      return;
+    }
+    await cancelJob(jobId);
+  }, [exportJobStream, project?.active_task?.job_id]);
+
+  React.useEffect(() => {
+    if (!project) {
+      return;
+    }
+    const activeTask = project.active_task;
+    if (
+      activeTask &&
+      typeof activeTask.job_id === "string" &&
+      (activeTask.kind === "create_subtitles" || activeTask.kind === "create_video_with_subtitles")
+    ) {
+      const pct =
+        typeof activeTask.pct === "number" ? Math.max(0, Math.min(100, activeTask.pct)) : 0;
+      const message = typeof activeTask.message === "string" ? activeTask.message : "";
+      const startedAt =
+        typeof activeTask.started_at === "string"
+          ? activeTask.started_at
+          : typeof activeTask.updated_at === "string"
+            ? activeTask.updated_at
+            : null;
+      const checklist = buildChecklistFromActiveTask(activeTask);
+      if (activeTask.kind === "create_subtitles") {
+        setIsCreatingSubtitles(true);
+        setCreateSubtitlesError(null);
+        setIsExporting(false);
+        setExportStartedAt(null);
+        setExportError(null);
+        exportJobIdRef.current = null;
+        setExportJobStream((prev) => {
+          prev?.close();
+          return null;
+        });
+        setCreateSubtitlesHeading(activeTask.heading ?? "Creating subtitles");
+        setCreateSubtitlesProgressPct(pct);
+        setCreateSubtitlesProgressMessage(message);
+        if (checklist.length > 0) {
+          setCreateSubtitlesChecklist(checklist);
+        }
+        setCreateSubtitlesStartedAt(startedAt);
+        createSubtitlesJobIdRef.current = activeTask.job_id;
+        if (!createSubtitlesJobStream || createSubtitlesJobStream.jobId !== activeTask.job_id) {
+          attachCreateSubtitlesStream(activeTask.job_id);
+        }
+      } else if (activeTask.kind === "create_video_with_subtitles") {
+        setIsCreatingSubtitles(false);
+        setCreateSubtitlesStartedAt(null);
+        setCreateSubtitlesError(null);
+        createSubtitlesJobIdRef.current = null;
+        setCreateSubtitlesJobStream((prev) => {
+          prev?.close();
+          return null;
+        });
+        setIsExporting(true);
+        setExportError(null);
+        setExportHeading(activeTask.heading ?? "Exporting video");
+        setExportProgressPct(pct);
+        setExportProgressMessage(message);
+        if (checklist.length > 0) {
+          setExportChecklist(checklist);
+        }
+        setExportStartedAt(startedAt);
+        exportJobIdRef.current = activeTask.job_id;
+        if (!exportJobStream || exportJobStream.jobId !== activeTask.job_id) {
+          attachExportStream(activeTask.job_id);
+        }
+      }
+      return;
+    }
+
+    const taskNotice = project.task_notice;
+    if (!activeTask && createSubtitlesJobIdRef.current && isCreatingSubtitles && !createSubtitlesJobStream) {
+      const finishedJobId = createSubtitlesJobIdRef.current;
+      createSubtitlesJobIdRef.current = null;
+      setIsCreatingSubtitles(false);
+      setCreateSubtitlesStartedAt(null);
+      setCreateSubtitlesProgressMessage("");
+      if (taskNotice?.job_id === finishedJobId && taskNotice.status !== "completed") {
+        setCreateSubtitlesError(taskNotice.message);
+        setCreateSubtitlesProgressPct(0);
+      } else {
+        setCreateSubtitlesProgressPct(100);
+        setSubtitlesReloadTick((prev) => prev + 1);
+      }
+    }
+    if (!activeTask && exportJobIdRef.current && isExporting && !exportJobStream) {
+      const finishedJobId = exportJobIdRef.current;
+      exportJobIdRef.current = null;
+      setIsExporting(false);
+      setExportStartedAt(null);
+      setExportProgressMessage("");
+      if (taskNotice?.job_id === finishedJobId && taskNotice.status !== "completed") {
+        setExportError(taskNotice.message);
+        setExportProgressPct(0);
+      } else {
+        setExportProgressPct(100);
+      }
+    }
+  }, [
+    attachCreateSubtitlesStream,
+    attachExportStream,
+    createSubtitlesJobStream,
+    exportJobStream,
+    isCreatingSubtitles,
+    isExporting,
+    project
+  ]);
+
+  React.useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+    const shouldPollCreateSync = isCreatingSubtitles && !createSubtitlesJobStream;
+    const shouldPollExportSync = isExporting && !exportJobStream;
+    if (!shouldPollCreateSync && !shouldPollExportSync) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setProjectReloadTick((prev) => prev + 1);
+    }, ACTIVE_TASK_SYNC_POLL_MS);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [
+    createSubtitlesJobStream,
+    exportJobStream,
+    isCreatingSubtitles,
+    isExporting,
+    projectId
+  ]);
 
   React.useEffect(() => {
     if (!pendingAutoStartSubtitles) {
@@ -2046,12 +2484,21 @@ const Workbench = () => {
               <>
                 <p className="text-lg font-semibold text-foreground">{createSubtitlesHeading}</p>
                 {createSubtitlesChecklist.length > 0 && (
-                  <Checklist items={createSubtitlesChecklist} className="text-left" />
+                  <Checklist
+                    items={createSubtitlesChecklist}
+                    className="text-left"
+                    data-testid="workbench-create-checklist"
+                  />
                 )}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>{Math.round(createSubtitlesProgressPct)}%</span>
-                    <span className="truncate">{createSubtitlesProgressMessage}</span>
+                    <span
+                      title={createSubtitlesProgressMessage || undefined}
+                      data-testid="workbench-create-elapsed"
+                    >
+                      {createSubtitlesElapsedText}
+                    </span>
                   </div>
                   <Progress value={createSubtitlesProgressPct} />
                 </div>
@@ -2384,12 +2831,21 @@ const Workbench = () => {
                 <div className="space-y-3">
                   <p className="text-sm font-semibold text-foreground">{exportHeading}</p>
                   {exportChecklist.length > 0 && (
-                    <Checklist items={exportChecklist} className="text-left" />
+                    <Checklist
+                      items={exportChecklist}
+                      className="text-left"
+                      data-testid="workbench-export-checklist"
+                    />
                   )}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>{Math.round(exportProgressPct)}%</span>
-                      <span className="truncate">{exportProgressMessage}</span>
+                      <span
+                        title={exportProgressMessage || undefined}
+                        data-testid="workbench-export-elapsed"
+                      >
+                        {exportElapsedText}
+                      </span>
                     </div>
                     <Progress value={exportProgressPct} />
                   </div>

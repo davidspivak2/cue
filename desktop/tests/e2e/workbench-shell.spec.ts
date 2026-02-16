@@ -94,7 +94,9 @@ const buildManifest = (project) => ({
     style_path: "style.json"
   },
   latest_export: project.latest_export ?? null,
-  style: project.style ?? DEFAULT_PROJECT_STYLE
+  style: project.style ?? DEFAULT_PROJECT_STYLE,
+  active_task: project.active_task ?? null,
+  task_notice: project.task_notice ?? null
 });
 
 const DEFAULT_SRT = "1\n00:00:00,000 --> 00:00:04,000\nOriginal subtitle line\n";
@@ -104,6 +106,8 @@ const LONG_HEBREW_SRT =
 
 const getProjectIdFromUrl = (url) => url.split("/projects/")[1]?.split("/")[0] ?? "";
 const getJobIdFromEventsUrl = (url) => url.split("/jobs/")[1]?.split("/")[0] ?? "";
+const toSseBody = (events) =>
+  events.map((event) => `event: message\ndata: ${JSON.stringify(event)}\n\n`).join("");
 
 const buildSettings = () => ({
   save_policy: "same_folder",
@@ -157,6 +161,7 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
     });
   }
   const eventsByJob = new Map();
+  const projectGetCounts = new Map();
 
   await page.route("**://127.0.0.1:8765/settings", async (route) => {
     const request = route.request();
@@ -332,6 +337,7 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
       await route.continue();
       return;
     }
+    projectGetCounts.set(projectId, (projectGetCounts.get(projectId) ?? 0) + 1);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -434,7 +440,16 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
     getPutCallCount: () => putCallCount,
     getSubtitlePutCallCount: () => subtitlePutCallCount,
     getLastPutPayload: () => lastPutPayload,
-    getLastJobPayload: () => lastJobPayload
+    getLastJobPayload: () => lastJobPayload,
+    getProjectFetchCount: (projectId) => projectGetCounts.get(projectId) ?? 0,
+    setProjectFields: (projectId, patch) => {
+      projects = projects.map((entry) =>
+        entry.project_id === projectId ? { ...entry, ...patch } : entry
+      );
+    },
+    setJobEvents: (jobId, events) => {
+      eventsByJob.set(jobId, events);
+    }
   };
 };
 
@@ -660,6 +675,237 @@ test("workbench exports video from the bottom action bar", async ({ page }) => {
   await expect(page.getByTestId("workbench-play-export-video")).toBeVisible();
   await expect(page.getByTestId("workbench-open-export-folder")).toBeVisible();
   expect(api.getLastJobPayload()?.project_id).toBe("project-1");
+});
+
+test("workbench resumes create progress with inline checklist detail and elapsed header", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const startedAt = new Date(Date.now() - 15_000).toISOString();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-resume-create",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Warmup",
+    pct: 12,
+    step_id: "load_model",
+    started_at: startedAt,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "load_model",
+        label: "Loading AI model",
+        state: "active",
+        detail: "Initializing"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects, null);
+  api.setJobEvents(
+    "job-resume-create",
+    toSseBody([
+      { job_id: "job-resume-create", ts, type: "started", heading: "Creating subtitles" },
+      {
+        job_id: "job-resume-create",
+        ts,
+        type: "progress",
+        step_id: "load_model",
+        pct: 19,
+        message: "Warming up engine"
+      }
+    ])
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  await expect(page.getByTestId("workbench-create-elapsed")).toContainText("Elapsed");
+  await expect(page.getByTestId("workbench-create-elapsed")).not.toContainText("Warming up engine");
+  const checklistRow = page.locator("[data-testid='workbench-create-checklist'] p").first();
+  await expect(checklistRow).toContainText(/Loading AI model\s*•\s*Warming up engine/);
+});
+
+test("workbench falls back to project polling when resumed create stream attach fails", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const startedAt = new Date(Date.now() - 9_000).toISOString();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-resume-fail",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Connecting",
+    pct: 5,
+    step_id: "load_model",
+    started_at: startedAt,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "load_model",
+        label: "Loading AI model",
+        state: "active",
+        detail: "Connecting stream"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects, null);
+  let resumeAttachRequested = false;
+  await page.route("**://127.0.0.1:8765/jobs/job-resume-fail/events", async (route) => {
+    resumeAttachRequested = true;
+    api.setProjectFields("project-1", {
+      active_task: null,
+      task_notice: {
+        notice_id: "notice-resume-fail",
+        project_id: "project-1",
+        job_id: "job-resume-fail",
+        kind: "create_subtitles",
+        status: "error",
+        message: "Runner disconnected while resuming.",
+        created_at: new Date().toISOString(),
+        finished_at: new Date().toISOString()
+      }
+    });
+    await route.fulfill({ status: 500, body: "stream unavailable" });
+  });
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect.poll(() => resumeAttachRequested).toBe(true);
+  await expect.poll(() => api.getProjectFetchCount("project-1")).toBeGreaterThan(1);
+  await expect(page.getByText("Runner disconnected while resuming.")).toBeVisible();
+  await expect(page.getByTestId("workbench-create-subtitles")).toBeVisible();
+});
+
+test("workbench handles create conflict by attaching existing job and keeps cancel available", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects, null);
+  const ts = new Date().toISOString();
+  api.setJobEvents(
+    "job-conflict-1",
+    toSseBody([
+      { job_id: "job-conflict-1", ts, type: "started", heading: "Creating subtitles" },
+      { job_id: "job-conflict-1", ts, type: "checklist", step_id: "load_model", state: "start" },
+      {
+        job_id: "job-conflict-1",
+        ts,
+        type: "progress",
+        step_id: "load_model",
+        pct: 18,
+        message: "Attaching to existing run"
+      }
+    ])
+  );
+  let conflictIssued = false;
+  await page.route("**://127.0.0.1:8765/jobs", async (route) => {
+    const request = route.request();
+    if (request.method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    const payload = request.postDataJSON() as { kind?: string; project_id?: string };
+    if (!conflictIssued && payload.kind === "create_subtitles" && payload.project_id === "project-1") {
+      conflictIssued = true;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: {
+            error: "project_job_conflict",
+            project_id: "project-1",
+            job_id: "job-conflict-1",
+            kind: "create_subtitles",
+            status: "running",
+            events_url: "http://127.0.0.1:8765/jobs/job-conflict-1/events"
+          }
+        })
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await page.getByTestId("workbench-create-subtitles").click();
+
+  await expect.poll(() => conflictIssued).toBe(true);
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  await expect(page.getByText("project_job_conflict")).toHaveCount(0);
+
+  const cancelRequest = page.waitForRequest(
+    (request) => request.url().includes("/jobs/job-conflict-1/cancel") && request.method() === "POST"
+  );
+  await page.getByTestId("workbench-cancel-create-subtitles").click();
+  await cancelRequest;
+});
+
+test("workbench keeps export cancel available after resume attach", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0].status = "ready";
+  const startedAt = new Date(Date.now() - 11_000).toISOString();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-resume-export",
+    kind: "create_video_with_subtitles",
+    status: "running",
+    heading: "Exporting video",
+    message: "Muxing frames",
+    pct: 61,
+    step_id: "save_video",
+    started_at: startedAt,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "save_video",
+        label: "Saving video",
+        state: "active",
+        detail: "Writing final file"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects);
+  api.setJobEvents(
+    "job-resume-export",
+    toSseBody([
+      { job_id: "job-resume-export", ts, type: "started", heading: "Exporting video" },
+      {
+        job_id: "job-resume-export",
+        ts,
+        type: "progress",
+        step_id: "save_video",
+        pct: 63,
+        message: "Muxing frames"
+      }
+    ])
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-cancel-export")).toBeVisible();
+  await expect(page.getByTestId("workbench-export-elapsed")).toContainText("Elapsed");
+  await expect(page.getByTestId("workbench-export-elapsed")).not.toContainText("Muxing frames");
+  const cancelRequest = page.waitForRequest(
+    (request) => request.url().includes("/jobs/job-resume-export/cancel") && request.method() === "POST"
+  );
+  await page.getByTestId("workbench-cancel-export").click();
+  await cancelRequest;
 });
 
 test("new project auto-starts subtitle creation in Workbench", async ({ page }) => {

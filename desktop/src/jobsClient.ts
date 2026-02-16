@@ -2,6 +2,14 @@ const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const JOBS_URL = `${BACKEND_BASE_URL}/jobs`;
 
 export type JobKind = "create_subtitles" | "create_video_with_subtitles";
+export type JobConflictDetail = {
+  error: "project_job_conflict";
+  project_id: string;
+  job_id: string;
+  kind: string;
+  status?: string;
+  events_url?: string;
+};
 
 export type ChecklistStepState = "start" | "done" | "skipped" | "failed";
 
@@ -109,6 +117,16 @@ export type JobStartResult = JobEventStream & {
   status: string;
 };
 
+export class JobConflictError extends Error {
+  readonly conflict: JobConflictDetail;
+
+  constructor(conflict: JobConflictDetail) {
+    super("project_job_conflict");
+    this.name = "JobConflictError";
+    this.conflict = conflict;
+  }
+}
+
 export type CreateSubtitlesJobParams = {
   inputPath: string;
   outputDir: string;
@@ -151,6 +169,42 @@ const ensureOk = async (response: Response) => {
   throw new Error(text || `Request failed: ${response.status}`);
 };
 
+const parseJobConflict = (raw: string): JobConflictDetail | null => {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const detail =
+      parsed && typeof parsed === "object" && parsed.detail && typeof parsed.detail === "object"
+        ? (parsed.detail as Record<string, unknown>)
+        : parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>)
+          : null;
+    if (!detail) {
+      return null;
+    }
+    if (
+      detail.error === "project_job_conflict" &&
+      typeof detail.project_id === "string" &&
+      typeof detail.job_id === "string" &&
+      typeof detail.kind === "string"
+    ) {
+      return {
+        error: "project_job_conflict",
+        project_id: detail.project_id,
+        job_id: detail.job_id,
+        kind: detail.kind,
+        status: typeof detail.status === "string" ? detail.status : undefined,
+        events_url: typeof detail.events_url === "string" ? detail.events_url : undefined
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
 const parseJobEvent = (raw: string): JobEvent | null => {
   let data: unknown;
   try {
@@ -174,6 +228,14 @@ const createJob = async (payload: JobRequest): Promise<JobCreateResponse> => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
+  if (response.status === 409) {
+    const text = await response.text();
+    const conflict = parseJobConflict(text);
+    if (conflict) {
+      throw new JobConflictError(conflict);
+    }
+    throw new Error(text || "Job conflict.");
+  }
   await ensureOk(response);
   return (await response.json()) as JobCreateResponse;
 };
@@ -218,6 +280,15 @@ const streamJobEvents = (
     close,
     cancel: () => cancelJob(jobId)
   };
+};
+
+export const attachToJobEvents = (
+  jobId: string,
+  handlers: JobEventHandlers = {},
+  eventsUrl?: string
+): JobEventStream => {
+  const resolvedEventsUrl = eventsUrl ?? `${JOBS_URL}/${encodeURIComponent(jobId)}/events`;
+  return streamJobEvents(jobId, resolvedEventsUrl, handlers);
 };
 
 export const createSubtitlesJob = async (

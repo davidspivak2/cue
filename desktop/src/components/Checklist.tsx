@@ -14,8 +14,7 @@ export type ChecklistItem = {
 
 export type ChecklistProps = {
   items: ChecklistItem[];
-  className?: string;
-};
+} & React.HTMLAttributes<HTMLDivElement>;
 
 const stateIconMap: Record<ChecklistState, React.ElementType> = {
   pending: Circle,
@@ -33,8 +32,8 @@ const stateColorMap: Record<ChecklistState, string> = {
   failed: "text-destructive"
 };
 
-const Checklist = ({ items, className }: ChecklistProps) => (
-  <div className={cn("flex flex-col gap-2", className)}>
+const Checklist = ({ items, className, ...props }: ChecklistProps) => (
+  <div className={cn("flex flex-col gap-2", className)} {...props}>
     {items.map((item) => {
       const state = item.state ?? "pending";
       const Icon = stateIconMap[state];
@@ -48,9 +47,18 @@ const Checklist = ({ items, className }: ChecklistProps) => (
               stateColorMap[state]
             )}
           />
-          <div className="flex-1">
-            <p className="text-sm text-foreground">{item.label}</p>
-            {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm leading-5 text-foreground">
+              <span>{item.label}</span>
+              {detail && (
+                <>
+                  <span className="mx-1 text-muted-foreground" aria-hidden="true">
+                    &bull;
+                  </span>
+                  <span className="text-xs text-muted-foreground">{detail}</span>
+                </>
+              )}
+            </p>
           </div>
         </div>
       );
