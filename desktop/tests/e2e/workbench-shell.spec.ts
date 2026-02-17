@@ -607,6 +607,30 @@ test("workbench shell narrow overlays", async ({ page }) => {
   await expect(page.getByTestId("workbench-right-drawer")).toHaveCount(0);
 });
 
+test("navigation without sidebar: Projects to Editor to Settings dialog to Back", async ({
+  page
+}) => {
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await expect(page.getByTestId("workbench")).toBeVisible();
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByTestId("settings-content")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByTestId("workbench")).toBeVisible();
+
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});
+
 test("workbench shows empty state before subtitles are created", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();

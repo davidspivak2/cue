@@ -6,9 +6,11 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useNavigate } from "react-router-dom";
 
 import DropZone from "@/components/DropZone";
+import PageHeader from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { useSettings } from "@/contexts/SettingsContext";
 import {
   Dialog,
   DialogClose,
@@ -193,6 +195,7 @@ const resolveTaskDetail = (project: ProjectSummary) => {
 
 const ProjectHub = () => {
   const navigate = useNavigate();
+  const { openSettings } = useSettings();
   const { closeTab, openOrActivateTab } = useWorkbenchTabs();
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -603,16 +606,17 @@ const ProjectHub = () => {
       onDragLeave={enableRootDrop ? handleDragLeave : undefined}
       onDrop={enableRootDrop ? handleDrop : undefined}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Projects</h1>
-        </div>
-        {!showEmptyState && (
-          <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
-            {NEW_PROJECT_CTA}
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title={<h1 className="text-2xl font-semibold text-foreground">Projects</h1>}
+        onOpenSettings={openSettings}
+        right={
+          !showEmptyState ? (
+            <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
+              {NEW_PROJECT_CTA}
+            </Button>
+          ) : undefined
+        }
+      />
 
       <input
         ref={inputRef}
