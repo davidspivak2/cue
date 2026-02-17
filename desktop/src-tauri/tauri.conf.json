@@ -22,7 +22,8 @@
         "label": "main",
         "title": "Cue",
         "width": 1100,
-        "height": 700
+        "height": 700,
+        "decorations": false
       }
     ]
   },

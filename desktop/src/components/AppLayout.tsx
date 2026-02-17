@@ -1,7 +1,9 @@
 import * as React from "react";
 import { X } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { isTauri } from "@tauri-apps/api/core";
 
+import TitleBar, { TITLE_BAR_HEIGHT_PX } from "@/components/TitleBar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -76,7 +78,7 @@ const AppLayout = () => {
           }
           seenNoticeIdsRef.current.add(notice.notice_id);
           const title = notice.status === "cancelled" ? "Task cancelled" : "Task failed";
-          const projectTitle = project.title || "Project";
+          const projectTitle = project.title || "Video";
           pushToast(projectTitle, `${title}: ${notice.message}`);
         }
       } catch {
@@ -99,7 +101,15 @@ const AppLayout = () => {
   return (
     <WorkbenchTabsProvider>
       <SettingsProvider openSettings={openSettings}>
-        <div className="min-h-screen bg-background text-foreground">
+        <div
+          className="min-h-screen bg-background text-foreground"
+          style={
+            isTauri()
+              ? ({ paddingTop: TITLE_BAR_HEIGHT_PX } as React.CSSProperties)
+              : undefined
+          }
+        >
+          <TitleBar />
           <main className="flex-1 px-6 py-6">
             <Outlet />
           </main>

@@ -5,7 +5,6 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useNavigate } from "react-router-dom";
 
-import DropZone from "@/components/DropZone";
 import PageHeader from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,7 +56,11 @@ const STATUS_LABELS: Record<string, string> = {
 
 const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v"]);
 const MAX_DURATION_DIFF_SECONDS = 3;
-const NEW_PROJECT_CTA = "New project";
+const HAS_HAD_VIDEOS_KEY = "cue_has_had_videos";
+const ADD_VIDEO_BUTTON = "Add video";
+const CHOOSE_VIDEO_CTA = "Choose video";
+const EMPTY_BODY =
+  "Choose a video or drop it here to generate subtitles using AI speech recognition.";
 const ACTIVE_TASK_POLL_MS = 2500;
 const IDLE_TASK_POLL_MS = 10000;
 
@@ -95,7 +98,7 @@ const resolveProjectTitle = (project: ProjectSummary) => {
   if (project.video_path) {
     return getFileName(project.video_path);
   }
-  return "Untitled project";
+  return "Untitled video";
 };
 
 const getFileExtension = (value: string) => {
@@ -235,6 +238,13 @@ const ProjectHub = () => {
       setIsBackendStarting(false);
       const data = await fetchProjects();
       setProjects(data);
+      if (data.length > 0) {
+        try {
+          localStorage.setItem(HAS_HAD_VIDEOS_KEY, "true");
+        } catch {
+          /* ignore */
+        }
+      }
     } catch (err) {
       setBanner({
         type: "error",
@@ -243,7 +253,7 @@ const ProjectHub = () => {
             ? "Cue is still starting in the background. Please wait a moment and try again."
             : err instanceof Error
               ? err.message
-              : "Failed to load projects."
+              : "Failed to load videos."
       });
     } finally {
       setIsBackendStarting(false);
@@ -268,6 +278,13 @@ const ProjectHub = () => {
         const data = await fetchProjects();
         if (!cancelled) {
           setProjects(data);
+          if (data.length > 0) {
+            try {
+              localStorage.setItem(HAS_HAD_VIDEOS_KEY, "true");
+            } catch {
+              /* ignore */
+            }
+          }
         }
       } catch {
         // Best-effort background polling only.
@@ -298,7 +315,7 @@ const ProjectHub = () => {
           state: { autoStartSubtitles: true }
         });
       } catch (err) {
-        showBanner("error", err instanceof Error ? err.message : "Failed to create project.");
+        showBanner("error", err instanceof Error ? err.message : "Failed to create video.");
       } finally {
         setIsCreating(false);
       }
@@ -575,16 +592,19 @@ const ProjectHub = () => {
         cancelledCount > 0
           ? ` Running job cancelled first${cancelledCount > 1 ? " (multiple jobs)." : "."}`
           : "";
-      showBanner("info", `Project deleted.${cancelledMessage}`);
+      showBanner("info", `Video deleted.${cancelledMessage}`);
     } catch (err) {
-      showBanner("error", err instanceof Error ? err.message : "Failed to delete project.");
+      showBanner("error", err instanceof Error ? err.message : "Failed to delete video.");
     } finally {
       setDeletingProjectId(null);
     }
   }, [closeTab, deleteConfirmProject, isBusyOperation, showBanner]);
 
   const showEmptyState = !isLoading && projects.length === 0;
-  const enableRootDrop = !isTauriEnv && !showEmptyState && !isBusyOperation;
+  const hasHadVideos =
+    typeof localStorage !== "undefined" && localStorage.getItem(HAS_HAD_VIDEOS_KEY) === "true";
+  const emptyHeadline = hasHadVideos ? "No videos yet" : "Create subtitles for your first video";
+  const enableRootDrop = !isTauriEnv && !isBusyOperation;
 
   const dismissTaskNotice = (noticeId: string) => {
     setDismissedNoticeIds((prev) => {
@@ -606,17 +626,18 @@ const ProjectHub = () => {
       onDragLeave={enableRootDrop ? handleDragLeave : undefined}
       onDrop={enableRootDrop ? handleDrop : undefined}
     >
-      <PageHeader
-        title={<h1 className="text-2xl font-semibold text-foreground">Projects</h1>}
-        onOpenSettings={openSettings}
-        right={
-          !showEmptyState ? (
+      {!showEmptyState && (
+        <PageHeader
+          title={<h1 className="text-2xl font-semibold text-foreground">Videos</h1>}
+          onOpenSettings={openSettings}
+          showSettings={!isTauriEnv}
+          right={
             <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
-              {NEW_PROJECT_CTA}
+              {ADD_VIDEO_BUTTON}
             </Button>
-          ) : undefined
-        }
-      />
+          }
+        />
+      )}
 
       <input
         ref={inputRef}
@@ -663,36 +684,38 @@ const ProjectHub = () => {
 
       {isLoading && (
         <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
-          {isBackendStarting ? "Starting the engine..." : "Loading projects..."}
+          {isBackendStarting ? "Starting the engine..." : "Loading videos..."}
         </div>
       )}
 
-      {showEmptyState &&
-        (isTauriEnv ? (
-          <div
-            className={cn(
-              "flex flex-col items-center gap-3 rounded-lg border-2 border-dashed px-6 py-12 text-center",
-              isDragging ? "border-primary bg-accent/10" : "border-border bg-card"
-            )}
-          >
-            <p className="text-lg font-semibold text-foreground">No projects yet</p>
-            <p className="text-sm text-muted-foreground">
-              Drop a video anywhere on this screen or use &quot;{NEW_PROJECT_CTA}&quot;.
-            </p>
-            <Button
-              onClick={openFileDialog}
-              disabled={isCreating || isBusyOperation}
-            >
-              {NEW_PROJECT_CTA}
-            </Button>
-          </div>
-        ) : (
-          <DropZone
-            onFileSelected={handleFileSelected}
+      {showEmptyState && (
+        <div
+          className={cn(
+            "flex flex-col items-center gap-3 rounded-lg border-2 border-dashed px-6 py-12 text-center transition",
+            isTauriEnv
+              ? isDragging
+                ? "border-primary bg-accent/10"
+                : "border-border bg-card"
+              : isDragging
+                ? "border-primary bg-accent/10"
+                : "border-border bg-card hover:border-primary/60"
+          )}
+          onDragEnter={enableRootDrop ? handleDragEnter : undefined}
+          onDragOver={enableRootDrop ? handleDragOver : undefined}
+          onDragLeave={enableRootDrop ? handleDragLeave : undefined}
+          onDrop={enableRootDrop ? handleDrop : undefined}
+        >
+          <p className="text-lg font-semibold text-foreground">{emptyHeadline}</p>
+          <p className="text-sm text-muted-foreground">{EMPTY_BODY}</p>
+          <Button
+            onClick={openFileDialog}
             disabled={isCreating || isBusyOperation}
-            className="rounded-lg"
-          />
-        ))}
+            data-testid="empty-state-choose-video"
+          >
+            {CHOOSE_VIDEO_CTA}
+          </Button>
+        </div>
+      )}
 
       {!isLoading && projects.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -781,7 +804,7 @@ const ProjectHub = () => {
                 <div className="mt-3 space-y-1">
                   <div className="flex items-center gap-2">
                     <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                      {project.title || "Untitled project"}
+                      {project.title || "Untitled video"}
                     </p>
                   </div>
                   {durationLabel && (
@@ -846,15 +869,15 @@ const ProjectHub = () => {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete project?</DialogTitle>
+            <DialogTitle>Delete video?</DialogTitle>
             <DialogDescription>
-              This removes the project and its saved subtitle/style/export data from Cue. Your
+              This removes the video and its saved subtitle/style/export data from Cue. Your
               original video file stays on your computer.
             </DialogDescription>
           </DialogHeader>
           {deleteConfirmProject ? (
             <p className="text-sm text-muted-foreground">
-              Project: <span className="font-medium text-foreground">{resolveProjectTitle(deleteConfirmProject)}</span>
+              Video: <span className="font-medium text-foreground">{resolveProjectTitle(deleteConfirmProject)}</span>
             </p>
           ) : null}
           <DialogFooter>
@@ -872,7 +895,7 @@ const ProjectHub = () => {
               disabled={isBusyOperation}
               data-testid="confirm-delete-project"
             >
-              {isDeleting ? "Deleting..." : "Delete project"}
+              {isDeleting ? "Deleting..." : "Delete video"}
             </Button>
           </DialogFooter>
         </DialogContent>
