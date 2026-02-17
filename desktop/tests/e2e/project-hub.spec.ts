@@ -108,7 +108,7 @@ test("project hub card interactions", async ({ page }) => {
       const payload = request.postDataJSON();
       createdCount += 1;
       const path = payload?.video_path || `C:\\fake\\video_${createdCount}.mp4`;
-      const title = String(path).split(/[/\\]/).pop() || "Untitled project";
+      const title = String(path).split(/[/\\]/).pop() || "Untitled video";
       const now = "2026-02-09T00:00:00Z";
       const newProject = {
         project_id: `project-${createdCount}`,
@@ -142,7 +142,7 @@ test("project hub card interactions", async ({ page }) => {
     const url = request.url();
     const projectId = url.split("/projects/")[1]?.split("/")[0];
     const relinkPath = payload?.video_path || "C:\\fake\\relinked.mp4";
-    const title = String(relinkPath).split(/[/\\]/).pop() || "Relinked project";
+    const title = String(relinkPath).split(/[/\\]/).pop() || "Relinked video";
     projects = projects.map((project) =>
       project.project_id === projectId
         ? {
@@ -247,8 +247,8 @@ test("project hub card interactions", async ({ page }) => {
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New project" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add video" })).toBeVisible();
   await expect(page.getByText("another.mp4")).toBeVisible();
   await expect(page.getByText("good.mp4")).toBeVisible();
 
@@ -256,10 +256,10 @@ test("project hub card interactions", async ({ page }) => {
   await page.waitForURL("**/workbench/project-1");
   await expect(page.getByTestId("workbench")).toBeVisible();
   await page.getByRole("button", { name: "Back" }).click();
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
 
   await page.getByTestId("project-card-delete-project-3").click();
-  await expect(page.getByRole("heading", { name: "Delete project?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Delete video?" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByText("another.mp4")).toBeVisible();
 
@@ -267,7 +267,7 @@ test("project hub card interactions", async ({ page }) => {
     (request) => request.url().includes("/projects/project-3") && request.method() === "DELETE"
   );
   await page.getByTestId("project-card-delete-project-3").click();
-  await page.getByRole("button", { name: "Delete project" }).click();
+  await page.getByRole("button", { name: "Delete video" }).click();
   await deleteRequest;
   await expect(page.getByText("another.mp4")).toHaveCount(0);
 
@@ -277,7 +277,7 @@ test("project hub card interactions", async ({ page }) => {
   await expect(page.getByTestId("workbench-tabs")).toBeVisible();
   await expect(page.getByRole("tab", { name: "good.mp4" })).toBeVisible();
   await page.getByRole("button", { name: "Back" }).click();
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
 
   await page.getByText("missing.mp4").click();
   await expect(page.getByRole("heading", { name: "Video file not found" })).toBeVisible();
@@ -489,7 +489,7 @@ test("project hub shows active task cards, inline notices, and background toasts
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await expect(page.getByTestId("project-card-active-task-project-1")).toBeVisible();
   await expect(page.getByTestId("project-card-active-task-project-1")).toContainText(
     "Creating subtitles"
@@ -504,7 +504,7 @@ test("project hub shows active task cards, inline notices, and background toasts
 
   await expect(page.getByText("Task failed: Background subtitle run failed.")).toBeVisible();
   await page.getByRole("button", { name: "Back" }).click();
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await expect(page.getByTestId("project-card-task-notice-project-1")).toContainText(
     "Background subtitle run failed."
   );

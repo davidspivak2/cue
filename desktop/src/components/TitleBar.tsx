@@ -1,0 +1,170 @@
+import * as React from "react";
+import { Maximize2, Minus, Settings, Square, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isTauri } from "@tauri-apps/api/core";
+
+import { useSettings } from "@/contexts/SettingsContext";
+import { cn } from "@/lib/utils";
+
+const TITLE_BAR_HEIGHT = 36;
+
+export const TITLE_BAR_HEIGHT_PX = `${TITLE_BAR_HEIGHT}px`;
+
+/** Simple Cue app icon (stylized C). */
+function CueIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden
+    >
+      <path
+        d="M18 6.5A7.5 7.5 0 0 0 6 12a7.5 7.5 0 0 0 12 5.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Custom window title bar shown only in Tauri (replaces native decorations).
+ * Left: Cue logo. Right: Close, Maximize/Restore, Minimize, Settings.
+ */
+const TitleBar = () => {
+  const { openSettings } = useSettings();
+  const [maximized, setMaximized] = React.useState(false);
+  const appWindow = React.useMemo(
+    () => (typeof window !== "undefined" && isTauri() ? getCurrentWindow() : null),
+    []
+  );
+
+  React.useEffect(() => {
+    if (!appWindow) return;
+    const check = async () => {
+      try {
+        setMaximized(await appWindow.isMaximized());
+      } catch {
+        // ignore
+      }
+    };
+    void check();
+    const unlistenPromise = appWindow.onFocusChanged(() => void check());
+    return () => {
+      unlistenPromise.then((u) => u()).catch(() => {});
+    };
+  }, [appWindow]);
+
+  const handleMinimize = React.useCallback(() => {
+    appWindow?.minimize();
+  }, [appWindow]);
+
+  const handleMaximize = React.useCallback(async () => {
+    await appWindow?.toggleMaximize();
+    try {
+      if (appWindow) setMaximized(await appWindow.isMaximized());
+    } catch {
+      setMaximized((prev) => !prev);
+    }
+  }, [appWindow]);
+
+  const handleClose = React.useCallback(() => {
+    appWindow?.close();
+  }, [appWindow]);
+
+  if (!isTauri()) {
+    return null;
+  }
+
+  return (
+    <header
+      className={cn(
+        "fixed left-0 right-0 top-0 z-[100] flex h-[var(--title-bar-height)] items-center justify-between",
+        "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      )}
+      style={{ "--title-bar-height": TITLE_BAR_HEIGHT_PX } as React.CSSProperties}
+    >
+      {/* Draggable region with logo — double-click to maximize/restore */}
+      <div
+        className="flex flex-1 cursor-default select-none items-center gap-2 pl-3"
+        data-tauri-drag-region
+        onDoubleClick={handleMaximize}
+      >
+        <CueIcon className="h-5 w-5 shrink-0 text-primary" />
+        <span className="text-lg font-bold tracking-tight text-primary">Cue</span>
+      </div>
+
+      {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
+      <div className="flex items-stretch">
+        <TitleBarButton
+          onClick={openSettings}
+          title="Settings"
+          aria-label="Settings"
+        >
+          <Settings className="h-4 w-4" />
+        </TitleBarButton>
+        <TitleBarButton
+          onClick={handleMinimize}
+          title="Minimize"
+          aria-label="Minimize"
+        >
+          <Minus className="h-4 w-4" />
+        </TitleBarButton>
+        <TitleBarButton
+          onClick={handleMaximize}
+          title={maximized ? "Restore" : "Maximize"}
+          aria-label={maximized ? "Restore" : "Maximize"}
+        >
+          {maximized ? (
+            <Maximize2 className="h-4 w-4" />
+          ) : (
+            <Square className="h-3.5 w-4" strokeWidth={2} />
+          )}
+        </TitleBarButton>
+        <TitleBarButton
+          onClick={handleClose}
+          title="Close"
+          className="hover:bg-destructive hover:text-destructive-foreground"
+          aria-label="Close"
+        >
+          <X className="h-4 w-4" />
+        </TitleBarButton>
+      </div>
+    </header>
+  );
+};
+
+function TitleBarButton({
+  children,
+  onClick,
+  title,
+  className,
+  "aria-label": ariaLabel,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  className?: string;
+  "aria-label": string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={ariaLabel}
+      className={cn(
+        "flex h-full w-10 items-center justify-center text-foreground transition-colors",
+        "hover:bg-muted/80 active:bg-muted",
+        className
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+export default TitleBar;

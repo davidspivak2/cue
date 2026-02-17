@@ -59,7 +59,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 const getFileName = (value?: string | null) => {
   if (!value) {
-    return "Untitled project";
+    return "Untitled video";
   }
   const parts = value.split(/[/\\]/);
   return parts[parts.length - 1] ?? value;
@@ -67,7 +67,7 @@ const getFileName = (value?: string | null) => {
 
 const resolveTitle = (project: ProjectManifest | null) => {
   const filename = project?.video?.filename ?? project?.video?.path ?? "";
-  return filename ? getFileName(filename) : "Untitled project";
+  return filename ? getFileName(filename) : "Untitled video";
 };
 
 const resolveStatusLabel = (status?: string | null) => {
@@ -543,7 +543,7 @@ const Workbench = () => {
   React.useEffect(() => {
     let active = true;
     if (!projectId) {
-      setError("Missing project id.");
+      setError("Missing video id.");
       setIsLoading(false);
       return () => {
         active = false;
@@ -559,7 +559,7 @@ const Workbench = () => {
       })
       .catch((err) => {
         if (!active) return;
-        setError(err instanceof Error ? err.message : "Failed to load project.");
+        setError(err instanceof Error ? err.message : "Failed to load video.");
       })
       .finally(() => {
         if (!active) return;
@@ -770,7 +770,7 @@ const Workbench = () => {
       })
       .catch((err) => {
         setStyleError(
-          err instanceof Error ? err.message : "Failed to save project style settings."
+          err instanceof Error ? err.message : "Failed to save video style settings."
         );
       })
       .finally(() => {
@@ -1188,7 +1188,7 @@ const Workbench = () => {
         }
         setIsCreatingSubtitles(false);
         setCreateSubtitlesStartedAt(null);
-        setCreateSubtitlesError("Another task is already running for this project.");
+        setCreateSubtitlesError("Another task is already running for this video.");
         return;
       }
       setIsCreatingSubtitles(false);
@@ -1416,7 +1416,7 @@ const Workbench = () => {
         }
         setIsExporting(false);
         setExportStartedAt(null);
-        setExportError("Subtitles are still being created for this project.");
+        setExportError("Subtitles are still being created for this video.");
         return;
       }
       setIsExporting(false);
@@ -2403,15 +2403,15 @@ const Workbench = () => {
       <div
         className="flex flex-wrap items-center gap-2 border-b border-border pb-2"
         role="tablist"
-        aria-label="Open projects"
+        aria-label="Open videos"
         data-testid="workbench-tabs"
       >
         {tabs.length === 0 ? (
-          <span className="text-xs text-muted-foreground">No open projects</span>
+          <span className="text-xs text-muted-foreground">No open videos</span>
         ) : (
           tabs.map((tab) => {
             const isActive = tab.projectId === projectId;
-            const label = tab.title || "Untitled project";
+            const label = tab.title || "Untitled video";
             return (
               <div
                 key={tab.projectId}
@@ -2451,13 +2451,14 @@ const Workbench = () => {
         }
         right={<Badge variant="secondary">{statusLabel}</Badge>}
         onOpenSettings={openSettings}
+        showSettings={!isTauriEnv}
         settingsDisabled={isCreatingSubtitles || isExporting}
         settingsDisabledTooltip="Settings unavailable while a task is running"
       />
 
       {isLoading && (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          Loading project…
+          Loading video…
         </div>
       )}
 

@@ -16,6 +16,7 @@ export type PageHeaderProps = {
   onBack?: () => void;
   right?: React.ReactNode;
   onOpenSettings: () => void;
+  showSettings?: boolean;
   settingsDisabled?: boolean;
   settingsDisabledTooltip?: string;
 };
@@ -26,6 +27,7 @@ const PageHeader = ({
   onBack,
   right,
   onOpenSettings,
+  showSettings = true,
   settingsDisabled = false,
   settingsDisabledTooltip
 }: PageHeaderProps) => {
@@ -50,28 +52,30 @@ const PageHeader = ({
       </div>
       <div className="flex items-center gap-2">
         {right}
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Settings"
-                  disabled={settingsDisabled}
-                  onClick={() => !settingsDisabled && onOpenSettings()}
-                >
-                  <Settings className="h-4 w-4" />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              {settingsDisabled && settingsDisabledTooltip
-                ? settingsDisabledTooltip
-                : "Settings"}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        {showSettings && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Settings"
+                    disabled={settingsDisabled}
+                    onClick={() => !settingsDisabled && onOpenSettings()}
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {settingsDisabled && settingsDisabledTooltip
+                  ? settingsDisabledTooltip
+                  : "Settings"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
     </header>
   );

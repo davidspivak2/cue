@@ -614,7 +614,7 @@ test("navigation without sidebar: Projects to Editor to Settings dialog to Back"
   await mockProjects(page, projects);
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
   await expect(page.getByTestId("workbench")).toBeVisible();
@@ -627,7 +627,7 @@ test("navigation without sidebar: Projects to Editor to Settings dialog to Back"
   await expect(page.getByTestId("workbench")).toBeVisible();
 
   await page.getByRole("button", { name: "Back" }).click();
-  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 });
 
