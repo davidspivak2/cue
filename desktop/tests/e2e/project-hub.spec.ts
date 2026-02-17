@@ -250,10 +250,9 @@ test("project hub card interactions", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   await expect(page.getByRole("button", { name: "New project" })).toBeVisible();
   await expect(page.getByText("another.mp4")).toBeVisible();
-  await expect(page.getByTestId("project-card-create-subtitles-project-1")).toBeVisible();
-  await expect(page.getByTestId("project-card-create-subtitles-project-3")).toHaveCount(0);
+  await expect(page.getByText("good.mp4")).toBeVisible();
 
-  await page.getByTestId("project-card-create-subtitles-project-1").click();
+  await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
   await expect(page.getByTestId("workbench")).toBeVisible();
   await page.getByRole("button", { name: "Back" }).click();
@@ -498,7 +497,6 @@ test("project hub shows active task cards, inline notices, and background toasts
   await expect(page.getByTestId("project-card-active-task-project-1")).toContainText(
     "Loading AI model"
   );
-  await expect(page.getByTestId("project-card-create-subtitles-project-1")).toHaveCount(0);
 
   await page.getByTestId("project-card-project-2").click();
   await page.waitForURL("**/workbench/project-2");

@@ -2448,7 +2448,7 @@ const Workbench = () => {
           Back
         </Button>
         <div className="min-w-0 text-center">
-          <h1 className="text-lg font-semibold">Workbench</h1>
+          <h1 className="text-lg font-semibold">Editor</h1>
           <p className="truncate text-sm text-muted-foreground">{title}</p>
         </div>
         <Badge variant="secondary">{statusLabel}</Badge>
@@ -2869,52 +2869,53 @@ const Workbench = () => {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-foreground">
-                      Export
-                    </p>
-                    {latestOutputPath ? (
-                      <p className="truncate text-xs text-muted-foreground">
+                <>
+                  {latestOutputPath && (
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <p className="min-w-0 truncate text-xs text-muted-foreground">
                         Latest export: {latestOutputPath}
                       </p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        Export a final video with your current subtitles and style.
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          data-testid="workbench-play-export-video"
+                          onClick={() => void openLatestOutputVideo()}
+                        >
+                          Play video
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          data-testid="workbench-open-export-folder"
+                          onClick={() => void openLatestOutputFolder()}
+                        >
+                          Open video location
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">
+                        Export
                       </p>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {latestOutputPath && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        data-testid="workbench-play-export-video"
-                        onClick={() => void openLatestOutputVideo()}
-                      >
-                        Play video
-                      </Button>
-                    )}
-                    {latestOutputPath && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        data-testid="workbench-open-export-folder"
-                        onClick={() => void openLatestOutputFolder()}
-                      >
-                        Open folder
-                      </Button>
-                    )}
+                      {!latestOutputPath && (
+                        <p className="text-xs text-muted-foreground">
+                          Export a final video with your current subtitles and style.
+                        </p>
+                      )}
+                    </div>
                     <Button
                       size="sm"
                       data-testid="workbench-export-cta"
                       onClick={() => void startExport()}
                       disabled={!canExport}
                     >
-                      Export
+                      {latestOutputPath ? "Export again" : "Export"}
                     </Button>
                   </div>
-                </div>
+                </>
               )}
             </section>
           )}

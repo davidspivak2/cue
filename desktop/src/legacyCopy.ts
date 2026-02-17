@@ -24,7 +24,7 @@ export const legacyCopy = {
   done: {
     header: "Your video is ready",
     playVideo: "Play video",
-    openFolder: "Open folder"
+    openFolder: "Open video location"
   },
   settings: {
     back: "Back"

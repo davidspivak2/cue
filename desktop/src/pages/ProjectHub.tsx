@@ -56,7 +56,6 @@ const STATUS_LABELS: Record<string, string> = {
 const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v"]);
 const MAX_DURATION_DIFF_SECONDS = 3;
 const NEW_PROJECT_CTA = "New project";
-const CREATE_SUBTITLES_CTA = "Create subtitles";
 const ACTIVE_TASK_POLL_MS = 2500;
 const IDLE_TASK_POLL_MS = 10000;
 
@@ -545,16 +544,6 @@ const ProjectHub = () => {
     navigate(`/workbench/${encodeURIComponent(project.project_id)}`);
   };
 
-  const handleCreateSubtitlesFromCard = (project: ProjectSummary) => {
-    if (isBusyOperation || project.missing_video || project.status !== "needs_subtitles") {
-      return;
-    }
-    openOrActivateTab({ projectId: project.project_id, title: resolveProjectTitle(project) });
-    navigate(`/workbench/${encodeURIComponent(project.project_id)}`, {
-      state: { autoStartSubtitles: true }
-    });
-  };
-
   const confirmRelinkWarning = async () => {
     if (!relinkWarning) {
       return;
@@ -618,9 +607,11 @@ const ProjectHub = () => {
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Projects</h1>
         </div>
-        <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
-          {NEW_PROJECT_CTA}
-        </Button>
+        {!showEmptyState && (
+          <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
+            {NEW_PROJECT_CTA}
+          </Button>
+        )}
       </div>
 
       <input
@@ -685,7 +676,6 @@ const ProjectHub = () => {
               Drop a video anywhere on this screen or use &quot;{NEW_PROJECT_CTA}&quot;.
             </p>
             <Button
-              variant="secondary"
               onClick={openFileDialog}
               disabled={isCreating || isBusyOperation}
             >
@@ -789,27 +779,6 @@ const ProjectHub = () => {
                     <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                       {project.title || "Untitled project"}
                     </p>
-                    {project.status === "needs_subtitles" &&
-                      !project.missing_video &&
-                      !project.active_task && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCreateSubtitlesFromCard(project);
-                        }}
-                        onKeyDown={(event) => {
-                          event.stopPropagation();
-                        }}
-                        disabled={cardDisabled}
-                        data-testid={`project-card-create-subtitles-${project.project_id}`}
-                      >
-                        {CREATE_SUBTITLES_CTA}
-                      </Button>
-                    )}
                   </div>
                   {durationLabel && (
                     <p className="text-xs text-muted-foreground">{durationLabel}</p>

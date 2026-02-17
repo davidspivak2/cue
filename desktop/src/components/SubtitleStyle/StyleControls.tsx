@@ -152,9 +152,9 @@ const StyleControls = ({
 
   return (
     <div className="space-y-5">
-      {/* ── Section 1: Mode & Preset ── */}
-      <section className="space-y-3">
-        <SectionHeading>Mode</SectionHeading>
+      {/* ── Section 1: Animation & Preset ── */}
+        <section className="space-y-3">
+        <SectionHeading>Animation</SectionHeading>
         <RadioGroup
           value={appearance.subtitle_mode}
           onValueChange={(v) => patch({ subtitle_mode: v })}
