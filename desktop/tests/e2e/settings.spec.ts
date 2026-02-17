@@ -100,8 +100,8 @@ test.beforeEach(async ({ page }) => {
 
 test("save policy enables the path controls", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("link", { name: "Settings" }).click();
-  await expect(page.getByTestId("settings-title")).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("settings-content")).toBeVisible();
 
   const pathField = page.getByPlaceholder("No folder selected");
   const browseButton = page.getByRole("button", { name: "Browse..." });
@@ -115,8 +115,9 @@ test("save policy enables the path controls", async ({ page }) => {
 });
 
 test("diagnostics master toggle gates categories", async ({ page }) => {
-  await page.goto("/settings?diagnostics=1");
-  await expect(page.getByTestId("settings-title")).toBeVisible();
+  await page.goto("/?diagnostics=1");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("settings-content")).toBeVisible();
 
   const master = page.getByLabel("Enable diagnostics logging");
   const writeOnSuccess = page.getByLabel("Write diagnostics on successful completion");
@@ -132,8 +133,8 @@ test("diagnostics master toggle gates categories", async ({ page }) => {
 
 test("transcription quality updates settings", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("link", { name: "Settings" }).click();
-  await expect(page.getByTestId("settings-title")).toBeVisible();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("settings-content")).toBeVisible();
 
   const requestPromise = page.waitForRequest(
     (request) => request.url().includes("/settings") && request.method() === "PUT"

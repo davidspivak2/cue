@@ -1,13 +1,15 @@
 import * as React from "react";
-import { ArrowLeft, Check, RotateCcw, X } from "lucide-react";
+import { Check, RotateCcw, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import Checklist, { ChecklistItem } from "@/components/Checklist";
+import PageHeader from "@/components/PageHeader";
 import StyleControls from "@/components/SubtitleStyle/StyleControls";
 import { Badge } from "@/components/ui/badge";
+import { useSettings } from "@/contexts/SettingsContext";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -455,6 +457,7 @@ const Workbench = () => {
   const incomingState = location.state as WorkbenchLocationState;
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const { openSettings } = useSettings();
   const { tabs, ensureTab, updateTabMeta } = useWorkbenchTabs();
   const width = useWindowWidth();
   const isNarrow = width < 1100;
@@ -2437,22 +2440,20 @@ const Workbench = () => {
           })
         )}
       </div>
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-2"
-          onClick={() => navigate("/")}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </Button>
-        <div className="min-w-0 text-center">
-          <h1 className="text-lg font-semibold">Editor</h1>
-          <p className="truncate text-sm text-muted-foreground">{title}</p>
-        </div>
-        <Badge variant="secondary">{statusLabel}</Badge>
-      </header>
+      <PageHeader
+        showBack
+        onBack={() => navigate("/")}
+        title={
+          <div className="min-w-0 text-center">
+            <h1 className="text-lg font-semibold">Editor</h1>
+            <p className="truncate text-sm text-muted-foreground">{title}</p>
+          </div>
+        }
+        right={<Badge variant="secondary">{statusLabel}</Badge>}
+        onOpenSettings={openSettings}
+        settingsDisabled={isCreatingSubtitles || isExporting}
+        settingsDisabledTooltip="Settings unavailable while a task is running"
+      />
 
       {isLoading && (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">

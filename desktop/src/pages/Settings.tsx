@@ -1,6 +1,5 @@
 import * as React from "react";
-import { ArrowLeft } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -218,19 +217,7 @@ const Settings = () => {
   const saveFolderValue = settings.save_folder ?? "";
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-      <header className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="sm" className="gap-2">
-          <Link to="/">
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Link>
-        </Button>
-        <h1 data-testid="settings-title" className="text-2xl font-semibold">
-          Settings
-        </h1>
-      </header>
-
+    <div className="flex flex-col gap-4" data-testid="settings-content">
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <SettingsSection title="Performance">
