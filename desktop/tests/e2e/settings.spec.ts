@@ -115,8 +115,7 @@ test("save policy enables the path controls", async ({ page }) => {
 });
 
 test("diagnostics master toggle gates categories", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("link", { name: "Settings" }).click();
+  await page.goto("/settings?diagnostics=1");
   await expect(page.getByTestId("settings-title")).toBeVisible();
 
   const master = page.getByLabel("Enable diagnostics logging");

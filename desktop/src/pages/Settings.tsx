@@ -1,6 +1,6 @@
 import * as React from "react";
 import { ArrowLeft } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -92,6 +92,9 @@ const SettingsSection = ({
 );
 
 const Settings = () => {
+  const [searchParams] = useSearchParams();
+  const showDiagnostics = searchParams.get("diagnostics") === "1";
+
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -349,6 +352,7 @@ const Settings = () => {
         </p>
       </SettingsSection>
 
+      {showDiagnostics && (
       <SettingsSection title="Diagnostics">
         <div className="flex items-start gap-2">
           <Checkbox
@@ -428,6 +432,7 @@ const Settings = () => {
           ))}
         </div>
       </SettingsSection>
+      )}
     </div>
   );
 };

@@ -122,7 +122,7 @@ Each project persists:
 - Style configuration (all supported controls, for Static + Word highlight)
 - Word highlight timing artifacts (WhisperX output)
 - Export output reference (latest exported video path, if any)
-- Last-known status (e.g., Needs video, Needs edits, Exporting, Done)
+- Last-known status (e.g., Needs video, Ready to review, Exporting, Exported)
 
 ### C3) Missing source video behavior
 - If the source video is missing, the project **remains** in Projects.
@@ -143,11 +143,11 @@ Each card shows:
 - Thumbnail
 - Filename (no full path)
 - Duration
-- Status label: **Needs edits / Exporting / Done / Missing file / Needs subtitles**
+- Status label: **Ready to review / Exporting / Exported / Missing file / Not started**
 
 ### D3) Card interactions
 - Clicking a card **opens or activates** that project in an **Editor tab**.
-- If status is **Needs subtitles**, the card includes a small secondary **“Create subtitles”** action in the metadata row; this action opens Editor and starts subtitle generation.
+- If status is **Not started**, the card includes a small secondary **“Create subtitles”** action in the metadata row; this action opens Editor and starts subtitle generation.
 - Missing source video:
   - Card shows **“Relink”** action.
   - After relink, project remains intact and usable.
@@ -237,7 +237,7 @@ The redesign workflow is **in-app subtitle text editing only** (no external subt
 ### E5) Primary CTA and export rules
 - **Bottom action bar exists in Editor** only in **WB_SUBTITLES_READY** and **WB_EXPORT_SUCCESS**.
 - Bottom bar contains **only** the primary CTA labeled exactly:
-  - **“Create video with subtitles”**
+  - **“Export”**
 - In earlier states (e.g., **WB_VIDEO_LINKED_READY**), the primary CTA is a **normal primary button** in the main content area labeled **“Create subtitles”** (no bottom bar).
 - **No export settings** in Editor. If export settings exist, they live in **Settings only**.
 - Export progress is shown as an **in-Editor** state (not a separate page).
@@ -357,13 +357,13 @@ Create Subtitles must output:
 | WB_NEEDS_VIDEO | Project exists but no linked video | **“Choose video…”** | Settings enabled (unless task running) | Panels closed/disabled | Editor accessible via tab, but requires relink. |
 | WB_VIDEO_LINKED_READY | Video linked, ready to create subtitles | **“Create subtitles”** | Settings enabled (unless task running) | Panels hidden; show strict empty state with only message + CTA | Center preview and style controls appear after subtitles are created. |
 | WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Matching individual words to speech”; Back is allowed and task continues in background. |
-| WB_SUBTITLES_READY | Subtitles + word timings available (user-facing status: Needs edits) | **“Create video with subtitles”** | Settings enabled | Left panel user-controlled; right inspector docked/overlay per width | Subtitle text editable; timestamps read-only. |
+| WB_SUBTITLES_READY | Subtitles + word timings available (user-facing status: Ready to review) | **“Export”** | Settings enabled | Left panel user-controlled; right inspector docked/overlay per width | Subtitle text editable; timestamps read-only. |
 | WB_EXPORTING | Export in progress | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Export uses existing artifacts only; Back is allowed and task continues in background. |
-| WB_EXPORT_SUCCESS | Export completed | **“Create video with subtitles”** | Settings enabled | Panels user-controlled | Show success UI with “Play video” + “Open folder”; opener failures surface clear non-blocking feedback. |
+| WB_EXPORT_SUCCESS | Export completed | **“Export”** | Settings enabled | Panels user-controlled | Show success UI with “Play video” + “Open folder”; opener failures surface clear non-blocking feedback. |
 | WB_ERROR_RECOVERABLE | Recoverable error occurred | **Retry** (contextual) | Settings enabled (unless task running) | Panels user-controlled | Inline banner. |
 | WB_ERROR_BLOCKING | Blocking error occurred | **Try again** (modal) | Settings enabled (unless task running) | Panels closed while modal active | Modal can show “Show details”. |
 
-**Primary CTA label requirement:** The Editor bottom bar **always** uses exactly **“Create video with subtitles”** when subtitles are ready or after successful export.
+**Primary CTA label requirement:** The Editor bottom bar **always** uses exactly **“Export”** when subtitles are ready or after successful export.
 
 ---
 
@@ -425,9 +425,12 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 - “Creating subtitles”
 - “Matching individual words to speech”
 - “Needs edits”
+- “Ready to review”
 - “Subtitles created”
-- “Create video with subtitles”
+- “Export”
 - “Exporting video”
+- “Exported”
+- “Not started”
 - “Play video”
 - “Open folder”
 - “Relink”
@@ -726,7 +729,7 @@ The UI aggregates progress without regression (percent should not go backwards).
 6) Click **Create subtitles**.
 7) Confirm `<video_stem>_audio_for_whisper.wav` is created during processing.
 8) Confirm `<video_stem>.srt` is created in the expected output folder.
-9) In the app, click **Create video with subtitles** (in the sticky bottom bar).
+9) In the app, click **Export** (in the sticky bottom bar).
 10) Confirm `<video_stem>_subtitled.mp4` is created.
 11) Play the exported MP4 and verify subtitles display and audio plays.
 13) Toggle **Clean up audio before transcription** ON, re-run on the same clip, confirm it still completes.

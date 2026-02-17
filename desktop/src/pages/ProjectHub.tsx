@@ -45,12 +45,12 @@ type RelinkWarning = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  ready: "Ready",
+  ready: "Ready to review",
   exporting: "Exporting",
-  done: "Done",
+  done: "Exported",
   missing_file: "Missing file",
   needs_video: "Missing file",
-  needs_subtitles: "Needs subtitles"
+  needs_subtitles: "Not started"
 };
 
 const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v"]);
@@ -159,7 +159,7 @@ const resolveStatusLabel = (project: ProjectSummary) => {
   if (project.missing_video) {
     return "Missing file";
   }
-  return STATUS_LABELS[project.status] ?? "Needs subtitles";
+  return STATUS_LABELS[project.status] ?? "Not started";
 };
 
 const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean) => {
@@ -617,9 +617,6 @@ const ProjectHub = () => {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Projects</h1>
-          <p className="text-sm text-muted-foreground">
-            Create a new project or open an existing one.
-          </p>
         </div>
         <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
           {NEW_PROJECT_CTA}

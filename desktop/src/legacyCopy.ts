@@ -17,20 +17,14 @@ export const legacyCopy = {
     cancel: "Cancel"
   },
   subtitlesReady: {
-    header: "Subtitles ready",
+    header: "Subtitles created",
     footerPrefix: "Saving as:",
-    cta: "Create video with subtitles"
+    cta: "Export"
   },
   done: {
     header: "Your video is ready",
     playVideo: "Play video",
-    openFolder: "Open folder",
-    editSubtitles: "Edit subtitles and export again"
-  },
-  details: {
-    toggle: "Show details",
-    groupTitle: "Details",
-    openFile: "Open details file"
+    openFolder: "Open folder"
   },
   settings: {
     back: "Back"

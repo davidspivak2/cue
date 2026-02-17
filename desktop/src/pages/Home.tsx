@@ -1,5 +1,5 @@
 import * as React from "react";
-import { CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
@@ -40,11 +40,6 @@ type AppState =
   | "WORKING"
   | "SUBTITLES_READY"
   | "EXPORT_DONE";
-
-type LogEntry = {
-  message: string;
-  important?: boolean;
-};
 
 type FileWithPath = File & { path?: string };
 
@@ -107,14 +102,11 @@ const Home = () => {
   const [srtPath, setSrtPath] = React.useState<string | null>(null);
   const [outputVideoPath, setOutputVideoPath] = React.useState<string | null>(null);
   const [previewFramePath, setPreviewFramePath] = React.useState<string | null>(null);
-  const [logPath, setLogPath] = React.useState<string | null>(null);
   const [progressPct, setProgressPct] = React.useState<number>(0);
   const [progressMessage, setProgressMessage] = React.useState<string>("");
   const [statusHeading, setStatusHeading] = React.useState<string>("");
   const [elapsedText, setElapsedText] = React.useState<string>("");
-  const [logs, setLogs] = React.useState<LogEntry[]>([]);
   const [checklistItems, setChecklistItems] = React.useState<ChecklistItem[]>([]);
-  const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [jobStream, setJobStream] = React.useState<JobEventStream | null>(null);
 
   const jobKindRef = React.useRef<JobKind | null>(null);
@@ -239,9 +231,7 @@ const Home = () => {
     setProgressMessage("");
     setStatusHeading("");
     setElapsedText("");
-    setLogs([]);
     setChecklistItems([]);
-    setLogPath(null);
     jobKindRef.current = null;
     jobStartRef.current = null;
   }, []);
@@ -417,9 +407,6 @@ const Home = () => {
             : legacyCopy.working.createSubtitlesHeading)
       );
       setState("WORKING");
-      if (event.log_path) {
-        setLogPath(event.log_path);
-      }
       return;
     }
     if (event.type === "checklist") {
@@ -436,15 +423,10 @@ const Home = () => {
       return;
     }
     if (event.type === "log") {
-      setLogs((prev) => [...prev, { message: event.message, important: event.important }]);
       return;
     }
     if (event.type === "result") {
       const payload = event.payload ?? {};
-      const payloadLog = payload.log_path;
-      if (typeof payloadLog === "string") {
-        setLogPath(payloadLog);
-      }
       if (typeof payload.srt_path === "string") {
         setSrtPath(payload.srt_path);
         srtPathRef.current = payload.srt_path;
@@ -567,12 +549,6 @@ const Home = () => {
     await jobStream?.cancel();
   };
 
-  const openDetailsFile = async () => {
-    if (logPath) {
-      await openPath(logPath);
-    }
-  };
-
   const openOutputVideo = async () => {
     if (outputVideoPath) {
       await openPath(outputVideoPath);
@@ -583,12 +559,6 @@ const Home = () => {
     const folder = outputVideoPath ? getDirName(outputVideoPath) : outputDir;
     if (folder) {
       await openPath(folder);
-    }
-  };
-
-  const editSubtitlesAgain = async () => {
-    if (srtPath) {
-      await openPath(srtPath);
     }
   };
 
@@ -707,49 +677,9 @@ const Home = () => {
             <Button variant="secondary" onClick={openOutputFolder}>
               {legacyCopy.done.openFolder}
             </Button>
-            <Button variant="ghost" onClick={editSubtitlesAgain}>
-              {legacyCopy.done.editSubtitles}
-            </Button>
           </div>
         </div>
       )}
-
-      <div className="space-y-2">
-        <button
-          type="button"
-          className="flex items-center gap-2 text-sm font-medium text-foreground"
-          onClick={() => setDetailsOpen((prev) => !prev)}
-        >
-          {detailsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          {detailsOpen ? "Hide details" : legacyCopy.details.toggle}
-        </button>
-        {detailsOpen && (
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">{legacyCopy.details.groupTitle}</h3>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={openDetailsFile}
-                disabled={!logPath}
-              >
-                {legacyCopy.details.openFile}
-              </Button>
-            </div>
-            <div className="mt-3 max-h-60 space-y-2 overflow-y-auto text-sm text-muted-foreground">
-              {logs.length === 0 && <p>No details yet.</p>}
-              {logs.map((entry, index) => (
-                <p
-                  key={`${entry.message}-${index}`}
-                  className={entry.important ? "text-foreground" : undefined}
-                >
-                  {entry.message}
-                </p>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   );
 };
