@@ -48,10 +48,10 @@ type WorkbenchLocationState = {
 
 const STATUS_LABELS: Record<string, string> = {
   needs_video: "Needs video",
-  needs_subtitles: "Needs subtitles",
-  ready: "Ready",
+  needs_subtitles: "Not started",
+  ready: "Ready to review",
   exporting: "Exporting",
-  done: "Done",
+  done: "Exported",
   missing_file: "Missing file"
 };
 
@@ -72,7 +72,7 @@ const resolveStatusLabel = (status?: string | null) => {
   if (!status) {
     return "Loading";
   }
-  return STATUS_LABELS[status] ?? "Needs subtitles";
+  return STATUS_LABELS[status] ?? "Not started";
 };
 
 const extractErrorDetail = (message: string): string => {
@@ -2872,7 +2872,7 @@ const Workbench = () => {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-foreground">
-                      Create video with subtitles
+                      Export
                     </p>
                     {latestOutputPath ? (
                       <p className="truncate text-xs text-muted-foreground">
@@ -2911,7 +2911,7 @@ const Workbench = () => {
                       onClick={() => void startExport()}
                       disabled={!canExport}
                     >
-                      Create video with subtitles
+                      Export
                     </Button>
                   </div>
                 </div>
