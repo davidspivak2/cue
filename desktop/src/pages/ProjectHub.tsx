@@ -758,7 +758,7 @@ const ProjectHub = () => {
               role="button"
               tabIndex={0}
               className={cn(
-                "flex w-full max-w-2xl cursor-pointer flex-col items-center gap-3 rounded-lg border-2 border-dashed px-6 py-12 text-center transition",
+                "flex w-full max-w-2xl cursor-pointer flex-col items-center gap-6 rounded-lg border-2 border-dashed px-6 py-12 text-center transition",
                 isNewUser && "empty-state-reveal-upload",
                 isDragging ? "border-primary bg-accent/10" : "border-border bg-card hover:border-primary/60"
               )}
@@ -780,8 +780,10 @@ const ProjectHub = () => {
               <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-current text-muted-foreground">
                 <Upload className="h-6 w-6" aria-hidden />
               </div>
-              <p className="text-lg font-semibold text-foreground">{EMPTY_MAIN}</p>
-              <p className="text-sm text-muted-foreground">{EMPTY_SUPPORTED_FORMATS}</p>
+              <div className="space-y-1">
+                <p className="text-lg font-semibold text-foreground">{EMPTY_MAIN}</p>
+                <p className="text-sm text-muted-foreground">{EMPTY_SUPPORTED_FORMATS}</p>
+              </div>
             </div>
           </div>
         );

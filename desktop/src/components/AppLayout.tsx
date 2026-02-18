@@ -108,7 +108,7 @@ const AppLayout = () => {
       <SettingsProvider openSettings={openSettings} settingsOpen={settingsOpen}>
         <ToastProvider pushToast={pushToast}>
           <div
-            className="min-h-screen bg-background text-foreground"
+            className="flex h-screen flex-col bg-background text-foreground"
             style={
               isTauri()
                 ? ({ paddingTop: TITLE_BAR_HEIGHT_PX } as React.CSSProperties)
@@ -116,7 +116,7 @@ const AppLayout = () => {
             }
           >
             {createPortal(<TitleBar />, document.body)}
-            <main className="flex-1 px-6 py-6">
+            <main className="flex min-h-0 flex-1 flex-col px-6 py-6">
               <Outlet />
             </main>
         <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
