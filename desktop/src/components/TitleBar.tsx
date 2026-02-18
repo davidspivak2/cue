@@ -6,7 +6,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { useSettings } from "@/contexts/SettingsContext";
 import { cn } from "@/lib/utils";
 
-const TITLE_BAR_HEIGHT = 36;
+export const TITLE_BAR_HEIGHT = 36;
 
 export const TITLE_BAR_HEIGHT_PX = `${TITLE_BAR_HEIGHT}px`;
 
@@ -35,7 +35,7 @@ function CueIcon({ className }: { className?: string }) {
  * Left: Cue logo. Right: Close, Maximize/Restore, Minimize, Settings.
  */
 const TitleBar = () => {
-  const { openSettings } = useSettings();
+  const { openSettings, settingsOpen } = useSettings();
   const [maximized, setMaximized] = React.useState(false);
   const appWindow = React.useMemo(
     () => (typeof window !== "undefined" && isTauri() ? getCurrentWindow() : null),
@@ -81,8 +81,9 @@ const TitleBar = () => {
 
   return (
     <header
+      data-cue-title-bar
       className={cn(
-        "fixed left-0 right-0 top-0 z-[100] flex h-[var(--title-bar-height)] items-center justify-between",
+        "pointer-events-auto fixed left-0 right-0 top-0 z-[100] flex h-[var(--title-bar-height)] items-center justify-between",
         "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
       )}
       style={{ "--title-bar-height": TITLE_BAR_HEIGHT_PX } as React.CSSProperties}
@@ -98,11 +99,12 @@ const TitleBar = () => {
       </div>
 
       {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
-      <div className="flex items-stretch">
+      <div className="flex self-stretch items-stretch">
         <TitleBarButton
-          onClick={openSettings}
+          onClick={settingsOpen ? undefined : openSettings}
           title="Settings"
           aria-label="Settings"
+          selected={settingsOpen}
         >
           <Settings className="h-4 w-4" />
         </TitleBarButton>
@@ -143,22 +145,26 @@ function TitleBarButton({
   title,
   className,
   "aria-label": ariaLabel,
+  selected = false,
 }: {
   children: React.ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
   title: string;
   className?: string;
   "aria-label": string;
+  selected?: boolean;
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={selected ? undefined : onClick}
       title={title}
       aria-label={ariaLabel}
+      aria-pressed={selected}
       className={cn(
         "flex h-full w-10 items-center justify-center text-foreground transition-colors",
-        "hover:bg-muted/80 active:bg-muted",
+        selected ? "bg-muted/80" : "hover:bg-muted/80 active:bg-muted",
+        selected && "cursor-default",
         className
       )}
     >

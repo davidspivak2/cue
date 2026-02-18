@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Trash2, X } from "lucide-react";
+import { Trash2, Upload, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -54,13 +54,15 @@ const STATUS_LABELS: Record<string, string> = {
   needs_subtitles: "Not started"
 };
 
-const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v"]);
+const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v", "webm"]);
 const MAX_DURATION_DIFF_SECONDS = 3;
 const HAS_HAD_VIDEOS_KEY = "cue_has_had_videos";
 const ADD_VIDEO_BUTTON = "Add video";
-const CHOOSE_VIDEO_CTA = "Choose video";
-const EMPTY_BODY =
-  "Choose a video or drop it here to generate subtitles using AI speech recognition.";
+const EMPTY_WELCOME_LEAD = "Welcome!";
+const EMPTY_WELCOME_REST =
+  " Cue adds subtitles to your videos using OpenAI's Whisper speech recognition.";
+const EMPTY_MAIN = "Drop a video here or click to browse to generate subtitles.";
+const EMPTY_SUPPORTED_FORMATS = "Supports MP4, MKV, MOV, M4V, WEBM.";
 const ACTIVE_TASK_POLL_MS = 2500;
 const IDLE_TASK_POLL_MS = 10000;
 
@@ -355,7 +357,7 @@ const ProjectHub = () => {
         filters: [
           {
             name: "Video files",
-            extensions: ["mp4", "mkv", "mov", "m4v"]
+            extensions: ["mp4", "mkv", "mov", "m4v", "webm"]
           }
         ],
         pickerMode: "video"
@@ -368,6 +370,8 @@ const ProjectHub = () => {
     }
   }, [handleCreateProject, isBusyOperation, isCreating, isTauriEnv, showBanner]);
 
+  const emptyStateZoneRef = React.useRef<HTMLDivElement>(null);
+
   React.useEffect(() => {
     if (!isTauriEnv) {
       return;
@@ -375,7 +379,34 @@ const ProjectHub = () => {
     let unlisten: (() => void) | null = null;
     getCurrentWebview()
       .onDragDropEvent((event) => {
-        const payload = event.payload;
+        const payload = event.payload as {
+          type: string;
+          position?: { x: number; y: number };
+          paths?: string[];
+        };
+        if (payload.type === "enter") {
+          setIsDragging(false);
+          return;
+        }
+        if (payload.type === "over") {
+          const zone = emptyStateZoneRef.current;
+          const pos = payload.position;
+          if (zone && pos != null && typeof pos.x === "number" && typeof pos.y === "number") {
+            const rect = zone.getBoundingClientRect();
+            const scale = 1 / (typeof window !== "undefined" ? window.devicePixelRatio : 1);
+            const x = pos.x * scale;
+            const y = pos.y * scale;
+            const inZone =
+              x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+            setIsDragging(inZone);
+          } else {
+            setIsDragging(false);
+          }
+          return;
+        }
+        if (payload.type === "drop" || payload.type === "leave") {
+          setIsDragging(false);
+        }
         if (payload.type !== "drop") {
           return;
         }
@@ -511,7 +542,7 @@ const ProjectHub = () => {
             filters: [
               {
                 name: "Video files",
-                extensions: ["mp4", "mkv", "mov", "m4v"]
+                extensions: ["mp4", "mkv", "mov", "m4v", "webm"]
               }
             ],
             pickerMode: "video"
@@ -601,9 +632,6 @@ const ProjectHub = () => {
   }, [closeTab, deleteConfirmProject, isBusyOperation, showBanner]);
 
   const showEmptyState = !isLoading && projects.length === 0;
-  const hasHadVideos =
-    typeof localStorage !== "undefined" && localStorage.getItem(HAS_HAD_VIDEOS_KEY) === "true";
-  const emptyHeadline = hasHadVideos ? "No videos yet" : "Create subtitles for your first video";
   const enableRootDrop = !isTauriEnv && !isBusyOperation;
 
   const dismissTaskNotice = (noticeId: string) => {
@@ -614,16 +642,15 @@ const ProjectHub = () => {
     });
   };
 
+  const handleRootDragOver = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+  }, []);
+
   return (
     <div
       data-testid="project-hub"
-      className={cn(
-        "space-y-6 rounded-lg border border-transparent p-1",
-        isDragging && !isTauriEnv ? "border-primary/60 bg-accent/10" : ""
-      )}
-      onDragEnter={enableRootDrop ? handleDragEnter : undefined}
-      onDragOver={enableRootDrop ? handleDragOver : undefined}
-      onDragLeave={enableRootDrop ? handleDragLeave : undefined}
+      className="space-y-6 rounded-lg border border-transparent p-1"
+      onDragOver={enableRootDrop ? handleRootDragOver : undefined}
       onDrop={enableRootDrop ? handleDrop : undefined}
     >
       {!showEmptyState && (
@@ -688,34 +715,62 @@ const ProjectHub = () => {
         </div>
       )}
 
-      {showEmptyState && (
-        <div
-          className={cn(
-            "flex flex-col items-center gap-3 rounded-lg border-2 border-dashed px-6 py-12 text-center transition",
-            isTauriEnv
-              ? isDragging
-                ? "border-primary bg-accent/10"
-                : "border-border bg-card"
-              : isDragging
-                ? "border-primary bg-accent/10"
-                : "border-border bg-card hover:border-primary/60"
-          )}
-          onDragEnter={enableRootDrop ? handleDragEnter : undefined}
-          onDragOver={enableRootDrop ? handleDragOver : undefined}
-          onDragLeave={enableRootDrop ? handleDragLeave : undefined}
-          onDrop={enableRootDrop ? handleDrop : undefined}
-        >
-          <p className="text-lg font-semibold text-foreground">{emptyHeadline}</p>
-          <p className="text-sm text-muted-foreground">{EMPTY_BODY}</p>
-          <Button
-            onClick={openFileDialog}
-            disabled={isCreating || isBusyOperation}
-            data-testid="empty-state-choose-video"
-          >
-            {CHOOSE_VIDEO_CTA}
-          </Button>
-        </div>
-      )}
+      {showEmptyState && (() => {
+        const showWelcome =
+          typeof window !== "undefined" &&
+          localStorage.getItem(HAS_HAD_VIDEOS_KEY) !== "true";
+        const isNewUser = showWelcome;
+        return (
+          <div className="flex min-h-[calc(100vh-6rem)] flex-1 flex-col items-center justify-center">
+            {showWelcome && (
+              <p className="mb-12 max-w-xl text-center text-xl font-medium text-foreground">
+                {isNewUser ? (
+                  <>
+                    <span className={isNewUser ? "empty-state-reveal-welcome" : undefined}>
+                      {EMPTY_WELCOME_LEAD}
+                    </span>
+                    <span className={cn(isNewUser && "empty-state-reveal-welcome-rest")}>
+                      {EMPTY_WELCOME_REST}
+                    </span>
+                  </>
+                ) : (
+                  EMPTY_WELCOME_LEAD + EMPTY_WELCOME_REST
+                )}
+              </p>
+            )}
+            <div
+              ref={emptyStateZoneRef}
+              role="button"
+              tabIndex={0}
+              className={cn(
+                "flex w-full max-w-2xl cursor-pointer flex-col items-center gap-3 rounded-lg border-2 border-dashed px-6 py-12 text-center transition",
+                isNewUser && "empty-state-reveal-upload",
+                isDragging ? "border-primary bg-accent/10" : "border-border bg-card hover:border-primary/60"
+              )}
+              onClick={() => {
+                if (!isCreating && !isBusyOperation) openFileDialog();
+              }}
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" || e.key === " ") && !isCreating && !isBusyOperation) {
+                  e.preventDefault();
+                  openFileDialog();
+                }
+              }}
+              onDragEnter={enableRootDrop ? handleDragEnter : undefined}
+              onDragOver={enableRootDrop ? handleDragOver : undefined}
+              onDragLeave={enableRootDrop ? handleDragLeave : undefined}
+              onDrop={enableRootDrop ? handleDrop : undefined}
+              data-testid="empty-state-drop-zone"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-current text-muted-foreground">
+                <Upload className="h-6 w-6" aria-hidden />
+              </div>
+              <p className="text-lg font-semibold text-foreground">{EMPTY_MAIN}</p>
+              <p className="text-sm text-muted-foreground">{EMPTY_SUPPORTED_FORMATS}</p>
+            </div>
+          </div>
+        );
+      })()}
 
       {!isLoading && projects.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -871,8 +926,8 @@ const ProjectHub = () => {
           <DialogHeader>
             <DialogTitle>Delete video?</DialogTitle>
             <DialogDescription>
-              This removes the video and its saved subtitle/style/export data from Cue. Your
-              original video file stays on your computer.
+              This removes the video from Cue. Your original video file stays on your
+              computer.
             </DialogDescription>
           </DialogHeader>
           {deleteConfirmProject ? (

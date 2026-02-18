@@ -1,16 +1,21 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { isTauri } from "@tauri-apps/api/core";
 
-import TitleBar, { TITLE_BAR_HEIGHT_PX } from "@/components/TitleBar";
+import TitleBar, { TITLE_BAR_HEIGHT, TITLE_BAR_HEIGHT_PX } from "@/components/TitleBar";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogTitle
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle
+} from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { SettingsProvider } from "@/contexts/SettingsContext";
+import { ToastProvider } from "@/contexts/ToastContext";
 import Settings from "@/pages/Settings";
 import { fetchProjects } from "@/projectsClient";
 import { WorkbenchTabsProvider } from "@/workbenchTabs";
@@ -100,29 +105,69 @@ const AppLayout = () => {
 
   return (
     <WorkbenchTabsProvider>
-      <SettingsProvider openSettings={openSettings}>
-        <div
-          className="min-h-screen bg-background text-foreground"
-          style={
-            isTauri()
-              ? ({ paddingTop: TITLE_BAR_HEIGHT_PX } as React.CSSProperties)
-              : undefined
-          }
-        >
-          <TitleBar />
-          <main className="flex-1 px-6 py-6">
-            <Outlet />
-          </main>
-        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <DialogContent className="max-h-[85vh] overflow-y-auto">
-            <DialogTitle id="settings-dialog-title">Settings</DialogTitle>
-            <div className="max-h-[calc(85vh-4rem)] overflow-y-auto">
+      <SettingsProvider openSettings={openSettings} settingsOpen={settingsOpen}>
+        <ToastProvider pushToast={pushToast}>
+          <div
+            className="min-h-screen bg-background text-foreground"
+            style={
+              isTauri()
+                ? ({ paddingTop: TITLE_BAR_HEIGHT_PX } as React.CSSProperties)
+                : undefined
+            }
+          >
+            {createPortal(<TitleBar />, document.body)}
+            <main className="flex-1 px-6 py-6">
+              <Outlet />
+            </main>
+        <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <SheetContent
+            side="right"
+            className={cn(
+              "flex w-96 max-w-[calc(100vw-2rem)] flex-col gap-4 p-0",
+              isTauri() && "!top-[36px] !h-[calc(100vh-36px)]"
+            )}
+            overlayClassName={isTauri() ? "!top-[36px] left-0 right-0 bottom-0" : undefined}
+            overlayStyle={
+              isTauri()
+                ? { top: TITLE_BAR_HEIGHT, left: 0, right: 0, bottom: 0 }
+                : undefined
+            }
+            onPointerDownOutside={
+              isTauri()
+                ? (e) => {
+                    const orig = (e as { detail?: { originalEvent?: PointerEvent } }).detail?.originalEvent;
+                    const target = orig?.target ?? e.target;
+                    const targetInTitleBar = target && (target as Element).closest?.("[data-cue-title-bar]");
+                    const clientY = orig?.clientY ?? (e as unknown as PointerEvent).clientY;
+                    const inTitleBarByPos = typeof clientY === "number" && clientY < TITLE_BAR_HEIGHT;
+                    if (!!targetInTitleBar || inTitleBarByPos) e.preventDefault();
+                  }
+                : undefined
+            }
+            onInteractOutside={
+              isTauri()
+                ? (e) => {
+                    const orig = (e as { detail?: { originalEvent?: PointerEvent } }).detail?.originalEvent;
+                    const target = orig?.target ?? e.target;
+                    const targetInTitleBar = target && (target as Element).closest?.("[data-cue-title-bar]");
+                    const clientY = orig?.clientY ?? (e as unknown as PointerEvent).clientY;
+                    const inTitleBarByPos = typeof clientY === "number" && clientY < TITLE_BAR_HEIGHT;
+                    if (!!targetInTitleBar || inTitleBarByPos) e.preventDefault();
+                  }
+                : undefined
+            }
+            onOpenAutoFocus={(e) => e.preventDefault()}
+          >
+            <SheetHeader className="shrink-0 px-6 pt-4 pb-0 pr-12">
+              <SheetTitle id="settings-dialog-title">Settings</SheetTitle>
+            </SheetHeader>
+            <ScrollArea type="always" className="min-h-0 flex-1 px-6 pb-6 pr-4">
               <Settings />
-            </div>
-          </DialogContent>
-        </Dialog>
+            </ScrollArea>
+          </SheetContent>
+        </Sheet>
         {toasts.length > 0 && (
-          <div className="pointer-events-none fixed right-4 top-4 z-[100] flex w-[min(92vw,360px)] flex-col gap-2">
+          <div className="pointer-events-none fixed bottom-4 left-4 z-[100] flex w-[min(92vw,360px)] flex-col gap-2">
             {toasts.map((toast) => (
               <div
                 key={toast.id}
@@ -148,7 +193,8 @@ const AppLayout = () => {
             ))}
           </div>
         )}
-        </div>
+          </div>
+        </ToastProvider>
       </SettingsProvider>
     </WorkbenchTabsProvider>
   );

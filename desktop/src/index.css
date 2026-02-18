@@ -87,3 +87,28 @@
     font-family: "Assistant", "Arial", "Helvetica", "DejaVu Sans", "Liberation Sans", "Noto Sans", "Sans Serif", sans-serif;
   }
 }
+
+/* Empty state stagger: welcome → rest of sentence → upload */
+@keyframes empty-state-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.empty-state-reveal-welcome {
+  opacity: 0;
+  animation: empty-state-fade-in 0.8s ease-out forwards;
+}
+
+.empty-state-reveal-welcome-rest {
+  opacity: 0;
+  animation: empty-state-fade-in 0.8s ease-out 1s forwards;
+}
+
+.empty-state-reveal-upload {
+  opacity: 0;
+  animation: empty-state-fade-in 0.9s ease-out 2.8s forwards;
+}
