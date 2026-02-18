@@ -384,7 +384,7 @@ Definition of done:
 3.1 Editor layout regions
 - Deliverable:
   - Center video preview
-  - Left “All subtitles” panel (currently hidden/paused in implementation to protect preview size; overlay-only when re-enabled)
+  - Left “All subtitles” panel **not in the current app UI** — documented here as planned only (no drawer or placeholder is shown to users; overlay-only when re-enabled in a future implementation)
   - Right style inspector
 - Acceptance criteria:
   - Workbench tab shows these regions with stable sizing.

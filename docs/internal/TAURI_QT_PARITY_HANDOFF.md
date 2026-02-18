@@ -13,7 +13,7 @@ Every agent must update it before handing work to another agent.
 
 **Next actionable task:** See `docs/internal/ROADMAP.md` and `docs/internal/KNOWN_ISSUES.md`. Queue item 4 is next: KI-004 (`Preview word-highlight sync`) to align preview highlight timing with timed-word artifacts while keeping export timing unchanged.
 
-**Gotchas (3–5):** (1) Cue uses **Tauri + React** (not Svelte, not Next.js); (2) No MUI — use shadcn/Tailwind and lucide-react only; (3) Config and projects live in **app data dir** (see `app/paths.py`); (4) **Cue_extra** folder holds `backend_port.txt` and is used by run scripts; (5) Workbench tabs are **in-memory** (no persistence); closing the app clears open tabs.
+**Gotchas (3–6):** (1) Cue uses **Tauri + React** (not Svelte, not Next.js); (2) No MUI — use shadcn/Tailwind and lucide-react only; (3) Config and projects live in **app data dir** (see `app/paths.py`); (4) **Cue_extra** folder holds `backend_port.txt` and is used by run scripts; (5) Workbench tabs are **in-memory** (no persistence); closing the app clears open tabs; (6) The "All subtitles" panel and any placeholder for it are **not in the current application UI** — they exist only in docs (spec/roadmap); do not assume users see that panel.
 
 **Run locally:** Windows: `scripts\run_desktop_all.cmd`. From repo root it installs deps, starts the backend, then launches the Tauri app. Alternative: start backend manually, then from `desktop/` run `npm run tauri dev`.
 
