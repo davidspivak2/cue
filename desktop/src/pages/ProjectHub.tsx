@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useSettings } from "@/contexts/SettingsContext";
+import { useToast } from "@/contexts/ToastContext";
 import {
   Dialog,
   DialogClose,
@@ -101,6 +102,14 @@ const resolveProjectTitle = (project: ProjectSummary) => {
     return getFileName(project.video_path);
   }
   return "Untitled video";
+};
+
+const MAX_TOAST_NAME_LENGTH = 50;
+
+const truncateForToast = (name: string, maxLen = MAX_TOAST_NAME_LENGTH): string => {
+  if (name.length <= maxLen) return name;
+  const trimmed = name.slice(0, maxLen - 1).trim();
+  return trimmed.length > 0 ? `${trimmed}\u2026` : name.slice(0, maxLen);
 };
 
 const getFileExtension = (value: string) => {
@@ -201,6 +210,7 @@ const resolveTaskDetail = (project: ProjectSummary) => {
 const ProjectHub = () => {
   const navigate = useNavigate();
   const { openSettings } = useSettings();
+  const { pushToast } = useToast();
   const { closeTab, openOrActivateTab } = useWorkbenchTabs();
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -623,13 +633,17 @@ const ProjectHub = () => {
         cancelledCount > 0
           ? ` Running job cancelled first${cancelledCount > 1 ? " (multiple jobs)." : "."}`
           : "";
-      showBanner("info", `Video deleted.${cancelledMessage}`);
+      const displayName =
+        truncateForToast(resolveProjectTitle(project).trim()) || "The video";
+      const message = `${displayName} was removed.${cancelledMessage.trim() ? ` ${cancelledMessage.trim()}` : ""}`;
+      // D4: delete success must be toast, not inline banner (CUE_UX_UI_SPEC).
+      pushToast("Video deleted", message);
     } catch (err) {
       showBanner("error", err instanceof Error ? err.message : "Failed to delete video.");
     } finally {
       setDeletingProjectId(null);
     }
-  }, [closeTab, deleteConfirmProject, isBusyOperation, showBanner]);
+  }, [closeTab, deleteConfirmProject, isBusyOperation, pushToast, showBanner]);
 
   const showEmptyState = !isLoading && projects.length === 0;
   const enableRootDrop = !isTauriEnv && !isBusyOperation;
@@ -688,6 +702,7 @@ const ProjectHub = () => {
 
       {banner && (
         <div
+          data-testid="project-hub-banner"
           className={cn(
             "flex items-start justify-between gap-3 rounded-md border p-3 text-sm",
             banner.type === "error"

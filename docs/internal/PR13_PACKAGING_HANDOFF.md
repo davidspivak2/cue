@@ -14,9 +14,10 @@ Purpose:
 
 ### Engine build and packaging
 - Added entry wrappers:
-  - `run_backend.py`
-  - `run_runner.py`
-  - `run_align_worker.py`
+  - `engine/run_backend.py`
+  - `engine/run_runner.py`
+  - `engine/run_worker.py`
+  - `engine/run_align_worker.py`
 - Added PyInstaller engine spec:
   - `tools/pyinstaller.engine.spec.in`
 - Added engine build scripts:

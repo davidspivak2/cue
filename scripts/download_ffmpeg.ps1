@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-$root = $PSScriptRoot
+$root = Split-Path $PSScriptRoot -Parent
 $outDir = Join-Path $root "bin"
 $tempDir = Join-Path $root "_ffmpeg_tmp"
 $zipPath = Join-Path $tempDir "ffmpeg.zip"

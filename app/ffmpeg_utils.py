@@ -10,7 +10,7 @@ from pathlib import Path
 
 BIN_DIR_NAME = "bin"
 MISSING_FFMPEG_MESSAGE = (
-    "Video tools not found. Run download_ffmpeg.bat or install them with winget."
+    "Video tools not found. Run scripts\\download_ffmpeg.bat or install them with winget."
 )
 
 

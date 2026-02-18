@@ -270,6 +270,11 @@ test("project hub card interactions", async ({ page }) => {
   await page.getByRole("button", { name: "Delete video" }).click();
   await deleteRequest;
   await expect(page.getByText("another.mp4")).toHaveCount(0);
+  // D4: delete success must be toast, not inline banner (CUE_UX_UI_SPEC).
+  await expect(
+    page.getByRole("status").filter({ hasText: "Video deleted" })
+  ).toBeVisible();
+  await expect(page.getByTestId("project-hub-banner")).toHaveCount(0);
 
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
