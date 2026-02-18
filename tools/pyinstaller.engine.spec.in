@@ -84,7 +84,7 @@ def script_name(entry: object) -> str:
 
 
 a = Analysis(
-    ["run_backend.py", "run_runner.py", "run_worker.py", "run_align_worker.py"],
+    ["engine/run_backend.py", "engine/run_runner.py", "engine/run_worker.py", "engine/run_align_worker.py"],
     pathex=[project_dir],
     binaries=binaries,
     datas=datas,
@@ -105,7 +105,7 @@ backend_exe = EXE(
     [
         script
         for script in a.scripts
-        if os.path.splitext(script_name(script))[0] == "run_backend"
+        if os.path.splitext(os.path.basename(script_name(script)))[0] == "run_backend"
     ],
     [],
     exclude_binaries=True,
@@ -123,7 +123,7 @@ runner_exe = EXE(
     [
         script
         for script in a.scripts
-        if os.path.splitext(script_name(script))[0] == "run_runner"
+        if os.path.splitext(os.path.basename(script_name(script)))[0] == "run_runner"
     ],
     [],
     exclude_binaries=True,
@@ -141,7 +141,7 @@ worker_exe = EXE(
     [
         script
         for script in a.scripts
-        if os.path.splitext(script_name(script))[0] == "run_worker"
+        if os.path.splitext(os.path.basename(script_name(script)))[0] == "run_worker"
     ],
     [],
     exclude_binaries=True,
@@ -159,7 +159,7 @@ align_exe = EXE(
     [
         script
         for script in a.scripts
-        if os.path.splitext(script_name(script))[0] == "run_align_worker"
+        if os.path.splitext(os.path.basename(script_name(script)))[0] == "run_align_worker"
     ],
     [],
     exclude_binaries=True,

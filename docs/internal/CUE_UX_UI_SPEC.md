@@ -154,7 +154,7 @@ Each card shows:
 
 ### D4) Projects micro-interactions
 - Delete confirmation appears directly (no side-swoop animation).
-- Delete success feedback is a toast (temporary), not a sticky inline banner.
+- Delete success feedback is a toast (temporary), not a sticky inline banner. Implementation: use toast API (e.g. useToast/pushToast) for delete success; E2E verifies toast appears and no persistent banner.
 - Empty state shows a single primary **“New project”** action inside the empty-state surface.
 - When the list is non-empty (no empty state), top-right **“New project”** appears as usual.
 
@@ -499,7 +499,7 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 
 **Runtime modes:**
 - Runs from source (python `-m app.main`).
-- Runs as a packaged EXE (PyInstaller).
+- Runs as a packaged app (Tauri installer with bundled engine).
 - Worker process launch differs by mode (python module vs worker EXE).
 
 **App data location (Windows):**

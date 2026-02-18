@@ -711,7 +711,7 @@ Definition of done:
   - Inline edit multi-line check: 3-line cue remains fully visible/editable.
   - RTL textarea check (Hebrew): punctuation placement and arrow-key behavior stay intuitive in edit mode.
   - While inline edit is active, click Play -> verify auto-save + exit edit mode + immediate playback resume.
-  - Delete project -> transient toast appears -> no persistent banner remains.
+  - Delete project -> transient toast appears -> no persistent banner remains (E2E: `project-hub.spec.ts` asserts toast and no inline banner).
   - Settings clarity checks for transcription quality, save policy/path grouping, and theme toggle.
   - Style pane checks for font list, color presets/picker behavior, default-color sanity, overlay `X` close affordance, collapsed-strip entry, and thin scrollbar usability.
 - Lightweight analytics (privacy-preserving):

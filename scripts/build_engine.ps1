@@ -60,7 +60,7 @@ if (-not (Test-Path $ffprobeTarget)) {
 
 if (-not (Test-Path $ffmpegTarget) -or -not (Test-Path $ffprobeTarget)) {
     Write-Host "[INFO] Downloading FFmpeg binaries..."
-    & (Join-Path $repo "download_ffmpeg.bat")
+    & (Join-Path $repo "scripts\download_ffmpeg.bat")
     if ($LASTEXITCODE -ne 0) {
         throw "download_ffmpeg.bat failed."
     }

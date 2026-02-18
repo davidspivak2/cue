@@ -49,7 +49,7 @@ The app needs FFmpeg and FFprobe. Either:
 
 **Option 1** (recommended) — run the bundled download script:
 ```bat
-download_ffmpeg.bat
+scripts\download_ffmpeg.bat
 ```
 
 **Option 2** — install via winget:
@@ -211,15 +211,6 @@ npm run tauri build
 ```
 
 Outputs `.msi` and `.exe` installers under `desktop/src-tauri/target/release/bundle/`.
-
-### Windows (Legacy PyInstaller — reference only)
-
-```bat
-.venv\Scripts\activate
-build_exe.bat
-```
-
-Produces `dist\Cue\Cue.exe` (portable folder).
 
 ### macOS
 
