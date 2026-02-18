@@ -10,6 +10,7 @@
     "core:window:allow-close",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
+    "core:window:allow-set-icon",
     "core:event:default",
     "core:event:allow-listen",
     "dialog:default",
