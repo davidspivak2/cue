@@ -2,6 +2,7 @@ import * as React from "react";
 
 type SettingsContextValue = {
   openSettings: () => void;
+  settingsOpen: boolean;
 };
 
 const SettingsContext = React.createContext<SettingsContextValue | null>(null);
@@ -16,12 +17,14 @@ export const useSettings = (): SettingsContextValue => {
 
 export const SettingsProvider = ({
   children,
-  openSettings
+  openSettings,
+  settingsOpen
 }: {
   children: React.ReactNode;
   openSettings: () => void;
+  settingsOpen: boolean;
 }) => (
-  <SettingsContext.Provider value={{ openSettings }}>
+  <SettingsContext.Provider value={{ openSettings, settingsOpen }}>
     {children}
   </SettingsContext.Provider>
 );
