@@ -617,7 +617,7 @@ const Home = () => {
       {state === "WORKING" && (
         <div className="space-y-4">
           <div className="text-center">
-            <h2 className="text-xl font-semibold text-foreground">{statusHeading}</h2>
+            <h2 className="text-lg font-semibold text-foreground">{statusHeading}</h2>
             {progressMessage && (
               <p className="text-sm text-muted-foreground">{progressMessage}</p>
             )}
@@ -640,8 +640,8 @@ const Home = () => {
 
       {state === "SUBTITLES_READY" && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 text-xl font-semibold">
-            <CheckCircle2 className="h-5 w-5 text-primary" />
+          <div className="flex items-center gap-2 text-lg font-semibold text-foreground">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-primary" aria-hidden />
             {legacyCopy.subtitlesReady.header}
           </div>
           <div
@@ -671,7 +671,7 @@ const Home = () => {
 
       {state === "EXPORT_DONE" && (
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold">{legacyCopy.done.header}</h2>
+          <h2 className="text-lg font-semibold text-foreground">{legacyCopy.done.header}</h2>
           <div className="flex flex-wrap gap-2">
             <Button onClick={openOutputVideo}>{legacyCopy.done.playVideo}</Button>
             <Button variant="secondary" onClick={openOutputFolder}>

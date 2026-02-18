@@ -36,7 +36,38 @@ const AppLayout = () => {
   const seenNoticeIdsRef = React.useRef<Set<string>>(new Set());
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [settingsScrolled, setSettingsScrolled] = React.useState(false);
+  const settingsScrollRef = React.useRef<HTMLDivElement>(null);
   const openSettings = React.useCallback(() => setSettingsOpen(true), []);
+
+  React.useEffect(() => {
+    if (!settingsOpen) {
+      setSettingsScrolled(false);
+      return;
+    }
+    let cancelled = false;
+    let teardown: (() => void) | null = null;
+    const id = window.setTimeout(() => {
+      if (cancelled) return;
+      const root = settingsScrollRef.current;
+      if (!root) return;
+      const viewport = root.querySelector("[data-radix-scroll-area-viewport]");
+      if (!viewport || cancelled) return;
+      const handler = () =>
+        setSettingsScrolled((viewport as HTMLElement).scrollTop > 0);
+      handler();
+      viewport.addEventListener("scroll", handler);
+      teardown = () => {
+        viewport.removeEventListener("scroll", handler);
+        setSettingsScrolled(false);
+      };
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+      teardown?.();
+    };
+  }, [settingsOpen]);
 
   const removeToast = React.useCallback((toastId: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== toastId));
@@ -123,7 +154,7 @@ const AppLayout = () => {
           <SheetContent
             side="right"
             className={cn(
-              "flex w-96 max-w-[calc(100vw-2rem)] flex-col gap-4 p-0",
+              "flex w-96 max-w-[calc(100vw-2rem)] flex-col gap-0 p-0",
               isTauri() && "!top-[36px] !h-[calc(100vh-36px)]"
             )}
             overlayClassName={isTauri() ? "!top-[36px] left-0 right-0 bottom-0" : undefined}
@@ -158,12 +189,24 @@ const AppLayout = () => {
             }
             onOpenAutoFocus={(e) => e.preventDefault()}
           >
-            <SheetHeader className="shrink-0 px-6 pt-4 pb-0 pr-12">
+            <SheetHeader
+              className={cn(
+                "relative z-10 shrink-0 overflow-visible px-6 pt-4 pb-4 pr-12 transition-shadow duration-200",
+                settingsScrolled &&
+                  "shadow-[0_4px_12px_-4px_rgba(0,0,0,0.2)] dark:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)]"
+              )}
+            >
               <SheetTitle id="settings-dialog-title">Settings</SheetTitle>
             </SheetHeader>
-            <ScrollArea type="always" className="min-h-0 flex-1 px-6 pb-6 pr-4">
-              <Settings />
-            </ScrollArea>
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <ScrollArea
+                ref={settingsScrollRef}
+                type="always"
+                className="min-h-0 flex-1 px-6 pr-4"
+              >
+                <Settings />
+              </ScrollArea>
+            </div>
           </SheetContent>
         </Sheet>
         {toasts.length > 0 && (
@@ -171,7 +214,7 @@ const AppLayout = () => {
             {toasts.map((toast) => (
               <div
                 key={toast.id}
-                className="pointer-events-auto rounded-md border border-border bg-card p-3 shadow-lg"
+                className="pointer-events-auto rounded-lg border border-border bg-card p-4 shadow transition-colors duration-200"
                 role="status"
                 aria-live="polite"
               >

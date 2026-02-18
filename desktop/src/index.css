@@ -1,54 +1,63 @@
+/* Design system: see desktop/design-system/ for tokens and usage. */
 @import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #f7f8fa;
-  --foreground: #0f1115;
+  /* Motion: use for transition-duration when not using Tailwind duration-* */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --background: #f5f9ff;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --card-foreground: #0f1115;
-  --popover: #f1f3f7;
-  --popover-foreground: #0f1115;
-  --primary: #7a5cff;
+  --card-foreground: #0f172a;
+  --popover: #eef5ff;
+  --popover-foreground: #0f172a;
+  --primary: #2563eb;
   --primary-foreground: #ffffff;
-  --secondary: #f1f3f7;
-  --secondary-foreground: #0f1115;
-  --muted: #f1f3f7;
-  --muted-foreground: #6b7383;
-  --accent: #7a5cff;
-  --accent-foreground: #ffffff;
-  --destructive: #e23b3b;
+  --secondary: #e7efff;
+  --secondary-foreground: #1e3a8a;
+  --muted: #eef4ff;
+  --muted-foreground: #5b6b85;
+  --accent: #e0f2fe;
+  --accent-foreground: #0c4a6e;
+  --destructive: #dc2626;
   --destructive-foreground: #ffffff;
-  --border: #d7dce5;
-  --input: #d7dce5;
-  --ring: #7a5cff;
+  --border: #c9d8f0;
+  --input: #c9d8f0;
+  --ring: #2563eb;
+  --overlay: rgb(15 23 42 / 0.50);
+  --overlay-soft: rgb(15 23 42 / 0.40);
   --radius: 10px;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 10px;
+  --font-sans: "Plus Jakarta Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
 .dark {
-  --background: #0f1115;
-  --foreground: #e6eaf2;
-  --card: #151922;
-  --card-foreground: #e6eaf2;
-  --popover: #1c2230;
-  --popover-foreground: #e6eaf2;
-  --primary: #7a5cff;
-  --primary-foreground: #ffffff;
-  --secondary: #1c2230;
-  --secondary-foreground: #e6eaf2;
-  --muted: #1c2230;
-  --muted-foreground: #8892a6;
-  --accent: #7a5cff;
-  --accent-foreground: #ffffff;
-  --destructive: #ff5d5d;
-  --destructive-foreground: #ffffff;
-  --border: #2a2f3a;
-  --input: #2a2f3a;
-  --ring: #7a5cff;
+  --background: #0b1220;
+  --foreground: #e6eeff;
+  --card: #101a2f;
+  --card-foreground: #e6eeff;
+  --popover: #15213a;
+  --popover-foreground: #e6eeff;
+  --primary: #60a5fa;
+  --primary-foreground: #0a224a;
+  --secondary: #1a2a47;
+  --secondary-foreground: #d7e7ff;
+  --muted: #1a2a47;
+  --muted-foreground: #9cb2d5;
+  --accent: #1e3a8a;
+  --accent-foreground: #dbeafe;
+  --destructive: #f87171;
+  --destructive-foreground: #2b0b0b;
+  --border: #2a3f63;
+  --input: #2a3f63;
+  --ring: #60a5fa;
+  --overlay: rgb(2 6 23 / 0.62);
+  --overlay-soft: rgb(2 6 23 / 0.50);
 }
 
 @theme inline {
@@ -71,6 +80,9 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+  --color-overlay-soft: var(--overlay-soft);
+  --font-sans: var(--font-sans);
   --radius: var(--radius);
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
@@ -84,7 +96,7 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: "Assistant", "Arial", "Helvetica", "DejaVu Sans", "Liberation Sans", "Noto Sans", "Sans Serif", sans-serif;
+    font-family: var(--font-sans);
   }
 }
 
@@ -111,4 +123,13 @@
 .empty-state-reveal-upload {
   opacity: 0;
   animation: empty-state-fade-in 0.9s ease-out 2.8s forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-state-reveal-welcome,
+  .empty-state-reveal-welcome-rest,
+  .empty-state-reveal-upload {
+    animation-duration: 0.01ms;
+    animation-delay: 0s;
+  }
 }

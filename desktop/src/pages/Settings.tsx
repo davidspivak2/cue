@@ -87,8 +87,8 @@ const SettingsSection = ({
   title: string;
   children: React.ReactNode;
 }) => (
-  <section className="rounded-lg border border-border bg-card p-4">
-    <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+  <section className="rounded-lg border border-border bg-card p-6 shadow-sm">
+    <h2 className="text-lg font-semibold text-foreground">{title}</h2>
     <div className="mt-4 space-y-3">{children}</div>
   </section>
 );
@@ -221,12 +221,11 @@ const Settings = () => {
   const saveFolderValue = settings.save_folder ?? "";
 
   return (
-    <div className="flex flex-col gap-4" data-testid="settings-content">
+    <div className="flex flex-col gap-4 pb-6" data-testid="settings-content">
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <SettingsSection title="Appearance">
+      <SettingsSection title="Theme">
         <div className="space-y-2">
-          <Label>Theme</Label>
           <ToggleGroup
             type="single"
             variant="outline"
@@ -250,9 +249,8 @@ const Settings = () => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Performance">
+      <SettingsSection title="Transcription quality">
         <div className="space-y-2">
-          <Label htmlFor="transcription-quality">Transcription quality</Label>
           <div className="max-w-xs">
             <Select
               value={settings.transcription_quality}

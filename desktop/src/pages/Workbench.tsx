@@ -2417,7 +2417,7 @@ const Workbench = () => {
                 key={tab.projectId}
                 className={cn(
                   "flex items-center rounded-md border px-2 py-1 text-sm",
-                  isActive ? "border-primary/60 bg-accent/20" : "border-border bg-card"
+                  isActive ? "border-primary/60 bg-accent text-accent-foreground" : "border-border bg-card"
                 )}
               >
                 <button
@@ -2427,7 +2427,7 @@ const Workbench = () => {
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
                     "max-w-[180px] truncate text-left text-sm",
-                    isActive ? "text-foreground" : "text-muted-foreground"
+                    isActive ? "text-accent-foreground" : "text-muted-foreground"
                   )}
                   title={label}
                   data-testid={`workbench-tab-${tab.projectId}`}
@@ -2774,7 +2774,7 @@ const Workbench = () => {
 
           {showScrim && (
             <div
-              className="fixed inset-0 z-40 bg-black/40"
+              className="fixed inset-0 z-40 bg-overlay-soft"
               onClick={closeOverlays}
               data-testid="workbench-overlay-scrim"
             />
@@ -2782,7 +2782,7 @@ const Workbench = () => {
 
           {hasSubtitles && showSubtitlesOverlay && leftPanelOpen && (
             <aside
-              className="fixed inset-y-0 left-0 z-50 flex w-[min(90vw,360px)] flex-col border-r border-border bg-card shadow-lg"
+              className="fixed inset-y-0 left-0 z-50 flex w-[min(90vw,360px)] flex-col border-r border-border bg-card shadow"
               data-testid="workbench-left-drawer"
             >
               <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -2801,7 +2801,7 @@ const Workbench = () => {
 
           {hasSubtitles && isNarrow && rightOverlayOpen && (
             <aside
-              className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,360px)] flex-col border-l border-border bg-card shadow-lg"
+              className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,360px)] flex-col border-l border-border bg-card shadow"
               data-testid="workbench-right-drawer"
             >
               <div className="flex items-center justify-between border-b border-border px-4 py-2">
