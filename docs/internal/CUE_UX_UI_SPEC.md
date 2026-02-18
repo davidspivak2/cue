@@ -171,10 +171,11 @@ The Editor is a **single unified** edit + style + preview + export surface for a
 - **Preview truthfulness:** subtitle overlay scales with the rendered video viewport during window resize (no fixed-size subtitle drift while video shrinks/grows).
 - **Preview/export style parity:** for the same project style, preview should remain materially consistent with export for core fields (font family, font size, shadow treatment, and relative placement intent).
 - **Right:** Style inspector.
-- **Left:** “All subtitles” panel (collapsible, resizable when docked).
+- **Left:** “All subtitles” panel (collapsible, resizable when docked). **Current app:** This panel is not present in the shipped UI; the following left-panel behavior is spec-only until implemented (no All subtitles drawer or placeholder is shown to users).
 - **Cursor semantics:** interactive controls use pointer cursor feedback; text-entry surfaces use I-beam feedback.
 
 ### E2) Left “All subtitles” panel behavior
+**Note:** This panel is not in the current application UI; it is documented here as planned behavior only.
 - Default on first entry: **collapsed**.
 - Expanded at wide window widths:
   - Docked panel that **pushes layout** (does not overlay).
@@ -208,7 +209,7 @@ Users can **edit subtitle text only**. Timestamps are visible but **not editable
 The redesign workflow is **in-app subtitle text editing only** (no external subtitle editor).
 
 **Entry points:**
-1) **All subtitles list**
+1) **All subtitles list** (not in current UI — doc/spec only)
    - Each row shows timestamps (read-only) + editable subtitle text.
    - Clicking a row seeks the video to that timestamp and selects the subtitle.
 2) **On-video editing**
