@@ -44,9 +44,9 @@ This document is written for OOTL AI contributors so they can pick up work witho
 
 \- UI: \*\*React + TypeScript\*\*
 
-\- Component library: \*\*MUI (Material UI)\*\* initially (fast polished UI + mature theming)
+\- Component library: \*\*shadcn/ui\*\* (stack was updated from the original MUI choice)
 
-\- Styling approach: MUI theme + (optional later) utility classes (Tailwind) if needed
+\- Styling approach: Tailwind with shadcn components
 
 \- Backend engine: existing \*\*Python\*\* pipeline (faster-whisper, whisperx, ffmpeg)
 
@@ -66,7 +66,7 @@ This document is written for OOTL AI contributors so they can pick up work witho
 
 \### Electron fallback
 
-If Tauri integration proves blocking (packaging constraints, WebView limitations, sidecar friction), the UI can be packaged with Electron instead. The UI code (React/MUI) stays the same; only the shell changes.
+If Tauri integration proves blocking (packaging constraints, WebView limitations, sidecar friction), the UI can be packaged with Electron instead. The UI code (React/shadcn) stays the same; only the shell changes.
 
 
 
