@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Maximize2, Minus, Settings, Square, X } from "lucide-react";
+import { useTheme } from "next-themes";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 
@@ -10,32 +11,13 @@ export const TITLE_BAR_HEIGHT = 36;
 
 export const TITLE_BAR_HEIGHT_PX = `${TITLE_BAR_HEIGHT}px`;
 
-/** Simple Cue app icon (stylized C). */
-function CueIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden
-    >
-      <path
-        d="M18 6.5A7.5 7.5 0 0 0 6 12a7.5 7.5 0 0 0 12 5.5"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 /**
  * Custom window title bar shown only in Tauri (replaces native decorations).
  * Left: Cue logo. Right: Close, Maximize/Restore, Minimize, Settings.
  */
 const TitleBar = () => {
   const { openSettings, settingsOpen } = useSettings();
+  const { resolvedTheme } = useTheme();
   const [maximized, setMaximized] = React.useState(false);
   const appWindow = React.useMemo(
     () => (typeof window !== "undefined" && isTauri() ? getCurrentWindow() : null),
@@ -94,7 +76,12 @@ const TitleBar = () => {
         data-tauri-drag-region
         onDoubleClick={handleMaximize}
       >
-        <CueIcon className="h-5 w-5 shrink-0 text-primary" />
+        <img
+          src={resolvedTheme === "dark" ? "/dark.svg" : "/light.svg"}
+          alt=""
+          className="h-5 w-5 shrink-0"
+          aria-hidden
+        />
         <span className="text-lg font-bold tracking-tight text-primary">Cue</span>
       </div>
 

@@ -32,6 +32,6 @@ export default [
     settings: { react: { version: "detect" } },
   },
   {
-    ignores: ["dist/**", "node_modules/**", "src-tauri/**", "tests/**"],
+    ignores: ["dist/**", "node_modules/**", "src-tauri/**", "tests/**", "scripts/**"],
   },
 ];
