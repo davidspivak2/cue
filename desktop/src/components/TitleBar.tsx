@@ -82,7 +82,7 @@ const TitleBar = () => {
           className="h-5 w-5 shrink-0"
           aria-hidden
         />
-        <span className="text-lg font-bold tracking-tight text-primary">Cue</span>
+        <span className="text-lg font-bold tracking-tight text-foreground">Cue</span>
       </div>
 
       {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
@@ -149,8 +149,8 @@ function TitleBarButton({
       aria-label={ariaLabel}
       aria-pressed={selected}
       className={cn(
-        "flex h-full w-10 items-center justify-center text-foreground transition-colors",
-        selected ? "bg-muted/80" : "hover:bg-muted/80 active:bg-muted",
+        "flex h-full w-10 items-center justify-center text-foreground transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        selected ? "bg-foreground/10" : "hover:bg-foreground/10 active:bg-foreground/15",
         selected && "cursor-default",
         className
       )}

@@ -105,7 +105,10 @@ const VideoCard = ({
         disabled={disabled}
       />
       <div
-        className="relative w-full overflow-hidden rounded-lg border border-border bg-muted"
+        className={cn(
+          "relative w-full overflow-hidden rounded-lg border border-border bg-muted",
+          (onFileSelected || onChoosePath) && "cursor-pointer"
+        )}
         style={{ aspectRatio: "16 / 9" }}
         onClick={onFileSelected || onChoosePath ? openFileDialog : undefined}
       >
@@ -135,7 +138,7 @@ const VideoCard = ({
             type="button"
             variant="ghost"
             size="icon"
-            className="absolute right-2 top-2 h-8 w-8 rounded-full bg-black/50 text-white hover:bg-black/70"
+            className="absolute right-2 top-2 h-8 w-8 rounded-full border border-border bg-background/90 text-foreground shadow-sm transition-colors duration-200 hover:bg-background"
             onClick={onClear}
             aria-label={legacyCopy.videoCard.remove}
             disabled={disabled}

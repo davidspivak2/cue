@@ -828,7 +828,7 @@ const ProjectHub = () => {
                 aria-busy={isBusy}
                 data-testid={`project-card-${project.project_id}`}
                 className={cn(
-                  "rounded-lg border bg-card p-3 text-left transition",
+                  "rounded-lg border border-border bg-card p-3 text-left shadow-sm transition-colors duration-200",
                   cardDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:border-primary/60",
                   isBusy ? "ring-1 ring-primary/40" : ""
                 )}
@@ -889,12 +889,12 @@ const ProjectHub = () => {
                     >
                       <p className="text-xs font-medium text-foreground">{activeTaskHeading}</p>
                       {activeTaskDetail && (
-                        <p className="truncate text-[11px] text-muted-foreground">
+                        <p className="truncate text-xs text-muted-foreground">
                           {activeTaskDetail}
                         </p>
                       )}
                       <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>{Math.round(activeTaskPct)}%</span>
                         </div>
                         <Progress value={activeTaskPct} />
@@ -903,7 +903,7 @@ const ProjectHub = () => {
                   )}
                   {shouldShowTaskNotice && taskNotice && (
                     <div
-                      className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive"
+                      className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
                       data-testid={`project-card-task-notice-${project.project_id}`}
                     >
                       <div className="flex items-start justify-between gap-2">

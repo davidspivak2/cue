@@ -102,7 +102,7 @@ const DropZone = ({
         onChange={handleInputChange}
         disabled={disabled}
       />
-      <p className="text-lg font-semibold">{legacyCopy.dropZone.headline}</p>
+      <p className="text-lg font-semibold text-foreground">{legacyCopy.dropZone.headline}</p>
       <p className="text-sm text-muted-foreground">{legacyCopy.dropZone.subtext}</p>
       <Button type="button" onClick={openFileDialog} disabled={disabled}>
         {legacyCopy.dropZone.chooseButton}
