@@ -16,7 +16,7 @@ export const TITLE_BAR_HEIGHT_PX = `${TITLE_BAR_HEIGHT}px`;
  * Left: Cue logo. Right: Close, Maximize/Restore, Minimize, Settings.
  */
 const TitleBar = () => {
-  const { openSettings, settingsOpen } = useSettings();
+  const { openSettings, closeSettings, settingsOpen } = useSettings();
   const { resolvedTheme } = useTheme();
   const [maximized, setMaximized] = React.useState(false);
   const appWindow = React.useMemo(
@@ -88,10 +88,11 @@ const TitleBar = () => {
       {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
       <div className="flex self-stretch items-stretch">
         <TitleBarButton
-          onClick={settingsOpen ? undefined : openSettings}
+          onClick={settingsOpen ? closeSettings : openSettings}
           title="Settings"
           aria-label="Settings"
           selected={settingsOpen}
+          className="cursor-pointer"
         >
           <Settings className="h-4 w-4" />
         </TitleBarButton>
@@ -144,7 +145,7 @@ function TitleBarButton({
   return (
     <button
       type="button"
-      onClick={selected ? undefined : onClick}
+      onClick={onClick}
       title={title}
       aria-label={ariaLabel}
       aria-pressed={selected}
