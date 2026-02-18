@@ -1,5 +1,7 @@
 import * as React from "react";
 import { useSearchParams } from "react-router-dom";
+import { useTheme } from "next-themes";
+import { Laptop, Moon, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   fetchDeviceInfo,
   fetchSettings,
@@ -93,6 +96,7 @@ const SettingsSection = ({
 const Settings = () => {
   const [searchParams] = useSearchParams();
   const showDiagnostics = searchParams.get("diagnostics") === "1";
+  const { theme, setTheme } = useTheme();
 
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -219,6 +223,32 @@ const Settings = () => {
   return (
     <div className="flex flex-col gap-4" data-testid="settings-content">
       {error && <p className="text-sm text-destructive">{error}</p>}
+
+      <SettingsSection title="Appearance">
+        <div className="space-y-2">
+          <Label>Theme</Label>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            value={theme ?? "system"}
+            onValueChange={(v) => v && setTheme(v)}
+            className="inline-flex"
+          >
+            <ToggleGroupItem value="light" aria-label="Light">
+              <Sun className="mr-2 size-4" />
+              Light
+            </ToggleGroupItem>
+            <ToggleGroupItem value="dark" aria-label="Dark">
+              <Moon className="mr-2 size-4" />
+              Dark
+            </ToggleGroupItem>
+            <ToggleGroupItem value="system" aria-label="System">
+              <Laptop className="mr-2 size-4" />
+              System
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+      </SettingsSection>
 
       <SettingsSection title="Performance">
         <div className="space-y-2">
