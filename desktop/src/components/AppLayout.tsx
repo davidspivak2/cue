@@ -39,6 +39,7 @@ const AppLayout = () => {
   const [settingsScrolled, setSettingsScrolled] = React.useState(false);
   const settingsScrollRef = React.useRef<HTMLDivElement>(null);
   const openSettings = React.useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = React.useCallback(() => setSettingsOpen(false), []);
 
   React.useEffect(() => {
     if (!settingsOpen) {
@@ -136,7 +137,7 @@ const AppLayout = () => {
 
   return (
     <WorkbenchTabsProvider>
-      <SettingsProvider openSettings={openSettings} settingsOpen={settingsOpen}>
+      <SettingsProvider openSettings={openSettings} closeSettings={closeSettings} settingsOpen={settingsOpen}>
         <ToastProvider pushToast={pushToast}>
           <div
             className="flex h-screen flex-col bg-background text-foreground"

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Trash2, Upload, X } from "lucide-react";
+import { LayoutGrid, List, Trash2, Upload, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -20,6 +20,21 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import {
   createProject,
@@ -58,7 +73,13 @@ const STATUS_LABELS: Record<string, string> = {
 const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v", "webm"]);
 const MAX_DURATION_DIFF_SECONDS = 3;
 const HAS_HAD_VIDEOS_KEY = "cue_has_had_videos";
+const PROJECT_HUB_VIEW_KEY = "cue_project_hub_view";
 const ADD_VIDEO_BUTTON = "Add video";
+
+type ViewMode = "cards" | "list";
+
+const isValidViewMode = (v: string): v is ViewMode =>
+  v === "cards" || v === "list";
 const EMPTY_WELCOME_LEAD = "Welcome!";
 const EMPTY_WELCOME_REST =
   " Cue adds subtitles to your videos using OpenAI's Whisper speech recognition.";
@@ -177,6 +198,27 @@ const resolveStatusLabel = (project: ProjectSummary) => {
   return STATUS_LABELS[project.status] ?? "Not started";
 };
 
+const resolveStatusBadgeClassName = (project: ProjectSummary): string => {
+  if (project.missing_video) {
+    return "border-transparent bg-red-500/15 text-red-700 dark:bg-red-400/20 dark:text-red-300";
+  }
+  const status = project.status ?? "";
+  switch (status) {
+    case "ready":
+      return "border-transparent bg-emerald-500/15 text-emerald-700 dark:bg-emerald-400/20 dark:text-emerald-300";
+    case "exporting":
+      return "border-transparent bg-amber-500/15 text-amber-700 dark:bg-amber-400/20 dark:text-amber-300";
+    case "done":
+      return "border-transparent bg-blue-500/15 text-blue-700 dark:bg-blue-400/20 dark:text-blue-300";
+    case "missing_file":
+    case "needs_video":
+      return "border-transparent bg-red-500/15 text-red-700 dark:bg-red-400/20 dark:text-red-300";
+    case "needs_subtitles":
+    default:
+      return "border-transparent bg-slate-500/15 text-slate-600 dark:bg-slate-400/20 dark:text-slate-300";
+  }
+};
+
 const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean) => {
   if (!path) {
     return "";
@@ -230,6 +272,18 @@ const ProjectHub = () => {
   const [busyProjectId, setBusyProjectId] = React.useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null);
   const [dismissedNoticeIds, setDismissedNoticeIds] = React.useState<Set<string>>(new Set());
+  const [viewMode, setViewMode] = React.useState<ViewMode>(() => {
+    if (typeof window === "undefined") return "cards";
+    const stored = localStorage.getItem(PROJECT_HUB_VIEW_KEY);
+    return stored && isValidViewMode(stored) ? stored : "cards";
+  });
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(PROJECT_HUB_VIEW_KEY, viewMode);
+    } catch {
+      /* ignore */
+    }
+  }, [viewMode]);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const relinkInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -673,9 +727,47 @@ const ProjectHub = () => {
           onOpenSettings={openSettings}
           showSettings={!isTauriEnv}
           right={
-            <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
-              {ADD_VIDEO_BUTTON}
-            </Button>
+            <>
+              {projects.length > 0 && (
+                <TooltipProvider delayDuration={300}>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    value={viewMode}
+                    onValueChange={(v) => v && isValidViewMode(v) && setViewMode(v)}
+                    className="inline-flex [&_[data-slot=toggle-group-item]]:h-[38px]"
+                  >
+                    <ToggleGroupItem value="cards" aria-label="Card view" className="relative">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="absolute inset-0 rounded-[inherit]"
+                            onClick={(e) => (e.target as HTMLElement).closest("button")?.click()}
+                          />
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={14}>Card view</TooltipContent>
+                      </Tooltip>
+                      <LayoutGrid className="relative z-10 h-4 w-4" />
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="list" aria-label="List view" className="relative">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="absolute inset-0 rounded-[inherit]"
+                            onClick={(e) => (e.target as HTMLElement).closest("button")?.click()}
+                          />
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={14}>List view</TooltipContent>
+                      </Tooltip>
+                      <List className="relative z-10 h-4 w-4" />
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </TooltipProvider>
+              )}
+              <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
+                {ADD_VIDEO_BUTTON}
+              </Button>
+            </>
           }
         />
       )}
@@ -789,7 +881,7 @@ const ProjectHub = () => {
         );
       })()}
 
-      {!isLoading && projects.length > 0 && (
+      {!isLoading && projects.length > 0 && (viewMode === "cards" ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {projects.map((project) => {
             const thumbnailSrc = resolveThumbnailSrc(project.thumbnail_path, isTauriEnv);
@@ -848,9 +940,6 @@ const ProjectHub = () => {
                       Preview not available
                     </div>
                   )}
-                  <Badge variant="secondary" className="absolute left-2 top-2">
-                    {statusLabel}
-                  </Badge>
                   <Button
                     type="button"
                     variant="ghost"
@@ -874,10 +963,13 @@ const ProjectHub = () => {
                   </Button>
                 </div>
                 <div className="mt-3 space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                       {project.title || "Untitled video"}
                     </p>
+                    <Badge variant="outline" className={cn("shrink-0", resolveStatusBadgeClassName(project))}>
+                      {statusLabel}
+                    </Badge>
                   </div>
                   {durationLabel && (
                     <p className="text-xs text-muted-foreground">{durationLabel}</p>
@@ -929,7 +1021,151 @@ const ProjectHub = () => {
             );
           })}
         </div>
-      )}
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border bg-muted/50 dark:bg-muted/30">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Video</TableHead>
+                <TableHead scope="col">Duration</TableHead>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">Progress</TableHead>
+                <TableHead scope="col" className="w-[60px]">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projects.map((project) => {
+                const thumbnailSrc = resolveThumbnailSrc(project.thumbnail_path, isTauriEnv);
+                const durationLabel = formatDuration(project.duration_seconds);
+                const statusLabel = resolveStatusLabel(project);
+                const isBusy =
+                  busyProjectId === project.project_id || deletingProjectId === project.project_id;
+                const cardDisabled = isBusyOperation;
+                const activeTaskPct =
+                  typeof project.active_task?.pct === "number"
+                    ? Math.max(0, Math.min(100, project.active_task.pct))
+                    : 0;
+                const activeTaskHeading = resolveTaskHeading(project);
+                const taskNotice = project.task_notice;
+                const shouldShowTaskNotice =
+                  !!taskNotice &&
+                  typeof taskNotice.notice_id === "string" &&
+                  !dismissedNoticeIds.has(taskNotice.notice_id);
+                return (
+                  <TableRow
+                    key={project.project_id}
+                    role="button"
+                    tabIndex={cardDisabled ? -1 : 0}
+                    onClick={() => handleCardClick(project)}
+                    onKeyDown={(event) => {
+                      if (cardDisabled) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleCardClick(project);
+                      }
+                    }}
+                    aria-disabled={cardDisabled}
+                    aria-busy={isBusy}
+                    data-testid={`project-list-row-${project.project_id}`}
+                    className={cn(
+                      cardDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                      isBusy ? "ring-1 ring-primary/40" : ""
+                    )}
+                  >
+                    <TableCell className="whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="relative h-9 w-16 shrink-0 overflow-hidden rounded border border-border bg-muted"
+                          style={{ aspectRatio: "16 / 9" }}
+                        >
+                          {thumbnailSrc ? (
+                            <img
+                              src={thumbnailSrc}
+                              alt={project.title || ""}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+                              —
+                            </div>
+                          )}
+                        </div>
+                        <p className="min-w-0 truncate text-sm font-medium text-foreground">
+                          {project.title || "Untitled video"}
+                        </p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {durationLabel || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={resolveStatusBadgeClassName(project)}>
+                      {statusLabel}
+                    </Badge>
+                    </TableCell>
+                    <TableCell className="min-w-[140px]">
+                      {project.active_task ? (
+                        <div className="space-y-1">
+                          <p className="truncate text-xs font-medium text-foreground">
+                            {activeTaskHeading}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Progress value={activeTaskPct} className="h-1.5 flex-1" />
+                            <span className="text-xs text-muted-foreground">
+                              {Math.round(activeTaskPct)}%
+                            </span>
+                          </div>
+                        </div>
+                      ) : shouldShowTaskNotice && taskNotice ? (
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-xs text-destructive">
+                            {taskNotice.message}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0 text-destructive hover:text-destructive"
+                            aria-label="Dismiss task notice"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              dismissTaskNotice(taskNotice.notice_id);
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell className="w-[60px]">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!cardDisabled) setDeleteConfirmProject(project);
+                        }}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        disabled={cardDisabled}
+                        aria-label={`Delete ${resolveProjectTitle(project)}`}
+                        data-testid={`project-list-row-delete-${project.project_id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      ))}
 
       <Dialog
         open={Boolean(deleteConfirmProject)}
