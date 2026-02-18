@@ -447,7 +447,7 @@ Summary:
 - Updated `docs/internal/CUE_UX_UI_SPEC.md` to reflect:
   - user-facing `Editor` naming,
   - no persistent sidebar navigation model,
-  - clearer status wording (`Needs edits`),
+  - clearer status wording (`Ready to review`),
   - progress transparency and background-task continuity,
   - settings clarity updates (quality cards, grouped save-path controls, merged transcription-assist controls, theme toggle),
   - hosted Send Logs contract (consent, redaction, fallback),

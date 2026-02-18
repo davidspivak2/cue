@@ -70,6 +70,8 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Edit textarea behavior for Hebrew/RTL text keeps punctuation placement and arrow-key movement intuitive.
      - Clicking `Play` while edit mode is active auto-saves, exits edit mode, and resumes playback immediately.
      - Edit affordance becomes more obvious while staying subtle and non-distracting.
+   - Current status:
+     - Play-during-edit (auto-save, exit edit mode, resume playback) is implemented. See KI-007. Three-line cue visibility, RTL edit behavior, and edit affordance discoverability remain pending.
    - Acceptance criteria:
      - Three-line cues are fully visible and editable in the inline textarea.
      - RTL edit sessions keep comma/terminal punctuation placement correct and arrow-key navigation predictable.
@@ -102,6 +104,8 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Global left sidebar is removed from the redesign flow.
      - Header/back/title/status placement is consistent across Projects, Editor, and Settings.
      - Settings entry remains discoverable from all primary surfaces when navigation is allowed.
+   - Current status:
+     - Global left sidebar is already removed; the app has no left sidebar. Remaining work is header/back/title/status consistency and Settings discoverability.
    - Acceptance criteria:
      - App remains fully navigable without the left sidebar.
      - No duplicate app/page headings or duplicated video-name labels appear in Editor.
@@ -128,6 +132,8 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Punctuation + audio controls are merged into one understandable section.
      - “Keep extracted WAV file” is removed; extracted WAV is auto-cleaned.
      - Theme toggle is exposed in Settings.
+   - Current status:
+     - Theme toggle (Light/Dark/System) is already exposed in Settings under Appearance. Remaining deliverables (transcription quality cards, save-folder grouping, punctuation/audio merge, remove Keep WAV) are still pending.
    - Acceptance criteria:
      - Non-technical users can understand each transcription-quality option without prior knowledge.
      - Save-folder controls are only shown/enabled where policy context is explicit.
@@ -323,7 +329,7 @@ Definition of done:
 
 1.3 Project status model
 - Deliverable:
-  - Status enum: Needs video / Needs subtitles / Needs edits / Exporting / Done / Missing file (API values remain `needs_video` / `needs_subtitles` / `ready` / `exporting` / `done` / `missing_file`; user-facing label for `ready` becomes “Needs edits”)
+  - Status enum: Needs video / Needs subtitles / Ready to review / Exporting / Done / Missing file (API values remain `needs_video` / `needs_subtitles` / `ready` / `exporting` / `done` / `missing_file`; user-facing label for `ready` becomes “Ready to review”)
 - Acceptance criteria:
   - Status is correct for each stage and survives restart.
 
@@ -688,7 +694,7 @@ Definition of done:
 | Fonts (fix + Hebrew/English curation) | Gap | Queue item 11 |
 | Color UX redesign (presets + picker + optional hex) | Partial (`E3`) | Queue item 11, Milestone 8.4 |
 | Sensible per-option default color sets | Gap | Queue item 11, Milestone 8.4 |
-| Theme toggle in Settings | Partial (`A`, not surfaced in Settings contract) | Queue item 10, Milestone 7.5 |
+| Theme toggle in Settings | Done | Queue item 10, Milestone 7.5 |
 | Replace ambiguous status wording (e.g., `Ready`) | Partial (`D2`, `K`) | Queue item 7, Milestone 1.3 + 0.3 |
 | Edit controls should not push subtitles while editing | Gap | Queue item 5, Milestone 4.4 |
 
