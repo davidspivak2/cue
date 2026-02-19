@@ -2605,30 +2605,47 @@ const Workbench = () => {
                         )}
                         style={subtitleOverlayPositionStyle}
                       >
-                        <div className="pointer-events-auto w-full">
-                          <div className="relative w-full">
+                        <div className="pointer-events-auto w-fit max-w-full">
+                          <div className="relative w-fit max-w-full">
                             {isEditingActiveCue ? (
-                              <textarea
-                                ref={activeSubtitleRef}
-                                data-testid="workbench-subtitle-editor"
-                                className="m-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/25 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
-                                style={subtitleEditorTextStyle}
-                                value={editingText}
-                                onChange={handleEditTextChange}
-                                onKeyDown={handleEditorKeyDown}
-                                rows={1}
-                                wrap="soft"
-                                readOnly={isSavingCue || isExporting}
-                                aria-label="Active subtitle editor"
-                                dir={subtitleDirection}
-                              />
+                              <div className="relative inline-block min-w-16 rounded-md px-3 py-2">
+                                <span
+                                  aria-hidden
+                                  className="block whitespace-pre-wrap text-center text-white"
+                                  dir={subtitleDirection}
+                                  style={{
+                                    ...subtitleEditorTextStyle,
+                                    visibility: "hidden",
+                                    margin: 0,
+                                    padding: 0,
+                                    border: "none",
+                                    boxSizing: "content-box"
+                                  }}
+                                >
+                                  {editingText || "\u00A0"}
+                                </span>
+                                <textarea
+                                  ref={activeSubtitleRef}
+                                  data-testid="workbench-subtitle-editor"
+                                  className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/25 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
+                                  style={subtitleEditorTextStyle}
+                                  value={editingText}
+                                  onChange={handleEditTextChange}
+                                  onKeyDown={handleEditorKeyDown}
+                                  rows={1}
+                                  wrap="soft"
+                                  readOnly={isSavingCue || isExporting}
+                                  aria-label="Active subtitle editor"
+                                  dir={subtitleDirection}
+                                />
+                              </div>
                             ) : (
                               <div
                                 role="button"
                                 tabIndex={0}
                                 data-testid="workbench-active-subtitle"
                                 className={cn(
-                                  "m-0 w-full cursor-text box-border rounded-md border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:ring-1 hover:ring-primary/40",
+                                  "m-0 inline-block cursor-text box-border rounded-md border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:ring-1 hover:ring-primary/40",
                                   shouldHideInteractiveSubtitlePreview && "opacity-0",
                                   isActiveCueSelected
                                     ? "outline-2 outline-offset-2 outline-primary ring-1 ring-primary/50"
