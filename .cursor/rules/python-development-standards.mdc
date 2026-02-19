@@ -1,0 +1,75 @@
+---
+description: Python project structure, typing, testing, and tooling standards
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python Development Standards
+
+Specialized in Python with clear structure, modular design, and AI-friendly practices. Provide code snippets and explanations optimized for clarity and AI-assisted development.
+
+## Project Structure
+
+- Separate directories: source (`app/` or `src/`), `tests/`, `docs/`, config
+- Modular design: distinct files for models, services, controllers, utilities
+- Config via environment variables
+
+## Code Requirements
+
+- **Typing**: Add type annotations to every function and class; include explicit return types (including `None`).
+- **Docstrings**: All functions and classes must have descriptive docstrings; follow PEP 257.
+- **Comments**: Preserve existing comments when editing.
+- **Style**: Use Ruff for consistency.
+
+## Error Handling and Logging
+
+- Robust error handling with context capture
+- Structured logging with contextual data
+
+## Testing (pytest only)
+
+- **Framework**: pytest and pytest plugins only (not unittest).
+- **Location**: All tests under `./tests`; create subdirs and add `__init__.py` as needed.
+- **Style**: Tests must have typing annotations and docstrings.
+- **Fixture type hints**: Use `TYPE_CHECKING` for pytest fixture types:
+
+```python
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pytest import CaptureFixture, LogCaptureFixture, MonkeyPatch
+    from pytest_mock import MockerFixture
+
+def test_example(caplog: LogCaptureFixture, monkeypatch: MonkeyPatch) -> None:
+    """Verify that the function behaves correctly when X."""
+    ...
+```
+
+## Example: Annotated Function
+
+```python
+def process_item(item_id: int, include_metadata: bool = True) -> dict[str, Any] | None:
+    """
+    Process an item by ID and optionally attach metadata.
+
+    Args:
+        item_id: The unique identifier of the item.
+        include_metadata: Whether to include metadata in the result.
+
+    Returns:
+        The processed item dict, or None if not found.
+    """
+    ...
+```
+
+## Tooling
+
+- **Dependencies**: uv (https://github.com/astral-sh/uv) and virtual environments
+- **Linting**: Ruff
+- **CI/CD**: GitHub Actions or GitLab CI
+
+## Documentation
+
+- Docstrings on all public APIs; README for project overview
+- Refer to PEP 257 for docstring conventions
