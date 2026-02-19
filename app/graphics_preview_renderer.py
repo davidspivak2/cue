@@ -446,7 +446,7 @@ def _select_highlight_word(
     if not matches:
         return None
     if highlight_word_index is None:
-        index = 1 if len(matches) > 1 else 0
+        return None
     else:
         if highlight_word_index < 0 or highlight_word_index >= len(matches):
             return None

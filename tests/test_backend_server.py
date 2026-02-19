@@ -11,6 +11,14 @@ from fastapi.testclient import TestClient
 
 from app import backend_server, project_store
 from app.paths import get_projects_dir
+from app.srt_utils import compute_srt_sha256
+from app.word_timing_schema import (
+    CueWordTimings,
+    SCHEMA_VERSION,
+    WordSpan,
+    WordTimingDocument,
+    save_word_timings_json,
+)
 
 
 def test_sse_stream_emits_result_payload(monkeypatch) -> None:
@@ -161,6 +169,120 @@ def test_create_subtitles_job_updates_project_and_subtitles_file(
         project_dir = get_projects_dir() / project_id
         assert (project_dir / "subtitles.srt").exists()
         assert (project_dir / "subtitles.srt").read_text(encoding="utf-8").strip() == srt_content.strip()
+
+
+def test_project_word_timings_endpoint_returns_document(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+
+    srt_text = "1\n00:00:00,000 --> 00:00:02,000\nhello world\n"
+    project_store.update_project(project_id, subtitles_srt_text=srt_text)
+
+    project_dir = get_projects_dir() / project_id
+    subtitles_path = project_dir / "subtitles.srt"
+    word_timings_path = project_dir / "word_timings.json"
+    doc = WordTimingDocument(
+        schema_version=SCHEMA_VERSION,
+        created_utc=datetime.now(timezone.utc).isoformat(),
+        language="en",
+        srt_sha256=compute_srt_sha256(subtitles_path),
+        cues=[
+            CueWordTimings(
+                cue_index=1,
+                cue_start=0.0,
+                cue_end=2.0,
+                cue_text="hello world",
+                words=[
+                    WordSpan(text="hello", start=0.2, end=0.7, confidence=0.9),
+                    WordSpan(text="world", start=0.8, end=1.4, confidence=0.92),
+                ],
+            )
+        ],
+    )
+    save_word_timings_json(word_timings_path, doc)
+
+    with TestClient(backend_server.app) as client:
+        response = client.get(f"/projects/{project_id}/word-timings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["stale"] is False
+    assert payload["reason"] is None
+    assert payload["document"]["schema_version"] == SCHEMA_VERSION
+    assert len(payload["document"]["cues"]) == 1
+    assert payload["document"]["cues"][0]["cue_index"] == 1
+    assert payload["document"]["cues"][0]["words"][0]["text"] == "hello"
+
+
+def test_project_word_timings_endpoint_handles_missing_file(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+    project_store.update_project(
+        project_id,
+        subtitles_srt_text="1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+    )
+
+    with TestClient(backend_server.app) as client:
+        response = client.get(f"/projects/{project_id}/word-timings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["stale"] is None
+    assert payload["reason"] == "word_timings_not_found"
+    assert payload["document"] is None
+
+
+def test_project_word_timings_endpoint_marks_stale(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+
+    initial_srt = "1\n00:00:00,000 --> 00:00:01,000\nHello\n"
+    project_store.update_project(project_id, subtitles_srt_text=initial_srt)
+
+    project_dir = get_projects_dir() / project_id
+    subtitles_path = project_dir / "subtitles.srt"
+    word_timings_path = project_dir / "word_timings.json"
+    doc = WordTimingDocument(
+        schema_version=SCHEMA_VERSION,
+        created_utc=datetime.now(timezone.utc).isoformat(),
+        language="en",
+        srt_sha256=compute_srt_sha256(subtitles_path),
+        cues=[
+            CueWordTimings(
+                cue_index=1,
+                cue_start=0.0,
+                cue_end=1.0,
+                cue_text="Hello",
+                words=[WordSpan(text="Hello", start=0.1, end=0.8, confidence=0.9)],
+            )
+        ],
+    )
+    save_word_timings_json(word_timings_path, doc)
+    project_store.update_project(
+        project_id,
+        subtitles_srt_text="1\n00:00:00,000 --> 00:00:01,000\nHello there\n",
+    )
+
+    with TestClient(backend_server.app) as client:
+        response = client.get(f"/projects/{project_id}/word-timings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["stale"] is True
+    assert payload["reason"] is None
+    assert payload["document"] is not None
 
 
 def _setup_env(tmp_path: Path, monkeypatch) -> None:
