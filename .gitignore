@@ -1,3 +1,5 @@
+.cursor/
+.codex/
 .venv/
 _ffmpeg_tmp/
 __pycache__/
