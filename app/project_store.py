@@ -437,6 +437,20 @@ def get_project_subtitles_text(project_id: str) -> str:
             raise HTTPException(status_code=500, detail="subtitles_read_failed") from exc
 
 
+def get_project_word_timing_artifacts(project_id: str) -> dict[str, Optional[str]]:
+    with _STORE_LOCK:
+        _ensure_store()
+        manifest = _read_manifest(project_id)
+        subtitles_path = _artifact_path(manifest, "subtitles_path")
+        word_timings_path = _artifact_path(manifest, "word_timings_path")
+        return {
+            "subtitles_path": str(subtitles_path) if subtitles_path.exists() else None,
+            "word_timings_path": (
+                str(word_timings_path) if word_timings_path.exists() else None
+            ),
+        }
+
+
 def delete_project(project_id: str) -> None:
     with _STORE_LOCK:
         _ensure_store()

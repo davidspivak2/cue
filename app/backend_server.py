@@ -1164,6 +1164,75 @@ def get_project_subtitles(project_id: str) -> dict[str, str]:
     return {"subtitles_srt_text": subtitles_srt_text}
 
 
+@app.get("/projects/{project_id}/word-timings")
+def get_project_word_timings(project_id: str) -> dict[str, Any]:
+    from .srt_utils import is_word_timing_stale
+    from .word_timing_schema import WordTimingValidationError, load_word_timings_json
+
+    artifacts = project_store.get_project_word_timing_artifacts(project_id)
+    subtitles_path_text = artifacts.get("subtitles_path")
+    word_timings_path_text = artifacts.get("word_timings_path")
+    if not isinstance(subtitles_path_text, str) or not subtitles_path_text:
+        return {
+            "available": False,
+            "stale": None,
+            "reason": "subtitles_not_found",
+            "document": None,
+        }
+    if not isinstance(word_timings_path_text, str) or not word_timings_path_text:
+        return {
+            "available": False,
+            "stale": None,
+            "reason": "word_timings_not_found",
+            "document": None,
+        }
+
+    subtitles_path = Path(subtitles_path_text)
+    word_timings_path = Path(word_timings_path_text)
+    try:
+        doc = load_word_timings_json(word_timings_path)
+    except (WordTimingValidationError, OSError) as exc:
+        return {
+            "available": False,
+            "stale": None,
+            "reason": "word_timings_invalid",
+            "document": None,
+            "error": str(exc),
+        }
+
+    stale = is_word_timing_stale(word_timings_path, subtitles_path)
+    document_payload = {
+        "schema_version": doc.schema_version,
+        "created_utc": doc.created_utc,
+        "language": doc.language,
+        "srt_sha256": doc.srt_sha256,
+        "cues": [
+            {
+                "cue_index": cue.cue_index,
+                "cue_start": cue.cue_start,
+                "cue_end": cue.cue_end,
+                "cue_text": cue.cue_text,
+                "words": [
+                    {
+                        "text": word.text,
+                        "start": word.start,
+                        "end": word.end,
+                        "confidence": word.confidence,
+                    }
+                    for word in cue.words
+                ],
+            }
+            for cue in doc.cues
+        ],
+    }
+    return {
+        "available": True,
+        "stale": stale,
+        "reason": None,
+        "document": document_payload,
+    }
+
+
 @app.put("/projects/{project_id}")
 def update_project(project_id: str, payload: ProjectUpdateRequest) -> dict[str, Any]:
     return project_store.update_project(

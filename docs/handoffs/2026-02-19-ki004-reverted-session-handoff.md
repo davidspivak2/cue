@@ -1,73 +1,82 @@
-# Session handoff — KI-004 reverted
+# Session handoff - KI-004 reverted (verified current state)
 
 **Date:** 2026-02-19  
 **Project:** Cue (C:\Cue_repo)  
-**Purpose:** Hand off to another agent after KI-004 (Preview word-highlight sync) was fully reverted.
+**Purpose:** Hand off to another agent with current, verified context after KI-004 (Preview word-highlight sync) was reverted.
 
 ---
 
 ## Current state summary
 
-- **KI-004 (Preview word-highlight sync) is reverted.** All code and doc changes from the KI-004 implementation and the follow-up “None = static line” fix have been removed.
-- **Preview word highlighting is back to pre–KI-004 behavior:**
-  - **Frontend:** `highlightedWordIndex` is computed with **even distribution** over the cue: `floor(cueProgress * cueWordCount)` (no word-timings fetch, no time-based lookup).
-  - **Backend:** When `highlight_word_index` is **None**, the preview renderer again **defaults to highlighting the second word** (or first if only one word). See `app/graphics_preview_renderer.py` → `_select_highlight_word`.
-- **Docs:** KI-004 is **OPEN** again; Queue item 4 is **[NEXT]** in the roadmap; milestone 0.7 no longer marked “Done”; issues table row for preview word-highlight drift is back to “Partial”.
-- **No** `GET /projects/{project_id}/word-timings` endpoint. No `fetchProjectWordTimings` or `WordTimingsResponse` in the frontend. No `wordTimings` state or word-timings fetch effect in Workbench. No `get_project_word_timings_path` in project_store. The two backend tests for the word-timings endpoint were removed.
-- Lint and pytest (including `test_backend_server.py` and `test_preview_overlay_returns_existing_cached_png`) pass after the revert.
+- **KI-004 (Preview word-highlight sync) remains reverted and open.**
+- **Preview word highlighting is currently pre-KI-004 behavior:**
+  - **Frontend:** `highlightedWordIndex` is computed by even cue progress distribution in `desktop/src/pages/Workbench.tsx` using `Math.floor(cueProgress * cueWordCount)`.
+  - **Backend:** `_select_highlight_word` in `app/graphics_preview_renderer.py` defaults to second word (or first if only one) when `highlight_word_index is None`.
+- **Docs are aligned with KI-004 as pending work:** `docs/internal/KNOWN_ISSUES.md` shows KI-004 as `OPEN`, and `docs/internal/ROADMAP.md` shows queue item 4 as `[NEXT]`.
+- **No preview word-timings API path currently exists:** no `GET /projects/{project_id}/word-timings` route in `app/backend_server.py`.
+- **No KI-004 frontend fetch plumbing currently exists:** no `fetchProjectWordTimings`, no `WordTimingsResponse`, and no Workbench `wordTimings` state/effect for preview timing sync.
+- **Product behavior decision still applies:** after subtitle text edits, users must run "Create subtitles" again for accurate timing; export does not run WhisperX alignment automatically.
 
 ---
 
-## Important context for the next agent
+## Important context for next agent
 
-1. **Why reverted:** User reported that after KI-004 and the “None = static line” fix, things were “still semi-broken” and asked to “revert everything.”
-2. **Known issue from the attempt:** When the frontend sent `highlight_word_index: null` (no word timings), the backend was still highlighting the second word because `_select_highlight_word` had a default `index = 1`. The fix was to return `None` when `highlight_word_index is None` so the line renders static. That fix was reverted along with everything else, so the “second word default” is back.
-3. **If you re-implement KI-004:** You must also change `_select_highlight_word` so that when `highlight_word_index is None` it **returns None** (no selection), otherwise users without word timings will still see the second word highlighted. The plan for that fix is in `c:\Users\david\.cursor\plans\fix_preview_none_=_static_line_9881ffac.plan.md` (or similar); the code change is in `app/graphics_preview_renderer.py` only.
-4. **Product decision (not implemented):** Re-running alignment when the user edits subtitles and then clicks Export was discussed and deferred. Current behavior remains: after text edits, user must run “Create subtitles” again for accurate word timing; export does not run WhisperX.
-
----
-
-## Immediate next steps (pick one or another task)
-
-1. **If continuing KI-004:** Use `docs/internal/KNOWN_ISSUES.md` (KI-004) and the plan at `c:\Users\david\.cursor\plans\preview_word-highlight_sync_ki-004_8de3ee49.plan.md`. Re-add backend word-timings endpoint, frontend fetch + time-based `highlightedWordIndex`, and the renderer fix so `None` → no highlight (static line). Validate with a project that has word timings and one that does not.
-2. **If working on something else:** See `docs/internal/ROADMAP.md` and `docs/internal/KNOWN_ISSUES.md`. Next queue item after 4 is item 5 (Subtitle edit-mode reliability).
+1. **Why this was reverted:** prior KI-004 work plus a follow-up "None = static line" backend fix was rolled back after user-reported preview behavior issues.
+2. **Known behavior gap if KI-004 is reintroduced:** if frontend sends `highlight_word_index: null`, backend currently highlights second/first word due to default index logic.
+3. **Required follow-up for a correct KI-004 reimplementation:** in `app/graphics_preview_renderer.py`, `_select_highlight_word` should return `None` when `highlight_word_index is None` so preview line stays static when timed-word data is unavailable.
+4. **Scope guardrail:** this is a preview-sync issue; export timing behavior should remain unchanged.
 
 ---
 
-## Decisions made this session
+## Immediate next steps
 
-- **Full revert:** User requested revert of all KI-004 work and the “None = static line” fix. No partial revert; everything related to word-timings API, frontend word timings, and renderer `None` handling was reverted.
-- **Docs reverted:** KI-004 status back to OPEN; Queue 4 back to [NEXT]; milestone 0.7 and issues table reverted so they no longer say “Done” for preview word-highlight sync.
+1. **If continuing KI-004:** use these repo-local references:
+   - `docs/internal/KNOWN_ISSUES.md` (KI-004 section)
+   - `docs/internal/ROADMAP.md` (Queue item 4 / milestone 0.7)
+   - `docs/internal/TAURI_QT_PARITY_HANDOFF.md` (Current State + Next actionable task)
+2. **Re-implement minimum KI-004 scope carefully:**
+   - Add backend endpoint for project word timings (preview read path).
+   - Add frontend fetch/types and Workbench logic for time-based highlighted word selection.
+   - Update `_select_highlight_word` so `highlight_word_index is None -> return None`.
+   - Validate with one project that has word timings and one that does not.
+3. **If not continuing KI-004:** move to queue item 5 in `docs/internal/ROADMAP.md` (Subtitle edit-mode reliability).
 
 ---
 
-## Critical files (for KI-004 or related work)
+## Critical files
 
 | Area | File | Notes |
 |------|------|--------|
-| Backend | `app/backend_server.py` | No word-timings route; add `GET /projects/{project_id}/word-timings` here if re-implementing. |
-| Backend | `app/project_store.py` | No `get_project_word_timings_path`; add if re-implementing. |
-| Backend | `app/graphics_preview_renderer.py` | `_select_highlight_word`: when `highlight_word_index is None`, currently sets `index = 1 if len(matches) > 1 else 0`. For “static line when None”, return `None` instead. |
+| Backend | `app/backend_server.py` | No `/projects/{project_id}/word-timings` route currently. |
+| Backend | `app/project_store.py` | No `get_project_word_timings_path` helper currently. |
+| Backend | `app/graphics_preview_renderer.py` | `_select_highlight_word` defaults second/first word when `highlight_word_index is None`. |
 | Frontend | `desktop/src/projectsClient.ts` | No `WordTimingsResponse` or `fetchProjectWordTimings`. |
-| Frontend | `desktop/src/pages/Workbench.tsx` | Uses even-distribution `highlightedWordIndex`; no `wordTimings` state or fetch effect. |
-| Docs | `docs/internal/KNOWN_ISSUES.md` | KI-004 section: Status OPEN. |
-| Docs | `docs/internal/ROADMAP.md` | Queue item 4: [NEXT]; milestone 0.7 not marked Done. |
-| Export (unchanged) | `app/workers.py`, `app/graphics_overlay_export.py` | Word timings used only for export; no changes needed for preview-only sync. |
+| Frontend | `desktop/src/pages/Workbench.tsx` | `highlightedWordIndex` uses even-distribution cue progress logic. |
+| Docs | `docs/internal/KNOWN_ISSUES.md` | KI-004 status is `OPEN`. |
+| Docs | `docs/internal/ROADMAP.md` | Queue item 4 is `[NEXT]`; milestone 0.7 is not marked done. |
+| Main handoff | `docs/internal/TAURI_QT_PARITY_HANDOFF.md` | Source of truth for current migration state and next task ordering. |
+
+---
+
+## Verified on 2026-02-19 (evidence snapshot)
+
+- `python -m pytest -q` -> `57 passed, 1 warning`
+- `python -m pytest tests/test_backend_server.py -q` -> `6 passed, 1 warning`
+- `python -m ruff check app tests tools` -> passed (`All checks passed!`)
+- `cd desktop && npm run lint` -> passed
+- Targeted source checks confirmed:
+  - `desktop/src/pages/Workbench.tsx` uses even-distribution `highlightedWordIndex` calculation.
+  - `app/graphics_preview_renderer.py` sets fallback index `1`/`0` when `highlight_word_index is None`.
+  - No backend route for `GET /projects/{project_id}/word-timings`.
+  - No frontend `fetchProjectWordTimings` / `WordTimingsResponse` symbols.
+
+This verification section is point-in-time data for 2026-02-19.
 
 ---
 
 ## Run / test commands
 
-- **Backend:** From repo root: start backend (e.g. per `docs/CONTRIBUTING.md` or `scripts\run_desktop_all.cmd`).
-- **Desktop:** `cd desktop && npm run tauri dev` (or use run script).
-- **Lint:** `cd desktop && npm run lint`; `python -m ruff check app tests tools`.
-- **Tests:** `pytest` from repo root; `cd desktop && npm run test:e2e` for E2E if needed.
-
----
-
-## Reference plans (on this machine)
-
-- **KI-004 implementation:** `c:\Users\david\.cursor\plans\preview_word-highlight_sync_ki-004_8de3ee49.plan.md`
-- **None = static line fix:** `c:\Users\david\.cursor\plans\fix_preview_none_=_static_line_9881ffac.plan.md`
-
-Main project handoff doc: `docs/internal/TAURI_QT_PARITY_HANDOFF.md` — update its “Current State” and “Next actionable task” when you start work.
+- Backend startup: follow `docs/CONTRIBUTING.md` or run `scripts\run_desktop_all.cmd`.
+- Desktop app: `cd desktop && npm run tauri dev`.
+- Lint: `cd desktop && npm run lint`; `python -m ruff check app tests tools`.
+- Tests: `python -m pytest -q`; `cd desktop && npm run test:e2e` if needed.

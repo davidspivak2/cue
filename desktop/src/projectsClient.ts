@@ -88,6 +88,37 @@ export type ProjectDeleteResponse = {
   cancelled_job_ids?: string[];
 };
 
+export type WordTimingWord = {
+  text: string;
+  start: number;
+  end: number;
+  confidence?: number | null;
+};
+
+export type WordTimingCue = {
+  cue_index: number;
+  cue_start: number;
+  cue_end: number;
+  cue_text: string;
+  words: WordTimingWord[];
+};
+
+export type ProjectWordTimingsDocument = {
+  schema_version: number;
+  created_utc: string;
+  language: string;
+  srt_sha256: string;
+  cues: WordTimingCue[];
+};
+
+export type ProjectWordTimingsResponse = {
+  available: boolean;
+  stale?: boolean | null;
+  reason?: string | null;
+  document?: ProjectWordTimingsDocument | null;
+  error?: string | null;
+};
+
 const ensureOk = async (response: Response) => {
   if (response.ok) {
     return;
@@ -154,6 +185,17 @@ export const fetchProjectSubtitles = async (projectId: string): Promise<string> 
     throw new Error("subtitles_srt_text_missing");
   }
   return payload.subtitles_srt_text;
+};
+
+export const fetchProjectWordTimings = async (
+  projectId: string
+): Promise<ProjectWordTimingsResponse> => {
+  if (!projectId) {
+    throw new Error("project_id_required");
+  }
+  const response = await fetch(`${PROJECTS_URL}/${projectId}/word-timings`);
+  await ensureOk(response);
+  return (await response.json()) as ProjectWordTimingsResponse;
 };
 
 export const updateProject = async (

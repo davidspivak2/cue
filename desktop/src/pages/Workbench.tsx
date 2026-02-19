@@ -30,8 +30,10 @@ import {
 } from "@/jobsClient";
 import {
   fetchProject,
+  fetchProjectWordTimings,
   fetchProjectSubtitles,
   ProjectManifest,
+  ProjectWordTimingsDocument,
   updateProject
 } from "@/projectsClient";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
@@ -423,6 +425,89 @@ const describeOpenError = (error: unknown): string => {
   return "No additional error details were provided.";
 };
 
+type ProjectWordTimingCue = ProjectWordTimingsDocument["cues"][number];
+
+const resolveHighlightWordIndexFromTimings = (
+  cue: SrtCue,
+  currentTimeSeconds: number,
+  cueTiming: ProjectWordTimingCue | undefined
+): number | null => {
+  if (!cueTiming || !Array.isArray(cueTiming.words) || cueTiming.words.length === 0) {
+    return null;
+  }
+
+  const cueDuration = Math.max(0, cue.endSeconds - cue.startSeconds);
+  const rawSpans = cueTiming.words
+    .map((word) => {
+      if (
+        typeof word.start !== "number" ||
+        !Number.isFinite(word.start) ||
+        typeof word.end !== "number" ||
+        !Number.isFinite(word.end)
+      ) {
+        return null;
+      }
+      return { startSeconds: word.start, endSeconds: word.end };
+    })
+    .filter(
+      (entry): entry is { startSeconds: number; endSeconds: number } => entry !== null
+    );
+
+  if (rawSpans.length === 0) {
+    return null;
+  }
+
+  // Alignment artifacts are normally absolute timeline seconds. Some artifacts can be cue-relative.
+  const looksCueRelative = rawSpans.every(
+    ({ startSeconds, endSeconds }) =>
+      startSeconds >= -0.25 && endSeconds <= cueDuration + 0.25 && endSeconds >= startSeconds
+  );
+
+  const entries = rawSpans
+    .map(({ startSeconds, endSeconds }) => {
+      const resolvedStart = looksCueRelative ? cue.startSeconds + startSeconds : startSeconds;
+      const resolvedEnd = looksCueRelative ? cue.startSeconds + endSeconds : endSeconds;
+      const clampedStart = Math.max(cue.startSeconds, resolvedStart);
+      const clampedEnd = Math.min(cue.endSeconds, resolvedEnd);
+      const start = clampedStart;
+      const end = clampedEnd;
+      if (endSeconds <= startSeconds) {
+        return null;
+      }
+      return { startSeconds: start, endSeconds: end };
+    })
+    .filter(
+      (entry): entry is { startSeconds: number; endSeconds: number } =>
+        entry !== null && entry.endSeconds > entry.startSeconds
+    )
+    .sort((a, b) =>
+      a.startSeconds === b.startSeconds ? a.endSeconds - b.endSeconds : a.startSeconds - b.startSeconds
+    );
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const cueWordCount = (cue.text.match(/\S+/g) ?? []).length;
+  if (cueWordCount <= 0) {
+    return null;
+  }
+
+  if (currentTimeSeconds < entries[0].startSeconds) {
+    return null;
+  }
+
+  let activeTimingRank = 0;
+  for (let idx = 1; idx < entries.length; idx += 1) {
+    if (currentTimeSeconds >= entries[idx].startSeconds) {
+      activeTimingRank = idx;
+    } else {
+      break;
+    }
+  }
+  return Math.min(activeTimingRank, cueWordCount - 1);
+};
+
 function useDebounce<T extends (...args: never[]) => void>(
   fn: T,
   delayMs: number
@@ -494,6 +579,9 @@ const Workbench = () => {
   });
   const [subtitleOverlayPath, setSubtitleOverlayPath] = React.useState<string | null>(null);
   const [cues, setCues] = React.useState<SrtCue[]>([]);
+  const [wordTimingsDoc, setWordTimingsDoc] = React.useState<ProjectWordTimingsDocument | null>(
+    null
+  );
   const [selectedCueId, setSelectedCueId] = React.useState<string | null>(null);
   const [editingCueId, setEditingCueId] = React.useState<string | null>(null);
   const [editingText, setEditingText] = React.useState("");
@@ -612,6 +700,39 @@ const Workbench = () => {
           return;
         }
         setSubtitleLoadError(message);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [projectId, subtitlesReloadTick]);
+
+  React.useEffect(() => {
+    let active = true;
+    if (!projectId) {
+      setWordTimingsDoc(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    setWordTimingsDoc(null);
+    fetchProjectWordTimings(projectId)
+      .then((payload) => {
+        if (!active) {
+          return;
+        }
+        if (payload.available && payload.document && payload.stale === false) {
+          setWordTimingsDoc(payload.document);
+          return;
+        }
+        setWordTimingsDoc(null);
+      })
+      .catch(() => {
+        if (!active) {
+          return;
+        }
+        setWordTimingsDoc(null);
       });
 
     return () => {
@@ -1630,6 +1751,26 @@ const Workbench = () => {
       ) ?? null
     );
   }, [cues, currentTimeSeconds]);
+  const activeCueOrdinal = React.useMemo(() => {
+    if (!activeCue) {
+      return null;
+    }
+    const cuePosition = cues.findIndex((cue) => cue.id === activeCue.id);
+    return cuePosition >= 0 ? cuePosition + 1 : null;
+  }, [activeCue, cues]);
+  const cueWordTimingsByIndex = React.useMemo(() => {
+    const mapping = new Map<number, ProjectWordTimingCue>();
+    if (!wordTimingsDoc || !Array.isArray(wordTimingsDoc.cues)) {
+      return mapping;
+    }
+    for (const cueTiming of wordTimingsDoc.cues) {
+      if (typeof cueTiming.cue_index !== "number" || !Number.isFinite(cueTiming.cue_index)) {
+        continue;
+      }
+      mapping.set(cueTiming.cue_index, cueTiming);
+    }
+    return mapping;
+  }, [wordTimingsDoc]);
   const isEditingCue = editingCueId !== null;
   const isActiveCueSelected = activeCue ? selectedCueId === activeCue.id : false;
   const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
@@ -1645,13 +1786,19 @@ const Workbench = () => {
     if (!activeCue || appearance.subtitle_mode !== "word_highlight" || cueWordCount <= 0) {
       return null;
     }
-    const cueDuration = Math.max(0.001, activeCue.endSeconds - activeCue.startSeconds);
-    const cueProgress = Math.max(
-      0,
-      Math.min(1, (currentTimeSeconds - activeCue.startSeconds) / cueDuration)
-    );
-    return Math.min(cueWordCount - 1, Math.floor(cueProgress * cueWordCount));
-  }, [activeCue, appearance.subtitle_mode, cueWordCount, currentTimeSeconds]);
+    if (activeCueOrdinal === null) {
+      return null;
+    }
+    const cueTiming = cueWordTimingsByIndex.get(activeCueOrdinal);
+    return resolveHighlightWordIndexFromTimings(activeCue, currentTimeSeconds, cueTiming);
+  }, [
+    activeCue,
+    activeCueOrdinal,
+    appearance.subtitle_mode,
+    cueWordCount,
+    cueWordTimingsByIndex,
+    currentTimeSeconds
+  ]);
   const highlightWordColor = colorWithOpacity(appearance.highlight_color, highlightOpacity);
   const wordPaddingX = Math.max(0, appearance.word_bg_padding / 2);
   const hasWordBackground = appearance.background_mode === "word";
