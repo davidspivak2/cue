@@ -1027,7 +1027,7 @@ const ProjectHub = () => {
             <TableHeader>
               <TableRow>
                 <TableHead scope="col">Video</TableHead>
-                <TableHead scope="col">Duration</TableHead>
+                <TableHead scope="col" className="min-w-[5rem] pr-24 text-right">Duration</TableHead>
                 <TableHead scope="col">Status</TableHead>
                 <TableHead scope="col">Progress</TableHead>
                 <TableHead scope="col" className="w-[60px]">
@@ -1097,7 +1097,7 @@ const ProjectHub = () => {
                         </p>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="min-w-[5rem] pr-24 text-right tabular-nums text-muted-foreground">
                       {durationLabel || "—"}
                     </TableCell>
                     <TableCell>

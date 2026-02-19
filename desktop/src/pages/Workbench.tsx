@@ -2449,7 +2449,11 @@ const Workbench = () => {
             <p className="truncate text-sm text-muted-foreground">{title}</p>
           </div>
         }
-        right={<Badge variant="secondary">{statusLabel}</Badge>}
+        right={
+          isCreatingSubtitles ? undefined : (
+            <Badge variant="secondary">{statusLabel}</Badge>
+          )
+        }
         onOpenSettings={openSettings}
         showSettings={!isTauriEnv}
         settingsDisabled={isCreatingSubtitles || isExporting}

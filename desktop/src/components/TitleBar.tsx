@@ -82,7 +82,7 @@ const TitleBar = () => {
           className="h-5 w-5 shrink-0"
           aria-hidden
         />
-        <span className="text-lg font-bold tracking-tight text-foreground">Cue</span>
+        <span className="text-lg font-medium tracking-tight text-foreground">Cue</span>
       </div>
 
       {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
