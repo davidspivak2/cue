@@ -285,8 +285,12 @@ const applyProgressMessageToChecklist = (
     }
     matchedById = true;
     const nextState = item.state === "pending" || !item.state ? "active" : item.state;
+    // Don't overwrite detail for steps that are already done or skipped (avoids "Loading AI model" showing "Listening to audio" when write_subtitles is active).
+    const alreadyFinished = item.state === "done" || item.state === "skipped";
     const detail =
-      isRedundantWithLabel(item.label) || isLabelOfAnotherStep(item.id) ? undefined : rawDetail;
+      alreadyFinished
+        ? item.detail
+        : (isRedundantWithLabel(item.label) || isLabelOfAnotherStep(item.id) ? undefined : rawDetail);
     return { ...item, state: nextState, detail };
   });
   if (matchedById) {
