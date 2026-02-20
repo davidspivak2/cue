@@ -65,17 +65,21 @@ const TitleBar = () => {
     <header
       data-cue-title-bar
       className={cn(
-        "pointer-events-auto fixed left-0 right-0 top-0 z-[100] flex h-[var(--title-bar-height)] items-center justify-between",
+        "pointer-events-auto fixed left-0 right-0 top-0 z-[100] flex h-[var(--title-bar-height)] select-none items-center justify-between",
         "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
       )}
       style={{ "--title-bar-height": TITLE_BAR_HEIGHT_PX } as React.CSSProperties}
     >
-      {/* Draggable region with logo — double-click to maximize/restore */}
+      {/* Full-size drag layer so the entire top strip is draggable (fixes drag at top when maximized) */}
       <div
-        className="flex flex-1 cursor-default select-none items-center gap-2 pl-3"
+        className="absolute inset-0 cursor-default"
         data-tauri-drag-region
         onDoubleClick={handleMaximize}
-      >
+        aria-hidden
+      />
+
+      {/* Logo + app name: visual only, clicks pass through to drag layer */}
+      <div className="relative z-10 flex flex-1 pointer-events-none items-center gap-2 pl-3">
         <img
           src={resolvedTheme === "dark" ? "/dark.svg" : "/light.svg"}
           alt=""
@@ -86,7 +90,7 @@ const TitleBar = () => {
       </div>
 
       {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
-      <div className="flex self-stretch items-stretch">
+      <div className="relative z-10 flex self-stretch items-stretch">
         <TitleBarButton
           onClick={settingsOpen ? closeSettings : openSettings}
           title="Settings"
