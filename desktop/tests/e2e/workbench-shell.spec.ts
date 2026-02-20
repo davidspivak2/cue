@@ -333,6 +333,18 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
       return;
     }
 
+    if (request.method() === "DELETE") {
+      projects = projects.filter((entry) => entry.project_id !== projectId);
+      subtitlesByProject.delete(projectId);
+      projectGetCounts.delete(projectId);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, project_id: projectId, cancelled_job_ids: [] })
+      });
+      return;
+    }
+
     if (request.method() !== "GET") {
       await route.continue();
       return;
@@ -571,6 +583,18 @@ const setVerticalOffset = async (page, value: string) => {
     .locator("xpath=../../input[@type='number']");
   await offsetInput.fill(value);
   await offsetInput.blur();
+};
+
+const showVideoControls = async (page) => {
+  await page.locator("[data-testid='workbench-center-panel'] video").hover();
+  await expect
+    .poll(async () =>
+      page.getByTestId("workbench-video-controls").evaluate((element) => {
+        const opacity = Number.parseFloat(window.getComputedStyle(element).opacity);
+        return Number.isFinite(opacity) ? opacity : 0;
+      })
+    )
+    .toBeGreaterThan(0.95);
 };
 
 test("workbench shell wide layout", async ({ page }) => {
@@ -932,6 +956,179 @@ test("workbench keeps export cancel available after resume attach", async ({ pag
   await cancelRequest;
 });
 
+test("workbench does not show export error banner on cancelled export event", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0].status = "ready";
+  const startedAt = new Date(Date.now() - 11_000).toISOString();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-export-cancel-stream",
+    kind: "create_video_with_subtitles",
+    status: "running",
+    heading: "Exporting video",
+    message: "Muxing frames",
+    pct: 61,
+    step_id: "save_video",
+    started_at: startedAt,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "save_video",
+        label: "Saving video",
+        state: "active",
+        detail: "Writing final file"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects);
+  api.setJobEvents(
+    "job-export-cancel-stream",
+    toSseBody([
+      { job_id: "job-export-cancel-stream", ts, type: "started", heading: "Exporting video" },
+      {
+        job_id: "job-export-cancel-stream",
+        ts,
+        type: "cancelled",
+        status: "cancelled",
+        message: "Operation cancelled."
+      }
+    ])
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-export-cta")).toBeVisible();
+  await expect(
+    page.getByTestId("workbench-export-panel").getByText("Operation cancelled.")
+  ).toHaveCount(0);
+});
+
+test("cancel create subtitles returns home, removes the project, and shows no cancel toast", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const startedAt = new Date(Date.now() - 12_000).toISOString();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-cancel-create-1",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Loading model",
+    pct: 21,
+    step_id: "load_model",
+    started_at: startedAt,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "load_model",
+        label: "Loading AI model",
+        state: "active",
+        detail: "Loading model"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects, null);
+  api.setJobEvents(
+    "job-cancel-create-1",
+    toSseBody([
+      { job_id: "job-cancel-create-1", ts, type: "started", heading: "Creating subtitles" },
+      {
+        job_id: "job-cancel-create-1",
+        ts,
+        type: "progress",
+        step_id: "load_model",
+        pct: 23,
+        message: "Loading model"
+      }
+    ])
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+
+  const cancelRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes("/jobs/job-cancel-create-1/cancel") &&
+      request.method() === "POST"
+  );
+  const deleteRequest = page.waitForRequest(
+    (request) => request.url().includes("/projects/project-1") && request.method() === "DELETE"
+  );
+  await page.getByTestId("workbench-cancel-create-subtitles").click();
+
+  await page.waitForURL("**/");
+  await cancelRequest;
+  await deleteRequest;
+  await expect(page.getByTestId("project-card-project-1")).toHaveCount(0);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Task cancelled: Operation cancelled." })
+  ).toHaveCount(0);
+});
+
+test("app layout suppresses export-cancel task notices from toast polling", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const now = new Date().toISOString();
+  const projects = [
+    {
+      ...buildProjects()[0],
+      status: "ready",
+      task_notice: {
+        notice_id: "notice-export-cancel",
+        project_id: "project-1",
+        job_id: "job-export-cancel-1",
+        kind: "create_video_with_subtitles",
+        status: "cancelled",
+        message: "Operation cancelled.",
+        created_at: now,
+        finished_at: now
+      }
+    },
+    {
+      project_id: "project-2",
+      title: "other.mp4",
+      video_path: "C:\\fake\\other.mp4",
+      missing_video: false,
+      status: "ready",
+      created_at: "2026-02-09T00:00:00Z",
+      updated_at: "2026-02-09T00:00:00Z",
+      duration_seconds: 42,
+      thumbnail_path: "",
+      latest_export: null,
+      task_notice: {
+        notice_id: "notice-error-other",
+        project_id: "project-2",
+        job_id: "job-error-other",
+        kind: "create_subtitles",
+        status: "error",
+        message: "Background subtitle run failed.",
+        created_at: now,
+        finished_at: now
+      }
+    }
+  ];
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await expect(page.getByTestId("project-card-task-notice-project-1")).toHaveCount(0);
+  await expect(page.getByText("Operation cancelled.")).toHaveCount(0);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Task failed: Background subtitle run failed." })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Task cancelled: Operation cancelled." })
+  ).toHaveCount(0);
+});
+
 test("new project auto-starts subtitle creation in Workbench", async ({ page }) => {
   await page.addInitScript(initMocks);
   await page.setViewportSize({ width: 1300, height: 800 });
@@ -1029,6 +1226,76 @@ test("vertical anchor middle offset matches overlay direction in wide and narrow
     expect(bottomAnchorTop).not.toBeNull();
     expect(bottomAnchorTop ?? 0).toBeGreaterThan(topAnchorTop ?? 0);
   }
+});
+
+test("controls overlap causes push and preserves overlay/edit parity", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await setVerticalAnchor(page, "Bottom");
+  await setVerticalOffset(page, "0");
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  const overlay = page.getByTestId("workbench-subtitle-overlay");
+  await expect(subtitleButton).toHaveCount(1);
+  await expect(overlay).toHaveCount(1);
+  const subtitleRectBefore = await readClientRect(subtitleButton);
+  const overlayRectBefore = await readClientRect(overlay);
+
+  await showVideoControls(page);
+  await expect
+    .poll(async () => (await readClientRect(subtitleButton)).top)
+    .toBeLessThan(subtitleRectBefore.top - 1);
+
+  const subtitleRectAfter = await readClientRect(subtitleButton);
+  const overlayRectAfter = await readClientRect(overlay);
+  const subtitleDeltaY = subtitleRectAfter.top - subtitleRectBefore.top;
+  const overlayDeltaY = overlayRectAfter.top - overlayRectBefore.top;
+  expect(subtitleDeltaY).toBeLessThan(-1);
+  expect(Math.abs(subtitleDeltaY - overlayDeltaY)).toBeLessThanOrEqual(1);
+
+  await subtitleButton.evaluate((element) => {
+    if (element instanceof HTMLElement) {
+      element.click();
+    }
+  });
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toHaveCount(1);
+  const editorRect = await readClientRect(editor);
+  expect(Math.abs(editorRect.top - subtitleRectAfter.top)).toBeLessThanOrEqual(2);
+  expect(Math.abs(editorRect.left - subtitleRectAfter.left)).toBeLessThanOrEqual(2);
+});
+
+test("no-overlap scenario does not push subtitle position when controls appear", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await setVerticalAnchor(page, "Top");
+  await setVerticalOffset(page, "24");
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  const subtitleRectBefore = await readClientRect(subtitleButton);
+
+  await showVideoControls(page);
+  await page.waitForTimeout(50);
+
+  const subtitleRectAfter = await readClientRect(subtitleButton);
+  expect(Math.abs(subtitleRectAfter.top - subtitleRectBefore.top)).toBeLessThanOrEqual(1);
 });
 
 test("edit overlay geometry matches preview subtitle and controls do not shift editor", async ({ page }) => {

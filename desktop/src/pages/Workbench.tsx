@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, RotateCcw, X } from "lucide-react";
+import { Check, Play, Pause, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { useSettings } from "@/contexts/SettingsContext";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
@@ -48,6 +49,8 @@ import {
 
 type WorkbenchLocationState = {
   autoStartSubtitles?: boolean;
+  cancelledCreateProjectId?: string;
+  cancelledCreateProjectTitle?: string;
 } | null;
 
 const STATUS_LABELS: Record<string, string> = {
@@ -77,6 +80,13 @@ const resolveStatusLabel = (status?: string | null) => {
     return "Loading";
   }
   return STATUS_LABELS[status] ?? "Not started";
+};
+
+const formatTime = (seconds: number): string => {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
 const extractErrorDetail = (message: string): string => {
@@ -226,6 +236,8 @@ const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const RTL_CHAR_PATTERN = /[\u0590-\u08FF]/;
 const MAX_OUTLINE_SHADOW_RADIUS = 10;
 const SUBTITLE_EDITOR_CONTROLS_GAP_PX = 8;
+const SUBTITLE_CONTROLS_COLLISION_GAP_PX = 8;
+const SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX = 0.5;
 const QT_POINT_TO_CSS_PX = 96 / 72;
 const WEB_SUBTITLE_LINE_HEIGHT_RATIO = 1.375;
 const QT_SUBTITLE_LINE_HEIGHT_RATIO = 1.125;
@@ -259,29 +271,39 @@ const applyProgressMessageToChecklist = (
   if (!message || !message.trim()) {
     return items;
   }
-  const detail = message.trim();
+  const rawDetail = message.trim();
+  const rawLower = rawDetail.toLowerCase();
+  const isRedundantWithLabel = (label: string | undefined) =>
+    label != null && rawLower === label.trim().toLowerCase();
+  /** Don't show a message as detail if it's another step's label (avoids "Loading AI model" showing "Writing subtitles"). */
+  const isLabelOfAnotherStep = (currentId: string) =>
+    items.some((o) => o.id !== currentId && o.label != null && rawLower === o.label.trim().toLowerCase());
   let matchedById = false;
-  let firstActiveIndex = -1;
-  const updated = items.map((item, index) => {
-    if (item.state === "active" && firstActiveIndex === -1) {
-      firstActiveIndex = index;
-    }
+  const updated = items.map((item) => {
     if (!stepId || item.id !== stepId) {
       return item;
     }
     matchedById = true;
     const nextState = item.state === "pending" || !item.state ? "active" : item.state;
+    const detail =
+      isRedundantWithLabel(item.label) || isLabelOfAnotherStep(item.id) ? undefined : rawDetail;
     return { ...item, state: nextState, detail };
   });
   if (matchedById) {
     return updated;
   }
-  if (firstActiveIndex >= 0) {
-    const next = [...updated];
-    next[firstActiveIndex] = { ...next[firstActiveIndex], detail };
-    return next;
-  }
+  // When stepId doesn't match any row, don't assign message to "first active" — that would show another step's message on the wrong row.
   return updated;
+};
+
+/** Maps backend ProgressStep ids (from progress events) to checklist step ids so progress message applies to the correct row. */
+const PROGRESS_STEP_TO_CHECKLIST_ID: Record<string, string> = {
+  PREPARE_AUDIO: checklistStepIds.extractAudio,
+  TRANSCRIBE: checklistStepIds.loadModel,
+  FIX_PUNCTUATION: checklistStepIds.fixPunctuation,
+  FIX_GAPS: checklistStepIds.fixMissingSubtitles,
+  ALIGN_WORDS: checklistStepIds.timingWordHighlights,
+  PREPARING_PREVIEW: checklistStepIds.preparingPreview
 };
 
 const asString = (value: unknown): string | null => (typeof value === "string" ? value : null);
@@ -550,7 +572,10 @@ const Workbench = () => {
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const activeSubtitleRef = React.useRef<HTMLTextAreaElement | null>(null);
   const subtitleOverlayPositionLayerRef = React.useRef<HTMLDivElement | null>(null);
+  const activeSubtitleWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const subtitleEditorControlsRef = React.useRef<HTMLDivElement | null>(null);
+  const videoControlsBarRef = React.useRef<HTMLDivElement | null>(null);
+  const videoControlsHideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldResumePlaybackRef = React.useRef(false);
   const editHistoryRef = React.useRef<string[]>([]);
   const editHistoryIndexRef = React.useRef(0);
@@ -569,6 +594,10 @@ const Workbench = () => {
   const [preset, setPreset] = React.useState("Default");
   const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
   const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
+  const [durationSeconds, setDurationSeconds] = React.useState(0);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [volume, setVolume] = React.useState(1);
+  const [isMuted, setIsMuted] = React.useState(false);
   const [videoNaturalSize, setVideoNaturalSize] = React.useState({ width: 0, height: 0 });
   const [displayedVideoRect, setDisplayedVideoRect] = React.useState({
     width: 0,
@@ -591,6 +620,8 @@ const Workbench = () => {
   const [isSavingCue, setIsSavingCue] = React.useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
+  const [showVideoControls, setShowVideoControls] = React.useState(false);
+  const [subtitleControlsPushPx, setSubtitleControlsPushPx] = React.useState(0);
   const [isCreatingSubtitles, setIsCreatingSubtitles] = React.useState(false);
   const [createSubtitlesError, setCreateSubtitlesError] = React.useState<string | null>(null);
   const [createSubtitlesHeading, setCreateSubtitlesHeading] =
@@ -941,6 +972,8 @@ const Workbench = () => {
     setExportOutputPath(null);
     setSubtitleOverlayPath(null);
     setVideoNaturalSize({ width: 0, height: 0 });
+    setDurationSeconds(0);
+    setIsPlaying(false);
     overlayRequestKeyRef.current = null;
     setCanUndoEdit(false);
     editHistoryRef.current = [];
@@ -1164,12 +1197,11 @@ const Workbench = () => {
         if (message) {
           setCreateSubtitlesProgressMessage(message);
         }
+        const rawStepId = typeof event.step_id === "string" ? event.step_id : null;
+        const checklistStepId =
+          rawStepId != null ? (PROGRESS_STEP_TO_CHECKLIST_ID[rawStepId] ?? rawStepId) : null;
         setCreateSubtitlesChecklist((prev) =>
-          applyProgressMessageToChecklist(
-            prev,
-            typeof event.step_id === "string" ? event.step_id : null,
-            message
-          )
+          applyProgressMessageToChecklist(prev, checklistStepId, message)
         );
         return;
       }
@@ -1330,20 +1362,33 @@ const Workbench = () => {
     settings
   ]);
 
-  const cancelCreateSubtitles = React.useCallback(async () => {
+  const cancelCreateSubtitles = React.useCallback(() => {
     const jobId =
       createSubtitlesJobStream?.jobId ??
       createSubtitlesJobIdRef.current ??
       (typeof project?.active_task?.job_id === "string" ? project.active_task.job_id : null);
-    if (!jobId) {
+    if (!jobId || !projectId) {
       return;
     }
-    if (createSubtitlesJobStream?.jobId === jobId) {
-      await createSubtitlesJobStream.cancel();
-      return;
-    }
-    await cancelJob(jobId);
-  }, [createSubtitlesJobStream, project?.active_task?.job_id]);
+    const projectTitle = resolveTitle(project);
+    navigate("/", {
+      state: {
+        cancelledCreateProjectId: projectId,
+        cancelledCreateProjectTitle: projectTitle
+      }
+    });
+    void (async () => {
+      try {
+        if (createSubtitlesJobStream?.jobId === jobId) {
+          await createSubtitlesJobStream.cancel();
+          return;
+        }
+        await cancelJob(jobId);
+      } catch {
+        // Best-effort cancel; ProjectHub handles project cleanup and user-facing recovery.
+      }
+    })();
+  }, [createSubtitlesJobStream, navigate, project, projectId]);
 
   const handleExportEvent = React.useCallback(
     (event: JobEvent) => {
@@ -1406,10 +1451,7 @@ const Workbench = () => {
         setIsExporting(false);
         setExportStartedAt(null);
         exportJobIdRef.current = null;
-        const message = asNonEmptyString(event.message);
-        if (message) {
-          setExportError(message);
-        }
+        setExportError(null);
         setExportJobStream((prev) => {
           prev?.close();
           return null;
@@ -1609,9 +1651,26 @@ const Workbench = () => {
         setCreateSubtitlesHeading(activeTask.heading ?? "Creating subtitles");
         setCreateSubtitlesProgressPct(pct);
         setCreateSubtitlesProgressMessage(message);
-        if (checklist.length > 0) {
-          setCreateSubtitlesChecklist(checklist);
-        }
+        const fullList = defaultChecklist(buildGenerateChecklist(settings));
+        const merged =
+          checklist.length > 0
+            ? fullList.map((fullItem) => {
+                const fromApi =
+                  checklist.find((c) => c.id === fullItem.id) ??
+                  checklist.find((c) => PROGRESS_STEP_TO_CHECKLIST_ID[c.id] === fullItem.id);
+                if (fromApi)
+                  return {
+                    ...fullItem,
+                    state: normalizeChecklistState(fromApi.state),
+                    detail:
+                      typeof fromApi.detail === "string" && fromApi.detail.trim()
+                        ? fromApi.detail.trim()
+                        : fullItem.detail
+                  };
+                return fullItem;
+              })
+            : fullList;
+        setCreateSubtitlesChecklist(merged);
         setCreateSubtitlesStartedAt(startedAt);
         createSubtitlesJobIdRef.current = activeTask.job_id;
         if (!createSubtitlesJobStream || createSubtitlesJobStream.jobId !== activeTask.job_id) {
@@ -1664,11 +1723,16 @@ const Workbench = () => {
       setIsExporting(false);
       setExportStartedAt(null);
       setExportProgressMessage("");
-      if (taskNotice?.job_id === finishedJobId && taskNotice.status !== "completed") {
+      if (
+        taskNotice?.job_id === finishedJobId &&
+        taskNotice.status !== "completed" &&
+        taskNotice.status !== "cancelled"
+      ) {
         setExportError(taskNotice.message);
         setExportProgressPct(0);
       } else {
-        setExportProgressPct(100);
+        setExportError(null);
+        setExportProgressPct(taskNotice?.status === "cancelled" ? 0 : 100);
       }
     }
   }, [
@@ -1678,7 +1742,8 @@ const Workbench = () => {
     exportJobStream,
     isCreatingSubtitles,
     isExporting,
-    project
+    project,
+    settings
   ]);
 
   React.useEffect(() => {
@@ -1828,6 +1893,8 @@ const Workbench = () => {
   React.useEffect(() => {
     setSubtitleOverlayPath(null);
     setVideoNaturalSize({ width: 0, height: 0 });
+    setDurationSeconds(0);
+    setIsPlaying(false);
     overlayRequestKeyRef.current = null;
   }, [videoPath]);
 
@@ -1975,6 +2042,13 @@ const Workbench = () => {
       : appearance.vertical_anchor === "middle"
         ? "items-center"
         : "items-end";
+  /** For flex-col containers: vertical position is controlled by justify-content, not align-items. */
+  const subtitleVerticalJustifyClass =
+    appearance.vertical_anchor === "top"
+      ? "justify-start"
+      : appearance.vertical_anchor === "middle"
+        ? "justify-center"
+        : "justify-end";
 
   const subtitleOverlayPositionStyle = React.useMemo<React.CSSProperties>(() => {
     const scaledOffset = Math.max(0, appearance.vertical_offset * displayedVideoRect.scale);
@@ -1999,6 +2073,35 @@ const Workbench = () => {
     }),
     [displayedVideoRect.height, displayedVideoRect.offsetX, displayedVideoRect.offsetY, displayedVideoRect.width]
   );
+
+  const VIDEO_CONTROL_BAR_HEIGHT_PX = 44;
+  const VIDEO_PROGRESS_STRIP_HEIGHT_PX = 6;
+  const VIDEO_PROGRESS_THUMB_SIZE_PX = 12;
+  const VIDEO_CONTROLS_TOTAL_HEIGHT_PX =
+    VIDEO_CONTROL_BAR_HEIGHT_PX + 2 + VIDEO_PROGRESS_STRIP_HEIGHT_PX + 8;
+  const videoControlsBarContainerStyle = React.useMemo<React.CSSProperties>(() => {
+    const totalHeight = VIDEO_CONTROLS_TOTAL_HEIGHT_PX;
+    return {
+      position: "absolute",
+      left: `${displayedVideoRect.offsetX}px`,
+      top: `${displayedVideoRect.offsetY + displayedVideoRect.height - totalHeight}px`,
+      width: `${displayedVideoRect.width}px`,
+      height: `${totalHeight}px`,
+      zIndex: 10
+    };
+  }, [
+    VIDEO_CONTROLS_TOTAL_HEIGHT_PX,
+    displayedVideoRect.height,
+    displayedVideoRect.offsetX,
+    displayedVideoRect.offsetY,
+    displayedVideoRect.width
+  ]);
+  const subtitleControlsPushStyle = React.useMemo<React.CSSProperties>(() => {
+    if (subtitleControlsPushPx <= SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX) {
+      return {};
+    }
+    return { transform: `translateY(-${subtitleControlsPushPx}px)` };
+  }, [subtitleControlsPushPx]);
 
   const subtitlePreviewTextStyle = React.useMemo<React.CSSProperties>(() => {
     const visualScale = displayedVideoRect.scale;
@@ -2152,6 +2255,58 @@ const Workbench = () => {
   }, [displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, subtitleEditorTextStyle]);
 
   React.useLayoutEffect(() => {
+    if (!showVideoControls || !activeCue) {
+      setSubtitleControlsPushPx((prev) =>
+        Math.abs(prev) <= SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX ? prev : 0
+      );
+      return;
+    }
+    const controlsBar = videoControlsBarRef.current;
+    const subtitleWrapper = activeSubtitleWrapperRef.current;
+    const positionLayer = subtitleOverlayPositionLayerRef.current;
+    if (!controlsBar || !subtitleWrapper || !positionLayer) {
+      return;
+    }
+
+    const controlsRect = controlsBar.getBoundingClientRect();
+    const subtitleRect = subtitleWrapper.getBoundingClientRect();
+    const positionLayerRect = positionLayer.getBoundingClientRect();
+    if (controlsRect.height <= 0 || subtitleRect.height <= 0 || positionLayerRect.height <= 0) {
+      return;
+    }
+
+    const overlapPx =
+      subtitleRect.bottom + SUBTITLE_CONTROLS_COLLISION_GAP_PX - controlsRect.top;
+    const availableAbovePx = Math.max(0, subtitleRect.top - positionLayerRect.top);
+    if (!Number.isFinite(overlapPx) || !Number.isFinite(availableAbovePx)) {
+      return;
+    }
+    setSubtitleControlsPushPx((previous) => {
+      const requestedPushPx = Math.max(0, overlapPx + previous);
+      const availablePushPx = Math.max(0, availableAbovePx + previous);
+      const nextPushPx = Math.min(requestedPushPx, availablePushPx);
+      if (!Number.isFinite(nextPushPx)) {
+        return previous;
+      }
+      return Math.abs(previous - nextPushPx) <= SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX
+        ? previous
+        : nextPushPx;
+    });
+  }, [
+    activeCue,
+    displayedVideoRect.height,
+    displayedVideoRect.offsetX,
+    displayedVideoRect.offsetY,
+    displayedVideoRect.scale,
+    displayedVideoRect.width,
+    editingText,
+    isEditingActiveCue,
+    showVideoControls,
+    subtitleEditorTextStyle,
+    subtitlePreviewTextStyle
+  ]);
+
+  React.useLayoutEffect(() => {
     if (!isEditingActiveCue) {
       setSubtitleEditorControlsPlacement("below");
       return;
@@ -2171,7 +2326,7 @@ const Workbench = () => {
     setSubtitleEditorControlsPlacement((previous) =>
       previous === nextPlacement ? previous : nextPlacement
     );
-  }, [appearance, displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, subtitleEditorTextStyle]);
+  }, [appearance, displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, subtitleControlsPushPx, subtitleEditorTextStyle]);
 
   React.useEffect(() => {
     if (hasSubtitles) {
@@ -2437,6 +2592,85 @@ const Workbench = () => {
     shouldResumePlaybackRef.current = true;
     if (!isSavingCue) void handleSaveEdit();
   }, [isEditingCue, isSavingCue, handleSaveEdit]);
+
+  const handlePlayPauseToggle = React.useCallback(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) {
+      el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+  }, []);
+
+  const progressBarTrackRef = React.useRef<HTMLDivElement | null>(null);
+  const handleProgressBarPointer = React.useCallback(
+    (clientX: number) => {
+      const el = videoRef.current;
+      const track = progressBarTrackRef.current;
+      if (!el || !track || durationSeconds <= 0) return;
+      const rect = track.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const newTime = frac * durationSeconds;
+      el.currentTime = newTime;
+      setCurrentTimeSeconds(newTime);
+    },
+    [durationSeconds]
+  );
+  const handleProgressBarClick = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      handleProgressBarPointer(event.clientX);
+    },
+    [handleProgressBarPointer]
+  );
+  const handleProgressBarMouseDown = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      handleProgressBarPointer(event.clientX);
+      const onMove = (e: MouseEvent) => handleProgressBarPointer(e.clientX);
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [handleProgressBarPointer]
+  );
+
+  const handleVolumeChange = React.useCallback((value: number) => {
+    const el = videoRef.current;
+    const v = Math.max(0, Math.min(1, value));
+    setVolume(v);
+    if (el) {
+      el.volume = v;
+      el.muted = v === 0;
+      setIsMuted(v === 0);
+    }
+  }, []);
+  const handleMuteToggle = React.useCallback(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (isMuted) {
+      el.muted = false;
+      el.volume = volume > 0 ? volume : 1;
+      setVolume(el.volume);
+      setIsMuted(false);
+    } else {
+      el.muted = true;
+      setIsMuted(true);
+    }
+  }, [isMuted, volume]);
+
+  const VIDEO_CONTROLS_HIDE_DELAY_MS = 2500;
+  React.useEffect(() => {
+    return () => {
+      if (videoControlsHideTimeoutRef.current) {
+        clearTimeout(videoControlsHideTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const openLeftPanel = () => {
     if (!showSubtitlesOverlay) {
@@ -2713,16 +2947,41 @@ const Workbench = () => {
               data-testid="workbench-center-panel"
             >
               {hasVideoPreview ? (
-                <div className="relative h-full w-full overflow-hidden rounded-md">
+                <div
+                  className="relative h-full w-full overflow-hidden rounded-md"
+                  onMouseEnter={() => {
+                    if (videoControlsHideTimeoutRef.current) {
+                      clearTimeout(videoControlsHideTimeoutRef.current);
+                      videoControlsHideTimeoutRef.current = null;
+                    }
+                    setShowVideoControls(true);
+                  }}
+                  onMouseLeave={() => {
+                    videoControlsHideTimeoutRef.current = setTimeout(() => {
+                      setShowVideoControls(false);
+                      videoControlsHideTimeoutRef.current = null;
+                    }, VIDEO_CONTROLS_HIDE_DELAY_MS);
+                  }}
+                >
                   <video
                     ref={videoRef}
                     className="h-full w-full rounded-md bg-black object-contain"
-                    controls
                     src={previewSrc}
-                    onPlay={handleVideoPlay}
+                    onPlay={() => {
+                      handleVideoPlay();
+                      setIsPlaying(true);
+                    }}
+                    onPause={() => setIsPlaying(false)}
+                    onEnded={() => setIsPlaying(false)}
                     onLoadedMetadata={(event) => {
                       const element = event.currentTarget;
                       setCurrentTimeSeconds(element.currentTime || 0);
+                      const d = element.duration;
+                      setDurationSeconds(
+                        Number.isFinite(d) && d >= 0 ? d : 0
+                      );
+                      setVolume(element.volume);
+                      setIsMuted(element.muted);
                       setVideoNaturalSize({
                         width: Math.max(0, Math.round(element.videoWidth || 0)),
                         height: Math.max(0, Math.round(element.videoHeight || 0))
@@ -2733,13 +2992,14 @@ const Workbench = () => {
                     }
                     onSeeked={(event) => setCurrentTimeSeconds(event.currentTarget.currentTime || 0)}
                   />
-                  <div className="pointer-events-none absolute" style={displayedVideoGeometryStyle}>
+                  <div className="absolute" style={displayedVideoGeometryStyle}>
                     {shouldRenderOverlayImage && (
                       <img
-                        className="pointer-events-none absolute inset-0 h-full w-full"
+                        className="pointer-events-none absolute inset-0 h-full w-full transition-transform duration-200"
                         src={subtitleOverlaySrc ?? ""}
                         alt="Subtitle preview overlay"
                         data-testid="workbench-subtitle-overlay"
+                        style={subtitleControlsPushStyle}
                       />
                     )}
                     {activeCue && (
@@ -2747,12 +3007,25 @@ const Workbench = () => {
                         ref={subtitleOverlayPositionLayerRef}
                         data-testid="workbench-subtitle-overlay-position-layer"
                         className={cn(
-                          "pointer-events-none absolute inset-0 flex justify-center",
+                          "absolute inset-0 flex justify-center",
                           subtitleVerticalClass
                         )}
                         style={subtitleOverlayPositionStyle}
                       >
-                        <div className="pointer-events-auto w-fit max-w-full">
+                        <div
+                          className={cn(
+                            "pointer-events-none flex min-h-0 min-w-0 flex-1 flex-col items-center",
+                            subtitleVerticalJustifyClass
+                          )}
+                          style={{
+                            height: "100%"
+                          }}
+                        >
+                        <div
+                          ref={activeSubtitleWrapperRef}
+                          className="pointer-events-auto relative z-11 w-fit max-w-full transition-transform duration-200"
+                          style={subtitleControlsPushStyle}
+                        >
                           <div className="relative w-fit max-w-full">
                             {isEditingActiveCue ? (
                               <div className="relative inline-block min-w-16 rounded-md px-3 py-2">
@@ -2897,7 +3170,111 @@ const Workbench = () => {
                             </div>
                           </div>
                         </div>
+                        </div>
                     )}
+                  </div>
+                  <div
+                    ref={videoControlsBarRef}
+                    className={cn(
+                      "flex cursor-pointer flex-col justify-end rounded-b-md transition-opacity duration-200",
+                      showVideoControls ? "opacity-100" : "opacity-0"
+                    )}
+                    style={{
+                      ...videoControlsBarContainerStyle,
+                      pointerEvents: showVideoControls ? "auto" : "none"
+                    }}
+                    data-testid="workbench-video-controls"
+                  >
+                    <div
+                      className="flex cursor-pointer items-center gap-2 px-2 py-1.5"
+                      style={{
+                        height: VIDEO_CONTROL_BAR_HEIGHT_PX,
+                        background:
+                          "linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 70%, transparent 100%)"
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded text-white hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        onClick={handlePlayPauseToggle}
+                        aria-label={isPlaying ? "Pause" : "Play"}
+                        data-testid="workbench-video-play-pause"
+                      >
+                        {isPlaying ? (
+                          <Pause className="h-5 w-5" fill="currentColor" />
+                        ) : (
+                          <Play className="h-5 w-5" fill="currentColor" />
+                        )}
+                      </button>
+                      <div className="relative flex items-center gap-0">
+                        <button
+                          type="button"
+                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded text-white hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          onClick={handleMuteToggle}
+                          aria-label={isMuted ? "Unmute" : "Mute"}
+                          data-testid="workbench-video-volume"
+                        >
+                          {isMuted ? (
+                            <VolumeX className="h-5 w-5" />
+                          ) : (
+                            <Volume2 className="h-5 w-5" />
+                          )}
+                        </button>
+                        <div className="w-[100px] shrink-0 cursor-pointer">
+                          <Slider
+                            className="h-8 w-[100px] shrink-0 cursor-pointer px-1 [&_.bg-primary\\/20]:bg-white/40 [&_.bg-primary]:bg-white [&_.border-primary\\/50]:border-white/80 [&_.bg-background]:bg-white"
+                            value={[isMuted ? 0 : volume]}
+                            onValueChange={([v]) => handleVolumeChange(v ?? 0)}
+                            min={0}
+                            max={1}
+                            step={0.05}
+                          />
+                        </div>
+                      </div>
+                      <span
+                        className="shrink-0 tabular-nums text-xs font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+                        style={{ textShadow: "0 0 2px rgba(0,0,0,1), 0 1px 3px rgba(0,0,0,0.9)" }}
+                      >
+                        {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
+                      </span>
+                    </div>
+                    <div className="shrink-0 px-2 pb-2 pt-0.5">
+                      <div
+                        ref={progressBarTrackRef}
+                        className="relative w-full cursor-pointer rounded-md bg-white/30"
+                        style={{ height: VIDEO_PROGRESS_STRIP_HEIGHT_PX }}
+                        role="progressbar"
+                        aria-valuenow={durationSeconds > 0 ? currentTimeSeconds : 0}
+                        aria-valuemin={0}
+                        aria-valuemax={durationSeconds}
+                        aria-label="Video progress"
+                        data-testid="workbench-video-progress"
+                        onClick={handleProgressBarClick}
+                        onMouseDown={handleProgressBarMouseDown}
+                      >
+                        <div
+                          className="absolute inset-y-0 left-0 rounded-l-md bg-primary"
+                          style={{
+                            width: `${
+                              durationSeconds > 0
+                                ? (currentTimeSeconds / durationSeconds) * 100
+                                : 0
+                            }%`
+                          }}
+                        />
+                        {durationSeconds > 0 && (
+                          <div
+                            className="absolute top-1/2 z-1 rounded-full border-2 border-white bg-primary shadow-md"
+                            style={{
+                              left: `${(currentTimeSeconds / durationSeconds) * 100}%`,
+                              width: VIDEO_PROGRESS_THUMB_SIZE_PX,
+                              height: VIDEO_PROGRESS_THUMB_SIZE_PX,
+                              transform: "translate(-50%, -50%)"
+                            }}
+                          />
+                        )}
+                      </div>
+                    </div>
                   </div>
                   {subtitleLoadError && (
                     <div

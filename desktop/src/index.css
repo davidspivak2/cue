@@ -104,7 +104,59 @@
   }
 }
 
-/* Empty state stagger: welcome → rest of sentence → upload */
+/* Interactive cursor policy: pointer for actionable controls by default.
+   Use :where(...) to keep specificity low so explicit cursor classes
+   (for example cursor-text) can override when needed. */
+:where(
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="menuitemcheckbox"]:not([aria-disabled="true"]),
+  [role="menuitemradio"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="switch"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([aria-disabled="true"]),
+  [role="radio"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  [role="slider"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="range"]:not(:disabled),
+  input[type="color"]:not(:disabled),
+  input[type="file"]:not(:disabled),
+  [data-interactive="true"]:not([aria-disabled="true"])
+) {
+  cursor: pointer;
+}
+
+:where(
+  button:disabled,
+  [aria-disabled="true"],
+  [data-disabled],
+  [role="button"][aria-disabled="true"],
+  [role="menuitem"][aria-disabled="true"],
+  [role="menuitemcheckbox"][aria-disabled="true"],
+  [role="menuitemradio"][aria-disabled="true"],
+  [role="tab"][aria-disabled="true"],
+  [role="switch"][aria-disabled="true"],
+  [role="checkbox"][aria-disabled="true"],
+  [role="radio"][aria-disabled="true"],
+  [role="option"][aria-disabled="true"],
+  [role="slider"][aria-disabled="true"],
+  [data-interactive="true"][aria-disabled="true"]
+) {
+  cursor: not-allowed;
+}
+
+/* Explicit exception: native-like window controls in the custom title bar. */
+button[data-cue-title-bar-window-control],
+[data-cue-title-bar-window-control] {
+  cursor: default;
+}
+
+/* Empty state stagger: welcome -> rest of sentence -> upload */
 @keyframes empty-state-fade-in {
   from {
     opacity: 0;

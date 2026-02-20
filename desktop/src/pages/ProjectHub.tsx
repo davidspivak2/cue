@@ -3,7 +3,7 @@ import { LayoutGrid, List, Trash2, Upload, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import PageHeader from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +60,11 @@ type RelinkWarning = {
   path: string;
   reasons: string[];
 };
+
+type ProjectHubLocationState = {
+  cancelledCreateProjectId?: string;
+  cancelledCreateProjectTitle?: string;
+} | null;
 
 const STATUS_LABELS: Record<string, string> = {
   ready: "Ready to review",
@@ -250,11 +255,15 @@ const resolveTaskDetail = (project: ProjectSummary) => {
 };
 
 const ProjectHub = () => {
+  const location = useLocation();
+  const incomingState = location.state as ProjectHubLocationState;
   const navigate = useNavigate();
   const { openSettings } = useSettings();
   const { pushToast } = useToast();
   const { closeTab, openOrActivateTab } = useWorkbenchTabs();
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
+  const [optimisticallyHiddenProjectIds, setOptimisticallyHiddenProjectIds] =
+    React.useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = React.useState(true);
   const [isBackendStarting, setIsBackendStarting] = React.useState(true);
   const [banner, setBanner] = React.useState<Banner | null>(null);
@@ -286,6 +295,7 @@ const ProjectHub = () => {
   }, [viewMode]);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const relinkInputRef = React.useRef<HTMLInputElement>(null);
+  const handledCreateCancelKeyRef = React.useRef<string | null>(null);
 
   const isTauriEnv = isTauri();
   const isRelinking = busyProjectId !== null;
@@ -294,6 +304,34 @@ const ProjectHub = () => {
 
   const showBanner = React.useCallback((type: BannerTone, message: string) => {
     setBanner({ type, message });
+  }, []);
+
+  const hideProjectOptimistically = React.useCallback((projectId: string) => {
+    if (!projectId) {
+      return;
+    }
+    setOptimisticallyHiddenProjectIds((prev) => {
+      if (prev.has(projectId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.add(projectId);
+      return next;
+    });
+  }, []);
+
+  const unhideProjectOptimistically = React.useCallback((projectId: string) => {
+    if (!projectId) {
+      return;
+    }
+    setOptimisticallyHiddenProjectIds((prev) => {
+      if (!prev.has(projectId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.delete(projectId);
+      return next;
+    });
   }, []);
 
   const loadProjects = React.useCallback(async () => {
@@ -330,6 +368,48 @@ const ProjectHub = () => {
   React.useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+
+  React.useEffect(() => {
+    const cancelledCreateProjectId =
+      typeof incomingState?.cancelledCreateProjectId === "string"
+        ? incomingState.cancelledCreateProjectId
+        : "";
+    if (!cancelledCreateProjectId) {
+      return;
+    }
+    if (handledCreateCancelKeyRef.current === location.key) {
+      return;
+    }
+    handledCreateCancelKeyRef.current = location.key;
+
+    hideProjectOptimistically(cancelledCreateProjectId);
+    window.history.replaceState({}, "");
+
+    void deleteProject(cancelledCreateProjectId)
+      .then(() => {
+        setProjects((prev) =>
+          prev.filter((entry) => entry.project_id !== cancelledCreateProjectId)
+        );
+        unhideProjectOptimistically(cancelledCreateProjectId);
+        closeTab(cancelledCreateProjectId);
+      })
+      .catch((err) => {
+        unhideProjectOptimistically(cancelledCreateProjectId);
+        showBanner(
+          "error",
+          err instanceof Error
+            ? err.message
+            : "Failed to remove cancelled video. Please try deleting it again."
+        );
+      });
+  }, [
+    closeTab,
+    hideProjectOptimistically,
+    incomingState,
+    location.key,
+    showBanner,
+    unhideProjectOptimistically
+  ]);
 
   React.useEffect(() => {
     if (isLoading) {
@@ -699,7 +779,12 @@ const ProjectHub = () => {
     }
   }, [closeTab, deleteConfirmProject, isBusyOperation, pushToast, showBanner]);
 
-  const showEmptyState = !isLoading && projects.length === 0;
+  const visibleProjects = React.useMemo(
+    () =>
+      projects.filter((project) => !optimisticallyHiddenProjectIds.has(project.project_id)),
+    [optimisticallyHiddenProjectIds, projects]
+  );
+  const showEmptyState = !isLoading && visibleProjects.length === 0;
   const enableRootDrop = !isTauriEnv && !isBusyOperation;
 
   const dismissTaskNotice = (noticeId: string) => {
@@ -728,7 +813,7 @@ const ProjectHub = () => {
           showSettings={!isTauriEnv}
           right={
             <>
-              {projects.length > 0 && (
+              {visibleProjects.length > 0 && (
                 <TooltipProvider delayDuration={300}>
                   <ToggleGroup
                     type="single"
@@ -881,9 +966,9 @@ const ProjectHub = () => {
         );
       })()}
 
-      {!isLoading && projects.length > 0 && (viewMode === "cards" ? (
+      {!isLoading && visibleProjects.length > 0 && (viewMode === "cards" ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {projects.map((project) => {
+          {visibleProjects.map((project) => {
             const thumbnailSrc = resolveThumbnailSrc(project.thumbnail_path, isTauriEnv);
             const durationLabel = formatDuration(project.duration_seconds);
             const statusLabel = resolveStatusLabel(project);
@@ -900,6 +985,7 @@ const ProjectHub = () => {
             const shouldShowTaskNotice =
               !!taskNotice &&
               typeof taskNotice.notice_id === "string" &&
+              taskNotice.status !== "cancelled" &&
               !dismissedNoticeIds.has(taskNotice.notice_id);
             return (
               <div
@@ -1036,7 +1122,7 @@ const ProjectHub = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {projects.map((project) => {
+              {visibleProjects.map((project) => {
                 const thumbnailSrc = resolveThumbnailSrc(project.thumbnail_path, isTauriEnv);
                 const durationLabel = formatDuration(project.duration_seconds);
                 const statusLabel = resolveStatusLabel(project);
@@ -1052,6 +1138,7 @@ const ProjectHub = () => {
                 const shouldShowTaskNotice =
                   !!taskNotice &&
                   typeof taskNotice.notice_id === "string" &&
+                  taskNotice.status !== "cancelled" &&
                   !dismissedNoticeIds.has(taskNotice.notice_id);
                 return (
                   <TableRow
