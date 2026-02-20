@@ -197,6 +197,49 @@ def main() -> int:
     )
     heartbeat_thread.start()
 
+    # Configure logging early so the first event can include log_path.
+    logger, log_path, handler = _configure_logging()
+
+    # Minimal validation and early emit so the frontend gets feedback before heavy imports.
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    video_path = Path(args.video_path)
+    if args.task == "generate_srt":
+        if not video_path.exists():
+            emitter.emit(
+                "error",
+                status="error",
+                message=f"Input path does not exist: {video_path}",
+                log_path=str(log_path),
+            )
+            stop_heartbeat.set()
+            return 1
+    elif args.task == "burn_in":
+        srt_path = Path(args.srt_path) if args.srt_path else None
+        if srt_path is None or not srt_path.exists():
+            emitter.emit(
+                "error",
+                status="error",
+                message="Missing or invalid srt_path for burn_in task.",
+                log_path=str(log_path),
+            )
+            stop_heartbeat.set()
+            return 1
+
+    heading = (
+        "Creating subtitles"
+        if args.task == "generate_srt"
+        else "Creating video with subtitles"
+    )
+    emitter.emit(
+        "started",
+        heading=heading,
+        message="Preparing...",
+        log_path=str(log_path),
+        task=args.task,
+    )
+    emitter.emit("progress", pct=0, message="Preparing...")
+
     try:
         from PySide6 import QtWidgets
     except Exception as exc:  # noqa: BLE001
@@ -207,7 +250,6 @@ def main() -> int:
     app = QtWidgets.QApplication(sys.argv)
     _ = app
 
-    logger, log_path, handler = _configure_logging()
     logger.info("Log file: %s", log_path)
 
     options = _parse_options(args.options_json)

@@ -92,7 +92,6 @@ const TitleBar = () => {
           title="Settings"
           aria-label="Settings"
           selected={settingsOpen}
-          className="cursor-pointer"
         >
           <Settings className="h-4 w-4" />
         </TitleBarButton>
@@ -100,6 +99,7 @@ const TitleBar = () => {
           onClick={handleMinimize}
           title="Minimize"
           aria-label="Minimize"
+          windowControl
         >
           <Minus className="h-4 w-4" />
         </TitleBarButton>
@@ -107,6 +107,7 @@ const TitleBar = () => {
           onClick={handleMaximize}
           title={maximized ? "Restore" : "Maximize"}
           aria-label={maximized ? "Restore" : "Maximize"}
+          windowControl
         >
           {maximized ? (
             <Maximize2 className="h-4 w-4" />
@@ -119,6 +120,7 @@ const TitleBar = () => {
           title="Close"
           className="hover:bg-destructive hover:text-destructive-foreground"
           aria-label="Close"
+          windowControl
         >
           <X className="h-4 w-4" />
         </TitleBarButton>
@@ -134,6 +136,7 @@ function TitleBarButton({
   className,
   "aria-label": ariaLabel,
   selected = false,
+  windowControl = false,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -141,6 +144,7 @@ function TitleBarButton({
   className?: string;
   "aria-label": string;
   selected?: boolean;
+  windowControl?: boolean;
 }) {
   return (
     <button
@@ -149,10 +153,10 @@ function TitleBarButton({
       title={title}
       aria-label={ariaLabel}
       aria-pressed={selected}
+      data-cue-title-bar-window-control={windowControl ? "true" : undefined}
       className={cn(
         "flex h-full w-10 items-center justify-center text-foreground transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         selected ? "bg-foreground/10" : "hover:bg-foreground/10 active:bg-foreground/15",
-        selected && "cursor-default",
         className
       )}
     >

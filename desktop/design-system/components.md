@@ -43,6 +43,14 @@ Use for all actions. Prefer variants over custom classes.
 - Always pair icon-only buttons with `aria-label`.
 - Use `transition-colors duration-200` (already in `buttonVariants`); avoid scale or layout-shifting hover.
 
+### Cursor behavior (system-wide)
+
+- Interactive controls show a hand cursor (`pointer`) by default via `desktop/src/index.css`.
+- This applies to design-system primitives and semantic interactive roles (button, menuitem, tab, option, slider, etc.).
+- For non-semantic custom interactive containers, add `data-interactive="true"` (or use proper semantic roles).
+- **Only** title bar window controls (`minimize`, `maximize/restore`, `close`) are exempt and intentionally keep the default cursor.
+- Inputs that require specialized cursors (for example text fields showing I-beam) are intentionally not forced to pointer.
+
 ---
 
 ## Badge

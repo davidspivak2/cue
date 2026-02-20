@@ -21,6 +21,7 @@ import os
 import subprocess
 import signal
 import sys
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -114,10 +115,12 @@ class JobState:
     snapshot_updated_at: Optional[str] = None
     snapshot_checklist_order: list[str] = field(default_factory=list)
     snapshot_checklist: dict[str, dict[str, Any]] = field(default_factory=dict)
+    enqueue_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 JOBS: dict[str, JobState] = {}
 PROJECT_TASK_NOTICES: dict[str, dict[str, Any]] = {}
+_inprocess_slot_lock: asyncio.Lock = asyncio.Lock()
 
 
 class JobRequest(BaseModel):
@@ -476,6 +479,8 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
         return
 
     if event_type in TERMINAL_STATUSES:
+        job.status = event_type
+        job.finished_at = datetime.now(timezone.utc)
         message = event.get("message")
         if isinstance(message, str) and message.strip():
             job.snapshot_message = message.strip()
@@ -511,9 +516,10 @@ def _build_event(job_id: str, event_type: str, **fields: Any) -> dict[str, Any]:
 
 
 def _enqueue_event(job: JobState, event: dict[str, Any]) -> None:
-    _update_job_snapshot(job, event)
-    _prune_job_event_queue(job)
-    job.event_queue.put_nowait(event)
+    with job.enqueue_lock:
+        _update_job_snapshot(job, event)
+        _prune_job_event_queue(job)
+        job.event_queue.put_nowait(event)
 
 
 async def _sleep_with_cancel(job: JobState, duration: float) -> bool:
@@ -733,6 +739,67 @@ def _maybe_update_project_from_runner_event(
             project_store.refresh_project_status(project_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Project update failed for %s: %s", project_id, exc)
+
+
+async def _run_inprocess_worker_job(job: JobState, request: JobRequest) -> None:
+    from app.backend_inprocess_worker import run_worker_inprocess
+
+    worker_ref: list[Any] = []
+
+    def enqueue_event_cb(ev: dict[str, Any]) -> None:
+        event_type = str(ev.pop("type", "message"))
+        event = _build_event(job.job_id, event_type, **ev)
+        _maybe_update_project_from_runner_event(request, event_type, event)
+        _enqueue_event(job, event)
+
+    async def watch_cancel_and_call_worker_cancel() -> None:
+        await job.cancel_event.wait()
+        if worker_ref:
+            worker_ref[0].cancel()
+
+    cancel_task = asyncio.create_task(watch_cancel_and_call_worker_cancel())
+    try:
+        await asyncio.to_thread(
+            run_worker_inprocess,
+            job.job_id,
+            request,
+            enqueue_event_cb,
+            job.cancel_event,
+            worker_ref,
+        )
+    finally:
+        cancel_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cancel_task
+
+    if job.status not in TERMINAL_STATUSES:
+        job.status = "error"
+        job.finished_at = datetime.now(timezone.utc)
+        _enqueue_event(
+            job,
+            _build_event(
+                job.job_id,
+                "error",
+                status=job.status,
+                message="In-process worker exited without terminal event.",
+            ),
+        )
+
+
+async def _run_worker_job_maybe_inprocess(job: JobState, request: JobRequest) -> None:
+    if _inprocess_slot_lock.locked():
+        await _run_runner_job(job, request)
+        return
+    try:
+        async with _inprocess_slot_lock:
+            await _run_inprocess_worker_job(job, request)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "In-process worker failed for job %s, falling back to runner: %s",
+            job.job_id,
+            exc,
+        )
+        await _run_runner_job(job, request)
 
 
 async def _run_runner_job(job: JobState, request: JobRequest) -> None:
@@ -1075,6 +1142,8 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
         job.task = asyncio.create_task(_run_demo_job(job))
     elif payload.kind == "pipeline":
         job.task = asyncio.create_task(_run_pipeline_job(job, payload))
+    elif payload.kind in {"create_subtitles", "create_video_with_subtitles"}:
+        job.task = asyncio.create_task(_run_worker_job_maybe_inprocess(job, payload))
     else:
         job.task = asyncio.create_task(_run_runner_job(job, payload))
     events_url = f"http://{HOST}:{PORT}/jobs/{job_id}/events"

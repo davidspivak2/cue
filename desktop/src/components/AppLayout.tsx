@@ -114,6 +114,10 @@ const AppLayout = () => {
             continue;
           }
           seenNoticeIdsRef.current.add(notice.notice_id);
+          const isSuppressedCancelledNotice = notice.status === "cancelled";
+          if (isSuppressedCancelledNotice) {
+            continue;
+          }
           const title = notice.status === "cancelled" ? "Task cancelled" : "Task failed";
           const projectTitle = project.title || "Video";
           pushToast(projectTitle, `${title}: ${notice.message}`);
