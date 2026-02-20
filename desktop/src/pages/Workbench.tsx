@@ -575,7 +575,6 @@ const Workbench = () => {
   const activeSubtitleWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const subtitleEditorControlsRef = React.useRef<HTMLDivElement | null>(null);
   const videoControlsBarRef = React.useRef<HTMLDivElement | null>(null);
-  const videoControlsHideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldResumePlaybackRef = React.useRef(false);
   const editHistoryRef = React.useRef<string[]>([]);
   const editHistoryIndexRef = React.useRef(0);
@@ -2663,15 +2662,6 @@ const Workbench = () => {
     }
   }, [isMuted, volume]);
 
-  const VIDEO_CONTROLS_HIDE_DELAY_MS = 2500;
-  React.useEffect(() => {
-    return () => {
-      if (videoControlsHideTimeoutRef.current) {
-        clearTimeout(videoControlsHideTimeoutRef.current);
-      }
-    };
-  }, []);
-
   const openLeftPanel = () => {
     if (!showSubtitlesOverlay) {
       return;
@@ -2950,17 +2940,10 @@ const Workbench = () => {
                 <div
                   className="relative h-full w-full overflow-hidden rounded-md"
                   onMouseEnter={() => {
-                    if (videoControlsHideTimeoutRef.current) {
-                      clearTimeout(videoControlsHideTimeoutRef.current);
-                      videoControlsHideTimeoutRef.current = null;
-                    }
                     setShowVideoControls(true);
                   }}
                   onMouseLeave={() => {
-                    videoControlsHideTimeoutRef.current = setTimeout(() => {
-                      setShowVideoControls(false);
-                      videoControlsHideTimeoutRef.current = null;
-                    }, VIDEO_CONTROLS_HIDE_DELAY_MS);
+                    setShowVideoControls(false);
                   }}
                 >
                   <video

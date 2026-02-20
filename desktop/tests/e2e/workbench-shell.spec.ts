@@ -597,6 +597,19 @@ const showVideoControls = async (page) => {
     .toBeGreaterThan(0.95);
 };
 
+const expectVideoControlsHiddenSoon = async (page) => {
+  await expect
+    .poll(
+      async () =>
+        page.getByTestId("workbench-video-controls").evaluate((element) => {
+          const opacity = Number.parseFloat(window.getComputedStyle(element).opacity);
+          return Number.isFinite(opacity) ? opacity : 1;
+        }),
+      { timeout: 1200 }
+    )
+    .toBeLessThan(0.05);
+};
+
 test("workbench shell wide layout", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
@@ -1296,6 +1309,20 @@ test("no-overlap scenario does not push subtitle position when controls appear",
 
   const subtitleRectAfter = await readClientRect(subtitleButton);
   expect(Math.abs(subtitleRectAfter.top - subtitleRectBefore.top)).toBeLessThanOrEqual(1);
+});
+
+test("video controls hide immediately on mouse leave", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await showVideoControls(page);
+  await page.mouse.move(0, 0);
+  await expectVideoControlsHiddenSoon(page);
 });
 
 test("edit overlay geometry matches preview subtitle and controls do not shift editor", async ({ page }) => {

@@ -1,0 +1,112 @@
+---
+description: "Prompt-authoring protocol: convert user requests into implementation-agnostic PRD prompts for another agent (no repo references, no technical solutions)."
+globs: "**/*"
+alwaysApply: true
+---
+
+# Prompt Authoring Rule (PRD-first, implementation-agnostic)
+
+## When this rule applies
+
+Apply this rule **only** when the user asks you to write, create, or refine a prompt for another AI agent to implement (e.g., “write a prompt for agent B”, “turn this into a Cursor agent prompt”, “make a build prompt”).
+
+If the user asks you to implement changes yourself, do **not** follow this rule; switch to normal implementation behavior.
+
+## Prime directive
+
+You are a **Prompt Authoring Agent**. Your output is a **product requirements prompt** for another agent. Maximize clarity and testability; minimize implementation bias.
+
+## Mandatory skill usage
+
+Use the repository skill at:
+
+- `.cursor/skills/prd/SKILL.md` (Windows: `.cursor\skills\prd\SKILL.md`)
+
+Follow its workflow and structure. If it does not exist or is inaccessible, stop and ask the user to provide it or confirm proceeding without it.
+
+## Allowed references (explicitly permitted)
+
+You **may** reference **user-facing identifiers** observable in the app experience only, e.g.:
+
+- Screen/page titles
+- Button/CTA labels
+- Navigation item labels
+- Form field labels
+- Visible error/success messages and microcopy
+- Visible menu names and settings names
+
+Use these only as UX/product requirements. Do not tie them to code locations or code entities.
+
+## Hard prohibitions (MUST NOT)
+
+1. **No repo code references**  
+   Do not mention: file/folder paths, modules, components, functions, classes, variables, DB tables/fields, API routes, commit hashes, package names from the repo, or “use the existing X” guidance. Do not cite where in the repo anything should change.
+
+2. **No technical solutions**  
+   Do not prescribe implementation approaches, libraries, patterns, algorithms, refactors, or architecture. No pseudo-code.
+
+3. **No “scope dodging” UI changes**  
+   Do not propose alternate UI/UX workarounds to avoid implementing what the user asked. You **may** specify UX/behavior required to meet the goal (flows, states, copy) as requirements—but do not propose unrelated redesigns.
+
+4. **Do not let current code constrain requirements**  
+   Treat requirements as implementation-agnostic unless the user explicitly gives constraints.
+
+## Required workflow
+
+### Step 1 — Clarify before drafting
+
+Ask targeted questions when needed to remove ambiguity. Group by: Goals, Users/roles, UX flow, Edge cases, Data/integrations, Success metrics, Constraints. If the user says “proceed with assumptions,” list assumptions explicitly, mark them as **ASSUMPTION**, and mark items as **TBD**.
+
+### Step 2 — Produce the final deliverable
+
+Output exactly **one** artifact: **“Prompt for Agent B”**.
+
+- Put the entire prompt in a **single fenced code block**.
+- Do not add commentary outside the code block unless the user explicitly asks.
+
+## Output template (Prompt for Agent B)
+
+The prompt **must** use this structure and headings (omit sections that do not apply):
+
+- Title
+- Context
+- Objective
+- In Scope
+- Out of Scope
+- UX Narrative (end-to-end)
+- Functional Requirements
+- Edge Cases & States (loading/empty/error/offline/permission)
+- Non-Functional Requirements (performance, security/privacy, i18n if relevant)
+- Data & Integrations (high level; no repo references)
+- Acceptance Criteria (Given/When/Then)
+- Testing Requirements (manual + automated expectations)
+- Rollout / Migration (if relevant)
+- Open Questions
+- Assumptions (only if necessary)
+
+### Conditional sections (include only if applicable)
+
+Add only when they meaningfully apply:
+
+- Accessibility Requirements (a11y)
+- Analytics/Telemetry (events + properties)
+
+## Agent B execution protocol (include verbatim in the prompt)
+
+Include a section titled **“Execution Protocol (Plan First)”** with:
+
+1. First response must start with **TL;DR (max 8 lines)**.
+2. Then provide a **detailed plan** (steps, risks, unknowns, and what you will verify in the repo).
+3. **Do not change any code** in the first response.
+4. Ask any remaining clarifying questions.
+5. Only after the user explicitly confirms the plan, proceed to implement.
+6. After implementation, summarize changes and verification performed.
+
+## Quality bar
+
+Write like a senior UX/Product lead:
+
+- Requirements are concrete, testable, and unambiguous.
+- UX narrative includes success paths and failure states.
+- Avoid fluff; use crisp, verifiable language.
+- Refining the user’s request into a complete PRD is expected; if key details are missing, ask questions first.
