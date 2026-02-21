@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, Play, Pause, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
+import { Check, Minus, Play, Pause, Plus, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   buildExportChecklist,
@@ -624,6 +626,22 @@ const Workbench = () => {
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
+  const [progressHoverSeconds, setProgressHoverSeconds] = React.useState<number | null>(null);
+  const [playbackSpeed, setPlaybackSpeed] = React.useState(() => {
+    if (typeof window === "undefined") return 1;
+    const stored = window.localStorage.getItem("workbench_playback_speed");
+    if (stored == null) return 1;
+    const parsed = Number.parseFloat(stored);
+    return Number.isFinite(parsed) && parsed >= 0.25 && parsed <= 2 ? parsed : 1;
+  });
+  const [speedPopoverOpen, setSpeedPopoverOpen] = React.useState(false);
+  const speedPopoverOpenDelayRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speedPopoverCloseTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const SPEED_POPOVER_CLOSE_DELAY_MS = 200;
+  const [seekFeedback, setSeekFeedback] = React.useState<{ text: string; side: "left" | "right" } | null>(
+    null
+  );
+  const seekFeedbackTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [subtitleControlsPushPx, setSubtitleControlsPushPx] = React.useState(0);
   const [isCreatingSubtitles, setIsCreatingSubtitles] = React.useState(false);
   const [createSubtitlesError, setCreateSubtitlesError] = React.useState<string | null>(null);
@@ -2079,9 +2097,17 @@ const Workbench = () => {
 
   const VIDEO_CONTROL_BAR_HEIGHT_PX = 44;
   const VIDEO_PROGRESS_STRIP_HEIGHT_PX = 6;
+  const VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER = 12;
+  const VIDEO_PROGRESS_STRIP_PADDING_PX = 8;
   const VIDEO_PROGRESS_THUMB_SIZE_PX = 12;
+  const effectiveProgressStripHeightPx =
+    progressHoverSeconds !== null ? VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER : VIDEO_PROGRESS_STRIP_HEIGHT_PX;
   const VIDEO_CONTROLS_TOTAL_HEIGHT_PX =
-    VIDEO_CONTROL_BAR_HEIGHT_PX + 2 + VIDEO_PROGRESS_STRIP_HEIGHT_PX + 8;
+    VIDEO_CONTROL_BAR_HEIGHT_PX +
+    2 +
+    Math.max(VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER, VIDEO_PROGRESS_STRIP_HEIGHT_PX) +
+    VIDEO_PROGRESS_STRIP_PADDING_PX * 2 +
+    8;
   const videoControlsBarContainerStyle = React.useMemo<React.CSSProperties>(() => {
     const totalHeight = VIDEO_CONTROLS_TOTAL_HEIGHT_PX;
     return {
@@ -2641,6 +2667,19 @@ const Workbench = () => {
     },
     [handleProgressBarPointer]
   );
+  const handleProgressBarMouseMove = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const track = progressBarTrackRef.current;
+      if (!track || durationSeconds <= 0) return;
+      const rect = track.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      setProgressHoverSeconds(frac * durationSeconds);
+    },
+    [durationSeconds]
+  );
+  const handleProgressBarMouseLeave = React.useCallback(() => {
+    setProgressHoverSeconds(null);
+  }, []);
 
   const handleVolumeChange = React.useCallback((value: number) => {
     const el = videoRef.current;
@@ -2665,6 +2704,175 @@ const Workbench = () => {
       setIsMuted(true);
     }
   }, [isMuted, volume]);
+
+  React.useEffect(() => {
+    const el = videoRef.current;
+    if (el) el.playbackRate = playbackSpeed;
+  }, [playbackSpeed]);
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem("workbench_playback_speed", String(playbackSpeed));
+    } catch {
+      // ignore
+    }
+  }, [playbackSpeed]);
+
+  const SPEED_CHIPS = [1.0, 1.25, 1.5, 1.75, 2.0] as const;
+  const formatSpeedLabel = (speed: number) => {
+    if (speed >= 1 && speed < 1.25 && Math.abs(speed - 1) < 0.01) return "1x";
+    if (speed >= 1.25 && speed < 1.5 && Math.abs(speed - 1.25) < 0.01) return "1.25x";
+    if (speed >= 1.5 && speed < 1.75 && Math.abs(speed - 1.5) < 0.01) return "1.5x";
+    if (speed >= 1.75 && speed < 2 && Math.abs(speed - 1.75) < 0.01) return "1.75x";
+    if (speed >= 2 && Math.abs(speed - 2) < 0.01) return "2x";
+    return `${speed.toFixed(2)}x`;
+  };
+  const handleSpeedPopoverMouseEnter = React.useCallback(() => {
+    if (speedPopoverCloseTimeoutRef.current) {
+      window.clearTimeout(speedPopoverCloseTimeoutRef.current);
+      speedPopoverCloseTimeoutRef.current = null;
+    }
+    if (speedPopoverOpenDelayRef.current) return;
+    speedPopoverOpenDelayRef.current = window.setTimeout(() => {
+      speedPopoverOpenDelayRef.current = null;
+      setSpeedPopoverOpen(true);
+    }, 250);
+  }, []);
+  const videoSingleClickTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoClickSurfaceRef = React.useRef<HTMLDivElement | null>(null);
+
+  const handleSpeedPopoverMouseLeave = React.useCallback(() => {
+    if (speedPopoverOpenDelayRef.current) {
+      window.clearTimeout(speedPopoverOpenDelayRef.current);
+      speedPopoverOpenDelayRef.current = null;
+    }
+    speedPopoverCloseTimeoutRef.current = window.setTimeout(() => {
+      speedPopoverCloseTimeoutRef.current = null;
+      setSpeedPopoverOpen(false);
+    }, SPEED_POPOVER_CLOSE_DELAY_MS);
+  }, []);
+  const cancelSpeedPopoverClose = React.useCallback(() => {
+    if (speedPopoverCloseTimeoutRef.current) {
+      window.clearTimeout(speedPopoverCloseTimeoutRef.current);
+      speedPopoverCloseTimeoutRef.current = null;
+    }
+  }, []);
+
+  const showSeekFeedback = React.useCallback((text: string, side: "left" | "right") => {
+    if (seekFeedbackTimeoutRef.current) {
+      window.clearTimeout(seekFeedbackTimeoutRef.current);
+    }
+    setSeekFeedback({ text, side });
+    seekFeedbackTimeoutRef.current = window.setTimeout(() => {
+      seekFeedbackTimeoutRef.current = null;
+      setSeekFeedback(null);
+    }, 500);
+  }, []);
+
+  const handleVideoSurfaceClick = React.useCallback(() => {
+    if (videoSingleClickTimeoutRef.current) return;
+    videoSingleClickTimeoutRef.current = window.setTimeout(() => {
+      videoSingleClickTimeoutRef.current = null;
+      handlePlayPauseToggle();
+    }, 250);
+  }, [handlePlayPauseToggle]);
+  const handleVideoSurfaceDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (videoSingleClickTimeoutRef.current) {
+        window.clearTimeout(videoSingleClickTimeoutRef.current);
+        videoSingleClickTimeoutRef.current = null;
+      }
+      const el = videoRef.current;
+      const surface = videoClickSurfaceRef.current;
+      if (!el || !surface || !Number.isFinite(el.duration)) return;
+      const rect = surface.getBoundingClientRect();
+      const frac = (event.clientX - rect.left) / rect.width;
+      if (frac < 0.25) {
+        const newTime = Math.max(0, el.currentTime - 5);
+        el.currentTime = newTime;
+        setCurrentTimeSeconds(newTime);
+        showSeekFeedback("−5 s", "left");
+      } else if (frac > 0.75) {
+        const newTime = Math.min(el.duration, el.currentTime + 5);
+        el.currentTime = newTime;
+        setCurrentTimeSeconds(newTime);
+        showSeekFeedback("+5 s", "right");
+      }
+    },
+    [showSeekFeedback]
+  );
+
+  React.useEffect(() => {
+    if (!hasVideoPreview) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = document.activeElement;
+      const tagName = target?.tagName?.toLowerCase();
+      const isEditable =
+        tagName === "input" ||
+        tagName === "textarea" ||
+        (target as HTMLElement)?.getAttribute?.("contenteditable") === "true";
+      if (isEditable) return;
+
+      const el = videoRef.current;
+      if (!el) return;
+
+      switch (event.key) {
+        case " ":
+        case "k":
+          event.preventDefault();
+          if (el.paused) {
+            el.play().catch(() => {});
+          } else {
+            el.pause();
+          }
+          break;
+        case "ArrowLeft":
+          event.preventDefault();
+          if (Number.isFinite(el.duration)) {
+            const t = Math.max(0, el.currentTime - 5);
+            el.currentTime = t;
+            setCurrentTimeSeconds(t);
+            showSeekFeedback("−5 s", "left");
+          }
+          break;
+        case "ArrowRight":
+          event.preventDefault();
+          if (Number.isFinite(el.duration)) {
+            const t = Math.min(el.duration, el.currentTime + 5);
+            el.currentTime = t;
+            setCurrentTimeSeconds(t);
+            showSeekFeedback("+5 s", "right");
+          }
+          break;
+        case "j":
+          event.preventDefault();
+          if (Number.isFinite(el.duration)) {
+            const t = Math.max(0, el.currentTime - 10);
+            el.currentTime = t;
+            setCurrentTimeSeconds(t);
+            showSeekFeedback("−10 s", "left");
+          }
+          break;
+        case "l":
+          event.preventDefault();
+          if (Number.isFinite(el.duration)) {
+            const t = Math.min(el.duration, el.currentTime + 10);
+            el.currentTime = t;
+            setCurrentTimeSeconds(t);
+            showSeekFeedback("+10 s", "right");
+          }
+          break;
+        case "m":
+          event.preventDefault();
+          el.muted = !el.muted;
+          setIsMuted(el.muted);
+          break;
+        default:
+          break;
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [hasVideoPreview, showSeekFeedback]);
 
   const openLeftPanel = () => {
     if (!showSubtitlesOverlay) {
@@ -2979,6 +3187,14 @@ const Workbench = () => {
                     }
                     onSeeked={(event) => setCurrentTimeSeconds(event.currentTarget.currentTime || 0)}
                   />
+                  <div
+                    ref={videoClickSurfaceRef}
+                    className="absolute cursor-pointer"
+                    style={displayedVideoGeometryStyle}
+                    onClick={handleVideoSurfaceClick}
+                    onDoubleClick={handleVideoSurfaceDoubleClick}
+                    aria-hidden
+                  />
                   <div className="absolute" style={displayedVideoGeometryStyle}>
                     {shouldRenderOverlayImage && (
                       <img
@@ -3160,6 +3376,24 @@ const Workbench = () => {
                         </div>
                     )}
                   </div>
+                  {seekFeedback && (
+                    <div
+                      className={cn(
+                        "pointer-events-none absolute flex items-center",
+                        seekFeedback.side === "left" ? "justify-start pl-6" : "justify-end pr-6"
+                      )}
+                      style={displayedVideoGeometryStyle}
+                    >
+                      <span
+                        className="text-lg font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] animate-in fade-in duration-150"
+                        style={{
+                          textShadow: "0 0 2px rgba(0,0,0,1), 0 1px 3px rgba(0,0,0,0.9)"
+                        }}
+                      >
+                        {seekFeedback.text}
+                      </span>
+                    </div>
+                  )}
                   <div
                     ref={videoControlsBarRef}
                     className={cn(
@@ -3172,6 +3406,67 @@ const Workbench = () => {
                     }}
                     data-testid="workbench-video-controls"
                   >
+                    <div
+                      className="flex shrink-0 flex-col justify-center px-2 py-2"
+                      style={{ minHeight: VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER + VIDEO_PROGRESS_STRIP_PADDING_PX * 2 }}
+                    >
+                      <TooltipProvider delayDuration={0}>
+                        <Tooltip open={progressHoverSeconds !== null}>
+                          <TooltipTrigger asChild>
+                            <div className="w-full cursor-pointer">
+                              <div
+                                ref={progressBarTrackRef}
+                                className="relative w-full cursor-pointer rounded-md bg-white/30 transition-[height] duration-150"
+                                style={{ height: effectiveProgressStripHeightPx }}
+                                role="progressbar"
+                                aria-valuenow={durationSeconds > 0 ? currentTimeSeconds : 0}
+                                aria-valuemin={0}
+                                aria-valuemax={durationSeconds}
+                                aria-label="Video progress"
+                                data-testid="workbench-video-progress"
+                                onClick={handleProgressBarClick}
+                                onMouseDown={handleProgressBarMouseDown}
+                                onMouseMove={handleProgressBarMouseMove}
+                                onMouseLeave={handleProgressBarMouseLeave}
+                              >
+                                {durationSeconds > 0 && progressHoverSeconds !== null && (
+                                  <div
+                                    className="absolute inset-y-0 left-0 rounded-l-md bg-white/50"
+                                    style={{
+                                      width: `${(progressHoverSeconds / durationSeconds) * 100}%`
+                                    }}
+                                  />
+                                )}
+                                <div
+                                  className="absolute inset-y-0 left-0 rounded-l-md bg-primary"
+                                  style={{
+                                    width: `${
+                                      durationSeconds > 0
+                                        ? (currentTimeSeconds / durationSeconds) * 100
+                                        : 0
+                                    }%`
+                                  }}
+                                />
+                                {durationSeconds > 0 && (
+                                  <div
+                                    className="absolute top-1/2 z-1 rounded-full border-2 border-white bg-primary shadow-md"
+                                    style={{
+                                      left: `${(currentTimeSeconds / durationSeconds) * 100}%`,
+                                      width: VIDEO_PROGRESS_THUMB_SIZE_PX,
+                                      height: VIDEO_PROGRESS_THUMB_SIZE_PX,
+                                      transform: "translate(-50%, -50%)"
+                                    }}
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" sideOffset={4}>
+                            {formatTime(progressHoverSeconds ?? 0)}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
                     <div
                       className="flex cursor-pointer items-center gap-2 px-2 py-1.5"
                       style={{
@@ -3224,42 +3519,85 @@ const Workbench = () => {
                       >
                         {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
                       </span>
-                    </div>
-                    <div className="shrink-0 px-2 pb-2 pt-0.5">
                       <div
-                        ref={progressBarTrackRef}
-                        className="relative w-full cursor-pointer rounded-md bg-white/30"
-                        style={{ height: VIDEO_PROGRESS_STRIP_HEIGHT_PX }}
-                        role="progressbar"
-                        aria-valuenow={durationSeconds > 0 ? currentTimeSeconds : 0}
-                        aria-valuemin={0}
-                        aria-valuemax={durationSeconds}
-                        aria-label="Video progress"
-                        data-testid="workbench-video-progress"
-                        onClick={handleProgressBarClick}
-                        onMouseDown={handleProgressBarMouseDown}
+                        className="flex min-h-[36px] shrink-0 cursor-pointer items-center px-2"
+                        onMouseEnter={handleSpeedPopoverMouseEnter}
+                        onMouseLeave={handleSpeedPopoverMouseLeave}
                       >
-                        <div
-                          className="absolute inset-y-0 left-0 rounded-l-md bg-primary"
-                          style={{
-                            width: `${
-                              durationSeconds > 0
-                                ? (currentTimeSeconds / durationSeconds) * 100
-                                : 0
-                            }%`
-                          }}
-                        />
-                        {durationSeconds > 0 && (
-                          <div
-                            className="absolute top-1/2 z-1 rounded-full border-2 border-white bg-primary shadow-md"
-                            style={{
-                              left: `${(currentTimeSeconds / durationSeconds) * 100}%`,
-                              width: VIDEO_PROGRESS_THUMB_SIZE_PX,
-                              height: VIDEO_PROGRESS_THUMB_SIZE_PX,
-                              transform: "translate(-50%, -50%)"
-                            }}
-                          />
-                        )}
+                        <Popover open={speedPopoverOpen} onOpenChange={setSpeedPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              className="flex min-h-9 min-w-9 cursor-pointer items-center justify-center rounded text-xs font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                              style={{ textShadow: "0 0 2px rgba(0,0,0,1), 0 1px 3px rgba(0,0,0,0.9)" }}
+                              aria-label="Playback speed"
+                              data-testid="workbench-video-speed"
+                            >
+                              {formatSpeedLabel(playbackSpeed)}
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            side="top"
+                            sideOffset={6}
+                            className="w-56 border-border bg-popover p-3 text-popover-foreground"
+                            onMouseEnter={cancelSpeedPopoverClose}
+                            onMouseLeave={handleSpeedPopoverMouseLeave}
+                          >
+                            <div className="flex flex-col gap-3">
+                              <div className="text-center text-sm font-medium">
+                                {playbackSpeed.toFixed(2)}x
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0 rounded-full"
+                                  aria-label="Decrease speed"
+                                  onClick={() =>
+                                    setPlaybackSpeed((s) => Math.max(0.25, Math.round((s - 0.05) * 100) / 100))
+                                  }
+                                >
+                                  <Minus className="h-4 w-4" />
+                                </Button>
+                                <Slider
+                                  className="flex-1 [&_.bg-primary\\/20]:bg-white/40 [&_.bg-primary]:bg-white [&_.border-primary\\/50]:border-white/80 [&_.bg-background]:bg-white"
+                                  value={[playbackSpeed]}
+                                  onValueChange={([v]) => setPlaybackSpeed(v ?? 1)}
+                                  min={0.25}
+                                  max={2}
+                                  step={0.05}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 shrink-0 rounded-full"
+                                  aria-label="Increase speed"
+                                  onClick={() =>
+                                    setPlaybackSpeed((s) => Math.min(2, Math.round((s + 0.05) * 100) / 100))
+                                  }
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap justify-center gap-1">
+                                {SPEED_CHIPS.map((speed) => (
+                                  <Button
+                                    key={speed}
+                                    type="button"
+                                    variant={Math.abs(playbackSpeed - speed) < 0.01 ? "default" : "secondary"}
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => setPlaybackSpeed(speed)}
+                                  >
+                                    {speed}x
+                                  </Button>
+                                ))}
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     </div>
                   </div>
