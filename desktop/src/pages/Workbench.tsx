@@ -627,6 +627,8 @@ const Workbench = () => {
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
   const [progressHoverSeconds, setProgressHoverSeconds] = React.useState<number | null>(null);
+  const [progressHoverXPx, setProgressHoverXPx] = React.useState<number | null>(null);
+  const lastProgressHoverXPxRef = React.useRef<number>(0);
   const [playbackSpeed, setPlaybackSpeed] = React.useState(() => {
     if (typeof window === "undefined") return 1;
     const stored = window.localStorage.getItem("workbench_playback_speed");
@@ -2097,16 +2099,17 @@ const Workbench = () => {
 
   const VIDEO_CONTROL_BAR_HEIGHT_PX = 44;
   const VIDEO_PROGRESS_STRIP_HEIGHT_PX = 6;
-  const VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER = 12;
+  const VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER = 9;
   const VIDEO_PROGRESS_STRIP_PADDING_PX = 8;
   const VIDEO_PROGRESS_THUMB_SIZE_PX = 12;
   const effectiveProgressStripHeightPx =
     progressHoverSeconds !== null ? VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER : VIDEO_PROGRESS_STRIP_HEIGHT_PX;
+  const VIDEO_PROGRESS_HIT_AREA_PY = 16;
   const VIDEO_CONTROLS_TOTAL_HEIGHT_PX =
     VIDEO_CONTROL_BAR_HEIGHT_PX +
-    2 +
-    Math.max(VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER, VIDEO_PROGRESS_STRIP_HEIGHT_PX) +
-    VIDEO_PROGRESS_STRIP_PADDING_PX * 2 +
+    8 +
+    VIDEO_PROGRESS_HIT_AREA_PY * 2 +
+    VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER +
     8;
   const videoControlsBarContainerStyle = React.useMemo<React.CSSProperties>(() => {
     const totalHeight = VIDEO_CONTROLS_TOTAL_HEIGHT_PX;
@@ -2672,13 +2675,17 @@ const Workbench = () => {
       const track = progressBarTrackRef.current;
       if (!track || durationSeconds <= 0) return;
       const rect = track.getBoundingClientRect();
-      const frac = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      const xPx = event.clientX - rect.left;
+      const frac = Math.max(0, Math.min(1, xPx / rect.width));
+      lastProgressHoverXPxRef.current = xPx;
+      setProgressHoverXPx(xPx);
       setProgressHoverSeconds(frac * durationSeconds);
     },
     [durationSeconds]
   );
   const handleProgressBarMouseLeave = React.useCallback(() => {
     setProgressHoverSeconds(null);
+    setProgressHoverXPx(null);
   }, []);
 
   const handleVolumeChange = React.useCallback((value: number) => {
@@ -3407,65 +3414,84 @@ const Workbench = () => {
                     data-testid="workbench-video-controls"
                   >
                     <div
-                      className="flex shrink-0 flex-col justify-center px-2 py-2"
-                      style={{ minHeight: VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER + VIDEO_PROGRESS_STRIP_PADDING_PX * 2 }}
+                      className="flex shrink-0 flex-col justify-center px-3 py-2"
+                      style={{
+                        minHeight:
+                          VIDEO_PROGRESS_HIT_AREA_PY * 2 +
+                          VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER
+                      }}
                     >
-                      <TooltipProvider delayDuration={0}>
-                        <Tooltip open={progressHoverSeconds !== null}>
-                          <TooltipTrigger asChild>
-                            <div className="w-full cursor-pointer">
+                      <div className="relative w-full">
+                        <TooltipProvider delayDuration={0}>
+                          <Tooltip open={progressHoverSeconds !== null}>
+                            <TooltipTrigger asChild>
                               <div
-                                ref={progressBarTrackRef}
-                                className="relative w-full cursor-pointer rounded-md bg-white/30 transition-[height] duration-150"
-                                style={{ height: effectiveProgressStripHeightPx }}
-                                role="progressbar"
-                                aria-valuenow={durationSeconds > 0 ? currentTimeSeconds : 0}
-                                aria-valuemin={0}
-                                aria-valuemax={durationSeconds}
-                                aria-label="Video progress"
-                                data-testid="workbench-video-progress"
-                                onClick={handleProgressBarClick}
-                                onMouseDown={handleProgressBarMouseDown}
-                                onMouseMove={handleProgressBarMouseMove}
-                                onMouseLeave={handleProgressBarMouseLeave}
-                              >
-                                {durationSeconds > 0 && progressHoverSeconds !== null && (
-                                  <div
-                                    className="absolute inset-y-0 left-0 rounded-l-md bg-white/50"
-                                    style={{
-                                      width: `${(progressHoverSeconds / durationSeconds) * 100}%`
-                                    }}
-                                  />
-                                )}
-                                <div
-                                  className="absolute inset-y-0 left-0 rounded-l-md bg-primary"
-                                  style={{
-                                    width: `${
-                                      durationSeconds > 0
-                                        ? (currentTimeSeconds / durationSeconds) * 100
-                                        : 0
-                                    }%`
-                                  }}
-                                />
-                                {durationSeconds > 0 && (
-                                  <div
-                                    className="absolute top-1/2 z-1 rounded-full border-2 border-white bg-primary shadow-md"
-                                    style={{
-                                      left: `${(currentTimeSeconds / durationSeconds) * 100}%`,
-                                      width: VIDEO_PROGRESS_THUMB_SIZE_PX,
-                                      height: VIDEO_PROGRESS_THUMB_SIZE_PX,
-                                      transform: "translate(-50%, -50%)"
-                                    }}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" sideOffset={4}>
-                            {formatTime(progressHoverSeconds ?? 0)}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                                className="pointer-events-none absolute top-0 bottom-0 z-0"
+                                style={{
+                                  left: `${progressHoverXPx ?? lastProgressHoverXPxRef.current}px`,
+                                  width: 1,
+                                  transform: "translateX(-50%)"
+                                }}
+                                aria-hidden
+                              />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" sideOffset={4}>
+                              {progressHoverSeconds != null
+                                ? formatTime(progressHoverSeconds)
+                                : ""}
+                            </TooltipContent>
+                          </Tooltip>
+                          <div
+                            className="relative flex w-full cursor-pointer items-center justify-center py-4"
+                            onClick={handleProgressBarClick}
+                            onMouseDown={handleProgressBarMouseDown}
+                            onMouseMove={handleProgressBarMouseMove}
+                            onMouseLeave={handleProgressBarMouseLeave}
+                          >
+                            <div
+                              ref={progressBarTrackRef}
+                              className="relative w-full cursor-pointer rounded-md bg-white/30 transition-[height] duration-150"
+                              style={{ height: effectiveProgressStripHeightPx }}
+                              role="progressbar"
+                              aria-valuenow={durationSeconds > 0 ? currentTimeSeconds : 0}
+                              aria-valuemin={0}
+                              aria-valuemax={durationSeconds}
+                              aria-label="Video progress"
+                              data-testid="workbench-video-progress"
+                            >
+                            {durationSeconds > 0 && progressHoverSeconds !== null && (
+                              <div
+                                className="absolute inset-y-0 left-0 rounded-l-md bg-white/50"
+                                style={{
+                                  width: `${(progressHoverSeconds / durationSeconds) * 100}%`
+                                }}
+                              />
+                            )}
+                            <div
+                              className="absolute inset-y-0 left-0 rounded-l-md bg-primary"
+                              style={{
+                                width: `${
+                                  durationSeconds > 0
+                                    ? (currentTimeSeconds / durationSeconds) * 100
+                                    : 0
+                                }%`
+                              }}
+                            />
+                            {durationSeconds > 0 && (
+                              <div
+                                className="absolute top-1/2 z-1 rounded-full border-2 border-white bg-primary shadow-md"
+                                style={{
+                                  left: `${(currentTimeSeconds / durationSeconds) * 100}%`,
+                                  width: VIDEO_PROGRESS_THUMB_SIZE_PX,
+                                  height: VIDEO_PROGRESS_THUMB_SIZE_PX,
+                                  transform: "translate(-50%, -50%)"
+                                }}
+                              />
+                            )}
+                          </div>
+                          </div>
+                        </TooltipProvider>
+                      </div>
                     </div>
                     <div
                       className="flex cursor-pointer items-center gap-2 px-2 py-1.5"
@@ -3514,7 +3540,7 @@ const Workbench = () => {
                         </div>
                       </div>
                       <span
-                        className="shrink-0 tabular-nums text-xs font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+                        className="ml-4 shrink-0 tabular-nums text-xs font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
                         style={{ textShadow: "0 0 2px rgba(0,0,0,1), 0 1px 3px rgba(0,0,0,0.9)" }}
                       >
                         {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
@@ -3539,13 +3565,13 @@ const Workbench = () => {
                           <PopoverContent
                             side="top"
                             sideOffset={6}
-                            className="w-56 border-border bg-popover p-3 text-popover-foreground"
+                            className="w-96 border-border bg-popover p-3 text-popover-foreground"
                             onMouseEnter={cancelSpeedPopoverClose}
                             onMouseLeave={handleSpeedPopoverMouseLeave}
                           >
                             <div className="flex flex-col gap-3">
                               <div className="text-center text-sm font-medium">
-                                {playbackSpeed.toFixed(2)}x
+                                {playbackSpeed.toFixed(2)}
                               </div>
                               <div className="flex items-center gap-2">
                                 <Button
@@ -3581,19 +3607,25 @@ const Workbench = () => {
                                   <Plus className="h-4 w-4" />
                                 </Button>
                               </div>
-                              <div className="flex flex-wrap justify-center gap-1">
-                                {SPEED_CHIPS.map((speed) => (
-                                  <Button
-                                    key={speed}
-                                    type="button"
-                                    variant={Math.abs(playbackSpeed - speed) < 0.01 ? "default" : "secondary"}
-                                    size="sm"
-                                    className="h-7 px-2 text-xs"
-                                    onClick={() => setPlaybackSpeed(speed)}
-                                  >
-                                    {speed}x
-                                  </Button>
-                                ))}
+                              <div className="flex flex-nowrap justify-center gap-1">
+                                {SPEED_CHIPS.map((speed) => {
+                                  const isSelected = Math.abs(playbackSpeed - speed) < 0.01;
+                                  return (
+                                    <Button
+                                      key={speed}
+                                      type="button"
+                                      variant={isSelected ? "default" : "secondary"}
+                                      size="sm"
+                                      className={cn(
+                                        "h-7 min-w-16 text-xs",
+                                        !isSelected && "hover:bg-accent!"
+                                      )}
+                                      onClick={() => setPlaybackSpeed(speed)}
+                                    >
+                                      {speed.toFixed(2)}
+                                    </Button>
+                                  );
+                                })}
                               </div>
                             </div>
                           </PopoverContent>
