@@ -86,7 +86,7 @@ const VideoCard = ({
   return (
     <div
       className={cn(
-        "rounded-lg border bg-card p-3 transition",
+        "rounded-lg border bg-card transition",
         isDragging ? "border-primary ring-2 ring-primary/20" : "border-border",
         disabled ? "opacity-60" : "hover:border-primary/60",
         className
@@ -106,7 +106,7 @@ const VideoCard = ({
       />
       <div
         className={cn(
-          "relative w-full overflow-hidden rounded-lg border border-border bg-muted",
+          "relative w-full overflow-hidden rounded-t-lg",
           (onFileSelected || onChoosePath) && "cursor-pointer"
         )}
         style={{ aspectRatio: "16 / 9" }}
@@ -148,7 +148,7 @@ const VideoCard = ({
         )}
       </div>
       {(fileName || durationLabel) && (
-        <div className="mt-3 space-y-1">
+        <div className="space-y-1 p-3 pt-0">
           {fileName && <p className="text-sm font-medium text-foreground">{fileName}</p>}
           {durationLabel && <p className="text-xs text-muted-foreground">{durationLabel}</p>}
         </div>

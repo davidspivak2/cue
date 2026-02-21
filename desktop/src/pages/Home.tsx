@@ -646,8 +646,8 @@ const Home = () => {
           </div>
           <div
             className={cn(
-              "overflow-hidden rounded-lg border border-border bg-muted",
-              framePreviewUrl ? "" : "flex items-center justify-center"
+              "overflow-hidden rounded-lg",
+              framePreviewUrl ? "" : "flex items-center justify-center bg-muted"
             )}
             style={{ aspectRatio: "16 / 9" }}
           >

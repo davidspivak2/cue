@@ -3048,7 +3048,7 @@ const Workbench = () => {
   return (
     <div data-testid="workbench" className="flex h-full min-h-0 flex-col gap-4">
       <header
-        className="flex flex-wrap items-center gap-2 border-b border-border pb-2"
+        className="flex flex-wrap items-center gap-2 pb-2"
         data-testid="workbench-top-bar"
       >
         <Button
@@ -3245,7 +3245,7 @@ const Workbench = () => {
 
           <div className={cn("flex min-h-0 flex-1 gap-4", isNarrow ? "flex-col" : "flex-row")}>
             <section
-              className="flex min-h-[220px] flex-1 items-center justify-center rounded-lg border border-border bg-muted p-4"
+              className="flex min-h-[220px] flex-1 items-center justify-center"
               data-testid="workbench-center-panel"
             >
               {hasVideoPreview ? (
