@@ -644,7 +644,40 @@ test("workbench shell narrow overlays", async ({ page }) => {
   await expect(page.getByTestId("workbench-right-drawer")).toHaveCount(0);
 });
 
-test("navigation without sidebar: Projects to Editor to Settings dialog to Back", async ({
+test("workbench narrow shows tab drawer and switches tab", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 800 });
+  const projects = buildProjects();
+  projects[0].status = "ready";
+  projects.push({
+    ...buildProjects()[0],
+    project_id: "project-2",
+    title: "other.mp4",
+    video_path: "C:\\fake\\other.mp4",
+    status: "ready"
+  });
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await page.getByTestId("workbench-top-bar").getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await page.getByText("other.mp4").click();
+  await page.waitForURL("**/workbench/project-2");
+
+  await expect(page.getByTestId("workbench-tab-drawer-trigger")).toBeVisible();
+  await expect(page.getByTestId("workbench-tabs")).toHaveCount(0);
+
+  await page.getByTestId("workbench-tab-drawer-trigger").click();
+  await expect(page.getByTestId("workbench-tab-drawer")).toBeVisible();
+  await expect(page.getByTestId("workbench-overlay-scrim")).toBeVisible();
+
+  await page.getByTestId("workbench-tab-drawer-item-project-1").click();
+  await expect(page).toHaveURL(/\/workbench\/project-1/);
+  await expect(page.getByTestId("workbench-tab-drawer")).toHaveCount(0);
+});
+
+test("navigation without sidebar: Projects to Editor to Back", async ({
   page
 }) => {
   const projects = buildProjects();
@@ -653,17 +686,10 @@ test("navigation without sidebar: Projects to Editor to Settings dialog to Back"
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
+  await page.waitForURL(/\/workbench\/project-1/);
   await expect(page.getByTestId("workbench")).toBeVisible();
 
-  await page.getByRole("button", { name: "Settings" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByTestId("settings-content")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByTestId("workbench")).toBeVisible();
-
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByTestId("workbench-top-bar").getByRole("button", { name: "Back" }).click();
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 });
@@ -704,7 +730,7 @@ test("workbench creates subtitles from empty state", async ({ page }) => {
   expect(api.getLastJobPayload()?.project_id).toBe("project-1");
 });
 
-test("workbench exports video from the bottom action bar", async ({ page }) => {
+test("workbench exports video from the top bar", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
   projects[0].status = "ready";
@@ -714,8 +740,8 @@ test("workbench exports video from the bottom action bar", async ({ page }) => {
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
 
-  await expect(page.getByTestId("workbench-export-panel")).toBeVisible();
   const exportCta = page.getByTestId("workbench-export-cta");
+  await expect(exportCta).toBeVisible();
   await expect(exportCta).toBeEnabled();
 
   const exportRequest = page.waitForRequest(
@@ -1016,9 +1042,7 @@ test("workbench does not show export error banner on cancelled export event", as
   await page.waitForURL("**/workbench/project-1");
 
   await expect(page.getByTestId("workbench-export-cta")).toBeVisible();
-  await expect(
-    page.getByTestId("workbench-export-panel").getByText("Operation cancelled.")
-  ).toHaveCount(0);
+  await expect(page.getByText("Operation cancelled.")).toHaveCount(0);
 });
 
 test("cancel create subtitles returns home, removes the project, and shows no cancel toast", async ({
