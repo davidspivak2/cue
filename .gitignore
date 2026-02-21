@@ -10,7 +10,7 @@ bin/ffmpeg.exe
 bin/ffprobe.exe
 debug_punct_matrix.py
 debug_raw_segments.py
-docs\handoffs
+docs/handoffs
 
 # Desktop UI (Node)
 desktop/node_modules/
