@@ -11,9 +11,8 @@ bin/ffprobe.exe
 debug_punct_matrix.py
 debug_raw_segments.py
 docs/handoffs
-.cursor/plans
-.cursor/skills
-.codex/skills
+.cursor/
+.codex/
 
 # Desktop UI (Node)
 desktop/node_modules/
@@ -26,6 +25,5 @@ desktop/src-tauri/engine/*
 desktop/src-tauri/engine_payload.zip
 
 # Cursor IDE debug artifacts and logs (debug.log, debug-*.log, etc.)
-.cursor/*.log
 **/test-results/**
 desktop/test-results/.last-run.json
