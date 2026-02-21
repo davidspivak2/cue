@@ -10,6 +10,23 @@ const initMocks = () => {
   });
 };
 
+const initTauriRuntimeMock = () => {
+  Object.defineProperty(globalThis, "isTauri", {
+    configurable: true,
+    value: true
+  });
+  Object.defineProperty(globalThis, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {
+      convertFileSrc: (filePath) => `data:,${encodeURIComponent(String(filePath ?? ""))}`,
+      metadata: {
+        currentWindow: { label: "main" },
+        currentWebview: { windowLabel: "main", label: "main" }
+      }
+    }
+  });
+};
+
 const DEFAULT_PROJECT_STYLE = {
   subtitle_mode: "word_highlight",
   subtitle_style: {
@@ -25,6 +42,7 @@ const DEFAULT_PROJECT_STYLE = {
 
 test("project hub card interactions", async ({ page }) => {
   await page.addInitScript(initMocks);
+  await page.addInitScript(initTauriRuntimeMock);
 
   let projects = [
     {
@@ -249,13 +267,13 @@ test("project hub card interactions", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add video" })).toBeVisible();
-  await expect(page.getByText("another.mp4")).toBeVisible();
-  await expect(page.getByText("good.mp4")).toBeVisible();
+  await expect(page.getByTestId("project-hub").getByText("another.mp4")).toBeVisible();
+  await expect(page.getByTestId("project-hub").getByText("good.mp4")).toBeVisible();
 
-  await page.getByText("good.mp4").click();
+  await page.getByTestId("project-hub").getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
   await expect(page.getByTestId("workbench")).toBeVisible();
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByTestId("title-bar-home").click();
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
 
   await page.getByTestId("project-card-delete-project-3").click();
@@ -269,22 +287,22 @@ test("project hub card interactions", async ({ page }) => {
   await page.getByTestId("project-card-delete-project-3").click();
   await page.getByRole("button", { name: "Delete video" }).click();
   await deleteRequest;
-  await expect(page.getByText("another.mp4")).toHaveCount(0);
   // D4: delete success must be toast, not inline banner (CUE_UX_UI_SPEC).
   await expect(
     page.getByRole("status").filter({ hasText: "Video deleted" })
   ).toBeVisible();
+  await expect(page.getByTestId("project-hub").getByText("another.mp4")).toHaveCount(0);
   await expect(page.getByTestId("project-hub-banner")).toHaveCount(0);
 
-  await page.getByText("good.mp4").click();
+  await page.getByTestId("project-hub").getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
   await expect(page.getByTestId("workbench")).toBeVisible();
-  await expect(page.getByTestId("workbench-tabs")).toBeVisible();
-  await expect(page.getByRole("tab", { name: "good.mp4" })).toBeVisible();
-  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByTestId("workbench-heading")).toBeVisible();
+  await expect(page.getByTestId("title-bar-tab-project-1")).toBeVisible();
+  await page.getByTestId("title-bar-home").click();
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
 
-  await page.getByText("missing.mp4").click();
+  await page.getByTestId("project-hub").getByText("missing.mp4").click();
   await expect(page.getByRole("heading", { name: "Video file not found" })).toBeVisible();
   await expect(
     page.getByText("We cannot find the original video file.")
@@ -313,6 +331,7 @@ test("project hub shows active task cards, inline notices, and background toasts
   page
 }) => {
   await page.addInitScript(initMocks);
+  await page.addInitScript(initTauriRuntimeMock);
 
   const projects = [
     {
@@ -508,7 +527,7 @@ test("project hub shows active task cards, inline notices, and background toasts
   await expect(page.getByTestId("workbench")).toBeVisible();
 
   await expect(page.getByText("Task failed: Background subtitle run failed.")).toBeVisible();
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByTestId("title-bar-home").click();
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await expect(page.getByTestId("project-card-task-notice-project-1")).toContainText(
     "Background subtitle run failed."

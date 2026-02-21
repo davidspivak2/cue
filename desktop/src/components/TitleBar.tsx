@@ -1,22 +1,177 @@
 import * as React from "react";
-import { Maximize2, Minus, Settings, Square, X } from "lucide-react";
+import {
+  DndContext,
+  type DragEndEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Home, Maximize2, Minus, Settings, Square, Video, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isTauri } from "@tauri-apps/api/core";
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 
 import { useSettings } from "@/contexts/SettingsContext";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useWindowWidth } from "@/hooks/useWindowWidth";
+import { truncatePathMiddle } from "@/lib/truncatePathMiddle";
 import { cn } from "@/lib/utils";
+import { HOME_TAB_ID, useWorkbenchTabs } from "@/workbenchTabs";
+import type { WorkbenchTab } from "@/workbenchTabs";
+
+/** Breakpoints for title bar tab layout (window width). */
+const TITLE_BAR_WIDE = 720;
+const TITLE_BAR_MEDIUM = 520;
+type TabLayoutMode = "wide" | "medium" | "narrow";
+
+function getTabLayoutMode(width: number): TabLayoutMode {
+  if (width >= TITLE_BAR_WIDE) return "wide";
+  if (width >= TITLE_BAR_MEDIUM) return "medium";
+  return "narrow";
+}
 
 export const TITLE_BAR_HEIGHT = 36;
 
 export const TITLE_BAR_HEIGHT_PX = `${TITLE_BAR_HEIGHT}px`;
 
+function SortableTitleTab({
+  tab,
+  isActive,
+  layoutMode,
+  onTabClick,
+  onCloseTab,
+}: {
+  tab: WorkbenchTab;
+  isActive: boolean;
+  layoutMode: TabLayoutMode;
+  onTabClick: (projectId: string) => void;
+  onCloseTab: (projectId: string, e: React.MouseEvent) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: tab.projectId });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const isIconOnly = layoutMode === "narrow";
+  const maxWidthClass =
+    layoutMode === "wide"
+      ? "max-w-[180px]"
+      : layoutMode === "medium"
+        ? "max-w-[100px]"
+        : "max-w-[44px]";
+
+  const thumbnailSrc =
+    isIconOnly && tab.thumbnail_path ? convertFileSrc(tab.thumbnail_path) : null;
+  const title = tab.title || "Untitled";
+  const tooltipText =
+    tab.path && tab.path.length > 0 ? truncatePathMiddle(tab.path, 56) : title;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      data-testid={`title-bar-tab-${tab.projectId}`}
+      className={cn(
+        "flex h-full shrink-0 items-center gap-1 border-b-2 px-2 transition-colors duration-200",
+        maxWidthClass,
+        isActive
+          ? "border-b-foreground/30 bg-foreground/8"
+          : "border-b-transparent hover:bg-foreground/5",
+        isDragging && "opacity-60 shadow-md z-50"
+      )}
+      {...attributes}
+      {...listeners}
+    >
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => onTabClick(tab.projectId)}
+              className={cn(
+                "flex min-w-0 flex-1 items-center gap-1 truncate py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                isIconOnly && "flex-1 justify-center p-1"
+              )}
+            >
+              {isIconOnly ? (
+                thumbnailSrc ? (
+                  <img
+                    src={thumbnailSrc}
+                    alt=""
+                    className="h-5 w-5 shrink-0 object-cover"
+                    aria-hidden
+                  />
+                ) : (
+                  <Video className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                )
+              ) : (
+                title
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            {tooltipText}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <button
+        type="button"
+        onClick={(e) => onCloseTab(tab.projectId, e)}
+        aria-label={`Close ${title}`}
+        data-testid={`title-bar-tab-close-${tab.projectId}`}
+        className="shrink-0 p-0.5 hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <X className="h-3.5 w-3.5 text-muted-foreground" />
+      </button>
+    </div>
+  );
+}
+
 /**
  * Custom window title bar shown only in Tauri (replaces native decorations).
- * Left: Cue logo. Right: Close, Maximize/Restore, Minimize, Settings.
+ * Left: Cue logo (draggable). Middle: tab strip (Home icon + video tabs). Right: Settings, Minimize, Maximize, Close.
+ * Only the logo area has data-tauri-drag-region so the tab strip stays clickable and future drag-to-reorder works.
  */
 const TitleBar = () => {
+  const navigate = useNavigate();
+  const width = useWindowWidth();
+  const tabLayoutMode = getTabLayoutMode(width);
   const { openSettings, closeSettings, settingsOpen } = useSettings();
+  const { tabs, activeView, setActiveView, closeTab, reorderTabs } = useWorkbenchTabs();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  );
+
+  const handleDragEnd = React.useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const order = tabs.map((t) => t.projectId);
+      const oldIndex = order.indexOf(active.id as string);
+      const newIndex = order.indexOf(over.id as string);
+      if (oldIndex === -1 || newIndex === -1) return;
+      reorderTabs(arrayMove(order, oldIndex, newIndex));
+    },
+    [tabs, reorderTabs]
+  );
   const { resolvedTheme } = useTheme();
   const [maximized, setMaximized] = React.useState(false);
   const appWindow = React.useMemo(
@@ -61,25 +216,41 @@ const TitleBar = () => {
     return null;
   }
 
+  const handleHomeClick = () => {
+    setActiveView(HOME_TAB_ID);
+    navigate("/");
+  };
+
+  const handleTabClick = (projectId: string) => {
+    if (activeView === projectId) return;
+    setActiveView(projectId);
+    navigate(`/workbench/${encodeURIComponent(projectId)}`);
+  };
+
+  const handleCloseTab = (projectId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    closeTab(projectId, (next) => {
+      if (next === HOME_TAB_ID) navigate("/");
+      else navigate(`/workbench/${encodeURIComponent(next)}`);
+    });
+  };
+
   return (
     <header
       data-cue-title-bar
+      data-testid="title-bar"
       className={cn(
-        "pointer-events-auto fixed left-0 right-0 top-0 z-[100] flex h-[var(--title-bar-height)] select-none items-center justify-between",
+        "pointer-events-auto fixed left-0 right-0 top-0 z-[100] flex h-[var(--title-bar-height)] select-none items-stretch",
         "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
       )}
       style={{ "--title-bar-height": TITLE_BAR_HEIGHT_PX } as React.CSSProperties}
     >
-      {/* Full-size drag layer so the entire top strip is draggable (fixes drag at top when maximized) */}
+      {/* Left: logo + Cue — only this area is draggable so tab strip stays clickable */}
       <div
-        className="absolute inset-0 cursor-default"
+        className="relative z-10 flex shrink-0 cursor-default items-center gap-2 pl-3 pr-2"
         data-tauri-drag-region
         onDoubleClick={handleMaximize}
-        aria-hidden
-      />
-
-      {/* Logo + app name: visual only, clicks pass through to drag layer */}
-      <div className="relative z-10 flex flex-1 pointer-events-none items-center gap-2 pl-3">
+      >
         <img
           src={resolvedTheme === "dark" ? "/dark.svg" : "/light.svg"}
           alt=""
@@ -89,8 +260,45 @@ const TitleBar = () => {
         <span className="text-lg font-medium tracking-tight text-foreground">Cue</span>
       </div>
 
+      {/* Tab strip: Home + video tabs (sortable). No drag region so clicks and drag-to-reorder work. */}
+      <div className="relative z-10 flex h-full min-w-0 flex-1 items-stretch gap-0 overflow-hidden">
+        <button
+          type="button"
+          onClick={handleHomeClick}
+          title="Home"
+          aria-label="Home"
+          data-testid="title-bar-home"
+          aria-current={activeView === HOME_TAB_ID ? "true" : undefined}
+          className={cn(
+            "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            activeView === HOME_TAB_ID
+              ? "border-b-foreground/30 bg-foreground/8 text-foreground"
+              : "border-b-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          )}
+        >
+          <Home className="h-4 w-4" />
+        </button>
+        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+          <SortableContext
+            items={tabs.map((t) => t.projectId)}
+            strategy={horizontalListSortingStrategy}
+          >
+            {tabs.map((tab) => (
+              <SortableTitleTab
+                key={tab.projectId}
+                tab={tab}
+                isActive={activeView === tab.projectId}
+                layoutMode={tabLayoutMode}
+                onTabClick={handleTabClick}
+                onCloseTab={handleCloseTab}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+      </div>
+
       {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
-      <div className="relative z-10 flex self-stretch items-stretch">
+      <div className="relative z-10 flex shrink-0 self-stretch items-stretch">
         <TitleBarButton
           onClick={settingsOpen ? closeSettings : openSettings}
           title="Settings"
