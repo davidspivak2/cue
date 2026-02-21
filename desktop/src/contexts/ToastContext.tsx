@@ -1,7 +1,22 @@
 import * as React from "react";
 
+export type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+
+export type ToastOptions = {
+  actions?: ToastAction[];
+};
+
+export type PushToastFn = (
+  title: string,
+  message: string,
+  options?: ToastOptions
+) => void;
+
 type ToastContextValue = {
-  pushToast: (title: string, message: string) => void;
+  pushToast: PushToastFn;
 };
 
 const ToastContext = React.createContext<ToastContextValue | null>(null);
@@ -19,7 +34,7 @@ export const ToastProvider = ({
   pushToast
 }: {
   children: React.ReactNode;
-  pushToast: (title: string, message: string) => void;
+  pushToast: PushToastFn;
 }) => (
   <ToastContext.Provider value={{ pushToast }}>
     {children}

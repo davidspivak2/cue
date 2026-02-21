@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { isTauri } from "@tauri-apps/api/core";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import TitleBar, { TITLE_BAR_HEIGHT, TITLE_BAR_HEIGHT_PX } from "@/components/TitleBar";
 import { cn } from "@/lib/utils";
@@ -23,10 +24,16 @@ import { WorkbenchTabsProvider } from "@/workbenchTabs";
 const ACTIVE_TASK_POLL_MS = 2500;
 const IDLE_TASK_POLL_MS = 10000;
 
+type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+
 type ToastItem = {
   id: string;
   title: string;
   message: string;
+  actions?: ToastAction[];
 };
 
 const AppLayout = () => {
@@ -34,6 +41,9 @@ const AppLayout = () => {
   const location = useLocation();
   const hasLaunchedRef = React.useRef(false);
   const seenNoticeIdsRef = React.useRef<Set<string>>(new Set());
+  const seenExportCompleteRef = React.useRef<Set<string>>(new Set());
+  const locationRef = React.useRef(location);
+  locationRef.current = location;
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [settingsScrolled, setSettingsScrolled] = React.useState(false);
@@ -75,9 +85,15 @@ const AppLayout = () => {
   }, []);
 
   const pushToast = React.useCallback(
-    (title: string, message: string) => {
+    (
+      title: string,
+      message: string,
+      options?: { actions?: ToastAction[] }
+    ) => {
       const toastId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      setToasts((prev) => [...prev, { id: toastId, title, message }].slice(-4));
+      setToasts((prev) =>
+        [...prev, { id: toastId, title, message, actions: options?.actions }].slice(-4)
+      );
       window.setTimeout(() => {
         removeToast(toastId);
       }, 8000);
@@ -121,6 +137,42 @@ const AppLayout = () => {
           const title = notice.status === "cancelled" ? "Task cancelled" : "Task failed";
           const projectTitle = project.title || "Video";
           pushToast(projectTitle, `${title}: ${notice.message}`);
+        }
+        const currentPath = locationRef.current.pathname;
+        for (const project of projects) {
+          const outputPath = project.latest_export?.output_video_path;
+          if (!outputPath || project.active_task) {
+            continue;
+          }
+          const workbenchPath = `/workbench/${project.project_id}`;
+          if (currentPath === workbenchPath) {
+            continue;
+          }
+          const key = `${project.project_id}:${outputPath}`;
+          if (seenExportCompleteRef.current.has(key)) {
+            continue;
+          }
+          seenExportCompleteRef.current.add(key);
+          const filename =
+            outputPath.split(/[/\\]/).filter(Boolean).pop() ?? outputPath;
+          const actions: ToastAction[] = [];
+          if (isTauri()) {
+            actions.push(
+              {
+                label: "Play",
+                onClick: () => {
+                  void openPath(outputPath);
+                }
+              },
+              {
+                label: "Open folder",
+                onClick: () => {
+                  void revealItemInDir(outputPath);
+                }
+              }
+            );
+          }
+          pushToast("Export complete", filename, { actions });
         }
       } catch {
         nextDelay = IDLE_TASK_POLL_MS;
@@ -237,6 +289,24 @@ const AppLayout = () => {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">{toast.message}</p>
+                {toast.actions && toast.actions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {toast.actions.map((action, i) => (
+                      <Button
+                        key={i}
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          action.onClick();
+                          removeToast(toast.id);
+                        }}
+                      >
+                        {action.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

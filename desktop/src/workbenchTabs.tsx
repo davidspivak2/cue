@@ -3,6 +3,7 @@ import * as React from "react";
 export type WorkbenchTab = {
   projectId: string;
   title: string;
+  path?: string;
 };
 
 type WorkbenchTabsContextValue = {
