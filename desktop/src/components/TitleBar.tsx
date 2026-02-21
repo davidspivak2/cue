@@ -254,14 +254,20 @@ const TitleBar = () => {
         <img
           src={resolvedTheme === "dark" ? "/dark.svg" : "/light.svg"}
           alt=""
-          className="h-5 w-5 shrink-0"
+          className="h-5 w-5 shrink-0 pointer-events-none"
           aria-hidden
         />
-        <span className="text-lg font-medium tracking-tight text-foreground">Cue</span>
+        <span className="pointer-events-none text-lg font-medium tracking-tight text-foreground">
+          Cue
+        </span>
       </div>
 
-      {/* Tab strip: Home + video tabs (sortable). No drag region so clicks and drag-to-reorder work. */}
-      <div className="relative z-10 flex h-full min-w-0 flex-1 items-stretch gap-0 overflow-hidden">
+      {/* Tab strip: Home + video tabs (sortable). Drag region on container so empty space (between tabs and window controls) drags window; clicks on Home/tabs still hit those elements. */}
+      <div
+        className="relative z-10 flex h-full min-w-0 flex-1 items-stretch gap-0 overflow-hidden"
+        data-tauri-drag-region
+        onDoubleClick={handleMaximize}
+      >
         <button
           type="button"
           onClick={handleHomeClick}
