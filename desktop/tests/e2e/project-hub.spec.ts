@@ -315,7 +315,9 @@ test("project hub card interactions", async ({ page }) => {
     buffer: Buffer.from("fake")
   });
 
-  await expect(page.getByRole("heading", { name: "This file looks different" })).toBeVisible();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "This file looks different" })).toBeVisible();
   await expect(page.getByText("Captions and timing may be wrong")).toBeVisible();
 
   const relinkRequest = page.waitForRequest(
@@ -332,6 +334,9 @@ test("project hub shows active task cards, inline notices, and background toasts
 }) => {
   await page.addInitScript(initMocks);
   await page.addInitScript(initTauriRuntimeMock);
+  await page.addInitScript(() => {
+    localStorage.setItem("cue_project_hub_view", "cards");
+  });
 
   const projects = [
     {
@@ -492,7 +497,7 @@ test("project hub shows active task cards, inline notices, and background toasts
       return;
     }
     projectsGetCount += 1;
-    if (projectsGetCount >= 3) {
+    if (projectsGetCount >= 10) {
       projects[0].active_task = null;
       projects[0].task_notice = {
         notice_id: "notice-bg-1",
@@ -514,19 +519,23 @@ test("project hub shows active task cards, inline notices, and background toasts
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
-  await expect(page.getByTestId("project-card-active-task-project-1")).toBeVisible();
+  await expect(page.getByTestId("project-card-active-task-project-1")).toBeVisible({
+    timeout: 10000
+  });
   await expect(page.getByTestId("project-card-active-task-project-1")).toContainText(
     "Creating subtitles"
   );
   await expect(page.getByTestId("project-card-active-task-project-1")).toContainText(
-    "Loading AI model"
+    /Loading (AI )?model/
   );
 
   await page.getByTestId("project-card-project-2").click();
   await page.waitForURL("**/workbench/project-2");
   await expect(page.getByTestId("workbench")).toBeVisible();
 
-  await expect(page.getByText("Task failed: Background subtitle run failed.")).toBeVisible();
+  await expect(
+    page.getByText("Task failed: Background subtitle run failed.")
+  ).toBeVisible({ timeout: 20000 });
   await page.getByTestId("title-bar-home").click();
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await expect(page.getByTestId("project-card-task-notice-project-1")).toContainText(

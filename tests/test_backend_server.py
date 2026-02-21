@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,7 +49,7 @@ def test_sse_stream_emits_result_payload(monkeypatch) -> None:
         )
 
     backend_server.JOBS.clear()
-    monkeypatch.setattr(backend_server, "_run_runner_job", fake_run_runner_job)
+    monkeypatch.setattr(backend_server, "_run_worker_job_maybe_inprocess", fake_run_runner_job)
 
     with TestClient(backend_server.app) as client:
         response = client.post(
@@ -60,7 +61,7 @@ def test_sse_stream_emits_result_payload(monkeypatch) -> None:
             },
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 201
         payload = response.json()
         job_id = payload["job_id"]
 
@@ -130,7 +131,7 @@ def test_create_subtitles_job_updates_project_and_subtitles_file(
             backend_server._build_event(job.job_id, "completed", status=job.status),
         )
 
-    monkeypatch.setattr(backend_server, "_run_runner_job", fake_run_runner_job)
+    monkeypatch.setattr(backend_server, "_run_worker_job_maybe_inprocess", fake_run_runner_job)
 
     with TestClient(backend_server.app) as client:
         response = client.post(
@@ -142,8 +143,11 @@ def test_create_subtitles_job_updates_project_and_subtitles_file(
                 "project_id": project_id,
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 201
         job_id = response.json()["job_id"]
+
+        # Allow queue worker to run and enqueue events (TestClient runs app in thread)
+        time.sleep(0.3)
 
         events: list[dict[str, Any]] = []
         with client.stream("GET", f"/jobs/{job_id}/events") as stream:

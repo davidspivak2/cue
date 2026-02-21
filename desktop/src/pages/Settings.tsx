@@ -95,7 +95,17 @@ const SettingsSection = ({
 
 const Settings = () => {
   const [searchParams] = useSearchParams();
-  const showDiagnostics = searchParams.get("diagnostics") === "1";
+  const [showDiagnosticsFromHash, setShowDiagnosticsFromHash] = React.useState(
+    () => (typeof window !== "undefined" && window.location.hash.includes("diagnostics=1"))
+  );
+  React.useEffect(() => {
+    setShowDiagnosticsFromHash(window.location.hash.includes("diagnostics=1"));
+  }, []);
+  const showDiagnostics =
+    searchParams.get("diagnostics") === "1" ||
+    (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("diagnostics") === "1") ||
+    showDiagnosticsFromHash;
   const { theme, setTheme } = useTheme();
 
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
@@ -368,6 +378,7 @@ const Settings = () => {
       </SettingsSection>
 
       {showDiagnostics && (
+      <div data-testid="settings-diagnostics-section">
       <SettingsSection title="Diagnostics">
         <div className="flex items-start gap-2">
           <Checkbox
@@ -447,6 +458,7 @@ const Settings = () => {
           ))}
         </div>
       </SettingsSection>
+      </div>
       )}
     </div>
   );

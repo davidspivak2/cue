@@ -206,9 +206,10 @@ def test_projects_include_active_task_snapshot(tmp_path: Path, monkeypatch) -> N
         assert detail_active_task.get("job_id") == running_job.job_id
 
 
-def test_create_job_returns_conflict_when_project_task_already_running(
+def test_create_job_accepts_second_subtitles_job_as_queued_when_first_running(
     tmp_path: Path, monkeypatch
 ) -> None:
+    """Second create_subtitles for same project is accepted with 201 and status queued."""
     _setup_env(tmp_path, monkeypatch)
 
     video_path = tmp_path / "conflict.mp4"
@@ -230,7 +231,7 @@ def test_create_job_returns_conflict_when_project_task_already_running(
         )
         backend_server.JOBS[running_job.job_id] = running_job
 
-        conflict_response = client.post(
+        second_response = client.post(
             "/jobs",
             json={
                 "kind": "create_subtitles",
@@ -239,12 +240,14 @@ def test_create_job_returns_conflict_when_project_task_already_running(
                 "project_id": project_id,
             },
         )
-        assert conflict_response.status_code == 409
-        payload = conflict_response.json().get("detail", {})
-        assert payload.get("error") == "project_job_conflict"
-        assert payload.get("project_id") == project_id
-        assert payload.get("job_id") == running_job.job_id
-        assert payload.get("kind") == "create_subtitles"
+        assert second_response.status_code == 201
+        payload = second_response.json()
+        assert payload.get("job_id")
+        assert payload.get("status") == "queued"
+        second_job_id = payload["job_id"]
+        assert second_job_id != running_job.job_id
+        assert backend_server.JOBS[second_job_id].status == "queued"
+        assert backend_server.JOBS[second_job_id].project_id == project_id
 
 
 def test_projects_include_task_notice_for_terminal_error(tmp_path: Path, monkeypatch) -> None:

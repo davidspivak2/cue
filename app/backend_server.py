@@ -14,6 +14,7 @@ _ensure_qt_app()
 
 import argparse
 import contextlib
+from contextlib import asynccontextmanager
 import asyncio
 import json
 import logging
@@ -48,7 +49,28 @@ PROJECT_DELETE_CANCEL_TIMEOUT_SECONDS = 3.0
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def _app_lifespan(app: FastAPI):  # noqa: ARG001
+    global _queue_worker_tasks
+    _queue_worker_tasks = [
+        asyncio.create_task(_queue_worker_create_subtitles()),
+    ]
+    for _ in range(EXPORT_CONCURRENCY):
+        _queue_worker_tasks.append(asyncio.create_task(_queue_worker_export()))
+    yield
+    for task in _queue_worker_tasks:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # noqa: BLE001 - ensure shutdown completes
+            pass
+    _queue_worker_tasks = []
+
+
+app = FastAPI(lifespan=_app_lifespan)
 ALLOWED_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -121,6 +143,12 @@ class JobState:
 JOBS: dict[str, JobState] = {}
 PROJECT_TASK_NOTICES: dict[str, dict[str, Any]] = {}
 _inprocess_slot_lock: asyncio.Lock = asyncio.Lock()
+
+# Per-kind job queues: (JobState, JobRequest). Workers run jobs; create_job enqueues.
+_create_subtitles_queue: asyncio.Queue[tuple[JobState, JobRequest]] = asyncio.Queue()
+_export_queue: asyncio.Queue[tuple[JobState, JobRequest]] = asyncio.Queue()
+_queue_worker_tasks: list[asyncio.Task[None]] = []
+EXPORT_CONCURRENCY = 10
 
 
 class JobRequest(BaseModel):
@@ -730,10 +758,12 @@ def _maybe_update_project_from_runner_event(
                     word_timings_path=payload.get("word_timings_path"),
                 )
             elif request.kind == "create_video_with_subtitles":
-                project_store.record_export_result(
+                exported_at = project_store.record_export_result(
                     project_id,
                     output_path=payload.get("output_path"),
                 )
+                if isinstance(exported_at, str) and isinstance(payload, dict):
+                    payload["exported_at"] = exported_at
             return
         if event_type in {"cancelled", "error"}:
             project_store.refresh_project_status(project_id)
@@ -800,6 +830,72 @@ async def _run_worker_job_maybe_inprocess(job: JobState, request: JobRequest) ->
             exc,
         )
         await _run_runner_job(job, request)
+
+
+async def _queue_worker_create_subtitles() -> None:
+    while True:
+        job, request = await _create_subtitles_queue.get()
+        if job.cancel_event.is_set():
+            _mark_cancelled(job)
+            continue
+        if job.status != "running":
+            job.status = "running"
+            job.started_at = datetime.now(timezone.utc)
+            _enqueue_event(
+                job,
+                _build_event(job.job_id, "started", heading="Creating subtitles"),
+            )
+        try:
+            await _run_worker_job_maybe_inprocess(job, request)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Queue worker create_subtitles job %s failed: %s", job.job_id, exc)
+            if job.status not in TERMINAL_STATUSES:
+                job.status = "error"
+                job.finished_at = datetime.now(timezone.utc)
+                _enqueue_event(
+                    job,
+                    _build_event(
+                        job.job_id,
+                        "error",
+                        status=job.status,
+                        message=str(exc),
+                    ),
+                )
+
+
+async def _queue_worker_export() -> None:
+    while True:
+        job, request = await _export_queue.get()
+        if job.cancel_event.is_set():
+            _mark_cancelled(job)
+            continue
+        if job.status != "running":
+            job.status = "running"
+            job.started_at = datetime.now(timezone.utc)
+            _enqueue_event(
+                job,
+                _build_event(
+                    job.job_id,
+                    "started",
+                    heading="Creating video with subtitles",
+                ),
+            )
+        try:
+            await _run_worker_job_maybe_inprocess(job, request)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Queue worker export job %s failed: %s", job.job_id, exc)
+            if job.status not in TERMINAL_STATUSES:
+                job.status = "error"
+                job.finished_at = datetime.now(timezone.utc)
+                _enqueue_event(
+                    job,
+                    _build_event(
+                        job.job_id,
+                        "error",
+                        status=job.status,
+                        message=str(exc),
+                    ),
+                )
 
 
 async def _run_runner_job(job: JobState, request: JobRequest) -> None:
@@ -983,18 +1079,28 @@ def _jobs_for_project(project_id: str) -> list[JobState]:
     ]
 
 
+def _count_running_by_kind(kind: str) -> int:
+    return sum(
+        1
+        for job in JOBS.values()
+        if job.kind == kind and job.status == "running"
+    )
+
+
 def _active_job_for_project(project_id: str) -> Optional[JobState]:
     active_jobs = [
         job
         for job in JOBS.values()
         if job.project_id == project_id
         and job.kind in ACTIVE_TASK_JOB_KINDS
-        and job.status == "running"
+        and job.status in ("running", "queued")
     ]
     if not active_jobs:
         return None
+    # Prefer running over queued; then most recent by started_at/created_at
     active_jobs.sort(
         key=lambda job: (
+            0 if job.status == "running" else 1,
             job.started_at or job.created_at,
             job.created_at,
         ),
@@ -1085,25 +1191,11 @@ async def _cancel_jobs_for_project(project_id: str) -> list[str]:
     return [job.job_id for job in target_jobs]
 
 
-@app.post("/jobs")
+@app.post("/jobs", status_code=201)
 async def create_job(payload: JobRequest) -> dict[str, str]:
     request_received_at = datetime.now(timezone.utc)
     if payload.project_id:
         project_store.get_project(payload.project_id)
-    if payload.project_id and payload.kind in ACTIVE_TASK_JOB_KINDS:
-        existing = _active_job_for_project(payload.project_id)
-        if existing is not None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "project_job_conflict",
-                    "project_id": payload.project_id,
-                    "job_id": existing.job_id,
-                    "kind": existing.kind,
-                    "status": existing.status,
-                    "events_url": f"http://{HOST}:{PORT}/jobs/{existing.job_id}/events",
-                },
-            )
     if payload.kind == "create_video_with_subtitles" and payload.project_id:
         _resolve_export_request_from_project(payload)
     if payload.kind in {"pipeline", "create_subtitles", "create_video_with_subtitles"}:
@@ -1124,26 +1216,40 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
     )
     logger.info("Job %s request received (kind=%s)", job_id, payload.kind)
     JOBS[job_id] = job
-    if payload.kind in {"create_subtitles", "create_video_with_subtitles"}:
-        heading = (
-            "Creating video with subtitles"
-            if payload.kind == "create_video_with_subtitles"
-            else "Creating subtitles"
-        )
-        job.status = "running"
-        job.started_at = datetime.now(timezone.utc)
-        _enqueue_event(job, _build_event(job_id, "started", heading=heading))
-        logger.info(
-            "Job %s started event queued after %.2fs",
-            job_id,
-            (job.started_at - request_received_at).total_seconds(),
-        )
+
+    if payload.kind == "create_subtitles":
+        slot_free = _count_running_by_kind("create_subtitles") == 0
+        if slot_free:
+            job.status = "running"
+            job.started_at = datetime.now(timezone.utc)
+            _enqueue_event(
+                job,
+                _build_event(job_id, "started", heading="Creating subtitles"),
+            )
+        _create_subtitles_queue.put_nowait((job, payload))
+        events_url = f"http://{HOST}:{PORT}/jobs/{job_id}/events"
+        return {"job_id": job_id, "events_url": events_url, "status": job.status}
+    if payload.kind == "create_video_with_subtitles":
+        slot_free = _count_running_by_kind("create_video_with_subtitles") < EXPORT_CONCURRENCY
+        if slot_free:
+            job.status = "running"
+            job.started_at = datetime.now(timezone.utc)
+            _enqueue_event(
+                job,
+                _build_event(
+                    job_id,
+                    "started",
+                    heading="Creating video with subtitles",
+                ),
+            )
+        _export_queue.put_nowait((job, payload))
+        events_url = f"http://{HOST}:{PORT}/jobs/{job_id}/events"
+        return {"job_id": job_id, "events_url": events_url, "status": job.status}
+
     if payload.kind == "demo":
         job.task = asyncio.create_task(_run_demo_job(job))
     elif payload.kind == "pipeline":
         job.task = asyncio.create_task(_run_pipeline_job(job, payload))
-    elif payload.kind in {"create_subtitles", "create_video_with_subtitles"}:
-        job.task = asyncio.create_task(_run_worker_job_maybe_inprocess(job, payload))
     else:
         job.task = asyncio.create_task(_run_runner_job(job, payload))
     events_url = f"http://{HOST}:{PORT}/jobs/{job_id}/events"
@@ -1202,7 +1308,7 @@ def list_projects() -> list[dict[str, Any]]:
     active_project_ids = {
         job.project_id
         for job in JOBS.values()
-        if getattr(job, "project_id", None) and job.status == "running"
+        if getattr(job, "project_id", None) and job.status in ("running", "queued")
     }
     active_ids = active_project_ids or None
     summaries = project_store.list_projects(active_ids)

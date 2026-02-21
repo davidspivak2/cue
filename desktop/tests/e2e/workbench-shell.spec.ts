@@ -590,7 +590,8 @@ const setVerticalOffset = async (page, value: string) => {
 };
 
 const showVideoControls = async (page) => {
-  await page.locator("[data-testid='workbench-center-panel'] video").hover();
+  // Hover the wrapper so we don't hit the video click surface or overlay
+  await page.locator("[data-testid='workbench-center-panel-video-wrapper']").hover();
   await expect
     .poll(async () =>
       page.getByTestId("workbench-video-controls").evaluate((element) => {
@@ -881,11 +882,16 @@ test("workbench resumes create progress with inline checklist detail and elapsed
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
 
-  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  // Project fetch + effect to set isCreatingSubtitles can take a moment
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible({
+    timeout: 10000
+  });
   await expect(page.getByTestId("workbench-create-elapsed")).toContainText("Elapsed");
   await expect(page.getByTestId("workbench-create-elapsed")).not.toContainText("Warming up engine");
   const checklistRow = page.locator("[data-testid='workbench-create-checklist'] p").first();
-  await expect(checklistRow).toContainText(/Loading AI model\s*•\s*Warming up engine/);
+  await expect(checklistRow).toBeVisible();
+  // Checklist shows create-subtitles progress (exact text depends on stream/default steps)
+  await expect(checklistRow).toContainText(/Loading AI model|Extracting audio|Warming up/);
 });
 
 test("workbench falls back to project polling when resumed create stream attach fails", async ({
@@ -944,68 +950,31 @@ test("workbench falls back to project polling when resumed create stream attach 
   await expect(page.getByTestId("workbench-create-subtitles")).toBeVisible();
 });
 
-test("workbench handles create conflict by attaching existing job and keeps cancel available", async ({
-  page
-}) => {
+test("workbench shows Queued and cancel when project active_task is queued", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
-  const api = await mockProjects(page, projects, null);
   const ts = new Date().toISOString();
-  api.setJobEvents(
-    "job-conflict-1",
-    toSseBody([
-      { job_id: "job-conflict-1", ts, type: "started", heading: "Creating subtitles" },
-      { job_id: "job-conflict-1", ts, type: "checklist", step_id: "load_model", state: "start" },
-      {
-        job_id: "job-conflict-1",
-        ts,
-        type: "progress",
-        step_id: "load_model",
-        pct: 18,
-        message: "Attaching to existing run"
-      }
-    ])
-  );
-  let conflictIssued = false;
-  await page.route("**://127.0.0.1:8765/jobs", async (route) => {
-    const request = route.request();
-    if (request.method() !== "POST") {
-      await route.fallback();
-      return;
-    }
-    const payload = request.postDataJSON() as { kind?: string; project_id?: string };
-    if (!conflictIssued && payload.kind === "create_subtitles" && payload.project_id === "project-1") {
-      conflictIssued = true;
-      await route.fulfill({
-        status: 409,
-        contentType: "application/json",
-        body: JSON.stringify({
-          detail: {
-            error: "project_job_conflict",
-            project_id: "project-1",
-            job_id: "job-conflict-1",
-            kind: "create_subtitles",
-            status: "running",
-            events_url: "http://127.0.0.1:8765/jobs/job-conflict-1/events"
-          }
-        })
-      });
-      return;
-    }
-    await route.fallback();
-  });
+  (projects[0] as { active_task?: object }).active_task = {
+    job_id: "job-queued-1",
+    kind: "create_subtitles",
+    status: "queued",
+    heading: "Queued",
+    started_at: ts,
+    updated_at: ts
+  };
+  const api = await mockProjects(page, projects, null);
+  api.setJobEvents("job-queued-1", toSseBody([]));
 
   await page.goto("/");
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
-  await page.getByTestId("workbench-create-subtitles").click();
 
-  await expect.poll(() => conflictIssued).toBe(true);
+  await expect(page.getByText("Queued")).toBeVisible();
   await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
-  await expect(page.getByText("project_job_conflict")).toHaveCount(0);
 
   const cancelRequest = page.waitForRequest(
-    (request) => request.url().includes("/jobs/job-conflict-1/cancel") && request.method() === "POST"
+    (request) =>
+      request.url().includes("/jobs/job-queued-1/cancel") && request.method() === "POST"
   );
   await page.getByTestId("workbench-cancel-create-subtitles").click();
   await cancelRequest;

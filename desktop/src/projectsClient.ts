@@ -44,6 +44,7 @@ export type ProjectSummary = {
   thumbnail_path?: string | null;
   active_task?: ActiveTaskSummary | null;
   task_notice?: TaskNotice | null;
+  latest_export?: ProjectLatestExport | null;
 };
 
 export type ProjectVideoInfo = {

@@ -101,6 +101,22 @@ const AppLayout = () => {
     [removeToast]
   );
 
+  const markExportCompleteSeen = React.useCallback(
+    (projectId: string, outputPath: string, exportedAt: string) => {
+      const key = `${projectId}:${outputPath}:${exportedAt}`;
+      seenExportCompleteRef.current.add(key);
+    },
+    []
+  );
+
+  const haveExportCompleteBeenSeen = React.useCallback(
+    (projectId: string, outputPath: string, exportedAt: string) => {
+      const key = `${projectId}:${outputPath}:${exportedAt}`;
+      return seenExportCompleteRef.current.has(key);
+    },
+    []
+  );
+
   React.useEffect(() => {
     if (hasLaunchedRef.current) {
       return;
@@ -138,17 +154,13 @@ const AppLayout = () => {
           const projectTitle = project.title || "Video";
           pushToast(projectTitle, `${title}: ${notice.message}`);
         }
-        const currentPath = locationRef.current.pathname;
         for (const project of projects) {
           const outputPath = project.latest_export?.output_video_path;
           if (!outputPath || project.active_task) {
             continue;
           }
-          const workbenchPath = `/workbench/${project.project_id}`;
-          if (currentPath === workbenchPath) {
-            continue;
-          }
-          const key = `${project.project_id}:${outputPath}`;
+          const exportedAt = project.latest_export?.exported_at ?? "";
+          const key = `${project.project_id}:${outputPath}:${exportedAt}`;
           if (seenExportCompleteRef.current.has(key)) {
             continue;
           }
@@ -194,7 +206,11 @@ const AppLayout = () => {
   return (
     <WorkbenchTabsProvider>
       <SettingsProvider openSettings={openSettings} closeSettings={closeSettings} settingsOpen={settingsOpen}>
-        <ToastProvider pushToast={pushToast}>
+        <ToastProvider
+          pushToast={pushToast}
+          markExportCompleteSeen={markExportCompleteSeen}
+          haveExportCompleteBeenSeen={haveExportCompleteBeenSeen}
+        >
           <div
             className="flex h-screen flex-col bg-background text-foreground"
             style={

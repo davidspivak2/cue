@@ -15,8 +15,22 @@ export type PushToastFn = (
   options?: ToastOptions
 ) => void;
 
+export type MarkExportCompleteSeenFn = (
+  projectId: string,
+  outputPath: string,
+  exportedAt: string
+) => void;
+
+export type HaveExportCompleteBeenSeenFn = (
+  projectId: string,
+  outputPath: string,
+  exportedAt: string
+) => boolean;
+
 type ToastContextValue = {
   pushToast: PushToastFn;
+  markExportCompleteSeen: MarkExportCompleteSeenFn;
+  haveExportCompleteBeenSeen: HaveExportCompleteBeenSeenFn;
 };
 
 const ToastContext = React.createContext<ToastContextValue | null>(null);
@@ -31,12 +45,18 @@ export const useToast = (): ToastContextValue => {
 
 export const ToastProvider = ({
   children,
-  pushToast
+  pushToast,
+  markExportCompleteSeen,
+  haveExportCompleteBeenSeen
 }: {
   children: React.ReactNode;
   pushToast: PushToastFn;
+  markExportCompleteSeen: MarkExportCompleteSeenFn;
+  haveExportCompleteBeenSeen: HaveExportCompleteBeenSeenFn;
 }) => (
-  <ToastContext.Provider value={{ pushToast }}>
+  <ToastContext.Provider
+    value={{ pushToast, markExportCompleteSeen, haveExportCompleteBeenSeen }}
+  >
     {children}
   </ToastContext.Provider>
 );

@@ -115,11 +115,21 @@ test("save policy enables the path controls", async ({ page }) => {
 });
 
 test("diagnostics master toggle gates categories", async ({ page }) => {
-  await page.goto("/?diagnostics=1");
+  await page.goto("/");
+  await page.evaluate(() => {
+    window.location.hash = "diagnostics=1";
+  });
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-content")).toBeVisible();
 
+  await expect(page.getByTestId("settings-diagnostics-section")).toBeVisible({
+    timeout: 10000
+  });
+  await page.getByTestId("settings-diagnostics-section").scrollIntoViewIfNeeded();
+
   const master = page.getByLabel("Enable diagnostics logging");
+  await expect(master).toBeVisible({ timeout: 5000 });
+
   const writeOnSuccess = page.getByLabel("Write diagnostics on successful completion");
   const category = page.getByLabel("App + system info");
 

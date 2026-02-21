@@ -232,6 +232,9 @@ const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean)
 };
 
 const resolveTaskHeading = (project: ProjectSummary) => {
+  if (project.active_task?.status === "queued") {
+    return "Queued";
+  }
   const heading = project.active_task?.heading;
   if (typeof heading === "string" && heading.trim()) {
     return heading;
@@ -698,7 +701,9 @@ const ProjectHub = () => {
             await handleRelinkSelection(project, selected, selectedFileName, duration);
           }
         } catch {
-          showBanner("error", "Could not open the file picker. Please try again.");
+          // Fall back to file input when native dialog is unavailable (e.g. in e2e tests)
+          setPendingRelinkProject(project);
+          relinkInputRef.current?.click();
         }
         return;
       }
@@ -1071,17 +1076,21 @@ const ProjectHub = () => {
                       data-testid={`project-card-active-task-${project.project_id}`}
                     >
                       <p className="text-xs font-medium text-foreground">{activeTaskHeading}</p>
-                      {activeTaskDetail && (
-                        <p className="truncate text-xs text-muted-foreground">
-                          {activeTaskDetail}
-                        </p>
+                      {project.active_task.status !== "queued" && (
+                        <>
+                          {activeTaskDetail && (
+                            <p className="truncate text-xs text-muted-foreground">
+                              {activeTaskDetail}
+                            </p>
+                          )}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span>{Math.round(activeTaskPct)}%</span>
+                            </div>
+                            <Progress value={activeTaskPct} />
+                          </div>
+                        </>
                       )}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>{Math.round(activeTaskPct)}%</span>
-                        </div>
-                        <Progress value={activeTaskPct} />
-                      </div>
                     </div>
                   )}
                   {shouldShowTaskNotice && taskNotice && (
@@ -1203,12 +1212,14 @@ const ProjectHub = () => {
                           <p className="truncate text-xs font-medium text-foreground">
                             {activeTaskHeading}
                           </p>
-                          <div className="flex items-center gap-2">
-                            <Progress value={activeTaskPct} className="h-1.5 flex-1" />
-                            <span className="text-xs text-muted-foreground">
-                              {Math.round(activeTaskPct)}%
-                            </span>
-                          </div>
+                          {project.active_task.status !== "queued" && (
+                            <div className="flex items-center gap-2">
+                              <Progress value={activeTaskPct} className="h-1.5 flex-1" />
+                              <span className="text-xs text-muted-foreground">
+                                {Math.round(activeTaskPct)}%
+                              </span>
+                            </div>
+                          )}
                         </div>
                       ) : shouldShowTaskNotice && taskNotice ? (
                         <div className="flex items-center gap-2">
