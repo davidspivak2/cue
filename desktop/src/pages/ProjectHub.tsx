@@ -455,7 +455,8 @@ const ProjectHub = () => {
         await loadProjects();
         openOrActivateTab({
           projectId: createdProject.project_id,
-          title: resolveProjectTitle(createdProject)
+          title: resolveProjectTitle(createdProject),
+          thumbnail_path: createdProject.thumbnail_path ?? undefined
         });
         navigate(`/workbench/${encodeURIComponent(createdProject.project_id)}`, {
           state: { autoStartSubtitles: true }
@@ -735,7 +736,11 @@ const ProjectHub = () => {
       setRelinkPromptProject(project);
       return;
     }
-    openOrActivateTab({ projectId: project.project_id, title: resolveProjectTitle(project) });
+    openOrActivateTab({
+      projectId: project.project_id,
+      title: resolveProjectTitle(project),
+      thumbnail_path: project.thumbnail_path ?? undefined
+    });
     navigate(`/workbench/${encodeURIComponent(project.project_id)}`);
   };
 

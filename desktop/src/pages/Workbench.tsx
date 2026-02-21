@@ -1,8 +1,6 @@
 import * as React from "react";
 import {
-  ArrowLeft,
   Check,
-  List,
   Minus,
   Pause,
   Play,
@@ -51,6 +49,7 @@ import {
 import { useWindowWidth } from "@/hooks/useWindowWidth";
 import { useWorkbenchTabs } from "@/workbenchTabs";
 import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
+import { truncatePathMiddle } from "@/lib/truncatePathMiddle";
 import {
   fetchSettings,
   previewOverlay,
@@ -633,7 +632,6 @@ const Workbench = () => {
   const [isSavingCue, setIsSavingCue] = React.useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
-  const [tabDrawerOpen, setTabDrawerOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
   const [progressHoverSeconds, setProgressHoverSeconds] = React.useState<number | null>(null);
   const [progressHoverXPx, setProgressHoverXPx] = React.useState<number | null>(null);
@@ -1043,7 +1041,8 @@ const Workbench = () => {
     }
     updateTabMeta(projectId, {
       title: resolveTitle(project),
-      path: project?.video?.path ?? project?.video?.filename ?? ""
+      path: project?.video?.path ?? project?.video?.filename ?? "",
+      thumbnail_path: project?.video?.thumbnail_path ?? undefined
     });
   }, [project, projectId, updateTabMeta]);
 
@@ -1843,10 +1842,10 @@ const Workbench = () => {
   const hasVideoPreview = Boolean(previewSrc);
   const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
   const isOverlayOpen =
-    (showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen || tabDrawerOpen;
+    (showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen;
   const showScrim =
     isNarrow &&
-    (tabDrawerOpen || (hasSubtitles && ((showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen)));
+    (hasSubtitles && ((showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen));
   const activeCue = React.useMemo(() => {
     return (
       cues.find(
@@ -2925,10 +2924,7 @@ const Workbench = () => {
     if (rightOverlayOpen) {
       setRightOverlayOpen(false);
     }
-    if (tabDrawerOpen) {
-      setTabDrawerOpen(false);
-    }
-  }, [leftPanelOpen, rightOverlayOpen, showSubtitlesOverlay, tabDrawerOpen]);
+  }, [leftPanelOpen, rightOverlayOpen, showSubtitlesOverlay]);
 
   React.useEffect(() => {
     if (!isOverlayOpen && !isEditingCue) {
@@ -2966,13 +2962,6 @@ const Workbench = () => {
         await handleSaveEdit();
       }
     }
-  };
-
-  const handleSelectTab = (targetId: string) => {
-    if (targetId === projectId) {
-      return;
-    }
-    navigate(`/workbench/${encodeURIComponent(targetId)}`);
   };
 
   const stylePanelContent = (
@@ -3048,99 +3037,37 @@ const Workbench = () => {
   return (
     <div data-testid="workbench" className="flex h-full min-h-0 flex-col gap-4">
       <header
-        className="flex flex-wrap items-center gap-2 pb-2"
+        className="flex items-center gap-2 pb-2"
         data-testid="workbench-top-bar"
       >
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-2 shrink-0"
-          onClick={() => navigate("/")}
+        <div
+          className="flex min-w-0 flex-1 items-center gap-2"
+          data-testid="workbench-heading"
         >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </Button>
-        {isNarrow ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => setTabDrawerOpen(true)}
-            data-testid="workbench-tab-drawer-trigger"
-          >
-            <List className="h-4 w-4" />
-            <span className="max-w-[140px] truncate">
-              {title || "Videos"}
-            </span>
-          </Button>
-        ) : (
-          <div
-            className="flex flex-wrap items-center gap-2"
-            role="tablist"
-            aria-label="Open videos"
-            data-testid="workbench-tabs"
-          >
-            {tabs.length === 0 ? (
-              <span className="text-xs text-muted-foreground">No open videos</span>
-            ) : (
-              tabs.map((tab) => {
-                const isActive = tab.projectId === projectId;
-                const label = tab.title || "Untitled video";
-                const tooltipText = tab.path || tab.title || undefined;
-                return (
-                  <div
-                    key={tab.projectId}
-                    className={cn(
-                      "flex items-center rounded-md border px-2 py-1 text-sm",
-                      isActive ? "border-primary/60 bg-accent text-accent-foreground" : "border-border bg-card"
-                    )}
-                  >
-                    {tooltipText ? (
-                      <TooltipProvider delayDuration={300}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              role="tab"
-                              aria-selected={isActive}
-                              aria-current={isActive ? "page" : undefined}
-                              className={cn(
-                                "max-w-[180px] truncate text-left text-sm",
-                                isActive ? "text-accent-foreground" : "text-muted-foreground"
-                              )}
-                              data-testid={`workbench-tab-${tab.projectId}`}
-                              onClick={() => handleSelectTab(tab.projectId)}
-                            >
-                              {label}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" sideOffset={14}>
-                            {tooltipText}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : (
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={isActive}
-                        aria-current={isActive ? "page" : undefined}
-                        className={cn(
-                          "max-w-[180px] truncate text-left text-sm",
-                          isActive ? "text-accent-foreground" : "text-muted-foreground"
-                        )}
-                        data-testid={`workbench-tab-${tab.projectId}`}
-                        onClick={() => handleSelectTab(tab.projectId)}
-                      >
-                        {label}
-                      </button>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
+          {(() => {
+            const displayTitle = title || "Untitled video";
+            const fullPath =
+              videoPath ||
+              (projectId ? tabs.find((t) => t.projectId === projectId)?.path : undefined) ||
+              "";
+            const tooltipText =
+              fullPath.length > 0 ? truncatePathMiddle(fullPath, 56) : displayTitle;
+            return (
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <h1 className="min-w-0 max-w-[min(100%,280px)] truncate text-lg font-semibold tracking-tight text-foreground">
+                      {displayTitle}
+                    </h1>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={8}>
+                    {tooltipText}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            );
+          })()}
+        </div>
         <div className="min-w-0 flex-1" aria-hidden="true" />
         {hasSubtitles && isNarrow && (
           <Button
@@ -3156,6 +3083,7 @@ const Workbench = () => {
         {exportAreaTopBar}
       </header>
 
+      <div className="flex min-h-0 flex-1 flex-col border-t border-border bg-card">
       {isLoading && (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Loading video…
@@ -3775,52 +3703,6 @@ const Workbench = () => {
             />
           )}
 
-          {isNarrow && tabDrawerOpen && (
-            <aside
-              className="fixed inset-y-0 left-0 z-50 flex w-[min(92vw,360px)] flex-col border-r border-border bg-card shadow"
-              data-testid="workbench-tab-drawer"
-            >
-              <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                <h2 className="text-sm font-semibold">Videos</h2>
-                <Button variant="ghost" size="sm" onClick={() => setTabDrawerOpen(false)}>
-                  Close
-                </Button>
-              </div>
-              <ScrollArea className="min-h-0 flex-1 px-2 py-2">
-                {tabs.length === 0 ? (
-                  <p className="px-2 py-2 text-xs text-muted-foreground">No open videos</p>
-                ) : (
-                  <ul className="space-y-0.5">
-                    {tabs.map((tab) => {
-                      const isActive = tab.projectId === projectId;
-                      const label = tab.title || "Untitled video";
-                      return (
-                        <li key={tab.projectId}>
-                          <button
-                            type="button"
-                            className={cn(
-                              "w-full rounded-md px-3 py-2 text-left text-sm",
-                              isActive
-                                ? "bg-accent text-accent-foreground"
-                                : "text-muted-foreground hover:bg-muted"
-                            )}
-                            data-testid={`workbench-tab-drawer-item-${tab.projectId}`}
-                            onClick={() => {
-                              handleSelectTab(tab.projectId);
-                              setTabDrawerOpen(false);
-                            }}
-                          >
-                            <span className="block max-w-full truncate">{label}</span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </ScrollArea>
-            </aside>
-          )}
-
           {hasSubtitles && showSubtitlesOverlay && leftPanelOpen && (
             <aside
               className="fixed inset-y-0 left-0 z-50 flex w-[min(90vw,360px)] flex-col border-r border-border bg-card shadow"
@@ -3914,6 +3796,7 @@ const Workbench = () => {
           )}
         </>
       )}
+      </div>
     </div>
   );
 };

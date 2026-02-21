@@ -1,17 +1,39 @@
 import * as React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+
+export const HOME_TAB_ID = "home" as const;
+export type ActiveView = typeof HOME_TAB_ID | string;
 
 export type WorkbenchTab = {
   projectId: string;
   title: string;
   path?: string;
+  /** Used in title bar icon-only (narrow) mode. Resolved from project manifest or ProjectHub list. */
+  thumbnail_path?: string | null;
+};
+
+const PERSIST_KEY = "cue_title_bar_tabs";
+type PersistedTabs = {
+  projectIds: string[];
+  lastActiveProjectId: string | typeof HOME_TAB_ID;
 };
 
 type WorkbenchTabsContextValue = {
   tabs: WorkbenchTab[];
+  /** Currently active view: Home or a projectId. Synced from route. */
+  activeView: ActiveView;
+  /** Set active view (e.g. when user clicks Home or a tab). Persistence uses this. */
+  setActiveView: (view: ActiveView) => void;
   openOrActivateTab: (tab: WorkbenchTab) => void;
   ensureTab: (tab: WorkbenchTab) => void;
-  closeTab: (projectId: string) => void;
+  /**
+   * Close a video tab. If it was the active tab, calls onSwitchTo(next) with
+   * the adjacent tab (prefer left; if leftmost, right) or 'home' if it was the last video tab.
+   */
+  closeTab: (projectId: string, onSwitchTo?: (next: ActiveView) => void) => void;
   updateTabMeta: (projectId: string, updates: Partial<WorkbenchTab>) => void;
+  /** Reorder video tabs to match the given projectId order. Persistence updates automatically. */
+  reorderTabs: (orderedProjectIds: string[]) => void;
 };
 
 const WorkbenchTabsContext = React.createContext<WorkbenchTabsContextValue | null>(null);
@@ -22,19 +44,106 @@ const upsertTab = (tabs: WorkbenchTab[], nextTab: WorkbenchTab): WorkbenchTab[] 
     return [...tabs, nextTab];
   }
   const current = tabs[index];
-  if (current.title === nextTab.title) {
-    return tabs;
-  }
+  const merged = { ...current, ...nextTab };
   const nextTabs = [...tabs];
-  nextTabs[index] = { ...current, ...nextTab };
+  nextTabs[index] = merged;
   return nextTabs;
 };
 
+function loadPersisted(): PersistedTabs | null {
+  try {
+    const raw = localStorage.getItem(PERSIST_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as PersistedTabs;
+    if (!Array.isArray(data.projectIds) || typeof data.lastActiveProjectId !== "string") {
+      return null;
+    }
+    return {
+      projectIds: data.projectIds.filter((id): id is string => typeof id === "string"),
+      lastActiveProjectId:
+        data.lastActiveProjectId === HOME_TAB_ID ? HOME_TAB_ID : data.lastActiveProjectId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function savePersisted(projectIds: string[], lastActiveProjectId: string | typeof HOME_TAB_ID) {
+  try {
+    localStorage.setItem(
+      PERSIST_KEY,
+      JSON.stringify({ projectIds, lastActiveProjectId } satisfies PersistedTabs)
+    );
+  } catch {
+    // ignore
+  }
+}
+
 export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [tabs, setTabs] = React.useState<WorkbenchTab[]>([]);
+  const [activeView, setActiveViewState] = React.useState<ActiveView>(HOME_TAB_ID);
+  const hasRestoredRef = React.useRef(false);
+
+  // Restore persisted tabs on first mount and navigate to last active
+  React.useEffect(() => {
+    if (hasRestoredRef.current) return;
+    hasRestoredRef.current = true;
+    const data = loadPersisted();
+    if (!data) {
+      navigate("/", { replace: true });
+      return;
+    }
+    const initialTabs: WorkbenchTab[] = data.projectIds.map((id) => ({
+      projectId: id,
+      title: "Untitled",
+    }));
+    setTabs(initialTabs);
+    const last = data.lastActiveProjectId;
+    setActiveViewState(last);
+    if (last === HOME_TAB_ID) {
+      navigate("/", { replace: true });
+    } else if (data.projectIds.includes(last)) {
+      navigate(`/workbench/${encodeURIComponent(last)}`, { replace: true });
+    } else {
+      navigate("/", { replace: true });
+      setActiveViewState(HOME_TAB_ID);
+    }
+  }, [navigate]);
+
+  // Sync activeView from route so it stays correct when navigating (e.g. back/forward or programmatic)
+  React.useEffect(() => {
+    if (location.pathname === "/") {
+      setActiveViewState(HOME_TAB_ID);
+      return;
+    }
+    const match = location.pathname.match(/^\/workbench\/(.+)$/);
+    if (match) {
+      try {
+        const id = decodeURIComponent(match[1]);
+        if (id) setActiveViewState(id);
+      } catch {
+        setActiveViewState(HOME_TAB_ID);
+      }
+    }
+  }, [location.pathname]);
+
+  // Persist whenever tabs or activeView change
+  React.useEffect(() => {
+    savePersisted(
+      tabs.map((t) => t.projectId),
+      activeView
+    );
+  }, [tabs, activeView]);
+
+  const setActiveView = React.useCallback((view: ActiveView) => {
+    setActiveViewState(view);
+  }, []);
 
   const openOrActivateTab = React.useCallback((tab: WorkbenchTab) => {
     setTabs((prev) => upsertTab(prev, tab));
+    setActiveViewState(tab.projectId);
   }, []);
 
   const ensureTab = React.useCallback((tab: WorkbenchTab) => {
@@ -47,9 +156,33 @@ export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode 
     });
   }, []);
 
-  const closeTab = React.useCallback((projectId: string) => {
-    setTabs((prev) => prev.filter((tab) => tab.projectId !== projectId));
-  }, []);
+  const closeTab = React.useCallback(
+    (projectId: string, onSwitchTo?: (next: ActiveView) => void) => {
+      const isClosingActive =
+        location.pathname.startsWith("/workbench/") &&
+        location.pathname === `/workbench/${encodeURIComponent(projectId)}`;
+
+      setTabs((prev) => {
+        const nextTabs = prev.filter((t) => t.projectId !== projectId);
+        if (isClosingActive && onSwitchTo) {
+          const currentIndex = prev.findIndex((t) => t.projectId === projectId);
+          if (currentIndex === -1) {
+            onSwitchTo(nextTabs.length > 0 ? nextTabs[0].projectId : HOME_TAB_ID);
+            return nextTabs;
+          }
+          if (nextTabs.length === 0) {
+            onSwitchTo(HOME_TAB_ID);
+          } else {
+            const adjacentIndex = currentIndex > 0 ? currentIndex - 1 : 0;
+            const nextTab = nextTabs[adjacentIndex] ?? nextTabs[0];
+            onSwitchTo(nextTab.projectId);
+          }
+        }
+        return nextTabs;
+      });
+    },
+    [location.pathname]
+  );
 
   const updateTabMeta = React.useCallback(
     (projectId: string, updates: Partial<WorkbenchTab>) => {
@@ -66,12 +199,33 @@ export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode 
     []
   );
 
+  const reorderTabs = React.useCallback((orderedProjectIds: string[]) => {
+    setTabs((prev) => {
+      const byId = new Map(prev.map((t) => [t.projectId, t]));
+      const next = orderedProjectIds
+        .map((id) => byId.get(id))
+        .filter((t): t is WorkbenchTab => t != null);
+      return next.length > 0 ? next : prev;
+    });
+  }, []);
+
   const value = React.useMemo(
-    () => ({ tabs, openOrActivateTab, ensureTab, closeTab, updateTabMeta }),
-    [tabs, openOrActivateTab, ensureTab, closeTab, updateTabMeta]
+    () => ({
+      tabs,
+      activeView,
+      setActiveView,
+      openOrActivateTab,
+      ensureTab,
+      closeTab,
+      updateTabMeta,
+      reorderTabs,
+    }),
+    [tabs, activeView, setActiveView, openOrActivateTab, ensureTab, closeTab, updateTabMeta, reorderTabs]
   );
 
-  return <WorkbenchTabsContext.Provider value={value}>{children}</WorkbenchTabsContext.Provider>;
+  return (
+    <WorkbenchTabsContext.Provider value={value}>{children}</WorkbenchTabsContext.Provider>
+  );
 };
 
 export const useWorkbenchTabs = () => {

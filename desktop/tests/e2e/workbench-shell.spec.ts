@@ -18,7 +18,11 @@ const initTauriRuntimeMock = () => {
   Object.defineProperty(globalThis, "__TAURI_INTERNALS__", {
     configurable: true,
     value: {
-      convertFileSrc: (filePath) => `data:,${encodeURIComponent(String(filePath ?? ""))}`
+      convertFileSrc: (filePath) => `data:,${encodeURIComponent(String(filePath ?? ""))}`,
+      metadata: {
+        currentWindow: { label: "main" },
+        currentWebview: { windowLabel: "main", label: "main" }
+      }
     }
   });
 };
@@ -644,7 +648,8 @@ test("workbench shell narrow overlays", async ({ page }) => {
   await expect(page.getByTestId("workbench-right-drawer")).toHaveCount(0);
 });
 
-test("workbench narrow shows tab drawer and switches tab", async ({ page }) => {
+test("title bar: switch between Home and video tab", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
   await page.setViewportSize({ width: 900, height: 800 });
   const projects = buildProjects();
   projects[0].status = "ready";
@@ -660,26 +665,28 @@ test("workbench narrow shows tab drawer and switches tab", async ({ page }) => {
   await page.goto("/");
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
-  await page.getByTestId("workbench-top-bar").getByRole("button", { name: "Back" }).click();
+  await expect(page.getByTestId("workbench-heading")).toBeVisible();
+  await expect(page.getByTestId("title-bar-tab-project-1")).toBeVisible();
+
+  await page.getByTestId("title-bar-home").click();
+  await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+
   await page.getByText("other.mp4").click();
   await page.waitForURL("**/workbench/project-2");
+  await expect(page.getByTestId("workbench-heading")).toContainText("other");
+  await expect(page.getByTestId("title-bar-tab-project-1")).toBeVisible();
+  await expect(page.getByTestId("title-bar-tab-project-2")).toBeVisible();
 
-  await expect(page.getByTestId("workbench-tab-drawer-trigger")).toBeVisible();
-  await expect(page.getByTestId("workbench-tabs")).toHaveCount(0);
-
-  await page.getByTestId("workbench-tab-drawer-trigger").click();
-  await expect(page.getByTestId("workbench-tab-drawer")).toBeVisible();
-  await expect(page.getByTestId("workbench-overlay-scrim")).toBeVisible();
-
-  await page.getByTestId("workbench-tab-drawer-item-project-1").click();
+  await page.getByTestId("title-bar-tab-project-1").click();
   await expect(page).toHaveURL(/\/workbench\/project-1/);
-  await expect(page.getByTestId("workbench-tab-drawer")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-heading")).toContainText("good");
 });
 
-test("navigation without sidebar: Projects to Editor to Back", async ({
+test("navigation without sidebar: Projects to Editor to Home via title bar", async ({
   page
 }) => {
+  await page.addInitScript(initTauriRuntimeMock);
   const projects = buildProjects();
   await mockProjects(page, projects);
 
@@ -689,9 +696,73 @@ test("navigation without sidebar: Projects to Editor to Back", async ({
   await page.waitForURL(/\/workbench\/project-1/);
   await expect(page.getByTestId("workbench")).toBeVisible();
 
-  await page.getByTestId("workbench-top-bar").getByRole("button", { name: "Back" }).click();
+  await page.getByTestId("title-bar-home").click();
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+});
+
+test("title bar: close active tab switches to adjacent or Home", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 900, height: 800 });
+  const projects = buildProjects();
+  projects[0].status = "ready";
+  projects.push({
+    ...buildProjects()[0],
+    project_id: "project-2",
+    title: "other.mp4",
+    video_path: "C:\\fake\\other.mp4",
+    status: "ready"
+  });
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await page.getByTestId("title-bar-home").click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByText("other.mp4").click();
+  await page.waitForURL("**/workbench/project-2");
+
+  await page.getByTestId("title-bar-tab-close-project-2").click();
+  await expect(page).toHaveURL(/\/workbench\/project-1/);
+  await expect(page.getByTestId("title-bar-tab-project-1")).toBeVisible();
+  await expect(page.getByTestId("title-bar-tab-project-2")).toHaveCount(0);
+
+  await page.getByTestId("title-bar-tab-close-project-1").click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await expect(page.getByTestId("title-bar-tab-project-1")).toHaveCount(0);
+});
+
+test("title bar: close non-active tab removes tab without navigation", async ({
+  page
+}) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 900, height: 800 });
+  const projects = buildProjects();
+  projects[0].status = "ready";
+  projects.push({
+    ...buildProjects()[0],
+    project_id: "project-2",
+    title: "other.mp4",
+    video_path: "C:\\fake\\other.mp4",
+    status: "ready"
+  });
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await page.getByTestId("title-bar-home").click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByText("other.mp4").click();
+  await page.waitForURL("**/workbench/project-2");
+
+  await page.getByTestId("title-bar-tab-close-project-1").click();
+  await expect(page).toHaveURL(/\/workbench\/project-2/);
+  await expect(page.getByTestId("workbench-heading")).toContainText("other");
+  await expect(page.getByTestId("title-bar-tab-project-1")).toHaveCount(0);
+  await expect(page.getByTestId("title-bar-tab-project-2")).toBeVisible();
 });
 
 test("workbench shows empty state before subtitles are created", async ({ page }) => {
