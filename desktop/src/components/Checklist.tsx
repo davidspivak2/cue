@@ -27,7 +27,7 @@ const stateIconMap: Record<ChecklistState, React.ElementType> = {
 const stateColorMap: Record<ChecklistState, string> = {
   pending: "text-muted-foreground",
   active: "text-primary",
-  done: "text-primary",
+  done: "text-green-600",
   skipped: "text-muted-foreground",
   failed: "text-destructive"
 };
@@ -48,7 +48,12 @@ const Checklist = ({ items, className, ...props }: ChecklistProps) => (
             )}
           />
           <div className="min-w-0 flex-1">
-            <p className="text-sm leading-5 text-foreground">
+            <p
+              className={cn(
+                "text-sm leading-5",
+                state === "pending" ? "text-muted-foreground" : "text-foreground"
+              )}
+            >
               <span>{item.label}</span>
               {detail && (
                 <>

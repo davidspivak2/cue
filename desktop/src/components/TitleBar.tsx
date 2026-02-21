@@ -104,10 +104,18 @@ function SortableTitleTab({
           <TooltipTrigger asChild>
             <button
               type="button"
-              onClick={() => onTabClick(tab.projectId)}
+              onClick={(e) => {
+                if (isActive) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  return;
+                }
+                onTabClick(tab.projectId);
+              }}
               className={cn(
                 "flex min-w-0 flex-1 items-center gap-1 truncate py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                isIconOnly && "flex-1 justify-center p-1"
+                isIconOnly && "flex-1 justify-center p-1",
+                isActive && "!cursor-default"
               )}
             >
               {isIconOnly ? (
@@ -268,22 +276,37 @@ const TitleBar = () => {
         data-tauri-drag-region
         onDoubleClick={handleMaximize}
       >
-        <button
-          type="button"
-          onClick={handleHomeClick}
-          title="Home"
-          aria-label="Home"
-          data-testid="title-bar-home"
-          aria-current={activeView === HOME_TAB_ID ? "true" : undefined}
-          className={cn(
-            "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            activeView === HOME_TAB_ID
-              ? "border-b-foreground/30 bg-foreground/8 text-foreground"
-              : "border-b-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          )}
-        >
-          <Home className="h-4 w-4" />
-        </button>
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={(e) => {
+                  if (activeView === HOME_TAB_ID) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                  }
+                  handleHomeClick();
+                }}
+                aria-label="Home"
+                data-testid="title-bar-home"
+                aria-current={activeView === HOME_TAB_ID ? "true" : undefined}
+                className={cn(
+                  "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  activeView === HOME_TAB_ID
+                    ? "!cursor-default border-b-foreground/30 bg-foreground/8 text-foreground"
+                    : "border-b-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                )}
+              >
+                <Home className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              Home
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext
             items={tabs.map((t) => t.projectId)}

@@ -48,6 +48,7 @@ class ProjectSummary(BaseModel):
     updated_at: str
     duration_seconds: Optional[float] = None
     thumbnail_path: Optional[str] = None
+    latest_export: Optional[dict[str, Any]] = None
 
 
 def _now_iso() -> str:
@@ -276,6 +277,9 @@ def _manifest_to_summary(
     video_path = video.get("path")
     missing_video = _is_missing(str(video_path)) if video_path else True
     status = _compute_status(manifest, allow_exporting=allow_exporting)
+    latest_export = manifest.get("latest_export")
+    if not isinstance(latest_export, dict):
+        latest_export = None
     return ProjectSummary(
         project_id=str(manifest.get("project_id") or ""),
         title=_derive_title(video_path),
@@ -286,6 +290,7 @@ def _manifest_to_summary(
         updated_at=str(manifest.get("updated_at") or ""),
         duration_seconds=video.get("duration_seconds"),
         thumbnail_path=video.get("thumbnail_path"),
+        latest_export=latest_export,
     )
 
 
@@ -581,15 +586,17 @@ def record_subtitles_result(
         _write_index(list_projects())
 
 
-def record_export_result(project_id: str, *, output_path: Optional[str]) -> None:
+def record_export_result(project_id: str, *, output_path: Optional[str]) -> Optional[str]:
     if not output_path:
-        return
+        return None
     with _STORE_LOCK:
         _ensure_store()
         manifest = _read_manifest(project_id)
+        exported_at = _now_iso()
         manifest["latest_export"] = {
             "output_video_path": output_path,
-            "exported_at": _now_iso(),
+            "exported_at": exported_at,
         }
         _write_manifest(manifest)
         _write_index(list_projects())
+        return exported_at

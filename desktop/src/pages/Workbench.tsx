@@ -16,6 +16,7 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import Checklist, { ChecklistItem } from "@/components/Checklist";
+import { useToast } from "@/contexts/ToastContext";
 import StyleControls from "@/components/SubtitleStyle/StyleControls";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -49,7 +50,6 @@ import {
 import { useWindowWidth } from "@/hooks/useWindowWidth";
 import { useWorkbenchTabs } from "@/workbenchTabs";
 import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
-import { truncatePathMiddle } from "@/lib/truncatePathMiddle";
 import {
   fetchSettings,
   previewOverlay,
@@ -578,6 +578,7 @@ const Workbench = () => {
   const incomingState = location.state as WorkbenchLocationState;
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const { pushToast, markExportCompleteSeen, haveExportCompleteBeenSeen } = useToast();
   const { tabs, ensureTab, updateTabMeta } = useWorkbenchTabs();
   const width = useWindowWidth();
   const isNarrow = width < 1100;
@@ -1464,7 +1465,36 @@ const Workbench = () => {
             ? (event.payload as Record<string, unknown>)
             : null;
         if (payload && typeof payload.output_path === "string") {
-          setExportOutputPath(payload.output_path);
+          const outputPath = payload.output_path as string;
+          setExportOutputPath(outputPath);
+          const exportedAt =
+            typeof payload.exported_at === "string" ? payload.exported_at : "";
+          const filename =
+            outputPath.split(/[/\\]/).filter(Boolean).pop() ?? outputPath;
+          const actions: { label: string; onClick: () => void }[] = [];
+          if (isTauriEnv) {
+            actions.push(
+              {
+                label: "Play",
+                onClick: () => {
+                  void openPath(outputPath);
+                }
+              },
+              {
+                label: "Open folder",
+                onClick: () => {
+                  void revealItemInDir(outputPath);
+                }
+              }
+            );
+          }
+          if (
+            projectId &&
+            !haveExportCompleteBeenSeen(projectId, outputPath, exportedAt)
+          ) {
+            markExportCompleteSeen(projectId, outputPath, exportedAt);
+            pushToast("Export complete", filename, { actions });
+          }
         }
         return;
       }
@@ -1506,7 +1536,15 @@ const Workbench = () => {
         });
       }
     },
-    [resolveChecklistReason, updateExportChecklist]
+    [
+      resolveChecklistReason,
+      updateExportChecklist,
+      pushToast,
+      markExportCompleteSeen,
+      haveExportCompleteBeenSeen,
+      projectId,
+      isTauriEnv
+    ]
   );
 
   const attachExportStream = React.useCallback(
@@ -1683,7 +1721,9 @@ const Workbench = () => {
           prev?.close();
           return null;
         });
-        setCreateSubtitlesHeading(activeTask.heading ?? "Creating subtitles");
+        setCreateSubtitlesHeading(
+          activeTask.status === "queued" ? "Queued" : (activeTask.heading ?? "Creating subtitles")
+        );
         setCreateSubtitlesProgressPct(pct);
         setCreateSubtitlesProgressMessage(message);
         const fullList = defaultChecklist(buildGenerateChecklist(settings));
@@ -1722,7 +1762,9 @@ const Workbench = () => {
         });
         setIsExporting(true);
         setExportError(null);
-        setExportHeading(activeTask.heading ?? "Exporting video");
+        setExportHeading(
+          activeTask.status === "queued" ? "Queued" : (activeTask.heading ?? "Exporting video")
+        );
         setExportProgressPct(pct);
         setExportProgressMessage(message);
         if (checklist.length > 0) {
@@ -3027,12 +3069,6 @@ const Workbench = () => {
     <div className="flex flex-wrap items-center gap-2">
       {latestOutputPath && (
         <>
-          <span
-            className="text-xs text-muted-foreground"
-            data-testid="workbench-export-complete"
-          >
-            Export complete
-          </span>
           <Button
             variant="secondary"
             size="sm"
@@ -3072,29 +3108,9 @@ const Workbench = () => {
           className="flex min-w-0 flex-1 items-center gap-2"
           data-testid="workbench-heading"
         >
-          {(() => {
-            const displayTitle = title || "Untitled video";
-            const fullPath =
-              videoPath ||
-              (projectId ? tabs.find((t) => t.projectId === projectId)?.path : undefined) ||
-              "";
-            const tooltipText =
-              fullPath.length > 0 ? truncatePathMiddle(fullPath, 56) : displayTitle;
-            return (
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <h1 className="min-w-0 max-w-[min(100%,280px)] truncate text-lg font-semibold tracking-tight text-foreground">
-                      {displayTitle}
-                    </h1>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={8}>
-                    {tooltipText}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            );
-          })()}
+          <h1 className="min-w-0 max-w-[min(100%,280px)] truncate text-lg font-semibold tracking-tight text-foreground">
+            {title || "Untitled video"}
+          </h1>
         </div>
         <div className="min-w-0 flex-1" aria-hidden="true" />
         {hasSubtitles && isNarrow && (
@@ -3145,6 +3161,20 @@ const Workbench = () => {
                 >
                   Create subtitles
                 </Button>
+              </>
+            ) : project?.active_task?.status === "queued" &&
+              project?.active_task?.kind === "create_subtitles" ? (
+              <>
+                <p className="text-lg font-semibold text-foreground">Queued</p>
+                <div className="flex justify-center">
+                  <Button
+                    variant="secondary"
+                    data-testid="workbench-cancel-create-subtitles"
+                    onClick={() => void cancelCreateSubtitles()}
+                  >
+                    Cancel
+                  </Button>
+                </div>
               </>
             ) : (
               <>
@@ -3207,6 +3237,7 @@ const Workbench = () => {
               {hasVideoPreview ? (
                 <div
                   className="relative h-full w-full overflow-hidden rounded-md"
+                  data-testid="workbench-center-panel-video-wrapper"
                   onMouseEnter={() => {
                     setShowVideoControls(true);
                   }}
@@ -3251,7 +3282,10 @@ const Workbench = () => {
                     onDoubleClick={handleVideoSurfaceDoubleClick}
                     aria-hidden
                   />
-                  <div className="absolute" style={displayedVideoGeometryStyle}>
+                  <div
+                    className={cn("absolute", !isEditingActiveCue && "pointer-events-none")}
+                    style={displayedVideoGeometryStyle}
+                  >
                     {shouldRenderOverlayImage && (
                       <img
                         className="pointer-events-none absolute inset-0 h-full w-full transition-transform duration-200"
@@ -3792,34 +3826,49 @@ const Workbench = () => {
               )}
               <div className="space-y-3">
                 <p className="text-sm font-semibold text-foreground">{exportHeading}</p>
-                {exportChecklist.length > 0 && (
-                  <Checklist
-                    items={exportChecklist}
-                    className="text-left"
-                    data-testid="workbench-export-checklist"
-                  />
-                )}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{Math.round(exportProgressPct)}%</span>
-                    <span
-                      title={exportProgressMessage || undefined}
-                      data-testid="workbench-export-elapsed"
+                {project?.active_task?.status === "queued" &&
+                project?.active_task?.kind === "create_video_with_subtitles" ? (
+                  <div className="flex justify-center">
+                    <Button
+                      variant="secondary"
+                      data-testid="workbench-cancel-export"
+                      onClick={() => void cancelExport()}
                     >
-                      {exportElapsedText}
-                    </span>
+                      Cancel
+                    </Button>
                   </div>
-                  <Progress value={exportProgressPct} />
-                </div>
-                <div className="flex justify-center">
-                  <Button
-                    variant="secondary"
-                    data-testid="workbench-cancel-export"
-                    onClick={() => void cancelExport()}
-                  >
-                    Cancel
-                  </Button>
-                </div>
+                ) : (
+                  <>
+                    {exportChecklist.length > 0 && (
+                      <Checklist
+                        items={exportChecklist}
+                        className="text-left"
+                        data-testid="workbench-export-checklist"
+                      />
+                    )}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{Math.round(exportProgressPct)}%</span>
+                        <span
+                          title={exportProgressMessage || undefined}
+                          data-testid="workbench-export-elapsed"
+                        >
+                          {exportElapsedText}
+                        </span>
+                      </div>
+                      <Progress value={exportProgressPct} />
+                    </div>
+                    <div className="flex justify-center">
+                      <Button
+                        variant="secondary"
+                        data-testid="workbench-cancel-export"
+                        onClick={() => void cancelExport()}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
             </section>
           )}
