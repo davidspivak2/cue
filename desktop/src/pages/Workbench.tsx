@@ -646,6 +646,7 @@ const Workbench = () => {
   const [speedPopoverOpen, setSpeedPopoverOpen] = React.useState(false);
   const speedPopoverOpenDelayRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const speedPopoverCloseTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speedControlClickRef = React.useRef(false);
   const SPEED_POPOVER_CLOSE_DELAY_MS = 200;
   const [seekFeedback, setSeekFeedback] = React.useState<{ text: string; side: "left" | "right" } | null>(
     null
@@ -2778,6 +2779,33 @@ const Workbench = () => {
     }
   }, []);
 
+  const cycleToNextPlaybackSpeed = React.useCallback(() => {
+    setPlaybackSpeed((current) => {
+      const idx = SPEED_CHIPS.findIndex((s) => Math.abs(current - s) < 0.01);
+      if (idx >= 0) {
+        const nextIdx = (idx + 1) % SPEED_CHIPS.length;
+        return SPEED_CHIPS[nextIdx];
+      }
+      const next = SPEED_CHIPS.find((s) => s > current) ?? SPEED_CHIPS[0];
+      return next;
+    });
+  }, []);
+
+  const handleSpeedControlClick = React.useCallback(() => {
+    speedControlClickRef.current = true;
+    setSpeedPopoverOpen(true);
+    cycleToNextPlaybackSpeed();
+  }, [cycleToNextPlaybackSpeed]);
+
+  const handleSpeedPopoverOpenChange = React.useCallback((open: boolean) => {
+    if (!open && speedControlClickRef.current) {
+      speedControlClickRef.current = false;
+      return;
+    }
+    speedControlClickRef.current = false;
+    setSpeedPopoverOpen(open);
+  }, []);
+
   const showSeekFeedback = React.useCallback((text: string, side: "left" | "right") => {
     if (seekFeedbackTimeoutRef.current) {
       window.clearTimeout(seekFeedbackTimeoutRef.current);
@@ -3571,7 +3599,7 @@ const Workbench = () => {
                         onMouseEnter={handleSpeedPopoverMouseEnter}
                         onMouseLeave={handleSpeedPopoverMouseLeave}
                       >
-                        <Popover open={speedPopoverOpen} onOpenChange={setSpeedPopoverOpen}>
+                        <Popover open={speedPopoverOpen} onOpenChange={handleSpeedPopoverOpenChange}>
                           <PopoverTrigger asChild>
                             <button
                               type="button"
@@ -3579,6 +3607,7 @@ const Workbench = () => {
                               style={{ textShadow: "0 0 2px rgba(0,0,0,1), 0 1px 3px rgba(0,0,0,0.9)" }}
                               aria-label="Playback speed"
                               data-testid="workbench-video-speed"
+                              onClick={handleSpeedControlClick}
                             >
                               {formatSpeedLabel(playbackSpeed)}
                             </button>
