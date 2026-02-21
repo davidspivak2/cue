@@ -3111,7 +3111,7 @@ const Workbench = () => {
         {exportAreaTopBar}
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col border-t border-border bg-card">
+      <div className="flex min-h-0 flex-1 flex-col">
       {isLoading && (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           Loading video…
