@@ -1106,8 +1106,7 @@ test("cancel create subtitles returns home, removes the project, and shows no ca
       {
         id: "load_model",
         label: "Loading AI model",
-        state: "active",
-        detail: "Loading model"
+        state: "active"
       }
     ]
   };

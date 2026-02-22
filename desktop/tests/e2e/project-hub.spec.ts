@@ -363,8 +363,7 @@ test("project hub shows active task cards, inline notices, and background toasts
           {
             id: "load_model",
             label: "Loading AI model",
-            state: "active",
-            detail: "Loading model"
+            state: "active"
           }
         ]
       },
