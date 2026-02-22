@@ -5,9 +5,14 @@
 
 $ErrorActionPreference = "Stop"
 $LogDir = "C:\Cue_extra"
+$PidFile = "$LogDir\backend_pid.json"
 $LogFile = "$LogDir\backend_dev.log"
 $PortFile = "$LogDir\backend_port.txt"
 $BackendPort = 8765
+
+# So the desktop app can shut down this window when the user closes the app
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+@{ pid = $PID } | ConvertTo-Json | Set-Content -Path $PidFile -Encoding utf8
 
 $Repo = Split-Path $PSScriptRoot -Parent
 if (-not $Repo) { $Repo = "C:\Cue_repo" }
@@ -71,5 +76,6 @@ try {
 }
 finally {
     Pop-Location
+    if (Test-Path $PidFile) { Remove-Item $PidFile -Force }
     Stop-CueApps
 }

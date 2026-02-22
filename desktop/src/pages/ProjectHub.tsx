@@ -35,6 +35,8 @@ import {
   TooltipTrigger
 } from "@/components/ui/tooltip";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { getPersistedRunningJob } from "@/lib/runningJobPersistence";
+import { normalizeLocalPath } from "@/lib/normalizeLocalPath";
 import { cn } from "@/lib/utils";
 import {
   createProject,
@@ -80,6 +82,7 @@ const MAX_DURATION_DIFF_SECONDS = 3;
 const HAS_HAD_VIDEOS_KEY = "cue_has_had_videos";
 const PROJECT_HUB_VIEW_KEY = "cue_project_hub_view";
 const ADD_VIDEO_BUTTON = "Add video";
+const REMOVE_FROM_CUE_LABEL = "Remove from Cue";
 
 type ViewMode = "cards" | "list";
 
@@ -176,7 +179,8 @@ const getVideoDurationFromFile = (file: File): Promise<number | null> =>
 const getVideoDurationFromPath = (path: string, useTauri: boolean): Promise<number | null> =>
   new Promise((resolve) => {
     const video = document.createElement("video");
-    const src = useTauri ? convertFileSrc(path) : path;
+    const normalizedPath = normalizeLocalPath(path);
+    const src = useTauri ? convertFileSrc(normalizedPath) : normalizedPath;
 
     const cleanup = () => {
       video.removeAttribute("src");
@@ -200,12 +204,22 @@ const resolveStatusLabel = (project: ProjectSummary) => {
   if (project.missing_video) {
     return "Missing file";
   }
+  if (project.active_task?.kind === "create_subtitles") {
+    return "Creating subtitles";
+  }
+  if (project.active_task?.kind === "create_video_with_subtitles") {
+    return "Exporting";
+  }
   return STATUS_LABELS[project.status] ?? "Not started";
 };
 
 const resolveStatusBadgeClassName = (project: ProjectSummary): string => {
   if (project.missing_video) {
     return "border-transparent bg-red-500/15 text-red-700 dark:bg-red-400/20 dark:text-red-300";
+  }
+  const taskKind = project.active_task?.kind;
+  if (taskKind === "create_subtitles" || taskKind === "create_video_with_subtitles") {
+    return "border-transparent bg-amber-500/15 text-amber-700 dark:bg-amber-400/20 dark:text-amber-300";
   }
   const status = project.status ?? "";
   switch (status) {
@@ -228,7 +242,8 @@ const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean)
   if (!path) {
     return "";
   }
-  return useTauri ? convertFileSrc(path) : path;
+  const normalizedPath = normalizeLocalPath(path);
+  return useTauri ? convertFileSrc(normalizedPath) : normalizedPath;
 };
 
 const resolveTaskHeading = (project: ProjectSummary) => {
@@ -372,6 +387,19 @@ const ProjectHub = () => {
     loadProjects();
   }, [loadProjects]);
 
+  const prevPathRef = React.useRef<string>(location.pathname);
+  React.useEffect(() => {
+    const isOnHub = location.pathname === "/";
+    const wasElsewhere = prevPathRef.current !== "/";
+    prevPathRef.current = location.pathname;
+    if (isOnHub && wasElsewhere && !isLoading) {
+      const t = window.setTimeout(() => {
+        void loadProjects();
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [location.pathname, loadProjects, isLoading]);
+
   React.useEffect(() => {
     const cancelledCreateProjectId =
       typeof incomingState?.cancelledCreateProjectId === "string"
@@ -419,9 +447,13 @@ const ProjectHub = () => {
       return;
     }
     let cancelled = false;
-    const pollDelay = projects.some((project) => Boolean(project.active_task))
-      ? ACTIVE_TASK_POLL_MS
-      : IDLE_TASK_POLL_MS;
+    const hasAnyActiveTask =
+      projects.some((project) => Boolean(project.active_task)) ||
+      projects.some(
+        (project) => getPersistedRunningJob(project.project_id)?.kind === "create_subtitles"
+      );
+    const pollDelay =
+      hasAnyActiveTask || projects.length > 0 ? ACTIVE_TASK_POLL_MS : IDLE_TASK_POLL_MS;
     const timer = window.setTimeout(async () => {
       try {
         const data = await fetchProjects();
@@ -767,23 +799,17 @@ const ProjectHub = () => {
     setBanner(null);
     setDeletingProjectId(project.project_id);
     try {
-      const result = await deleteProject(project.project_id);
+      await deleteProject(project.project_id);
       setProjects((prev) => prev.filter((entry) => entry.project_id !== project.project_id));
       closeTab(project.project_id);
-      const cancelledCount = Array.isArray(result.cancelled_job_ids)
-        ? result.cancelled_job_ids.length
-        : 0;
-      const cancelledMessage =
-        cancelledCount > 0
-          ? ` Running job cancelled first${cancelledCount > 1 ? " (multiple jobs)." : "."}`
-          : "";
       const displayName =
         truncateForToast(resolveProjectTitle(project).trim()) || "The video";
-      const message = `${displayName} was removed.${cancelledMessage.trim() ? ` ${cancelledMessage.trim()}` : ""}`;
-      // D4: delete success must be toast, not inline banner (CUE_UX_UI_SPEC).
-      pushToast("Video deleted", message);
+      pushToast(`${displayName} removed from Cue.`, "");
     } catch (err) {
-      showBanner("error", err instanceof Error ? err.message : "Failed to delete video.");
+      showBanner(
+        "error",
+        err instanceof Error ? err.message : "Failed to remove video from Cue."
+      );
     } finally {
       setDeletingProjectId(null);
     }
@@ -810,54 +836,53 @@ const ProjectHub = () => {
   }, []);
 
   return (
-    <div
-      data-testid="project-hub"
-      className="space-y-6 rounded-lg border border-transparent p-1"
-      onDragOver={enableRootDrop ? handleRootDragOver : undefined}
-      onDrop={enableRootDrop ? handleDrop : undefined}
-    >
+    <TooltipProvider delayDuration={300}>
+      <div
+        data-testid="project-hub"
+        className="space-y-6 rounded-lg border border-transparent p-1"
+        onDragOver={enableRootDrop ? handleRootDragOver : undefined}
+        onDrop={enableRootDrop ? handleDrop : undefined}
+      >
       {!showEmptyState && (
         <PageHeader
-          title={<h1 className="text-2xl font-semibold text-foreground">Videos</h1>}
+          title={<h1 className="text-2xl font-semibold text-foreground">Home</h1>}
           onOpenSettings={openSettings}
           showSettings={!isTauriEnv}
           right={
             <>
               {visibleProjects.length > 0 && (
-                <TooltipProvider delayDuration={300}>
-                  <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    value={viewMode}
-                    onValueChange={(v) => v && isValidViewMode(v) && setViewMode(v)}
-                    className="inline-flex [&_[data-slot=toggle-group-item]]:h-[38px]"
-                  >
-                    <ToggleGroupItem value="cards" aria-label="Card view" className="relative">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            className="absolute inset-0 rounded-[inherit]"
-                            onClick={(e) => (e.target as HTMLElement).closest("button")?.click()}
-                          />
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={14}>Card view</TooltipContent>
-                      </Tooltip>
-                      <LayoutGrid className="relative z-10 h-4 w-4" />
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="list" aria-label="List view" className="relative">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            className="absolute inset-0 rounded-[inherit]"
-                            onClick={(e) => (e.target as HTMLElement).closest("button")?.click()}
-                          />
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={14}>List view</TooltipContent>
-                      </Tooltip>
-                      <List className="relative z-10 h-4 w-4" />
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </TooltipProvider>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  value={viewMode}
+                  onValueChange={(v) => v && isValidViewMode(v) && setViewMode(v)}
+                  className="inline-flex [&_[data-slot=toggle-group-item]]:h-[38px]"
+                >
+                  <ToggleGroupItem value="cards" aria-label="Card view" className="relative">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="absolute inset-0 rounded-[inherit]"
+                          onClick={(e) => (e.target as HTMLElement).closest("button")?.click()}
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={4}>Card view</TooltipContent>
+                    </Tooltip>
+                    <LayoutGrid className="relative z-10 h-4 w-4" />
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="list" aria-label="List view" className="relative">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="absolute inset-0 rounded-[inherit]"
+                          onClick={(e) => (e.target as HTMLElement).closest("button")?.click()}
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={4}>List view</TooltipContent>
+                    </Tooltip>
+                    <List className="relative z-10 h-4 w-4" />
+                  </ToggleGroupItem>
+                </ToggleGroup>
               )}
               <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
                 {ADD_VIDEO_BUTTON}
@@ -985,12 +1010,34 @@ const ProjectHub = () => {
             const isBusy =
               busyProjectId === project.project_id || deletingProjectId === project.project_id;
             const cardDisabled = isBusyOperation;
+            const persistedJob = getPersistedRunningJob(project.project_id);
+            const hasPersistedCreate = persistedJob?.kind === "create_subtitles";
+            const effectiveActiveTask =
+              project.active_task ??
+              (hasPersistedCreate
+                ? {
+                    kind: "create_subtitles",
+                    status: "running",
+                    pct: 0,
+                    heading: "Creating subtitles",
+                    message: null
+                  }
+                : null);
             const activeTaskPct =
-              typeof project.active_task?.pct === "number"
-                ? Math.max(0, Math.min(100, project.active_task.pct))
+              typeof effectiveActiveTask?.pct === "number"
+                ? Math.max(0, Math.min(100, effectiveActiveTask.pct))
                 : 0;
-            const activeTaskDetail = resolveTaskDetail(project);
-            const activeTaskHeading = resolveTaskHeading(project);
+            const activeTaskDetail = resolveTaskDetail({
+              ...project,
+              active_task: effectiveActiveTask
+            });
+            const activeTaskHeading = resolveTaskHeading({
+              ...project,
+              active_task: effectiveActiveTask
+            });
+            const hideProgressLabelCard =
+              effectiveActiveTask?.kind === "create_subtitles" ||
+              effectiveActiveTask?.kind === "create_video_with_subtitles";
             const taskNotice = project.task_notice;
             const shouldShowTaskNotice =
               !!taskNotice &&
@@ -1036,27 +1083,32 @@ const ProjectHub = () => {
                       Preview not available
                     </div>
                   )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-2 top-2 h-7 w-7 bg-background/80 text-muted-foreground hover:text-destructive"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (cardDisabled) {
-                        return;
-                      }
-                      setDeleteConfirmProject(project);
-                    }}
-                    onKeyDown={(event) => {
-                      event.stopPropagation();
-                    }}
-                    disabled={cardDisabled}
-                    aria-label={`Delete ${resolveProjectTitle(project)}`}
-                    data-testid={`project-card-delete-${project.project_id}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-2 top-2 h-7 w-7 bg-background/80 text-muted-foreground hover:text-destructive"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (cardDisabled) {
+                            return;
+                          }
+                          setDeleteConfirmProject(project);
+                        }}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                        }}
+                        disabled={cardDisabled}
+                        aria-label={`Remove ${resolveProjectTitle(project)} from Cue`}
+                        data-testid={`project-card-delete-${project.project_id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" collisionPadding={8}>{REMOVE_FROM_CUE_LABEL}</TooltipContent>
+                  </Tooltip>
                 </div>
                 <div className="mt-3 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1070,15 +1122,17 @@ const ProjectHub = () => {
                   {durationLabel && (
                     <p className="text-xs text-muted-foreground">{durationLabel}</p>
                   )}
-                  {project.active_task && (
+                  {effectiveActiveTask && (
                     <div
                       className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-2"
                       data-testid={`project-card-active-task-${project.project_id}`}
                     >
-                      <p className="text-xs font-medium text-foreground">{activeTaskHeading}</p>
-                      {project.active_task.status !== "queued" && (
+                      {!hideProgressLabelCard && (
+                        <p className="text-xs font-medium text-foreground">{activeTaskHeading}</p>
+                      )}
+                      {effectiveActiveTask.status !== "queued" && (
                         <>
-                          {activeTaskDetail && (
+                          {!hideProgressLabelCard && activeTaskDetail && (
                             <p className="truncate text-xs text-muted-foreground">
                               {activeTaskDetail}
                             </p>
@@ -1143,11 +1197,30 @@ const ProjectHub = () => {
                 const isBusy =
                   busyProjectId === project.project_id || deletingProjectId === project.project_id;
                 const cardDisabled = isBusyOperation;
+                const persistedJobList = getPersistedRunningJob(project.project_id);
+                const hasPersistedCreateList = persistedJobList?.kind === "create_subtitles";
+                const effectiveActiveTaskList =
+                  project.active_task ??
+                  (hasPersistedCreateList
+                    ? {
+                        kind: "create_subtitles",
+                        status: "running",
+                        pct: 0,
+                        heading: "Creating subtitles",
+                        message: null
+                      }
+                    : null);
                 const activeTaskPct =
-                  typeof project.active_task?.pct === "number"
-                    ? Math.max(0, Math.min(100, project.active_task.pct))
+                  typeof effectiveActiveTaskList?.pct === "number"
+                    ? Math.max(0, Math.min(100, effectiveActiveTaskList.pct))
                     : 0;
-                const activeTaskHeading = resolveTaskHeading(project);
+                const activeTaskHeading = resolveTaskHeading({
+                  ...project,
+                  active_task: effectiveActiveTaskList
+                });
+                const hideProgressLabelList =
+                  effectiveActiveTaskList?.kind === "create_subtitles" ||
+                  effectiveActiveTaskList?.kind === "create_video_with_subtitles";
                 const taskNotice = project.task_notice;
                 const shouldShowTaskNotice =
                   !!taskNotice &&
@@ -1207,12 +1280,14 @@ const ProjectHub = () => {
                     </Badge>
                     </TableCell>
                     <TableCell className="min-w-[140px]">
-                      {project.active_task ? (
+                      {effectiveActiveTaskList ? (
                         <div className="space-y-1">
-                          <p className="truncate text-xs font-medium text-foreground">
-                            {activeTaskHeading}
-                          </p>
-                          {project.active_task.status !== "queued" && (
+                          {!hideProgressLabelList && (
+                            <p className="truncate text-xs font-medium text-foreground">
+                              {activeTaskHeading}
+                            </p>
+                          )}
+                          {effectiveActiveTaskList && effectiveActiveTaskList.status !== "queued" && (
                             <div className="flex items-center gap-2">
                               <Progress value={activeTaskPct} className="h-1.5 flex-1" />
                               <span className="text-xs text-muted-foreground">
@@ -1245,22 +1320,27 @@ const ProjectHub = () => {
                       )}
                     </TableCell>
                     <TableCell className="w-[60px]">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (!cardDisabled) setDeleteConfirmProject(project);
-                        }}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        disabled={cardDisabled}
-                        aria-label={`Delete ${resolveProjectTitle(project)}`}
-                        data-testid={`project-list-row-delete-${project.project_id}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (!cardDisabled) setDeleteConfirmProject(project);
+                            }}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            disabled={cardDisabled}
+                            aria-label={`Remove ${resolveProjectTitle(project)} from Cue`}
+                            data-testid={`project-list-row-delete-${project.project_id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" collisionPadding={8}>{REMOVE_FROM_CUE_LABEL}</TooltipContent>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 );
@@ -1280,10 +1360,10 @@ const ProjectHub = () => {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete video?</DialogTitle>
+            <DialogTitle>{REMOVE_FROM_CUE_LABEL}?</DialogTitle>
             <DialogDescription>
-              This removes the video from Cue. Your original video file stays on your
-              computer.
+              This removes the video from Cue only. Your original and exported files
+              stay on your computer.
             </DialogDescription>
           </DialogHeader>
           {deleteConfirmProject ? (
@@ -1306,7 +1386,7 @@ const ProjectHub = () => {
               disabled={isBusyOperation}
               data-testid="confirm-delete-project"
             >
-              {isDeleting ? "Deleting..." : "Delete video"}
+              {isDeleting ? "Removing..." : REMOVE_FROM_CUE_LABEL}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1383,7 +1463,8 @@ const ProjectHub = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 };
 

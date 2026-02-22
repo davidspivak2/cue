@@ -22,25 +22,40 @@ function ThemeIconSync() {
   // Taskbar/window icon follows system theme only (not in-app theme).
   useEffect(() => {
     if (!isTauri()) return;
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const setWindowIcon = () => {
-      const iconName = media.matches ? "dark" : "light";
-      const url = `/icons/${iconName}-32.png`;
-      fetch(url)
-        .then((r) => r.arrayBuffer())
-        .then((buf) => getCurrentWindow().setIcon(buf))
-        .catch(() => {});
-    };
-    setWindowIcon();
-    media.addEventListener("change", setWindowIcon);
-    return () => media.removeEventListener("change", setWindowIcon);
+    try {
+      if (typeof window.matchMedia !== "function") return;
+      const media = window.matchMedia("(prefers-color-scheme: dark)");
+      const setWindowIcon = () => {
+        const iconName = media.matches ? "dark" : "light";
+        const url = `/icons/${iconName}-32.png`;
+        fetch(url)
+          .then((r) => r.arrayBuffer())
+          .then((buf) => getCurrentWindow().setIcon(buf))
+          .catch(() => {});
+      };
+      setWindowIcon();
+
+      if (typeof media.addEventListener === "function") {
+        media.addEventListener("change", setWindowIcon);
+        return () => media.removeEventListener("change", setWindowIcon);
+      }
+
+      if (typeof media.addListener === "function") {
+        media.addListener(setWindowIcon);
+        return () => media.removeListener(setWindowIcon);
+      }
+    } catch {
+      return;
+    }
+
+    return;
   }, []);
   return null;
 }
 
 const App = () => {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ThemeIconSync />
       <Routes>
         <Route path="/" element={<AppLayout />}>

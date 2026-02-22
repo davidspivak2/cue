@@ -7,7 +7,14 @@
     <title>Cue</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root" style="background:#09090b;min-height:100vh;"></div>
+    <script>
+      (function() {
+        var d = document.documentElement;
+        var m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+        d.classList.add(m && m.matches ? 'dark' : 'light');
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

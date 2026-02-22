@@ -277,7 +277,7 @@ test("project hub card interactions", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
 
   await page.getByTestId("project-card-delete-project-3").click();
-  await expect(page.getByRole("heading", { name: "Delete video?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Remove from Cue?" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByText("another.mp4")).toBeVisible();
 
@@ -285,11 +285,11 @@ test("project hub card interactions", async ({ page }) => {
     (request) => request.url().includes("/projects/project-3") && request.method() === "DELETE"
   );
   await page.getByTestId("project-card-delete-project-3").click();
-  await page.getByRole("button", { name: "Delete video" }).click();
+  await page.getByRole("button", { name: "Remove from Cue" }).click();
   await deleteRequest;
   // D4: delete success must be toast, not inline banner (CUE_UX_UI_SPEC).
   await expect(
-    page.getByRole("status").filter({ hasText: "Video deleted" })
+    page.getByRole("status").filter({ hasText: "Remove from Cue" })
   ).toBeVisible();
   await expect(page.getByTestId("project-hub").getByText("another.mp4")).toHaveCount(0);
   await expect(page.getByTestId("project-hub-banner")).toHaveCount(0);

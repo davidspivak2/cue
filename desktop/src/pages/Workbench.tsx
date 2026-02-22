@@ -47,7 +47,13 @@ import {
   ProjectWordTimingsDocument,
   updateProject
 } from "@/projectsClient";
+import { useRunningJobs } from "@/contexts/RunningJobsContext";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
+import {
+  clearPersistedRunningJob,
+  getPersistedRunningJob,
+  setPersistedRunningJob
+} from "@/lib/runningJobPersistence";
 import { useWorkbenchTabs } from "@/workbenchTabs";
 import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
 import {
@@ -667,6 +673,9 @@ const Workbench = () => {
   const [createSubtitlesJobStream, setCreateSubtitlesJobStream] =
     React.useState<JobEventStream | null>(null);
   const createSubtitlesJobIdRef = React.useRef<string | null>(null);
+  const createSubtitlesJustStartedRef = React.useRef(false);
+  const projectIdRef = React.useRef<string | null>(null);
+  projectIdRef.current = projectId ?? null;
   const [createSubtitlesStartedAt, setCreateSubtitlesStartedAt] = React.useState<string | null>(
     null
   );
@@ -679,6 +688,9 @@ const Workbench = () => {
   const [exportChecklist, setExportChecklist] = React.useState<ChecklistItem[]>([]);
   const [exportJobStream, setExportJobStream] = React.useState<JobEventStream | null>(null);
   const exportJobIdRef = React.useRef<string | null>(null);
+  const { registerJob: registerRunningJob } = useRunningJobs();
+  const createSubtitlesUnregisterRef = React.useRef<(() => void) | null>(null);
+  const exportUnregisterRef = React.useRef<(() => void) | null>(null);
   const [exportStartedAt, setExportStartedAt] = React.useState<string | null>(null);
   const [exportElapsedText, setExportElapsedText] = React.useState("");
   const [exportOutputPath, setExportOutputPath] = React.useState<string | null>(null);
@@ -690,6 +702,15 @@ const Workbench = () => {
   const styleBootstrapKeyRef = React.useRef<string | null>(null);
   const overlayRequestKeyRef = React.useRef<string | null>(null);
   const showSubtitlesOverlay = false;
+
+  React.useEffect(() => {
+    return () => {
+      createSubtitlesUnregisterRef.current?.();
+      createSubtitlesUnregisterRef.current = null;
+      exportUnregisterRef.current?.();
+      exportUnregisterRef.current = null;
+    };
+  }, []);
 
   React.useEffect(() => {
     let active = true;
@@ -1041,8 +1062,9 @@ const Workbench = () => {
     if (!projectId || !project) {
       return;
     }
+    const title = resolveTitle(project);
     updateTabMeta(projectId, {
-      title: resolveTitle(project),
+      title,
       path: project?.video?.path ?? project?.video?.filename ?? "",
       thumbnail_path: project?.video?.thumbnail_path ?? undefined
     });
@@ -1213,7 +1235,14 @@ const Workbench = () => {
     (event: JobEvent) => {
       if (event.type === "started") {
         setCreateSubtitlesHeading(asNonEmptyString(event.heading) ?? "Creating subtitles");
-        setCreateSubtitlesStartedAt(asString(event.ts) ?? new Date().toISOString());
+        setCreateSubtitlesStartedAt((prev) => {
+          const ts = asString(event.ts) ?? new Date().toISOString();
+          if (!prev) return ts;
+          const prevMs = Date.parse(prev);
+          const tsMs = Date.parse(ts);
+          if (!Number.isFinite(prevMs) || !Number.isFinite(tsMs)) return prev ?? ts;
+          return prevMs <= tsMs ? prev : ts;
+        });
         return;
       }
       if (event.type === "checklist") {
@@ -1242,6 +1271,9 @@ const Workbench = () => {
         return;
       }
       if (event.type === "completed") {
+        createSubtitlesUnregisterRef.current?.();
+        createSubtitlesUnregisterRef.current = null;
+        if (projectIdRef.current) clearPersistedRunningJob(projectIdRef.current);
         setCreateSubtitlesProgressPct(100);
         setIsCreatingSubtitles(false);
         setCreateSubtitlesStartedAt(null);
@@ -1255,6 +1287,9 @@ const Workbench = () => {
         return;
       }
       if (event.type === "cancelled") {
+        createSubtitlesUnregisterRef.current?.();
+        createSubtitlesUnregisterRef.current = null;
+        if (projectIdRef.current) clearPersistedRunningJob(projectIdRef.current);
         setCreateSubtitlesProgressPct(0);
         setCreateSubtitlesProgressMessage("");
         setIsCreatingSubtitles(false);
@@ -1271,6 +1306,9 @@ const Workbench = () => {
         return;
       }
       if (event.type === "error") {
+        createSubtitlesUnregisterRef.current?.();
+        createSubtitlesUnregisterRef.current = null;
+        if (projectIdRef.current) clearPersistedRunningJob(projectIdRef.current);
         setCreateSubtitlesProgressPct(0);
         setCreateSubtitlesProgressMessage("");
         setIsCreatingSubtitles(false);
@@ -1314,8 +1352,14 @@ const Workbench = () => {
       );
       createSubtitlesJobIdRef.current = jobId;
       setCreateSubtitlesJobStream(stream);
+      createSubtitlesUnregisterRef.current?.();
+      createSubtitlesUnregisterRef.current = registerRunningJob({
+        id: jobId,
+        label: `Creating subtitles for ${resolveTitle(project)}`,
+        cancel: () => stream.cancel()
+      });
     },
-    [createSubtitlesJobStream, handleCreateSubtitlesEvent]
+    [createSubtitlesJobStream, handleCreateSubtitlesEvent, project, registerRunningJob]
   );
 
   const startCreateSubtitles = React.useCallback(async () => {
@@ -1335,10 +1379,16 @@ const Workbench = () => {
     setCreateSubtitlesError(null);
     setCreateSubtitlesHeading("Creating subtitles");
     setCreateSubtitlesProgressPct(0);
-    setCreateSubtitlesProgressMessage("Starting...");
-    setCreateSubtitlesChecklist(defaultChecklist(buildGenerateChecklist(settings)));
+    const genItems = buildGenerateChecklist(settings);
+    const initialChecklist = defaultChecklist(genItems);
+    if (initialChecklist.length > 0) {
+      initialChecklist[0] = { ...initialChecklist[0], state: "active" };
+    }
+    setCreateSubtitlesProgressMessage(initialChecklist[0]?.label ?? "Extracting audio");
+    setCreateSubtitlesChecklist(initialChecklist);
     setIsCreatingSubtitles(true);
     setCreateSubtitlesStartedAt(new Date().toISOString());
+    createSubtitlesJustStartedRef.current = true;
 
     try {
       const job = await createSubtitlesJob(
@@ -1364,13 +1414,33 @@ const Workbench = () => {
         }
       );
       createSubtitlesJobIdRef.current = job.jobId;
+      createSubtitlesJustStartedRef.current = false;
       setCreateSubtitlesJobStream(job);
+      setPersistedRunningJob(projectId, {
+        jobId: job.jobId,
+        eventsUrl: job.eventsUrl,
+        kind: "create_subtitles"
+      });
+      createSubtitlesUnregisterRef.current?.();
+      createSubtitlesUnregisterRef.current = registerRunningJob({
+        id: job.jobId,
+        label: `Creating subtitles for ${resolveTitle(project)}`,
+        cancel: () => job.cancel()
+      });
     } catch (err) {
+      createSubtitlesJustStartedRef.current = false;
       if (err instanceof JobConflictError) {
         if (err.conflict.kind === "create_subtitles") {
           setCreateSubtitlesError(null);
           setIsCreatingSubtitles(true);
           createSubtitlesJobIdRef.current = err.conflict.job_id;
+          const eventsUrl =
+            err.conflict.events_url ?? `http://127.0.0.1:8765/jobs/${err.conflict.job_id}/events`;
+          setPersistedRunningJob(projectId, {
+            jobId: err.conflict.job_id,
+            eventsUrl,
+            kind: "create_subtitles"
+          });
           attachCreateSubtitlesStream(err.conflict.job_id, err.conflict.events_url);
           setProjectReloadTick((prev) => prev + 1);
           return;
@@ -1394,6 +1464,7 @@ const Workbench = () => {
     isExporting,
     project,
     projectId,
+    registerRunningJob,
     resolveOutputDir,
     settings
   ]);
@@ -1406,6 +1477,8 @@ const Workbench = () => {
     if (!jobId || !projectId) {
       return;
     }
+    createSubtitlesUnregisterRef.current?.();
+    createSubtitlesUnregisterRef.current = null;
     const projectTitle = resolveTitle(project);
     navigate("/", {
       state: {
@@ -1499,6 +1572,8 @@ const Workbench = () => {
         return;
       }
       if (event.type === "completed") {
+        exportUnregisterRef.current?.();
+        exportUnregisterRef.current = null;
         setExportProgressPct(100);
         setIsExporting(false);
         setExportStartedAt(null);
@@ -1511,6 +1586,8 @@ const Workbench = () => {
         return;
       }
       if (event.type === "cancelled") {
+        exportUnregisterRef.current?.();
+        exportUnregisterRef.current = null;
         setExportProgressPct(0);
         setExportProgressMessage("");
         setIsExporting(false);
@@ -1524,6 +1601,8 @@ const Workbench = () => {
         return;
       }
       if (event.type === "error") {
+        exportUnregisterRef.current?.();
+        exportUnregisterRef.current = null;
         setExportProgressPct(0);
         setExportProgressMessage("");
         setIsExporting(false);
@@ -1575,8 +1654,14 @@ const Workbench = () => {
       );
       exportJobIdRef.current = jobId;
       setExportJobStream(stream);
+      exportUnregisterRef.current?.();
+      exportUnregisterRef.current = registerRunningJob({
+        id: jobId,
+        label: `Exporting ${resolveTitle(project)}`,
+        cancel: () => stream.cancel()
+      });
     },
-    [exportJobStream, handleExportEvent]
+    [exportJobStream, handleExportEvent, project, registerRunningJob]
   );
 
   const startExport = React.useCallback(async () => {
@@ -1640,6 +1725,12 @@ const Workbench = () => {
       );
       exportJobIdRef.current = job.jobId;
       setExportJobStream(job);
+      exportUnregisterRef.current?.();
+      exportUnregisterRef.current = registerRunningJob({
+        id: job.jobId,
+        label: `Exporting ${resolveTitle(project)}`,
+        cancel: () => job.cancel()
+      });
     } catch (err) {
       if (err instanceof JobConflictError) {
         if (err.conflict.kind === "create_video_with_subtitles") {
@@ -1683,6 +1774,8 @@ const Workbench = () => {
     if (!jobId) {
       return;
     }
+    exportUnregisterRef.current?.();
+    exportUnregisterRef.current = null;
     if (exportJobStream?.jobId === jobId) {
       await exportJobStream.cancel();
       return;
@@ -1726,7 +1819,7 @@ const Workbench = () => {
         );
         setCreateSubtitlesProgressPct(pct);
         setCreateSubtitlesProgressMessage(message);
-        const fullList = defaultChecklist(buildGenerateChecklist(settings));
+        const fullList = defaultChecklist(buildGenerateChecklist(settings ?? {}));
         const merged =
           checklist.length > 0
             ? fullList.map((fullItem) => {
@@ -1746,7 +1839,14 @@ const Workbench = () => {
               })
             : fullList;
         setCreateSubtitlesChecklist(merged);
-        setCreateSubtitlesStartedAt(startedAt);
+        setCreateSubtitlesStartedAt((prev) => {
+          if (!startedAt) return prev;
+          if (!prev) return startedAt;
+          const prevMs = Date.parse(prev);
+          const serverMs = Date.parse(startedAt);
+          if (!Number.isFinite(prevMs) || !Number.isFinite(serverMs)) return prev ?? startedAt;
+          return prevMs <= serverMs ? prev : startedAt;
+        });
         createSubtitlesJobIdRef.current = activeTask.job_id;
         if (!createSubtitlesJobStream || createSubtitlesJobStream.jobId !== activeTask.job_id) {
           attachCreateSubtitlesStream(activeTask.job_id);
@@ -1779,10 +1879,47 @@ const Workbench = () => {
       return;
     }
 
+    if (!activeTask && projectId) {
+      const persisted = getPersistedRunningJob(projectId);
+      if (persisted?.kind === "create_subtitles") {
+        const isSameSessionJustStarted =
+          createSubtitlesJustStartedRef.current ||
+          (createSubtitlesJobIdRef.current === persisted.jobId && createSubtitlesStartedAt != null);
+        setIsCreatingSubtitles(true);
+        setCreateSubtitlesError(null);
+        setIsExporting(false);
+        setExportStartedAt(null);
+        setExportError(null);
+        exportJobIdRef.current = null;
+        setExportJobStream((prev) => {
+          prev?.close();
+          return null;
+        });
+        setCreateSubtitlesHeading("Creating subtitles");
+        setCreateSubtitlesProgressPct(0);
+        if (!isSameSessionJustStarted) {
+          setCreateSubtitlesProgressMessage("");
+          setCreateSubtitlesChecklist(
+            settings ? defaultChecklist(buildGenerateChecklist(settings)) : []
+          );
+          setCreateSubtitlesStartedAt(null);
+        }
+        createSubtitlesJobIdRef.current = persisted.jobId;
+        if (
+          !createSubtitlesJobStream ||
+          createSubtitlesJobStream.jobId !== persisted.jobId
+        ) {
+          attachCreateSubtitlesStream(persisted.jobId, persisted.eventsUrl);
+        }
+        return;
+      }
+    }
+
     const taskNotice = project.task_notice;
     if (!activeTask && createSubtitlesJobIdRef.current && isCreatingSubtitles && !createSubtitlesJobStream) {
       const finishedJobId = createSubtitlesJobIdRef.current;
       createSubtitlesJobIdRef.current = null;
+      if (projectId) clearPersistedRunningJob(projectId);
       setIsCreatingSubtitles(false);
       setCreateSubtitlesStartedAt(null);
       setCreateSubtitlesProgressMessage("");
@@ -1816,10 +1953,12 @@ const Workbench = () => {
     attachCreateSubtitlesStream,
     attachExportStream,
     createSubtitlesJobStream,
+    createSubtitlesStartedAt,
     exportJobStream,
     isCreatingSubtitles,
     isExporting,
     project,
+    projectId,
     settings
   ]);
 
@@ -1882,6 +2021,11 @@ const Workbench = () => {
     !isExporting &&
     (project?.status === "ready" || project?.status === "done");
   const showNoSubtitlesState = !isLoading && !error && !subtitleLoadError && !hasSubtitles;
+  const persistedCreateJob = projectId ? getPersistedRunningJob(projectId) : null;
+  const hasActiveCreateSubtitles =
+    isCreatingSubtitles ||
+    project?.active_task?.kind === "create_subtitles" ||
+    persistedCreateJob?.kind === "create_subtitles";
   const hasVideoPreview = Boolean(previewSrc);
   const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
   const isOverlayOpen =
@@ -3152,7 +3296,7 @@ const Workbench = () => {
               </div>
             )}
 
-            {!isCreatingSubtitles ? (
+            {!hasActiveCreateSubtitles ? (
               <>
                 <p className="text-lg font-semibold text-foreground">No subtitles yet.</p>
                 <Button
@@ -3176,39 +3320,74 @@ const Workbench = () => {
                   </Button>
                 </div>
               </>
-            ) : (
-              <>
-                <p className="text-lg font-semibold text-foreground">{createSubtitlesHeading}</p>
-                {createSubtitlesChecklist.length > 0 && (
-                  <Checklist
-                    items={createSubtitlesChecklist}
-                    className="text-left"
-                    data-testid="workbench-create-checklist"
-                  />
-                )}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{Math.round(createSubtitlesProgressPct)}%</span>
-                    <span
-                      title={createSubtitlesProgressMessage || undefined}
-                      data-testid="workbench-create-elapsed"
-                    >
-                      {createSubtitlesElapsedText}
-                    </span>
+            ) : (() => {
+              const at = project?.active_task;
+              const heading =
+                createSubtitlesHeading ||
+                (at?.status === "queued" ? "Queued" : at?.heading) ||
+                "Creating subtitles";
+              const checklistFromApi =
+                at && at.checklist?.length
+                  ? buildChecklistFromActiveTask(at)
+                  : createSubtitlesChecklist;
+              const checklist =
+                checklistFromApi.length > 0
+                  ? checklistFromApi
+                  : settings
+                    ? defaultChecklist(buildGenerateChecklist(settings))
+                    : [];
+              const pct =
+                isCreatingSubtitles || createSubtitlesProgressPct > 0
+                  ? createSubtitlesProgressPct
+                  : typeof at?.pct === "number"
+                    ? Math.max(0, Math.min(100, at.pct))
+                    : 0;
+              const startedAt =
+                createSubtitlesStartedAt ||
+                (typeof at?.started_at === "string"
+                  ? at.started_at
+                  : typeof at?.updated_at === "string"
+                    ? at.updated_at
+                    : null);
+              const elapsedText =
+                createSubtitlesElapsedText || formatElapsedSince(startedAt);
+              const message =
+                createSubtitlesProgressMessage ||
+                (typeof at?.message === "string" ? at.message : "");
+              return (
+                <>
+                  <p className="text-lg font-semibold text-foreground">{heading}</p>
+                  {checklist.length > 0 && (
+                    <Checklist
+                      items={checklist}
+                      className="text-left"
+                      data-testid="workbench-create-checklist"
+                    />
+                  )}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{Math.round(pct)}%</span>
+                      <span
+                        title={message || undefined}
+                        data-testid="workbench-create-elapsed"
+                      >
+                        {elapsedText}
+                      </span>
+                    </div>
+                    <Progress value={pct} />
                   </div>
-                  <Progress value={createSubtitlesProgressPct} />
-                </div>
-                <div className="flex justify-center">
-                  <Button
-                    variant="secondary"
-                    data-testid="workbench-cancel-create-subtitles"
-                    onClick={() => void cancelCreateSubtitles()}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </>
-            )}
+                  <div className="flex justify-center">
+                    <Button
+                      variant="secondary"
+                      data-testid="workbench-cancel-create-subtitles"
+                      onClick={() => void cancelCreateSubtitles()}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </section>
       )}
@@ -3247,7 +3426,7 @@ const Workbench = () => {
                 >
                   <video
                     ref={videoRef}
-                    className="h-full w-full rounded-md bg-black object-contain"
+                    className="h-full w-full rounded-md bg-black object-contain dark:bg-muted"
                     src={previewSrc}
                     onPlay={() => {
                       handleVideoPlay();

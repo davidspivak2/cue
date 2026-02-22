@@ -52,8 +52,9 @@ echo === Checking if backend is already healthy ===
 call :read_port
 call :probe_health
 if "!HEALTH_HTTP!"=="200" (
-  echo Backend already healthy at !HEALTH_URL!
-  goto :launch_desktop
+  echo Backend already running. Stopping it so a fresh backend window can open...
+  powershell -NoProfile -Command "if (Test-Path '%EXTRA%\backend_pid.json') { $j = Get-Content '%EXTRA%\backend_pid.json' -Raw | ConvertFrom-Json; if ($j.pid) { Start-Process -FilePath taskkill -ArgumentList '/PID',$j.pid,'/T','/F' -Wait -WindowStyle Hidden } }"
+  timeout /t 2 /nobreak >nul
 )
 
 echo.
@@ -96,11 +97,22 @@ echo.
 echo === Launching desktop (Tauri) ===
 if not exist "%REPO%\scripts\run_desktop_dev.cmd" (
   echo ERROR: %REPO%\scripts\run_desktop_dev.cmd not found.
-  exit /b 1
+  set "EXIT_CODE=1"
+  goto :cleanup
 )
 
 call "%REPO%\scripts\run_desktop_dev.cmd"
-exit /b %errorlevel%
+set "EXIT_CODE=%errorlevel%"
+goto :cleanup
+
+:cleanup
+rem When desktop exits (app closed or Ctrl+C), shut down the backend so nothing is left running.
+if exist "%PORT_FILE%" (
+  echo.
+  echo === Shutting down backend ===
+  powershell -NoProfile -Command "if (Test-Path '%EXTRA%\backend_pid.json') { $j = Get-Content '%EXTRA%\backend_pid.json' -Raw | ConvertFrom-Json; if ($j.pid) { Start-Process -FilePath taskkill -ArgumentList '/PID',$j.pid,'/T','/F' -Wait -WindowStyle Hidden; Write-Host 'Backend stopped.' } }"
+)
+exit /b %EXIT_CODE%
 
 rem --- helpers ---
 

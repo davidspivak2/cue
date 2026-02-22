@@ -22,10 +22,11 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useSettings } from "@/contexts/SettingsContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
+import { normalizeLocalPath } from "@/lib/normalizeLocalPath";
 import { truncatePathMiddle } from "@/lib/truncatePathMiddle";
 import { cn } from "@/lib/utils";
 import { HOME_TAB_ID, useWorkbenchTabs } from "@/workbenchTabs";
-import type { WorkbenchTab } from "@/workbenchTabs";
+import type { ActiveView, WorkbenchTab } from "@/workbenchTabs";
 
 /** Breakpoints for title bar tab layout (window width). */
 const TITLE_BAR_WIDE = 720;
@@ -78,10 +79,14 @@ function SortableTitleTab({
         : "max-w-[44px]";
 
   const thumbnailSrc =
-    isIconOnly && tab.thumbnail_path ? convertFileSrc(tab.thumbnail_path) : null;
+    isIconOnly && tab.thumbnail_path
+      ? convertFileSrc(normalizeLocalPath(tab.thumbnail_path))
+      : null;
   const title = tab.title || "Untitled";
   const tooltipText =
     tab.path && tab.path.length > 0 ? truncatePathMiddle(tab.path, 56) : title;
+
+  const [tabHover, setTabHover] = React.useState(false);
 
   return (
     <div
@@ -89,7 +94,7 @@ function SortableTitleTab({
       style={style}
       data-testid={`title-bar-tab-${tab.projectId}`}
       className={cn(
-        "flex h-full shrink-0 items-center gap-1 border-b-2 px-2 transition-colors duration-200",
+        "flex h-full shrink-0 items-center gap-1 border-b-2 border-r border-foreground/15 pl-3 pr-2 transition-colors duration-200",
         maxWidthClass,
         isActive
           ? "border-b-foreground/30 bg-foreground/8"
@@ -98,9 +103,11 @@ function SortableTitleTab({
       )}
       {...attributes}
       {...listeners}
+      onPointerEnter={() => setTabHover(true)}
+      onPointerLeave={() => setTabHover(false)}
     >
       <TooltipProvider delayDuration={300}>
-        <Tooltip>
+        <Tooltip open={tabHover}>
           <TooltipTrigger asChild>
             <button
               type="button"
@@ -144,10 +151,59 @@ function SortableTitleTab({
         onClick={(e) => onCloseTab(tab.projectId, e)}
         aria-label={`Close ${title}`}
         data-testid={`title-bar-tab-close-${tab.projectId}`}
-        className="shrink-0 p-0.5 hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="shrink-0 rounded-md p-0.5 hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <X className="h-3.5 w-3.5 text-muted-foreground" />
       </button>
+    </div>
+  );
+}
+
+function HomeTabWithTooltip({
+  activeView,
+  onHomeClick,
+}: {
+  activeView: ActiveView;
+  onHomeClick: () => void;
+}) {
+  const [homeHover, setHomeHover] = React.useState(false);
+  return (
+    <div
+      className="h-full"
+      onPointerEnter={() => setHomeHover(true)}
+      onPointerLeave={() => setHomeHover(false)}
+    >
+      <TooltipProvider delayDuration={300}>
+        <Tooltip open={homeHover}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={(e) => {
+                if (activeView === HOME_TAB_ID) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  return;
+                }
+                onHomeClick();
+              }}
+              aria-label="Home"
+              data-testid="title-bar-home"
+              aria-current={activeView === HOME_TAB_ID ? "true" : undefined}
+              className={cn(
+                "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 border-r border-foreground/15 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                activeView === HOME_TAB_ID
+                  ? "!cursor-default border-b-foreground/30 bg-foreground/8 text-foreground"
+                  : "border-b-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              )}
+            >
+              <Home className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            Home
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   );
 }
@@ -276,37 +332,10 @@ const TitleBar = () => {
         data-tauri-drag-region
         onDoubleClick={handleMaximize}
       >
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={(e) => {
-                  if (activeView === HOME_TAB_ID) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return;
-                  }
-                  handleHomeClick();
-                }}
-                aria-label="Home"
-                data-testid="title-bar-home"
-                aria-current={activeView === HOME_TAB_ID ? "true" : undefined}
-                className={cn(
-                  "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                  activeView === HOME_TAB_ID
-                    ? "!cursor-default border-b-foreground/30 bg-foreground/8 text-foreground"
-                    : "border-b-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                )}
-              >
-                <Home className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>
-              Home
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <HomeTabWithTooltip
+          activeView={activeView}
+          onHomeClick={handleHomeClick}
+        />
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext
             items={tabs.map((t) => t.projectId)}

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { X } from "lucide-react";
+import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { legacyCopy } from "@/legacyCopy";
@@ -143,7 +143,7 @@ const VideoCard = ({
             aria-label={legacyCopy.videoCard.remove}
             disabled={disabled}
           >
-            <X className="h-4 w-4" />
+            <Trash2 className="h-4 w-4" />
           </Button>
         )}
       </div>

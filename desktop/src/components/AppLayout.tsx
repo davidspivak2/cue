@@ -15,8 +15,10 @@ import {
   SheetTitle
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { RunningJobsProvider } from "@/contexts/RunningJobsContext";
 import { SettingsProvider } from "@/contexts/SettingsContext";
 import { ToastProvider } from "@/contexts/ToastContext";
+import { ExitConfirmHandler } from "@/components/ExitConfirmHandler";
 import Settings from "@/pages/Settings";
 import { fetchProjects } from "@/projectsClient";
 import { WorkbenchTabsProvider } from "@/workbenchTabs";
@@ -204,9 +206,11 @@ const AppLayout = () => {
   }, [pushToast]);
 
   return (
-    <WorkbenchTabsProvider>
-      <SettingsProvider openSettings={openSettings} closeSettings={closeSettings} settingsOpen={settingsOpen}>
-        <ToastProvider
+    <RunningJobsProvider>
+      <ExitConfirmHandler />
+      <WorkbenchTabsProvider>
+        <SettingsProvider openSettings={openSettings} closeSettings={closeSettings} settingsOpen={settingsOpen}>
+          <ToastProvider
           pushToast={pushToast}
           markExportCompleteSeen={markExportCompleteSeen}
           haveExportCompleteBeenSeen={haveExportCompleteBeenSeen}
@@ -304,7 +308,9 @@ const AppLayout = () => {
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">{toast.message}</p>
+                {toast.message ? (
+                  <p className="text-xs text-muted-foreground">{toast.message}</p>
+                ) : null}
                 {toast.actions && toast.actions.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {toast.actions.map((action, i) => (
@@ -328,9 +334,10 @@ const AppLayout = () => {
           </div>
         )}
           </div>
-        </ToastProvider>
-      </SettingsProvider>
-    </WorkbenchTabsProvider>
+          </ToastProvider>
+        </SettingsProvider>
+      </WorkbenchTabsProvider>
+    </RunningJobsProvider>
   );
 };
 
