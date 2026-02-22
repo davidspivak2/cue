@@ -16,6 +16,8 @@ const PERSIST_KEY = "cue_title_bar_tabs";
 type PersistedTabs = {
   projectIds: string[];
   lastActiveProjectId: string | typeof HOME_TAB_ID;
+  /** Optional per-tab meta so tab titles survive restart. Keyed by projectId. */
+  tabMeta?: Record<string, { title?: string }>;
 };
 
 type WorkbenchTabsContextValue = {
@@ -58,21 +60,33 @@ function loadPersisted(): PersistedTabs | null {
     if (!Array.isArray(data.projectIds) || typeof data.lastActiveProjectId !== "string") {
       return null;
     }
+    const tabMeta =
+      data.tabMeta && typeof data.tabMeta === "object" && !Array.isArray(data.tabMeta)
+        ? data.tabMeta
+        : undefined;
     return {
       projectIds: data.projectIds.filter((id): id is string => typeof id === "string"),
       lastActiveProjectId:
         data.lastActiveProjectId === HOME_TAB_ID ? HOME_TAB_ID : data.lastActiveProjectId,
+      tabMeta,
     };
   } catch {
     return null;
   }
 }
 
-function savePersisted(projectIds: string[], lastActiveProjectId: string | typeof HOME_TAB_ID) {
+function savePersisted(tabs: WorkbenchTab[], lastActiveProjectId: string | typeof HOME_TAB_ID) {
   try {
+    const projectIds = tabs.map((t) => t.projectId);
+    const tabMeta: Record<string, { title?: string }> = {};
+    for (const t of tabs) {
+      if (t.title && t.title !== "Untitled" && t.title !== "Loading...") {
+        tabMeta[t.projectId] = { title: t.title };
+      }
+    }
     localStorage.setItem(
       PERSIST_KEY,
-      JSON.stringify({ projectIds, lastActiveProjectId } satisfies PersistedTabs)
+      JSON.stringify({ projectIds, lastActiveProjectId, tabMeta } satisfies PersistedTabs)
     );
   } catch {
     // ignore
@@ -97,7 +111,7 @@ export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode 
     }
     const initialTabs: WorkbenchTab[] = data.projectIds.map((id) => ({
       projectId: id,
-      title: "Untitled",
+      title: data.tabMeta?.[id]?.title ?? "Untitled",
     }));
     setTabs(initialTabs);
     const last = data.lastActiveProjectId;
@@ -131,10 +145,7 @@ export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode 
 
   // Persist whenever tabs or activeView change
   React.useEffect(() => {
-    savePersisted(
-      tabs.map((t) => t.projectId),
-      activeView
-    );
+    savePersisted(tabs, activeView);
   }, [tabs, activeView]);
 
   const setActiveView = React.useCallback((view: ActiveView) => {

@@ -13,6 +13,7 @@ debug_raw_segments.py
 docs/handoffs
 .cursor/
 .codex/
+docs/internal/SESSION_HANDOFF*.md
 
 # Desktop UI (Node)
 desktop/node_modules/

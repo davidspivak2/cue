@@ -4,11 +4,20 @@ use std::{
     io,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use tauri::{path::BaseDirectory, App, Manager, RunEvent};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+use tauri::{path::BaseDirectory, App, AppHandle, Emitter, Manager, RunEvent, WindowEvent};
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 use zip::ZipArchive;
 
 const ENGINE_PAYLOAD_FILENAME: &str = "engine_payload.zip";
@@ -82,6 +91,13 @@ fn cue_root_dir() -> PathBuf {
 
 fn cue_logs_dir() -> PathBuf {
     cue_root_dir().join("logs")
+}
+
+#[cfg(windows)]
+fn cue_extra_dir() -> PathBuf {
+    env::var_os("CUE_EXTRA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("C:\\Cue_extra"))
 }
 
 fn cue_engine_root_dir() -> PathBuf {
@@ -239,6 +255,9 @@ fn start_packaged_backend(app: &App) -> Option<Child> {
         }
     }
 
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
     match command.spawn() {
         Ok(child) => Some(child),
         Err(err) => {
@@ -258,6 +277,8 @@ fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
     };
 
     let Some(child) = guard.as_mut() else {
+        #[cfg(windows)]
+        try_stop_dev_backend_by_pid_file();
         return;
     };
 
@@ -272,11 +293,65 @@ fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
         }
     }
 
+    let pid = child.id();
+
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    #[cfg(not(windows))]
     if let Err(err) = child.kill() {
         eprintln!("Failed to terminate backend process: {err}");
     }
+    #[cfg(windows)]
+    let _ = child.kill();
     let _ = child.wait();
     *guard = None;
+}
+
+struct AllowCloseState(AtomicBool);
+impl Default for AllowCloseState {
+    fn default() -> Self {
+        Self(AtomicBool::new(false))
+    }
+}
+
+#[tauri::command]
+fn allow_exit_and_close(app: AppHandle) -> Result<(), String> {
+    app.try_state::<AllowCloseState>()
+        .ok_or_else(|| "AllowCloseState not found".to_string())?
+        .0
+        .store(true, Ordering::Relaxed);
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    window.close().map_err(|e| e.to_string())
+}
+
+#[cfg(windows)]
+fn try_stop_dev_backend_by_pid_file() {
+    let pid_path = cue_extra_dir().join("backend_pid.json");
+    let Ok(contents) = fs::read_to_string(&pid_path) else {
+        return;
+    };
+    let rest = contents.trim().strip_prefix("{\"pid\":").or_else(|| contents.trim().strip_prefix("{\"pid\": "));
+    let pid: u32 = match rest.and_then(|s| s.trim().trim_end_matches('}').trim().parse().ok()) {
+        Some(p) => p,
+        None => return,
+    };
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = fs::remove_file(pid_path);
 }
 
 fn main() {
@@ -286,6 +361,7 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
+            app.manage(AllowCloseState::default());
             if let Some(child) = start_packaged_backend(app) {
                 match backend_child_for_setup.lock() {
                     Ok(mut lock) => {
@@ -300,10 +376,36 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    return;
+                }
+                let allow = window
+                    .app_handle()
+                    .try_state::<AllowCloseState>()
+                    .map(|s| s.0.load(Ordering::Relaxed))
+                    .unwrap_or(false);
+                if !allow {
+                    api.prevent_close();
+                    let _ = window.app_handle().emit("close-requested", ());
+                }
+            }
+        })
+        .invoke_handler(tauri::generate_handler![allow_exit_and_close])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(move |_app, event| {
-            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+            let should_stop = matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit)
+                || matches!(
+                    event,
+                    RunEvent::WindowEvent {
+                        label,
+                        event: WindowEvent::CloseRequested { .. },
+                        ..
+                    } if label == "main"
+                );
+            if should_stop {
                 stop_backend_process(&backend_child_for_run);
             }
         });
