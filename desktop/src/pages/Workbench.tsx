@@ -294,6 +294,8 @@ const applyProgressMessageToChecklist = (
   /** Don't show a message as detail if it's another step's label (avoids "Loading AI model" showing "Writing subtitles"). */
   const isLabelOfAnotherStep = (currentId: string) =>
     items.some((o) => o.id !== currentId && o.label != null && rawLower === o.label.trim().toLowerCase());
+  const isLoadModelStepRedundant = (id: string) =>
+    id === checklistStepIds.loadModel && rawLower === "loading model";
   let matchedById = false;
   const updated = items.map((item) => {
     if (!stepId || item.id !== stepId) {
@@ -306,7 +308,7 @@ const applyProgressMessageToChecklist = (
     const detail =
       alreadyFinished
         ? item.detail
-        : (isRedundantWithLabel(item.label) || isLabelOfAnotherStep(item.id) ? undefined : rawDetail);
+        : (isRedundantWithLabel(item.label) || isLabelOfAnotherStep(item.id) || isLoadModelStepRedundant(item.id) ? undefined : rawDetail);
     return { ...item, state: nextState, detail };
   });
   if (matchedById) {
@@ -342,12 +344,18 @@ const buildChecklistFromActiveTask = (activeTask: ProjectManifest["active_task"]
   }
   return activeTask.checklist
     .filter((row): row is NonNullable<typeof row> => !!row && typeof row.id === "string")
-    .map((row) => ({
-      id: row.id,
-      label: typeof row.label === "string" && row.label.trim() ? row.label : row.id,
-      state: normalizeChecklistState(row.state),
-      detail: typeof row.detail === "string" && row.detail.trim() ? row.detail.trim() : undefined
-    }));
+    .map((row) => {
+      let detail: string | undefined = typeof row.detail === "string" && row.detail.trim() ? row.detail.trim() : undefined;
+      if (row.id === checklistStepIds.loadModel && detail?.toLowerCase() === "loading model") {
+        detail = undefined;
+      }
+      return {
+        id: row.id,
+        label: typeof row.label === "string" && row.label.trim() ? row.label : row.id,
+        state: normalizeChecklistState(row.state),
+        detail
+      };
+    });
 };
 
 const formatElapsedSince = (startedAt: string | null): string => {
