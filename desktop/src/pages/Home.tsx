@@ -88,6 +88,9 @@ const formatElapsed = (elapsedSeconds: number) => {
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
   items.map((item) => ({ ...item, state: "pending" }));
 
+const PREPARING_PREVIEW_MIN_ACTIVE_MS = 5000;
+const PREPARING_PREVIEW_DONE_VISIBLE_MS = 150;
+
 const Home = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -116,6 +119,14 @@ const Home = () => {
   const previewFramePathRef = React.useRef<string | null>(null);
   const outputDirRef = React.useRef<string | null>(null);
   const pendingExportRef = React.useRef(false);
+  const preparingPreviewStartedAtRef = React.useRef<number | null>(null);
+  const preparingPreviewDelayTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const preparingPreviewDoneTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const preparingPreviewCompletionScheduledRef = React.useRef(false);
 
   const isTauriEnv = isTauri();
 
@@ -209,6 +220,21 @@ const Home = () => {
   }, [jobStream]);
 
   React.useEffect(() => {
+    return () => {
+      if (preparingPreviewDelayTimerRef.current !== null) {
+        clearTimeout(preparingPreviewDelayTimerRef.current);
+        preparingPreviewDelayTimerRef.current = null;
+      }
+      if (preparingPreviewDoneTimerRef.current !== null) {
+        clearTimeout(preparingPreviewDoneTimerRef.current);
+        preparingPreviewDoneTimerRef.current = null;
+      }
+      preparingPreviewCompletionScheduledRef.current = false;
+      preparingPreviewStartedAtRef.current = null;
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (previewUrlRef.current) {
       URL.revokeObjectURL(previewUrlRef.current);
       previewUrlRef.current = null;
@@ -226,7 +252,21 @@ const Home = () => {
     };
   }, [videoFile]);
 
+  const clearPreparingPreviewTimers = React.useCallback(() => {
+    if (preparingPreviewDelayTimerRef.current !== null) {
+      clearTimeout(preparingPreviewDelayTimerRef.current);
+      preparingPreviewDelayTimerRef.current = null;
+    }
+    if (preparingPreviewDoneTimerRef.current !== null) {
+      clearTimeout(preparingPreviewDoneTimerRef.current);
+      preparingPreviewDoneTimerRef.current = null;
+    }
+    preparingPreviewCompletionScheduledRef.current = false;
+  }, []);
+
   const resetJobState = React.useCallback(() => {
+    clearPreparingPreviewTimers();
+    preparingPreviewStartedAtRef.current = null;
     setProgressPct(0);
     setProgressMessage("");
     setStatusHeading("");
@@ -234,7 +274,7 @@ const Home = () => {
     setChecklistItems([]);
     jobKindRef.current = null;
     jobStartRef.current = null;
-  }, []);
+  }, [clearPreparingPreviewTimers]);
 
   const clearVideo = () => {
     setVideoFile(null);
@@ -410,7 +450,21 @@ const Home = () => {
       return;
     }
     if (event.type === "checklist") {
-      updateChecklist(event.step_id, event.state, resolveChecklistReason(event));
+      const checklistReason = resolveChecklistReason(event);
+      if (event.step_id === checklistStepIds.preparingPreview && event.state === "start") {
+        clearPreparingPreviewTimers();
+        preparingPreviewStartedAtRef.current = Date.now();
+      }
+      if (event.step_id === checklistStepIds.preparingPreview && event.state === "done") {
+        const startedAtMs = preparingPreviewStartedAtRef.current;
+        if (
+          startedAtMs != null &&
+          Date.now() - startedAtMs < PREPARING_PREVIEW_MIN_ACTIVE_MS
+        ) {
+          return;
+        }
+      }
+      updateChecklist(event.step_id, event.state, checklistReason);
       return;
     }
     if (event.type === "progress") {
@@ -438,32 +492,62 @@ const Home = () => {
         setPreviewFramePath(payload.preview_frame_path);
         previewFramePathRef.current = payload.preview_frame_path;
       }
-      if (jobKindRef.current === "create_subtitles") {
-        updateChecklist(checklistStepIds.preparingPreview, "done");
-      }
       return;
     }
     if (event.type === "completed") {
-      setProgressPct(100);
-      setProgressMessage("");
-      jobStartRef.current = null;
-      if (jobKindRef.current === "create_video_with_subtitles") {
-        setState("EXPORT_DONE");
-      } else if (srtPathRef.current && videoPath) {
-        navigate("/review", {
-          state: {
-            videoPath,
-            srtPath: srtPathRef.current,
-            outputDir: outputDirRef.current,
-            previewFramePath: previewFramePathRef.current
-          }
-        });
-      } else {
-        setState("SUBTITLES_READY");
+      const finish = () => {
+        setProgressPct(100);
+        setProgressMessage("");
+        jobStartRef.current = null;
+        if (jobKindRef.current === "create_video_with_subtitles") {
+          setState("EXPORT_DONE");
+        } else if (srtPathRef.current && videoPath) {
+          navigate("/review", {
+            state: {
+              videoPath,
+              srtPath: srtPathRef.current,
+              outputDir: outputDirRef.current,
+              previewFramePath: previewFramePathRef.current
+            }
+          });
+        } else {
+          setState("SUBTITLES_READY");
+        }
+      };
+      if (jobKindRef.current === "create_subtitles") {
+        if (preparingPreviewCompletionScheduledRef.current) {
+          return;
+        }
+        preparingPreviewCompletionScheduledRef.current = true;
+        const startedAtMs = preparingPreviewStartedAtRef.current;
+        const elapsedMs =
+          startedAtMs != null ? Date.now() - startedAtMs : PREPARING_PREVIEW_MIN_ACTIVE_MS;
+        const remainingActiveMs = Math.max(0, PREPARING_PREVIEW_MIN_ACTIVE_MS - elapsedMs);
+        const completeAfterPreview = () => {
+          updateChecklist(checklistStepIds.preparingPreview, "done");
+          preparingPreviewDoneTimerRef.current = setTimeout(() => {
+            preparingPreviewDoneTimerRef.current = null;
+            clearPreparingPreviewTimers();
+            preparingPreviewStartedAtRef.current = null;
+            finish();
+          }, PREPARING_PREVIEW_DONE_VISIBLE_MS);
+        };
+        if (remainingActiveMs > 0) {
+          preparingPreviewDelayTimerRef.current = setTimeout(() => {
+            preparingPreviewDelayTimerRef.current = null;
+            completeAfterPreview();
+          }, remainingActiveMs);
+          return;
+        }
+        completeAfterPreview();
+        return;
       }
+      finish();
       return;
     }
     if (event.type === "cancelled") {
+      clearPreparingPreviewTimers();
+      preparingPreviewStartedAtRef.current = null;
       setProgressPct(0);
       setProgressMessage("");
       jobStartRef.current = null;
@@ -474,6 +558,8 @@ const Home = () => {
       return;
     }
     if (event.type === "error") {
+      clearPreparingPreviewTimers();
+      preparingPreviewStartedAtRef.current = null;
       setProgressPct(0);
       setProgressMessage("");
       jobStartRef.current = null;
@@ -494,11 +580,15 @@ const Home = () => {
     outputDirRef.current = resolvedOutputDir;
     setError(null);
     resetJobState();
-    setChecklistItems(defaultChecklist(buildGenerateChecklist(settings)));
+    const initialChecklist = defaultChecklist(buildGenerateChecklist(settings));
+    if (initialChecklist.length > 0) {
+      initialChecklist[0] = { ...initialChecklist[0], state: "active" };
+    }
+    setChecklistItems(initialChecklist);
     jobKindRef.current = "create_subtitles";
     setState("WORKING");
     setStatusHeading(legacyCopy.working.createSubtitlesHeading);
-    setProgressMessage("Starting...");
+    setProgressMessage(initialChecklist[0]?.label ?? "Extracting audio");
     const job = await createSubtitlesJob(
       {
         inputPath: videoPath,

@@ -258,6 +258,24 @@ const QT_POINT_TO_CSS_PX = 96 / 72;
 const WEB_SUBTITLE_LINE_HEIGHT_RATIO = 1.375;
 const QT_SUBTITLE_LINE_HEIGHT_RATIO = 1.125;
 const ACTIVE_TASK_SYNC_POLL_MS = 2500;
+const PREPARING_PREVIEW_MIN_ACTIVE_MS = 5000;
+const PREPARING_PREVIEW_DONE_VISIBLE_MS = 150;
+const STREAM_ATTACH_COOLDOWN_MS = 10_000;
+const ALIGNMENT_PROGRESS_STEP_IDS = new Set(["ALIGN_WORDS", checklistStepIds.timingWordHighlights]);
+const ALIGNMENT_WORD_DETAIL_PATTERN = /^(\d{1,3}(?:,\d{3})*|\d+)\s*\/\s*(\d{1,3}(?:,\d{3})*|\d+)\s+words$/i;
+
+type StreamHealth = "idle" | "connecting" | "open" | "cooldown";
+
+type TimingFallbackProgress = {
+  current: number;
+  total: number;
+  updatedAtMs: number;
+};
+
+type ParsedAlignmentWordDetail = {
+  current: number;
+  total: number;
+};
 
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
   items.map((item) => ({ ...item, state: "pending" }));
@@ -279,55 +297,6 @@ const normalizeChecklistState = (value: unknown): NonNullable<ChecklistItem["sta
   return "pending";
 };
 
-const applyProgressMessageToChecklist = (
-  items: ChecklistItem[],
-  stepId: string | null | undefined,
-  message: string | null | undefined
-): ChecklistItem[] => {
-  if (!message || !message.trim()) {
-    return items;
-  }
-  const rawDetail = message.trim();
-  const rawLower = rawDetail.toLowerCase();
-  const isRedundantWithLabel = (label: string | undefined) =>
-    label != null && rawLower === label.trim().toLowerCase();
-  /** Don't show a message as detail if it's another step's label (avoids "Loading AI model" showing "Writing subtitles"). */
-  const isLabelOfAnotherStep = (currentId: string) =>
-    items.some((o) => o.id !== currentId && o.label != null && rawLower === o.label.trim().toLowerCase());
-  const isLoadModelStepRedundant = (id: string) =>
-    id === checklistStepIds.loadModel && rawLower === "loading model";
-  let matchedById = false;
-  const updated = items.map((item) => {
-    if (!stepId || item.id !== stepId) {
-      return item;
-    }
-    matchedById = true;
-    const nextState = item.state === "pending" || !item.state ? "active" : item.state;
-    // Don't overwrite detail for steps that are already done or skipped (avoids "Loading AI model" showing "Listening to audio" when write_subtitles is active).
-    const alreadyFinished = item.state === "done" || item.state === "skipped";
-    const detail =
-      alreadyFinished
-        ? item.detail
-        : (isRedundantWithLabel(item.label) || isLabelOfAnotherStep(item.id) || isLoadModelStepRedundant(item.id) ? undefined : rawDetail);
-    return { ...item, state: nextState, detail };
-  });
-  if (matchedById) {
-    return updated;
-  }
-  // When stepId doesn't match any row, don't assign message to "first active" — that would show another step's message on the wrong row.
-  return updated;
-};
-
-/** Maps backend ProgressStep ids (from progress events) to checklist step ids so progress message applies to the correct row. */
-const PROGRESS_STEP_TO_CHECKLIST_ID: Record<string, string> = {
-  PREPARE_AUDIO: checklistStepIds.extractAudio,
-  TRANSCRIBE: checklistStepIds.loadModel,
-  FIX_PUNCTUATION: checklistStepIds.fixPunctuation,
-  FIX_GAPS: checklistStepIds.fixMissingSubtitles,
-  ALIGN_WORDS: checklistStepIds.timingWordHighlights,
-  PREPARING_PREVIEW: checklistStepIds.preparingPreview
-};
-
 const asString = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
 const asNonEmptyString = (value: unknown): string | null => {
@@ -338,6 +307,39 @@ const asNonEmptyString = (value: unknown): string | null => {
   return trimmed ? trimmed : null;
 };
 
+const parseIsoTimestampMs = (value: unknown): number => {
+  if (typeof value !== "string" || !value.trim()) {
+    return 0;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseAlignmentWordDetail = (value: unknown): ParsedAlignmentWordDetail | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = value.trim().match(ALIGNMENT_WORD_DETAIL_PATTERN);
+  if (!match) {
+    return null;
+  }
+  const current = Number.parseInt(match[1].replace(/,/g, ""), 10);
+  const total = Number.parseInt(match[2].replace(/,/g, ""), 10);
+  if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) {
+    return null;
+  }
+  return {
+    current: Math.max(0, current),
+    total
+  };
+};
+
+const formatAlignmentWordDetail = (current: number, total: number): string => {
+  const safeTotal = Math.max(1, Math.floor(total));
+  const safeCurrent = Math.max(0, Math.min(Math.floor(current), safeTotal));
+  return `${safeCurrent.toLocaleString()}/${safeTotal.toLocaleString()} words`;
+};
+
 const buildChecklistFromActiveTask = (activeTask: ProjectManifest["active_task"]): ChecklistItem[] => {
   if (!activeTask || !Array.isArray(activeTask.checklist)) {
     return [];
@@ -345,15 +347,11 @@ const buildChecklistFromActiveTask = (activeTask: ProjectManifest["active_task"]
   return activeTask.checklist
     .filter((row): row is NonNullable<typeof row> => !!row && typeof row.id === "string")
     .map((row) => {
-      let detail: string | undefined = typeof row.detail === "string" && row.detail.trim() ? row.detail.trim() : undefined;
-      if (row.id === checklistStepIds.loadModel && detail?.toLowerCase() === "loading model") {
-        detail = undefined;
-      }
       return {
         id: row.id,
         label: typeof row.label === "string" && row.label.trim() ? row.label : row.id,
         state: normalizeChecklistState(row.state),
-        detail
+        detail: typeof row.detail === "string" && row.detail.trim() ? row.detail.trim() : undefined
       };
     });
 };
@@ -678,8 +676,16 @@ const Workbench = () => {
   const [createSubtitlesChecklist, setCreateSubtitlesChecklist] = React.useState<ChecklistItem[]>(
     []
   );
-  const [createSubtitlesJobStream, setCreateSubtitlesJobStream] =
-    React.useState<JobEventStream | null>(null);
+  const [, setCreateSubtitlesJobStream] = React.useState<JobEventStream | null>(null);
+  const createSubtitlesJobStreamRef = React.useRef<JobEventStream | null>(null);
+  const [createSubtitlesStreamHealth, setCreateSubtitlesStreamHealth] =
+    React.useState<StreamHealth>("idle");
+  const createSubtitlesStreamHealthRef = React.useRef<StreamHealth>("idle");
+  const createSubtitlesStreamCooldownUntilRef = React.useRef(0);
+  const createSubtitlesStreamCooldownTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const latestCreateLiveEventAtMsRef = React.useRef(0);
   const createSubtitlesJobIdRef = React.useRef<string | null>(null);
   const createSubtitlesJustStartedRef = React.useRef(false);
   const projectIdRef = React.useRef<string | null>(null);
@@ -688,13 +694,27 @@ const Workbench = () => {
     null
   );
   const [createSubtitlesElapsedText, setCreateSubtitlesElapsedText] = React.useState("");
+  const preparingPreviewStartedAtRef = React.useRef<number | null>(null);
+  const preparingPreviewDelayTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const preparingPreviewDoneTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const preparingPreviewCompletionScheduledRef = React.useRef(false);
   const [isExporting, setIsExporting] = React.useState(false);
   const [exportError, setExportError] = React.useState<string | null>(null);
   const [exportHeading, setExportHeading] = React.useState("Exporting video");
   const [exportProgressPct, setExportProgressPct] = React.useState(0);
   const [exportProgressMessage, setExportProgressMessage] = React.useState<string>("");
   const [exportChecklist, setExportChecklist] = React.useState<ChecklistItem[]>([]);
-  const [exportJobStream, setExportJobStream] = React.useState<JobEventStream | null>(null);
+  const [, setExportJobStream] = React.useState<JobEventStream | null>(null);
+  const exportJobStreamRef = React.useRef<JobEventStream | null>(null);
+  const [exportStreamHealth, setExportStreamHealth] = React.useState<StreamHealth>("idle");
+  const exportStreamHealthRef = React.useRef<StreamHealth>("idle");
+  const exportStreamCooldownUntilRef = React.useRef(0);
+  const exportStreamCooldownTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestExportLiveEventAtMsRef = React.useRef(0);
   const exportJobIdRef = React.useRef<string | null>(null);
   const { registerJob: registerRunningJob } = useRunningJobs();
   const createSubtitlesUnregisterRef = React.useRef<(() => void) | null>(null);
@@ -705,11 +725,102 @@ const Workbench = () => {
   const [openActionError, setOpenActionError] = React.useState<string | null>(null);
   const [projectReloadTick, setProjectReloadTick] = React.useState(0);
   const [subtitlesReloadTick, setSubtitlesReloadTick] = React.useState(0);
+  const projectFetchSeqRef = React.useRef(0);
+  const knownTimingWordsTotalRef = React.useRef<number | null>(null);
+  const latestTimingAuthoritativeAtMsRef = React.useRef(0);
+  const [timingFallbackDetail, setTimingFallbackDetail] = React.useState<string | null>(null);
+  const timingFallbackProgressRef = React.useRef<TimingFallbackProgress | null>(null);
   const [pendingAutoStartSubtitles, setPendingAutoStartSubtitles] = React.useState(false);
   const handledAutoStartKeyRef = React.useRef<string | null>(null);
   const styleBootstrapKeyRef = React.useRef<string | null>(null);
   const overlayRequestKeyRef = React.useRef<string | null>(null);
   const showSubtitlesOverlay = false;
+
+  const setCreateStreamHealthValue = React.useCallback((next: StreamHealth) => {
+    createSubtitlesStreamHealthRef.current = next;
+    setCreateSubtitlesStreamHealth(next);
+  }, []);
+
+  const setExportStreamHealthValue = React.useCallback((next: StreamHealth) => {
+    exportStreamHealthRef.current = next;
+    setExportStreamHealth(next);
+  }, []);
+
+  const noteCreateLiveEventTimestamp = React.useCallback((event: JobEvent) => {
+    const eventMs = parseIsoTimestampMs(event.ts);
+    if (eventMs > latestCreateLiveEventAtMsRef.current) {
+      latestCreateLiveEventAtMsRef.current = eventMs;
+    }
+  }, []);
+
+  const noteExportLiveEventTimestamp = React.useCallback((event: JobEvent) => {
+    const eventMs = parseIsoTimestampMs(event.ts);
+    if (eventMs > latestExportLiveEventAtMsRef.current) {
+      latestExportLiveEventAtMsRef.current = eventMs;
+    }
+  }, []);
+
+  const rememberTimingAuthoritativeDetail = React.useCallback(
+    (detail: string | null | undefined, eventTs?: string | null) => {
+      const parsed = parseAlignmentWordDetail(detail);
+      if (!parsed) {
+        return;
+      }
+      knownTimingWordsTotalRef.current = parsed.total;
+      const fallback = timingFallbackProgressRef.current;
+      if (fallback && fallback.total === parsed.total) {
+        // Keep showing inferred fallback progress when the polled checklist detail is behind.
+        if (parsed.current < fallback.current) {
+          return;
+        }
+        timingFallbackProgressRef.current = null;
+        setTimingFallbackDetail(null);
+      }
+      const detailTs = parseIsoTimestampMs(eventTs);
+      if (detailTs > latestTimingAuthoritativeAtMsRef.current) {
+        latestTimingAuthoritativeAtMsRef.current = detailTs;
+      }
+    },
+    []
+  );
+
+  const clearTimingFallbackProgress = React.useCallback(() => {
+    timingFallbackProgressRef.current = null;
+    setTimingFallbackDetail(null);
+  }, []);
+
+  const withTimingFallbackChecklist = React.useCallback(
+    (items: ChecklistItem[]): ChecklistItem[] => {
+      const fallback = timingFallbackProgressRef.current;
+      if (!fallback) {
+        return items;
+      }
+      if (fallback.updatedAtMs <= latestTimingAuthoritativeAtMsRef.current) {
+        return items;
+      }
+      const fallbackDetail = timingFallbackDetail;
+      if (!fallbackDetail) {
+        return items;
+      }
+      return items.map((item) => {
+        if (item.id !== checklistStepIds.timingWordHighlights || item.state !== "active") {
+          return item;
+        }
+        const authoritative = parseAlignmentWordDetail(item.detail);
+        if (!authoritative) {
+          return { ...item, detail: fallbackDetail };
+        }
+        if (authoritative.total !== fallback.total) {
+          return item;
+        }
+        if (authoritative.current >= fallback.current) {
+          return item;
+        }
+        return { ...item, detail: fallbackDetail };
+      });
+    },
+    [timingFallbackDetail]
+  );
 
   React.useEffect(() => {
     return () => {
@@ -717,6 +828,28 @@ const Workbench = () => {
       createSubtitlesUnregisterRef.current = null;
       exportUnregisterRef.current?.();
       exportUnregisterRef.current = null;
+      if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+        clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+        createSubtitlesStreamCooldownTimerRef.current = null;
+      }
+      if (exportStreamCooldownTimerRef.current !== null) {
+        clearTimeout(exportStreamCooldownTimerRef.current);
+        exportStreamCooldownTimerRef.current = null;
+      }
+      createSubtitlesJobStreamRef.current?.close();
+      createSubtitlesJobStreamRef.current = null;
+      exportJobStreamRef.current?.close();
+      exportJobStreamRef.current = null;
+      if (preparingPreviewDelayTimerRef.current !== null) {
+        clearTimeout(preparingPreviewDelayTimerRef.current);
+        preparingPreviewDelayTimerRef.current = null;
+      }
+      if (preparingPreviewDoneTimerRef.current !== null) {
+        clearTimeout(preparingPreviewDoneTimerRef.current);
+        preparingPreviewDoneTimerRef.current = null;
+      }
+      preparingPreviewCompletionScheduledRef.current = false;
+      preparingPreviewStartedAtRef.current = null;
     };
   }, []);
 
@@ -729,20 +862,22 @@ const Workbench = () => {
         active = false;
       };
     }
+    const fetchSeq = projectFetchSeqRef.current + 1;
+    projectFetchSeqRef.current = fetchSeq;
     setIsLoading((prev) => (project?.project_id === projectId && prev === false ? false : true));
     fetchProject(projectId)
       .then((data) => {
-        if (!active) return;
+        if (!active || fetchSeq !== projectFetchSeqRef.current) return;
         setProject(data);
         setExportOutputPath(data.latest_export?.output_video_path ?? null);
         setError(null);
       })
       .catch((err) => {
-        if (!active) return;
+        if (!active || fetchSeq !== projectFetchSeqRef.current) return;
         setError(err instanceof Error ? err.message : "Failed to load video.");
       })
       .finally(() => {
-        if (!active) return;
+        if (!active || fetchSeq !== projectFetchSeqRef.current) return;
         setIsLoading(false);
       });
     return () => {
@@ -1018,9 +1153,32 @@ const Workbench = () => {
     setCreateSubtitlesProgressPct(0);
     setCreateSubtitlesProgressMessage("");
     setCreateSubtitlesChecklist([]);
+    if (preparingPreviewDelayTimerRef.current !== null) {
+      clearTimeout(preparingPreviewDelayTimerRef.current);
+      preparingPreviewDelayTimerRef.current = null;
+    }
+    if (preparingPreviewDoneTimerRef.current !== null) {
+      clearTimeout(preparingPreviewDoneTimerRef.current);
+      preparingPreviewDoneTimerRef.current = null;
+    }
+    preparingPreviewCompletionScheduledRef.current = false;
+    preparingPreviewStartedAtRef.current = null;
     setIsCreatingSubtitles(false);
     setCreateSubtitlesStartedAt(null);
     createSubtitlesJobIdRef.current = null;
+    latestCreateLiveEventAtMsRef.current = 0;
+    knownTimingWordsTotalRef.current = null;
+    latestTimingAuthoritativeAtMsRef.current = 0;
+    clearTimingFallbackProgress();
+    if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+      clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+      createSubtitlesStreamCooldownTimerRef.current = null;
+    }
+    createSubtitlesStreamCooldownUntilRef.current = 0;
+    createSubtitlesJobStreamRef.current?.close();
+    createSubtitlesJobStreamRef.current = null;
+    setCreateSubtitlesJobStream(null);
+    setCreateStreamHealthValue("idle");
     setExportError(null);
     setOpenActionError(null);
     setExportHeading("Exporting video");
@@ -1030,6 +1188,16 @@ const Workbench = () => {
     setIsExporting(false);
     setExportStartedAt(null);
     exportJobIdRef.current = null;
+    latestExportLiveEventAtMsRef.current = 0;
+    if (exportStreamCooldownTimerRef.current !== null) {
+      clearTimeout(exportStreamCooldownTimerRef.current);
+      exportStreamCooldownTimerRef.current = null;
+    }
+    exportStreamCooldownUntilRef.current = 0;
+    exportJobStreamRef.current?.close();
+    exportJobStreamRef.current = null;
+    setExportJobStream(null);
+    setExportStreamHealthValue("idle");
     setExportOutputPath(null);
     setSubtitleOverlayPath(null);
     setVideoNaturalSize({ width: 0, height: 0 });
@@ -1041,15 +1209,7 @@ const Workbench = () => {
     editHistoryIndexRef.current = 0;
     lastHistoryCommitAtRef.current = 0;
     shouldResumePlaybackRef.current = false;
-    setCreateSubtitlesJobStream((prev) => {
-      prev?.close();
-      return null;
-    });
-    setExportJobStream((prev) => {
-      prev?.close();
-      return null;
-    });
-  }, [projectId]);
+  }, [clearTimingFallbackProgress, projectId, setCreateStreamHealthValue, setExportStreamHealthValue]);
 
   React.useEffect(() => {
     if (selectedCueId && !cues.some((cue) => cue.id === selectedCueId)) {
@@ -1083,18 +1243,6 @@ const Workbench = () => {
       setRightOverlayOpen(false);
     }
   }, [isNarrow]);
-
-  React.useEffect(() => {
-    return () => {
-      createSubtitlesJobStream?.close();
-    };
-  }, [createSubtitlesJobStream]);
-
-  React.useEffect(() => {
-    return () => {
-      exportJobStream?.close();
-    };
-  }, [exportJobStream]);
 
   React.useEffect(() => {
     if (!isCreatingSubtitles || !createSubtitlesStartedAt) {
@@ -1239,8 +1387,140 @@ const Workbench = () => {
     []
   );
 
+  const clearPreparingPreviewTimers = React.useCallback(() => {
+    if (preparingPreviewDelayTimerRef.current !== null) {
+      clearTimeout(preparingPreviewDelayTimerRef.current);
+      preparingPreviewDelayTimerRef.current = null;
+    }
+    if (preparingPreviewDoneTimerRef.current !== null) {
+      clearTimeout(preparingPreviewDoneTimerRef.current);
+      preparingPreviewDoneTimerRef.current = null;
+    }
+    preparingPreviewCompletionScheduledRef.current = false;
+  }, []);
+
+  const closeCreateSubtitlesStream = React.useCallback(
+    (reason: string) => {
+      void reason;
+      const current = createSubtitlesJobStreamRef.current;
+      if (current) {
+        current.close();
+      }
+      createSubtitlesJobStreamRef.current = null;
+      setCreateSubtitlesJobStream(null);
+      if (createSubtitlesStreamHealthRef.current !== "cooldown") {
+        setCreateStreamHealthValue("idle");
+      }
+    },
+    [setCreateStreamHealthValue]
+  );
+
+  const closeExportStream = React.useCallback(
+    (reason: string) => {
+      void reason;
+      const current = exportJobStreamRef.current;
+      if (current) {
+        current.close();
+      }
+      exportJobStreamRef.current = null;
+      setExportJobStream(null);
+      if (exportStreamHealthRef.current !== "cooldown") {
+        setExportStreamHealthValue("idle");
+      }
+    },
+    [setExportStreamHealthValue]
+  );
+
+  const startCreateStreamCooldown = React.useCallback(() => {
+    const cooldownUntil = Date.now() + STREAM_ATTACH_COOLDOWN_MS;
+    createSubtitlesStreamCooldownUntilRef.current = cooldownUntil;
+    if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+      clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+    }
+    setCreateStreamHealthValue("cooldown");
+    createSubtitlesStreamCooldownTimerRef.current = setTimeout(() => {
+      createSubtitlesStreamCooldownTimerRef.current = null;
+      if (
+        createSubtitlesStreamHealthRef.current === "cooldown" &&
+        Date.now() >= createSubtitlesStreamCooldownUntilRef.current
+      ) {
+        createSubtitlesStreamCooldownUntilRef.current = 0;
+        setCreateStreamHealthValue("idle");
+        setProjectReloadTick((prev) => prev + 1);
+      }
+    }, STREAM_ATTACH_COOLDOWN_MS);
+  }, [setCreateStreamHealthValue]);
+
+  const startExportStreamCooldown = React.useCallback(() => {
+    const cooldownUntil = Date.now() + STREAM_ATTACH_COOLDOWN_MS;
+    exportStreamCooldownUntilRef.current = cooldownUntil;
+    if (exportStreamCooldownTimerRef.current !== null) {
+      clearTimeout(exportStreamCooldownTimerRef.current);
+    }
+    setExportStreamHealthValue("cooldown");
+    exportStreamCooldownTimerRef.current = setTimeout(() => {
+      exportStreamCooldownTimerRef.current = null;
+      if (
+        exportStreamHealthRef.current === "cooldown" &&
+        Date.now() >= exportStreamCooldownUntilRef.current
+      ) {
+        exportStreamCooldownUntilRef.current = 0;
+        setExportStreamHealthValue("idle");
+        setProjectReloadTick((prev) => prev + 1);
+      }
+    }, STREAM_ATTACH_COOLDOWN_MS);
+  }, [setExportStreamHealthValue]);
+
+  const finalizeCreateSubtitlesCompleted = React.useCallback(() => {
+    clearPreparingPreviewTimers();
+    preparingPreviewStartedAtRef.current = null;
+    createSubtitlesUnregisterRef.current?.();
+    createSubtitlesUnregisterRef.current = null;
+    if (projectIdRef.current) clearPersistedRunningJob(projectIdRef.current);
+    setCreateSubtitlesProgressPct(100);
+    setIsCreatingSubtitles(false);
+    setCreateSubtitlesStartedAt(null);
+    createSubtitlesJobIdRef.current = null;
+    if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+      clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+      createSubtitlesStreamCooldownTimerRef.current = null;
+    }
+    createSubtitlesStreamCooldownUntilRef.current = 0;
+    closeCreateSubtitlesStream("create_subtitles_completed");
+    setCreateStreamHealthValue("idle");
+    clearTimingFallbackProgress();
+    setProjectReloadTick((prev) => prev + 1);
+    setSubtitlesReloadTick((prev) => prev + 1);
+  }, [clearPreparingPreviewTimers, clearTimingFallbackProgress, closeCreateSubtitlesStream, setCreateStreamHealthValue]);
+
+  const scheduleCreateSubtitlesCompletion = React.useCallback(() => {
+    if (preparingPreviewCompletionScheduledRef.current) {
+      return;
+    }
+    preparingPreviewCompletionScheduledRef.current = true;
+    const startedAtMs = preparingPreviewStartedAtRef.current;
+    const elapsedMs = startedAtMs != null ? Date.now() - startedAtMs : PREPARING_PREVIEW_MIN_ACTIVE_MS;
+    const remainingActiveMs = Math.max(0, PREPARING_PREVIEW_MIN_ACTIVE_MS - elapsedMs);
+    const finalize = () => {
+      updateCreateChecklist(checklistStepIds.preparingPreview, "done");
+      preparingPreviewDoneTimerRef.current = setTimeout(() => {
+        preparingPreviewDoneTimerRef.current = null;
+        finalizeCreateSubtitlesCompleted();
+      }, PREPARING_PREVIEW_DONE_VISIBLE_MS);
+    };
+    if (remainingActiveMs > 0) {
+      preparingPreviewDelayTimerRef.current = setTimeout(() => {
+        preparingPreviewDelayTimerRef.current = null;
+        finalize();
+      }, remainingActiveMs);
+      return;
+    }
+    finalize();
+  }, [finalizeCreateSubtitlesCompleted, updateCreateChecklist]);
+
   const handleCreateSubtitlesEvent = React.useCallback(
     (event: JobEvent) => {
+      noteCreateLiveEventTimestamp(event);
       if (event.type === "started") {
         setCreateSubtitlesHeading(asNonEmptyString(event.heading) ?? "Creating subtitles");
         setCreateSubtitlesStartedAt((prev) => {
@@ -1259,42 +1539,74 @@ const Workbench = () => {
         if (!stepId || !state) {
           return;
         }
-        updateCreateChecklist(stepId, state, resolveChecklistReason(event));
+        const checklistReason = resolveChecklistReason(event);
+        if (stepId === checklistStepIds.timingWordHighlights) {
+          rememberTimingAuthoritativeDetail(checklistReason, asString(event.ts));
+          if (state !== "start") {
+            clearTimingFallbackProgress();
+          }
+        }
+        if (stepId === checklistStepIds.preparingPreview && state === "start") {
+          clearPreparingPreviewTimers();
+          preparingPreviewStartedAtRef.current = Date.now();
+        }
+        if (stepId === checklistStepIds.preparingPreview && state === "done") {
+          const startedAtMs = preparingPreviewStartedAtRef.current;
+          if (
+            startedAtMs != null &&
+            Date.now() - startedAtMs < PREPARING_PREVIEW_MIN_ACTIVE_MS
+          ) {
+            return;
+          }
+        }
+        updateCreateChecklist(stepId, state, checklistReason);
         return;
       }
       if (event.type === "progress") {
         if (typeof event.pct === "number") {
           setCreateSubtitlesProgressPct(event.pct);
         }
+        const stepId = asString(event.step_id);
+        if (
+          stepId &&
+          ALIGNMENT_PROGRESS_STEP_IDS.has(stepId) &&
+          typeof event.step_progress === "number" &&
+          Number.isFinite(event.step_progress)
+        ) {
+          const total = knownTimingWordsTotalRef.current;
+          if (total && total > 0) {
+            const progress = Math.max(0, Math.min(1, event.step_progress));
+            const current = Math.max(0, Math.min(total, Math.round(progress * total)));
+            const fallback = timingFallbackProgressRef.current;
+            const fallbackCurrent =
+              fallback && fallback.total === total ? fallback.current : -1;
+            if (current > fallbackCurrent) {
+              const detail = formatAlignmentWordDetail(current, total);
+              timingFallbackProgressRef.current = {
+                current,
+                total,
+                updatedAtMs: Date.now()
+              };
+              setTimingFallbackDetail(detail);
+            }
+          }
+        }
         const message = asString(event.message);
         if (message) {
           setCreateSubtitlesProgressMessage(message);
         }
-        const rawStepId = typeof event.step_id === "string" ? event.step_id : null;
-        const checklistStepId =
-          rawStepId != null ? (PROGRESS_STEP_TO_CHECKLIST_ID[rawStepId] ?? rawStepId) : null;
-        setCreateSubtitlesChecklist((prev) =>
-          applyProgressMessageToChecklist(prev, checklistStepId, message)
-        );
+        return;
+      }
+      if (event.type === "result") {
         return;
       }
       if (event.type === "completed") {
-        createSubtitlesUnregisterRef.current?.();
-        createSubtitlesUnregisterRef.current = null;
-        if (projectIdRef.current) clearPersistedRunningJob(projectIdRef.current);
-        setCreateSubtitlesProgressPct(100);
-        setIsCreatingSubtitles(false);
-        setCreateSubtitlesStartedAt(null);
-        createSubtitlesJobIdRef.current = null;
-        setCreateSubtitlesJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
-        setProjectReloadTick((prev) => prev + 1);
-        setSubtitlesReloadTick((prev) => prev + 1);
+        scheduleCreateSubtitlesCompletion();
         return;
       }
       if (event.type === "cancelled") {
+        clearPreparingPreviewTimers();
+        preparingPreviewStartedAtRef.current = null;
         createSubtitlesUnregisterRef.current?.();
         createSubtitlesUnregisterRef.current = null;
         if (projectIdRef.current) clearPersistedRunningJob(projectIdRef.current);
@@ -1303,17 +1615,23 @@ const Workbench = () => {
         setIsCreatingSubtitles(false);
         setCreateSubtitlesStartedAt(null);
         createSubtitlesJobIdRef.current = null;
+        clearTimingFallbackProgress();
+        if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+          clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+          createSubtitlesStreamCooldownTimerRef.current = null;
+        }
+        createSubtitlesStreamCooldownUntilRef.current = 0;
+        closeCreateSubtitlesStream("create_subtitles_cancelled");
+        setCreateStreamHealthValue("idle");
         const message = asNonEmptyString(event.message);
         if (message) {
           setCreateSubtitlesError(message);
         }
-        setCreateSubtitlesJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
         return;
       }
       if (event.type === "error") {
+        clearPreparingPreviewTimers();
+        preparingPreviewStartedAtRef.current = null;
         createSubtitlesUnregisterRef.current?.();
         createSubtitlesUnregisterRef.current = null;
         if (projectIdRef.current) clearPersistedRunningJob(projectIdRef.current);
@@ -1322,43 +1640,82 @@ const Workbench = () => {
         setIsCreatingSubtitles(false);
         setCreateSubtitlesStartedAt(null);
         createSubtitlesJobIdRef.current = null;
+        clearTimingFallbackProgress();
+        if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+          clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+          createSubtitlesStreamCooldownTimerRef.current = null;
+        }
+        createSubtitlesStreamCooldownUntilRef.current = 0;
+        closeCreateSubtitlesStream("create_subtitles_error");
+        setCreateStreamHealthValue("idle");
         setCreateSubtitlesError(asNonEmptyString(event.message) ?? "Subtitle generation failed.");
-        setCreateSubtitlesJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
       }
     },
-    [resolveChecklistReason, updateCreateChecklist]
+    [
+      clearTimingFallbackProgress,
+      clearPreparingPreviewTimers,
+      closeCreateSubtitlesStream,
+      noteCreateLiveEventTimestamp,
+      rememberTimingAuthoritativeDetail,
+      resolveChecklistReason,
+      scheduleCreateSubtitlesCompletion,
+      setCreateStreamHealthValue,
+      updateCreateChecklist
+    ]
   );
 
-  const attachCreateSubtitlesStream = React.useCallback(
+  const openCreateSubtitlesStream = React.useCallback(
     (jobId: string, eventsUrl?: string) => {
       if (!jobId) {
         return;
       }
-      if (createSubtitlesJobStream?.jobId === jobId) {
+      if (
+        createSubtitlesStreamHealthRef.current === "cooldown" &&
+        Date.now() < createSubtitlesStreamCooldownUntilRef.current
+      ) {
         return;
       }
-      createSubtitlesJobStream?.close();
+      if (
+        createSubtitlesJobStreamRef.current?.jobId === jobId &&
+        (createSubtitlesStreamHealthRef.current === "open" ||
+          createSubtitlesStreamHealthRef.current === "connecting")
+      ) {
+        return;
+      }
+      closeCreateSubtitlesStream("open_create_subtitles_stream");
+      setCreateStreamHealthValue("connecting");
+      let streamOpened = false;
       const stream = attachToJobEvents(
         jobId,
         {
           onEvent: handleCreateSubtitlesEvent,
+          onOpen: () => {
+            if (createSubtitlesJobStreamRef.current !== stream) {
+              return;
+            }
+            streamOpened = true;
+            createSubtitlesStreamCooldownUntilRef.current = 0;
+            if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+              clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+              createSubtitlesStreamCooldownTimerRef.current = null;
+            }
+            setCreateStreamHealthValue("open");
+          },
           onError: () => {
-            setCreateSubtitlesJobStream((prev) => {
-              if (prev?.jobId === jobId) {
-                prev.close();
-                return null;
-              }
-              return prev;
-            });
+            if (createSubtitlesJobStreamRef.current !== stream) {
+              return;
+            }
+            closeCreateSubtitlesStream("create_subtitles_stream_error");
+            if (!streamOpened) {
+              startCreateStreamCooldown();
+            }
             setProjectReloadTick((prev) => prev + 1);
           }
         },
         eventsUrl
       );
       createSubtitlesJobIdRef.current = jobId;
+      createSubtitlesJobStreamRef.current = stream;
       setCreateSubtitlesJobStream(stream);
       createSubtitlesUnregisterRef.current?.();
       createSubtitlesUnregisterRef.current = registerRunningJob({
@@ -1367,7 +1724,14 @@ const Workbench = () => {
         cancel: () => stream.cancel()
       });
     },
-    [createSubtitlesJobStream, handleCreateSubtitlesEvent, project, registerRunningJob]
+    [
+      closeCreateSubtitlesStream,
+      handleCreateSubtitlesEvent,
+      project,
+      registerRunningJob,
+      setCreateStreamHealthValue,
+      startCreateStreamCooldown
+    ]
   );
 
   const startCreateSubtitles = React.useCallback(async () => {
@@ -1394,9 +1758,23 @@ const Workbench = () => {
     }
     setCreateSubtitlesProgressMessage(initialChecklist[0]?.label ?? "Extracting audio");
     setCreateSubtitlesChecklist(initialChecklist);
+    clearPreparingPreviewTimers();
+    preparingPreviewStartedAtRef.current = null;
+    clearTimingFallbackProgress();
+    knownTimingWordsTotalRef.current = null;
+    latestTimingAuthoritativeAtMsRef.current = 0;
+    latestCreateLiveEventAtMsRef.current = 0;
+    if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+      clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+      createSubtitlesStreamCooldownTimerRef.current = null;
+    }
+    createSubtitlesStreamCooldownUntilRef.current = 0;
+    closeCreateSubtitlesStream("start_create_subtitles");
+    setCreateStreamHealthValue("connecting");
     setIsCreatingSubtitles(true);
     setCreateSubtitlesStartedAt(new Date().toISOString());
     createSubtitlesJustStartedRef.current = true;
+    let streamOpened = false;
 
     try {
       const job = await createSubtitlesJob(
@@ -1408,21 +1786,28 @@ const Workbench = () => {
         },
         {
           onEvent: handleCreateSubtitlesEvent,
+          onOpen: () => {
+            streamOpened = true;
+            createSubtitlesStreamCooldownUntilRef.current = 0;
+            if (createSubtitlesStreamCooldownTimerRef.current !== null) {
+              clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
+              createSubtitlesStreamCooldownTimerRef.current = null;
+            }
+            setCreateStreamHealthValue("open");
+          },
           onError: () => {
-            setCreateSubtitlesJobStream((prev) => {
-              prev?.close();
-              return null;
-            });
+            closeCreateSubtitlesStream("create_subtitles_start_stream_error");
+            if (!streamOpened) {
+              startCreateStreamCooldown();
+            }
             setCreateSubtitlesProgressMessage("Syncing progress...");
-            setCreateSubtitlesChecklist((prev) =>
-              applyProgressMessageToChecklist(prev, null, "Connection lost. Syncing progress...")
-            );
             setProjectReloadTick((prev) => prev + 1);
           }
         }
       );
       createSubtitlesJobIdRef.current = job.jobId;
       createSubtitlesJustStartedRef.current = false;
+      createSubtitlesJobStreamRef.current = job;
       setCreateSubtitlesJobStream(job);
       setPersistedRunningJob(projectId, {
         jobId: job.jobId,
@@ -1449,42 +1834,57 @@ const Workbench = () => {
             eventsUrl,
             kind: "create_subtitles"
           });
-          attachCreateSubtitlesStream(err.conflict.job_id, err.conflict.events_url);
+          openCreateSubtitlesStream(err.conflict.job_id, err.conflict.events_url);
           setProjectReloadTick((prev) => prev + 1);
           return;
         }
         setIsCreatingSubtitles(false);
+        clearPreparingPreviewTimers();
+        preparingPreviewStartedAtRef.current = null;
+        closeCreateSubtitlesStream("create_subtitles_start_conflict");
+        setCreateStreamHealthValue("idle");
         setCreateSubtitlesStartedAt(null);
         setCreateSubtitlesError("Another task is already running for this video.");
         return;
       }
       setIsCreatingSubtitles(false);
+      clearPreparingPreviewTimers();
+      preparingPreviewStartedAtRef.current = null;
+      closeCreateSubtitlesStream("create_subtitles_start_failed");
+      setCreateStreamHealthValue("idle");
       setCreateSubtitlesStartedAt(null);
       setCreateSubtitlesError(
         err instanceof Error ? err.message : "Failed to start subtitle generation."
       );
     }
   }, [
-    attachCreateSubtitlesStream,
     buildJobOptions,
+    clearTimingFallbackProgress,
+    clearPreparingPreviewTimers,
+    closeCreateSubtitlesStream,
     handleCreateSubtitlesEvent,
     isCreatingSubtitles,
     isExporting,
+    openCreateSubtitlesStream,
     project,
     projectId,
     registerRunningJob,
     resolveOutputDir,
-    settings
+    setCreateStreamHealthValue,
+    settings,
+    startCreateStreamCooldown
   ]);
 
   const cancelCreateSubtitles = React.useCallback(() => {
     const jobId =
-      createSubtitlesJobStream?.jobId ??
+      createSubtitlesJobStreamRef.current?.jobId ??
       createSubtitlesJobIdRef.current ??
       (typeof project?.active_task?.job_id === "string" ? project.active_task.job_id : null);
     if (!jobId || !projectId) {
       return;
     }
+    clearPreparingPreviewTimers();
+    preparingPreviewStartedAtRef.current = null;
     createSubtitlesUnregisterRef.current?.();
     createSubtitlesUnregisterRef.current = null;
     const projectTitle = resolveTitle(project);
@@ -1496,8 +1896,8 @@ const Workbench = () => {
     });
     void (async () => {
       try {
-        if (createSubtitlesJobStream?.jobId === jobId) {
-          await createSubtitlesJobStream.cancel();
+        if (createSubtitlesJobStreamRef.current?.jobId === jobId) {
+          await createSubtitlesJobStreamRef.current.cancel();
           return;
         }
         await cancelJob(jobId);
@@ -1505,10 +1905,16 @@ const Workbench = () => {
         // Best-effort cancel; ProjectHub handles project cleanup and user-facing recovery.
       }
     })();
-  }, [createSubtitlesJobStream, navigate, project, projectId]);
+  }, [
+    clearPreparingPreviewTimers,
+    navigate,
+    project,
+    projectId
+  ]);
 
   const handleExportEvent = React.useCallback(
     (event: JobEvent) => {
+      noteExportLiveEventTimestamp(event);
       if (event.type === "started") {
         setExportHeading(asNonEmptyString(event.heading) ?? "Exporting video");
         setExportStartedAt(asString(event.ts) ?? new Date().toISOString());
@@ -1531,13 +1937,6 @@ const Workbench = () => {
         if (message) {
           setExportProgressMessage(message);
         }
-        setExportChecklist((prev) =>
-          applyProgressMessageToChecklist(
-            prev,
-            typeof event.step_id === "string" ? event.step_id : null,
-            message
-          )
-        );
         return;
       }
       if (event.type === "result") {
@@ -1586,10 +1985,13 @@ const Workbench = () => {
         setIsExporting(false);
         setExportStartedAt(null);
         exportJobIdRef.current = null;
-        setExportJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
+        if (exportStreamCooldownTimerRef.current !== null) {
+          clearTimeout(exportStreamCooldownTimerRef.current);
+          exportStreamCooldownTimerRef.current = null;
+        }
+        exportStreamCooldownUntilRef.current = 0;
+        closeExportStream("export_completed");
+        setExportStreamHealthValue("idle");
         setProjectReloadTick((prev) => prev + 1);
         return;
       }
@@ -1602,10 +2004,13 @@ const Workbench = () => {
         setExportStartedAt(null);
         exportJobIdRef.current = null;
         setExportError(null);
-        setExportJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
+        if (exportStreamCooldownTimerRef.current !== null) {
+          clearTimeout(exportStreamCooldownTimerRef.current);
+          exportStreamCooldownTimerRef.current = null;
+        }
+        exportStreamCooldownUntilRef.current = 0;
+        closeExportStream("export_cancelled");
+        setExportStreamHealthValue("idle");
         return;
       }
       if (event.type === "error") {
@@ -1617,50 +2022,81 @@ const Workbench = () => {
         setExportStartedAt(null);
         exportJobIdRef.current = null;
         setExportError(asNonEmptyString(event.message) ?? "Video export failed.");
-        setExportJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
+        if (exportStreamCooldownTimerRef.current !== null) {
+          clearTimeout(exportStreamCooldownTimerRef.current);
+          exportStreamCooldownTimerRef.current = null;
+        }
+        exportStreamCooldownUntilRef.current = 0;
+        closeExportStream("export_error");
+        setExportStreamHealthValue("idle");
       }
     },
     [
-      resolveChecklistReason,
-      updateExportChecklist,
-      pushToast,
-      markExportCompleteSeen,
+      closeExportStream,
       haveExportCompleteBeenSeen,
+      isTauriEnv,
+      markExportCompleteSeen,
+      noteExportLiveEventTimestamp,
       projectId,
-      isTauriEnv
+      pushToast,
+      resolveChecklistReason,
+      setExportStreamHealthValue,
+      updateExportChecklist
     ]
   );
 
-  const attachExportStream = React.useCallback(
+  const openExportStream = React.useCallback(
     (jobId: string, eventsUrl?: string) => {
       if (!jobId) {
         return;
       }
-      if (exportJobStream?.jobId === jobId) {
+      if (
+        exportStreamHealthRef.current === "cooldown" &&
+        Date.now() < exportStreamCooldownUntilRef.current
+      ) {
         return;
       }
-      exportJobStream?.close();
+      if (
+        exportJobStreamRef.current?.jobId === jobId &&
+        (exportStreamHealthRef.current === "open" ||
+          exportStreamHealthRef.current === "connecting")
+      ) {
+        return;
+      }
+      closeExportStream("open_export_stream");
+      setExportStreamHealthValue("connecting");
+      let streamOpened = false;
       const stream = attachToJobEvents(
         jobId,
         {
           onEvent: handleExportEvent,
+          onOpen: () => {
+            if (exportJobStreamRef.current !== stream) {
+              return;
+            }
+            streamOpened = true;
+            exportStreamCooldownUntilRef.current = 0;
+            if (exportStreamCooldownTimerRef.current !== null) {
+              clearTimeout(exportStreamCooldownTimerRef.current);
+              exportStreamCooldownTimerRef.current = null;
+            }
+            setExportStreamHealthValue("open");
+          },
           onError: () => {
-            setExportJobStream((prev) => {
-              if (prev?.jobId === jobId) {
-                prev.close();
-                return null;
-              }
-              return prev;
-            });
+            if (exportJobStreamRef.current !== stream) {
+              return;
+            }
+            closeExportStream("export_stream_error");
+            if (!streamOpened) {
+              startExportStreamCooldown();
+            }
             setProjectReloadTick((prev) => prev + 1);
           }
         },
         eventsUrl
       );
       exportJobIdRef.current = jobId;
+      exportJobStreamRef.current = stream;
       setExportJobStream(stream);
       exportUnregisterRef.current?.();
       exportUnregisterRef.current = registerRunningJob({
@@ -1669,7 +2105,14 @@ const Workbench = () => {
         cancel: () => stream.cancel()
       });
     },
-    [exportJobStream, handleExportEvent, project, registerRunningJob]
+    [
+      closeExportStream,
+      handleExportEvent,
+      project,
+      registerRunningJob,
+      setExportStreamHealthValue,
+      startExportStreamCooldown
+    ]
   );
 
   const startExport = React.useCallback(async () => {
@@ -1707,8 +2150,17 @@ const Workbench = () => {
     setExportProgressPct(0);
     setExportProgressMessage("Starting...");
     setExportChecklist(defaultChecklist(buildExportChecklist()));
+    latestExportLiveEventAtMsRef.current = 0;
+    if (exportStreamCooldownTimerRef.current !== null) {
+      clearTimeout(exportStreamCooldownTimerRef.current);
+      exportStreamCooldownTimerRef.current = null;
+    }
+    exportStreamCooldownUntilRef.current = 0;
+    closeExportStream("start_export");
+    setExportStreamHealthValue("connecting");
     setIsExporting(true);
     setExportStartedAt(new Date().toISOString());
+    let streamOpened = false;
     try {
       const job = await createVideoWithSubtitlesJob(
         {
@@ -1718,20 +2170,27 @@ const Workbench = () => {
         },
         {
           onEvent: handleExportEvent,
+          onOpen: () => {
+            streamOpened = true;
+            exportStreamCooldownUntilRef.current = 0;
+            if (exportStreamCooldownTimerRef.current !== null) {
+              clearTimeout(exportStreamCooldownTimerRef.current);
+              exportStreamCooldownTimerRef.current = null;
+            }
+            setExportStreamHealthValue("open");
+          },
           onError: () => {
-            setExportJobStream((prev) => {
-              prev?.close();
-              return null;
-            });
+            closeExportStream("export_start_stream_error");
+            if (!streamOpened) {
+              startExportStreamCooldown();
+            }
             setExportProgressMessage("Syncing progress...");
-            setExportChecklist((prev) =>
-              applyProgressMessageToChecklist(prev, null, "Connection lost. Syncing progress...")
-            );
             setProjectReloadTick((prev) => prev + 1);
           }
         }
       );
       exportJobIdRef.current = job.jobId;
+      exportJobStreamRef.current = job;
       setExportJobStream(job);
       exportUnregisterRef.current?.();
       exportUnregisterRef.current = registerRunningJob({
@@ -1745,38 +2204,46 @@ const Workbench = () => {
           setExportError(null);
           setIsExporting(true);
           exportJobIdRef.current = err.conflict.job_id;
-          attachExportStream(err.conflict.job_id, err.conflict.events_url);
+          openExportStream(err.conflict.job_id, err.conflict.events_url);
           setProjectReloadTick((prev) => prev + 1);
           return;
         }
         setIsExporting(false);
+        closeExportStream("export_start_conflict");
+        setExportStreamHealthValue("idle");
         setExportStartedAt(null);
         setExportError("Subtitles are still being created for this video.");
         return;
       }
       setIsExporting(false);
+      closeExportStream("export_start_failed");
+      setExportStreamHealthValue("idle");
       setExportStartedAt(null);
       setExportError(err instanceof Error ? err.message : "Failed to start video export.");
     }
   }, [
-    attachExportStream,
     buildProjectStylePayload,
     buildJobOptions,
+    closeExportStream,
     handleExportEvent,
     isCreatingSubtitles,
     isExporting,
+    openExportStream,
     preset,
     project,
     projectId,
+    registerRunningJob,
     resolveOutputDir,
+    setExportStreamHealthValue,
     settings,
+    startExportStreamCooldown,
     appearance,
     highlightOpacity
   ]);
 
   const cancelExport = React.useCallback(async () => {
     const jobId =
-      exportJobStream?.jobId ??
+      exportJobStreamRef.current?.jobId ??
       exportJobIdRef.current ??
       (typeof project?.active_task?.job_id === "string" ? project.active_task.job_id : null);
     if (!jobId) {
@@ -1784,12 +2251,12 @@ const Workbench = () => {
     }
     exportUnregisterRef.current?.();
     exportUnregisterRef.current = null;
-    if (exportJobStream?.jobId === jobId) {
-      await exportJobStream.cancel();
+    if (exportJobStreamRef.current?.jobId === jobId) {
+      await exportJobStreamRef.current.cancel();
       return;
     }
     await cancelJob(jobId);
-  }, [exportJobStream, project?.active_task?.job_id]);
+  }, [project?.active_task?.job_id]);
 
   React.useEffect(() => {
     if (!project) {
@@ -1810,78 +2277,104 @@ const Workbench = () => {
           : typeof activeTask.updated_at === "string"
             ? activeTask.updated_at
             : null;
+      const snapshotUpdatedAtMs = parseIsoTimestampMs(activeTask.updated_at);
       const checklist = buildChecklistFromActiveTask(activeTask);
       if (activeTask.kind === "create_subtitles") {
+        const createStreamOpenForJob =
+          createSubtitlesStreamHealthRef.current === "open" &&
+          createSubtitlesJobStreamRef.current?.jobId === activeTask.job_id;
+        const shouldApplyCreateSnapshot =
+          !createStreamOpenForJob ||
+          snapshotUpdatedAtMs >= latestCreateLiveEventAtMsRef.current;
         setIsCreatingSubtitles(true);
         setCreateSubtitlesError(null);
         setIsExporting(false);
         setExportStartedAt(null);
         setExportError(null);
         exportJobIdRef.current = null;
-        setExportJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
-        setCreateSubtitlesHeading(
-          activeTask.status === "queued" ? "Queued" : (activeTask.heading ?? "Creating subtitles")
-        );
-        setCreateSubtitlesProgressPct(pct);
-        setCreateSubtitlesProgressMessage(message);
-        const fullList = defaultChecklist(buildGenerateChecklist(settings ?? {}));
-        const merged =
-          checklist.length > 0
-            ? fullList.map((fullItem) => {
-                const fromApi =
-                  checklist.find((c) => c.id === fullItem.id) ??
-                  checklist.find((c) => PROGRESS_STEP_TO_CHECKLIST_ID[c.id] === fullItem.id);
-                if (fromApi)
-                  return {
-                    ...fullItem,
-                    state: normalizeChecklistState(fromApi.state),
-                    detail:
-                      typeof fromApi.detail === "string" && fromApi.detail.trim()
-                        ? fromApi.detail.trim()
-                        : fullItem.detail
-                  };
-                return fullItem;
-              })
-            : fullList;
-        setCreateSubtitlesChecklist(merged);
-        setCreateSubtitlesStartedAt((prev) => {
-          if (!startedAt) return prev;
-          if (!prev) return startedAt;
-          const prevMs = Date.parse(prev);
-          const serverMs = Date.parse(startedAt);
-          if (!Number.isFinite(prevMs) || !Number.isFinite(serverMs)) return prev ?? startedAt;
-          return prevMs <= serverMs ? prev : startedAt;
-        });
+        closeExportStream("switch_to_create_subtitles");
+        setExportStreamHealthValue("idle");
+        if (shouldApplyCreateSnapshot) {
+          setCreateSubtitlesHeading(
+            activeTask.status === "queued" ? "Queued" : (activeTask.heading ?? "Creating subtitles")
+          );
+          setCreateSubtitlesProgressPct(pct);
+          setCreateSubtitlesProgressMessage(message);
+          const fullList = defaultChecklist(buildGenerateChecklist(settings ?? {}));
+          const merged =
+            checklist.length > 0
+              ? fullList.map((fullItem) => {
+                  const fromApi = checklist.find((c) => c.id === fullItem.id);
+                  if (fromApi)
+                    return {
+                      ...fullItem,
+                      state: normalizeChecklistState(fromApi.state),
+                      detail:
+                        typeof fromApi.detail === "string" && fromApi.detail.trim()
+                          ? fromApi.detail.trim()
+                          : fullItem.detail
+                    };
+                  return fullItem;
+                })
+              : fullList;
+          const timingItem = merged.find((item) => item.id === checklistStepIds.timingWordHighlights);
+          rememberTimingAuthoritativeDetail(timingItem?.detail, activeTask.updated_at);
+          setCreateSubtitlesChecklist(merged);
+          const isPreparingPreviewActive = merged.some(
+            (item) => item.id === checklistStepIds.preparingPreview && item.state === "active"
+          );
+          if (isPreparingPreviewActive) {
+            if (preparingPreviewStartedAtRef.current == null) {
+              preparingPreviewStartedAtRef.current = Date.now();
+            }
+          } else if (!preparingPreviewCompletionScheduledRef.current) {
+            preparingPreviewStartedAtRef.current = null;
+          }
+          setCreateSubtitlesStartedAt((prev) => {
+            if (!startedAt) return prev;
+            if (!prev) return startedAt;
+            const prevMs = Date.parse(prev);
+            const serverMs = Date.parse(startedAt);
+            if (!Number.isFinite(prevMs) || !Number.isFinite(serverMs)) return prev ?? startedAt;
+            return prevMs <= serverMs ? prev : startedAt;
+          });
+        }
         createSubtitlesJobIdRef.current = activeTask.job_id;
-        if (!createSubtitlesJobStream || createSubtitlesJobStream.jobId !== activeTask.job_id) {
-          attachCreateSubtitlesStream(activeTask.job_id);
+        if (!createStreamOpenForJob) {
+          openCreateSubtitlesStream(activeTask.job_id);
         }
       } else if (activeTask.kind === "create_video_with_subtitles") {
+        const exportStreamOpenForJob =
+          exportStreamHealthRef.current === "open" &&
+          exportJobStreamRef.current?.jobId === activeTask.job_id;
+        const shouldApplyExportSnapshot =
+          !exportStreamOpenForJob ||
+          snapshotUpdatedAtMs >= latestExportLiveEventAtMsRef.current;
+        clearPreparingPreviewTimers();
+        preparingPreviewStartedAtRef.current = null;
         setIsCreatingSubtitles(false);
         setCreateSubtitlesStartedAt(null);
         setCreateSubtitlesError(null);
         createSubtitlesJobIdRef.current = null;
-        setCreateSubtitlesJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
+        closeCreateSubtitlesStream("switch_to_export");
+        setCreateStreamHealthValue("idle");
+        clearTimingFallbackProgress();
         setIsExporting(true);
         setExportError(null);
-        setExportHeading(
-          activeTask.status === "queued" ? "Queued" : (activeTask.heading ?? "Exporting video")
-        );
-        setExportProgressPct(pct);
-        setExportProgressMessage(message);
-        if (checklist.length > 0) {
-          setExportChecklist(checklist);
+        if (shouldApplyExportSnapshot) {
+          setExportHeading(
+            activeTask.status === "queued" ? "Queued" : (activeTask.heading ?? "Exporting video")
+          );
+          setExportProgressPct(pct);
+          setExportProgressMessage(message);
+          if (checklist.length > 0) {
+            setExportChecklist(checklist);
+          }
+          setExportStartedAt(startedAt);
         }
-        setExportStartedAt(startedAt);
         exportJobIdRef.current = activeTask.job_id;
-        if (!exportJobStream || exportJobStream.jobId !== activeTask.job_id) {
-          attachExportStream(activeTask.job_id);
+        if (!exportStreamOpenForJob) {
+          openExportStream(activeTask.job_id);
         }
       }
       return;
@@ -1899,10 +2392,8 @@ const Workbench = () => {
         setExportStartedAt(null);
         setExportError(null);
         exportJobIdRef.current = null;
-        setExportJobStream((prev) => {
-          prev?.close();
-          return null;
-        });
+        closeExportStream("resume_persisted_create");
+        setExportStreamHealthValue("idle");
         setCreateSubtitlesHeading("Creating subtitles");
         setCreateSubtitlesProgressPct(0);
         if (!isSameSessionJustStarted) {
@@ -1914,23 +2405,31 @@ const Workbench = () => {
         }
         createSubtitlesJobIdRef.current = persisted.jobId;
         if (
-          !createSubtitlesJobStream ||
-          createSubtitlesJobStream.jobId !== persisted.jobId
+          createSubtitlesJobStreamRef.current?.jobId !== persisted.jobId ||
+          createSubtitlesStreamHealthRef.current !== "open"
         ) {
-          attachCreateSubtitlesStream(persisted.jobId, persisted.eventsUrl);
+          openCreateSubtitlesStream(persisted.jobId, persisted.eventsUrl);
         }
         return;
       }
     }
 
     const taskNotice = project.task_notice;
-    if (!activeTask && createSubtitlesJobIdRef.current && isCreatingSubtitles && !createSubtitlesJobStream) {
+    if (
+      !activeTask &&
+      createSubtitlesJobIdRef.current &&
+      isCreatingSubtitles &&
+      createSubtitlesStreamHealthRef.current !== "open"
+    ) {
+      clearPreparingPreviewTimers();
+      preparingPreviewStartedAtRef.current = null;
       const finishedJobId = createSubtitlesJobIdRef.current;
       createSubtitlesJobIdRef.current = null;
       if (projectId) clearPersistedRunningJob(projectId);
       setIsCreatingSubtitles(false);
       setCreateSubtitlesStartedAt(null);
       setCreateSubtitlesProgressMessage("");
+      clearTimingFallbackProgress();
       if (taskNotice?.job_id === finishedJobId && taskNotice.status !== "completed") {
         setCreateSubtitlesError(taskNotice.message);
         setCreateSubtitlesProgressPct(0);
@@ -1939,7 +2438,12 @@ const Workbench = () => {
         setSubtitlesReloadTick((prev) => prev + 1);
       }
     }
-    if (!activeTask && exportJobIdRef.current && isExporting && !exportJobStream) {
+    if (
+      !activeTask &&
+      exportJobIdRef.current &&
+      isExporting &&
+      exportStreamHealthRef.current !== "open"
+    ) {
       const finishedJobId = exportJobIdRef.current;
       exportJobIdRef.current = null;
       setIsExporting(false);
@@ -1958,15 +2462,22 @@ const Workbench = () => {
       }
     }
   }, [
-    attachCreateSubtitlesStream,
-    attachExportStream,
-    createSubtitlesJobStream,
+    clearTimingFallbackProgress,
+    clearPreparingPreviewTimers,
     createSubtitlesStartedAt,
-    exportJobStream,
+    closeCreateSubtitlesStream,
+    closeExportStream,
+    createSubtitlesStreamHealth,
+    exportStreamHealth,
     isCreatingSubtitles,
     isExporting,
+    openCreateSubtitlesStream,
+    openExportStream,
     project,
     projectId,
+    rememberTimingAuthoritativeDetail,
+    setCreateStreamHealthValue,
+    setExportStreamHealthValue,
     settings
   ]);
 
@@ -1974,8 +2485,8 @@ const Workbench = () => {
     if (!projectId) {
       return;
     }
-    const shouldPollCreateSync = isCreatingSubtitles && !createSubtitlesJobStream;
-    const shouldPollExportSync = isExporting && !exportJobStream;
+    const shouldPollCreateSync = isCreatingSubtitles && createSubtitlesStreamHealth !== "open";
+    const shouldPollExportSync = isExporting && exportStreamHealth !== "open";
     if (!shouldPollCreateSync && !shouldPollExportSync) {
       return;
     }
@@ -1986,8 +2497,8 @@ const Workbench = () => {
       clearInterval(timer);
     };
   }, [
-    createSubtitlesJobStream,
-    exportJobStream,
+    createSubtitlesStreamHealth,
+    exportStreamHealth,
     isCreatingSubtitles,
     isExporting,
     projectId
@@ -3337,13 +3848,16 @@ const Workbench = () => {
               const checklistFromApi =
                 at && at.checklist?.length
                   ? buildChecklistFromActiveTask(at)
-                  : createSubtitlesChecklist;
-              const checklist =
-                checklistFromApi.length > 0
-                  ? checklistFromApi
-                  : settings
-                    ? defaultChecklist(buildGenerateChecklist(settings))
-                    : [];
+                  : [];
+              const checklistBase =
+                createSubtitlesChecklist.length > 0
+                  ? createSubtitlesChecklist
+                  : checklistFromApi.length > 0
+                    ? checklistFromApi
+                    : settings
+                      ? defaultChecklist(buildGenerateChecklist(settings))
+                      : [];
+              const checklist = withTimingFallbackChecklist(checklistBase);
               const pct =
                 isCreatingSubtitles || createSubtitlesProgressPct > 0
                   ? createSubtitlesProgressPct

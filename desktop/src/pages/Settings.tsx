@@ -1,5 +1,4 @@
 import * as React from "react";
-import { useSearchParams } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { Laptop, Moon, Sun } from "lucide-react";
 
@@ -94,18 +93,6 @@ const SettingsSection = ({
 );
 
 const Settings = () => {
-  const [searchParams] = useSearchParams();
-  const [showDiagnosticsFromHash, setShowDiagnosticsFromHash] = React.useState(
-    () => (typeof window !== "undefined" && window.location.hash.includes("diagnostics=1"))
-  );
-  React.useEffect(() => {
-    setShowDiagnosticsFromHash(window.location.hash.includes("diagnostics=1"));
-  }, []);
-  const showDiagnostics =
-    searchParams.get("diagnostics") === "1" ||
-    (typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).get("diagnostics") === "1") ||
-    showDiagnosticsFromHash;
   const { theme, setTheme } = useTheme();
 
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
@@ -377,89 +364,91 @@ const Settings = () => {
         </p>
       </SettingsSection>
 
-      {showDiagnostics && (
       <div data-testid="settings-diagnostics-section">
-      <SettingsSection title="Diagnostics">
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id="diagnostics-archive"
-            checked={settings.diagnostics?.archive_on_exit}
-            onCheckedChange={(checked) =>
-              persistSettings({
-                diagnostics: { archive_on_exit: Boolean(checked) }
-              })
-            }
-            disabled={!diagnosticsEnabled}
-          />
-          <Label htmlFor="diagnostics-archive">Zip logs and outputs on exit</Label>
-        </div>
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id="diagnostics-enabled"
-            checked={diagnosticsEnabled}
-            onCheckedChange={(checked) =>
-              persistSettings({ diagnostics: { enabled: Boolean(checked) } })
-            }
-          />
-          <Label htmlFor="diagnostics-enabled">Enable diagnostics logging</Label>
-        </div>
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id="diagnostics-success"
-            checked={settings.diagnostics?.write_on_success}
-            onCheckedChange={(checked) =>
-              persistSettings({
-                diagnostics: { write_on_success: Boolean(checked) }
-              })
-            }
-            disabled={!diagnosticsEnabled}
-          />
-          <Label htmlFor="diagnostics-success">
-            Write diagnostics on successful completion
-          </Label>
-        </div>
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id="diagnostics-render"
-            checked={settings.diagnostics?.render_timing_logs_enabled ?? false}
-            onCheckedChange={(checked) =>
-              persistSettings({
-                diagnostics: { render_timing_logs_enabled: Boolean(checked) }
-              })
-            }
-            disabled={!diagnosticsEnabled}
-          />
-          <Label htmlFor="diagnostics-render">Enable render timing logs (dev-only)</Label>
-        </div>
-        <div className="mt-2 space-y-2">
-          {[
-            { key: "app_system", label: "App + system info" },
-            { key: "video_info", label: "Video info" },
-            { key: "audio_info", label: "Audio (WAV) info" },
-            { key: "transcription_config", label: "Transcription config" },
-            { key: "srt_stats", label: "SRT stats" },
-            { key: "commands_timings", label: "Commands + timings" }
-          ].map((category) => (
-            <div key={category.key} className="flex items-start gap-2">
-              <Checkbox
-                id={`diagnostics-${category.key}`}
-                checked={settings.diagnostics?.categories?.[category.key as keyof typeof settings.diagnostics.categories]}
-                onCheckedChange={(checked) =>
-                  persistSettings({
-                    diagnostics: {
-                      categories: { [category.key]: Boolean(checked) }
-                    }
-                  })
-                }
-                disabled={!diagnosticsEnabled}
-              />
-              <Label htmlFor={`diagnostics-${category.key}`}>{category.label}</Label>
-            </div>
-          ))}
-        </div>
-      </SettingsSection>
+        <SettingsSection title="Diagnostics">
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="diagnostics-archive"
+              checked={settings.diagnostics?.archive_on_exit}
+              onCheckedChange={(checked) =>
+                persistSettings({
+                  diagnostics: { archive_on_exit: Boolean(checked) }
+                })
+              }
+              disabled={!diagnosticsEnabled}
+            />
+            <Label htmlFor="diagnostics-archive">Zip logs and outputs on exit</Label>
+          </div>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="diagnostics-enabled"
+              checked={diagnosticsEnabled}
+              onCheckedChange={(checked) =>
+                persistSettings({ diagnostics: { enabled: Boolean(checked) } })
+              }
+            />
+            <Label htmlFor="diagnostics-enabled">Enable diagnostics logging</Label>
+          </div>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="diagnostics-success"
+              checked={settings.diagnostics?.write_on_success}
+              onCheckedChange={(checked) =>
+                persistSettings({
+                  diagnostics: { write_on_success: Boolean(checked) }
+                })
+              }
+              disabled={!diagnosticsEnabled}
+            />
+            <Label htmlFor="diagnostics-success">
+              Write diagnostics on successful completion
+            </Label>
+          </div>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="diagnostics-render"
+              checked={settings.diagnostics?.render_timing_logs_enabled ?? false}
+              onCheckedChange={(checked) =>
+                persistSettings({
+                  diagnostics: { render_timing_logs_enabled: Boolean(checked) }
+                })
+              }
+              disabled={!diagnosticsEnabled}
+            />
+            <Label htmlFor="diagnostics-render">Enable render timing logs (dev-only)</Label>
+          </div>
+          <div className="mt-2 space-y-2">
+            {[
+              { key: "app_system", label: "App + system info" },
+              { key: "video_info", label: "Video info" },
+              { key: "audio_info", label: "Audio (WAV) info" },
+              { key: "transcription_config", label: "Transcription config" },
+              { key: "srt_stats", label: "SRT stats" },
+              { key: "commands_timings", label: "Commands + timings" }
+            ].map((category) => (
+              <div key={category.key} className="flex items-start gap-2">
+                <Checkbox
+                  id={`diagnostics-${category.key}`}
+                  checked={
+                    settings.diagnostics?.categories?.[
+                      category.key as keyof typeof settings.diagnostics.categories
+                    ]
+                  }
+                  onCheckedChange={(checked) =>
+                    persistSettings({
+                      diagnostics: {
+                        categories: { [category.key]: Boolean(checked) }
+                      }
+                    })
+                  }
+                  disabled={!diagnosticsEnabled}
+                />
+                <Label htmlFor={`diagnostics-${category.key}`}>{category.label}</Label>
+              </div>
+            ))}
+          </div>
+        </SettingsSection>
       </div>
-      )}
     </div>
   );
 };

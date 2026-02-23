@@ -165,6 +165,9 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
     });
   }
   const eventsByJob = new Map();
+  const projectGetDelaysByProject = new Map();
+  const eventRequestCounts = new Map();
+  const eventFailureByJob = new Map();
   const projectGetCounts = new Map();
 
   await page.route("**://127.0.0.1:8765/settings", async (route) => {
@@ -354,6 +357,13 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
       return;
     }
     projectGetCounts.set(projectId, (projectGetCounts.get(projectId) ?? 0) + 1);
+    const delays = projectGetDelaysByProject.get(projectId);
+    if (Array.isArray(delays) && delays.length > 0) {
+      const delayMs = delays.shift();
+      if (typeof delayMs === "number" && delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -432,6 +442,16 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
   await page.route("**://127.0.0.1:8765/jobs/*/events", async (route) => {
     const request = route.request();
     const jobId = getJobIdFromEventsUrl(request.url());
+    eventRequestCounts.set(jobId, (eventRequestCounts.get(jobId) ?? 0) + 1);
+    const forcedFailure = eventFailureByJob.get(jobId);
+    if (forcedFailure) {
+      await route.fulfill({
+        status: forcedFailure.status,
+        contentType: forcedFailure.contentType ?? "application/json",
+        body: forcedFailure.body
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       headers: {
@@ -463,9 +483,19 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
         entry.project_id === projectId ? { ...entry, ...patch } : entry
       );
     },
+    setProjectGetDelays: (projectId, delays) => {
+      projectGetDelaysByProject.set(projectId, [...delays]);
+    },
     setJobEvents: (jobId, events) => {
       eventsByJob.set(jobId, events);
-    }
+    },
+    setJobEventFailure: (jobId, status, body, contentType = "application/json") => {
+      eventFailureByJob.set(jobId, { status, body, contentType });
+    },
+    clearJobEventFailure: (jobId) => {
+      eventFailureByJob.delete(jobId);
+    },
+    getJobEventsRequestCount: (jobId) => eventRequestCounts.get(jobId) ?? 0
   };
 };
 
@@ -948,6 +978,237 @@ test("workbench falls back to project polling when resumed create stream attach 
   await expect.poll(() => api.getProjectFetchCount("project-1")).toBeGreaterThan(1);
   await expect(page.getByText("Runner disconnected while resuming.")).toBeVisible();
   await expect(page.getByTestId("workbench-create-subtitles")).toBeVisible();
+});
+
+test("workbench reattach cooldown throttles repeated create stream failures", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-reattach-throttle",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Waiting for stream",
+    pct: 0,
+    step_id: "extract_audio",
+    started_at: ts,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "extract_audio",
+        label: "Extracting audio",
+        state: "active",
+        detail: "Starting"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects, null);
+  api.setJobEventFailure(
+    "job-reattach-throttle",
+    409,
+    JSON.stringify({ error: "sse_client_already_connected", job_id: "job-reattach-throttle" })
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  await page.waitForTimeout(6500);
+  await expect.poll(() => api.getProjectFetchCount("project-1")).toBeGreaterThan(1);
+  await expect.poll(() => api.getJobEventsRequestCount("job-reattach-throttle")).toBeLessThanOrEqual(2);
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+});
+
+test("workbench keeps live create progress when snapshot updated_at is stale", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const startedAt = new Date(Date.now() - 20_000).toISOString();
+  const staleTs = new Date(Date.now() - 10_000).toISOString();
+  const liveTs = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-snapshot-precedence",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Snapshot stale",
+    pct: 5,
+    step_id: "load_model",
+    started_at: startedAt,
+    updated_at: staleTs,
+    checklist: [
+      {
+        id: "load_model",
+        label: "Loading AI model",
+        state: "active",
+        detail: "Snapshot stale detail"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects, null);
+  api.setProjectGetDelays("project-1", [0, 700]);
+  api.setJobEvents(
+    "job-snapshot-precedence",
+    toSseBody([
+      {
+        job_id: "job-snapshot-precedence",
+        ts: liveTs,
+        type: "started",
+        heading: "Creating subtitles"
+      },
+      {
+        job_id: "job-snapshot-precedence",
+        ts: liveTs,
+        type: "progress",
+        step_id: "load_model",
+        pct: 42,
+        message: "Live stream update"
+      }
+    ])
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  await expect(page.getByTestId("workbench-create-elapsed")).toHaveAttribute(
+    "title",
+    "Live stream update"
+  );
+  await expect.poll(() => api.getProjectFetchCount("project-1")).toBeGreaterThan(1);
+  await expect(page.getByText("42%")).toBeVisible();
+});
+
+test("workbench timing fallback shows incremental words from ALIGN_WORDS progress", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-timing-fallback",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Timing word highlighting",
+    pct: 18,
+    step_id: "timing_word_highlights",
+    started_at: ts,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "timing_word_highlights",
+        label: "Matching individual words to speech",
+        state: "active",
+        detail: "0/100 words"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects, null);
+  api.setJobEvents(
+    "job-timing-fallback",
+    toSseBody([
+      {
+        job_id: "job-timing-fallback",
+        ts,
+        type: "started",
+        heading: "Creating subtitles"
+      },
+      {
+        job_id: "job-timing-fallback",
+        ts: new Date(Date.now() + 1000).toISOString(),
+        type: "progress",
+        step_id: "ALIGN_WORDS",
+        step_progress: 0.35,
+        pct: 35,
+        message: "Timing word highlighting"
+      }
+    ])
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  await expect(
+    page.locator("[data-testid='workbench-create-checklist']").getByText("35/100 words")
+  ).toBeVisible();
+});
+
+test("workbench timing fallback ignores stale snapshot detail with newer updated_at", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const startedAt = new Date(Date.now() - 8_000).toISOString();
+  const streamTs = new Date(Date.now() - 4_000).toISOString();
+  const activeTask = {
+    job_id: "job-timing-fallback-stale",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Timing word highlighting",
+    pct: 18,
+    step_id: "timing_word_highlights",
+    started_at: startedAt,
+    updated_at: startedAt,
+    checklist: [
+      {
+        id: "timing_word_highlights",
+        label: "Matching individual words to speech",
+        state: "active",
+        detail: "0/100 words"
+      }
+    ]
+  };
+  projects[0].active_task = activeTask;
+  const api = await mockProjects(page, projects, null);
+  api.setJobEvents(
+    "job-timing-fallback-stale",
+    toSseBody([
+      {
+        job_id: "job-timing-fallback-stale",
+        ts: streamTs,
+        type: "started",
+        heading: "Creating subtitles"
+      },
+      {
+        job_id: "job-timing-fallback-stale",
+        ts: new Date(Date.now() - 3_000).toISOString(),
+        type: "progress",
+        step_id: "ALIGN_WORDS",
+        step_progress: 0.35,
+        pct: 35,
+        message: "Timing word highlighting"
+      }
+    ])
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  const checklist = page.locator("[data-testid='workbench-create-checklist']");
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  await expect(checklist.getByText("35/100 words")).toBeVisible();
+
+  const fetchCountBeforeSnapshotRefresh = api.getProjectFetchCount("project-1");
+  api.setProjectFields("project-1", {
+    active_task: {
+      ...activeTask,
+      pct: 35,
+      updated_at: new Date(Date.now() + 60_000).toISOString()
+    }
+  });
+
+  await expect
+    .poll(() => api.getProjectFetchCount("project-1"))
+    .toBeGreaterThan(fetchCountBeforeSnapshotRefresh);
+  await expect(checklist.getByText("35/100 words")).toBeVisible();
+  await expect(checklist).not.toContainText("0/100 words");
 });
 
 test("workbench shows Queued and cancel when project active_task is queued", async ({ page }) => {
