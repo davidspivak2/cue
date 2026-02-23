@@ -2813,6 +2813,12 @@ class MainWindow(QtWidgets.QMainWindow):
         step_progress: Optional[float],
         _status: str,
     ) -> None:
+        if step_id == ProgressStep.ALIGN_WORDS and step_progress is not None:
+            row = self._checklist_rows.get(ChecklistStep.TIMING_WORD_HIGHLIGHTS)
+            state = self._checklist_state.get(ChecklistStep.TIMING_WORD_HIGHLIGHTS) if self._checklist_state else None
+            if row and state == "active":
+                pct = max(0, min(int(round(step_progress * 100)), 100))
+                row.set_active_detail(f"{pct}%")
         if not self._progress_controller:
             return
         global_progress = self._progress_controller.update(step_id, step_progress)

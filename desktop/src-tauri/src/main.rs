@@ -1,14 +1,15 @@
 use std::{
     env,
     fs::{self, File},
-    io,
+    io::{self, Read, Write},
+    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(windows)]
@@ -267,6 +268,108 @@ fn start_packaged_backend(app: &App) -> Option<Child> {
     }
 }
 
+#[cfg(debug_assertions)]
+fn repo_root_dir() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(|path| path.parent())
+        .map(Path::to_path_buf)
+        .unwrap_or(manifest_dir)
+}
+
+#[cfg(debug_assertions)]
+fn start_dev_backend(_app: &App) -> Option<Child> {
+    let repo_root = repo_root_dir();
+    let venv_python = repo_root.join(".venv").join("Scripts").join("python.exe");
+    let mut command = if venv_python.exists() {
+        Command::new(venv_python)
+    } else {
+        Command::new("python")
+    };
+
+    let logs_dir = cue_logs_dir();
+    if let Err(err) = fs::create_dir_all(&logs_dir) {
+        eprintln!("Failed to create backend logs directory {logs_dir:?}: {err}");
+    }
+    let log_path = build_backend_log_path(&logs_dir);
+
+    command
+        .arg("-m")
+        .arg("app.backend_server")
+        .current_dir(&repo_root)
+        .stdin(Stdio::null())
+        .env("CUE_BACKEND_PORT", "8765")
+        .env("PYTHONUNBUFFERED", "1")
+        .env("PYTHONIOENCODING", "utf-8");
+
+    match File::create(&log_path) {
+        Ok(stdout_file) => match stdout_file.try_clone() {
+            Ok(stderr_file) => {
+                command
+                    .stdout(Stdio::from(stdout_file))
+                    .stderr(Stdio::from(stderr_file));
+            }
+            Err(err) => {
+                eprintln!("Failed to clone backend log handle {log_path:?}: {err}");
+                command.stdout(Stdio::from(stdout_file)).stderr(Stdio::null());
+            }
+        },
+        Err(err) => {
+            eprintln!("Failed to create backend log file {log_path:?}: {err}");
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+    }
+
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    match command.spawn() {
+        Ok(child) => Some(child),
+        Err(err) => {
+            eprintln!(
+                "Failed to start dev backend from repo {repo_root:?}: {err}. Falling back to packaged backend."
+            );
+            None
+        }
+    }
+}
+
+fn start_backend(app: &App) -> Option<Child> {
+    #[cfg(debug_assertions)]
+    {
+        if let Some(child) = start_dev_backend(app) {
+            return Some(child);
+        }
+    }
+    start_packaged_backend(app)
+}
+
+fn request_backend_archive_on_exit() {
+    let addr = match "127.0.0.1:8765".parse::<SocketAddr>() {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(800)) {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(20)));
+    let request = "POST /diagnostics/archive-on-exit HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+    if stream.write_all(request.as_bytes()).is_err() {
+        return;
+    }
+    let mut buffer = [0_u8; 1024];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+}
+
 fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
     let mut guard = match shared_child.lock() {
         Ok(lock) => lock,
@@ -292,6 +395,8 @@ fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
             eprintln!("Failed to check backend process status: {err}");
         }
     }
+
+    request_backend_archive_on_exit();
 
     let pid = child.id();
 
@@ -362,7 +467,7 @@ fn main() {
     tauri::Builder::default()
         .setup(move |app| {
             app.manage(AllowCloseState::default());
-            if let Some(child) = start_packaged_backend(app) {
+            if let Some(child) = start_backend(app) {
                 match backend_child_for_setup.lock() {
                     Ok(mut lock) => {
                         *lock = Some(child);

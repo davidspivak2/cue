@@ -114,11 +114,8 @@ test("save policy enables the path controls", async ({ page }) => {
   await expect(browseButton).toBeEnabled();
 });
 
-test("diagnostics master toggle gates categories", async ({ page }) => {
+test("diagnostics section is visible and master toggle gates categories", async ({ page }) => {
   await page.goto("/");
-  await page.evaluate(() => {
-    window.location.hash = "diagnostics=1";
-  });
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-content")).toBeVisible();
 

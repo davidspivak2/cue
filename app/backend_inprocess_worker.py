@@ -4,10 +4,47 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger("cue")
+
+
+def warmup_inprocess_runtime() -> dict[str, Any]:
+    """Warm imports/Qt runtime used by in-process jobs."""
+    started = time.monotonic()
+    result: dict[str, Any] = {
+        "ok": False,
+        "qt_ready": False,
+        "worker_ready": False,
+        "error": None,
+        "elapsed_ms": 0,
+    }
+    try:
+        from PySide6 import QtWidgets
+
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            app = QtWidgets.QApplication(sys.argv if hasattr(sys, "argv") else [])
+        del app
+        result["qt_ready"] = True
+
+        # Warm module imports used in run_worker_inprocess without starting a job.
+        from app.qt_worker_runner import (  # noqa: F401
+            _build_progress_controller,
+            _resolve_settings,
+            _resolve_subtitle_style,
+        )
+        from app.workers import TaskType, Worker  # noqa: F401
+
+        result["worker_ready"] = True
+        result["ok"] = True
+    except Exception as exc:  # noqa: BLE001
+        result["error"] = str(exc)
+    finally:
+        result["elapsed_ms"] = int(round((time.monotonic() - started) * 1000))
+    return result
 
 
 def run_worker_inprocess(

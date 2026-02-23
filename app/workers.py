@@ -532,6 +532,21 @@ class Worker(QtCore.QObject):
                     True,
                 )
 
+        hold_deadline = time.monotonic() + 5.0
+        while time.monotonic() < hold_deadline:
+            if self._cancelled.is_set():
+                raise CancelledError()
+            remaining = hold_deadline - time.monotonic()
+            time.sleep(min(0.1, max(0.0, remaining)))
+
+        self._emit_step_event(ChecklistStep.PREPARING_PREVIEW, StepState.DONE)
+        self._emit_step_progress(
+            ProgressStep.PREPARING_PREVIEW,
+            1.0,
+            "Preparing preview",
+            force=True,
+        )
+
         return {
             "audio_path": str(audio_path),
             "srt_path": str(srt_path),
@@ -1859,10 +1874,7 @@ class Worker(QtCore.QObject):
                     match = re.search(r'srt="([^"]+)"', text)
                     if match:
                         srt_hint = Path(match.group(1))
-                        self._write_subtitles_words_total = count_alignment_words_in_srt(
-                            srt_hint,
-                            "he",
-                        )
+                        self._refresh_write_subtitles_words_total(srt_hint)
                         self._emit_write_subtitles_created_if_needed()
                     continue
                 if text in {"WRITE_SUBTITLES_ASSEMBLING", "WRITE_SUBTITLES_FINALIZING"}:
@@ -2119,11 +2131,7 @@ class Worker(QtCore.QObject):
                     self._stop_smooth_progress()
                     self._stop_transcribe_estimator()
                     final_srt_path = done_srt_path or srt_path
-                    if self._write_subtitles_words_total is None:
-                        self._write_subtitles_words_total = count_alignment_words_in_srt(
-                            final_srt_path,
-                            "he",
-                        )
+                    self._refresh_write_subtitles_words_total(final_srt_path)
                     self._emit_write_subtitles_created_if_needed()
                     self._emit_step_progress(
                         ProgressStep.TRANSCRIBE,
@@ -2153,11 +2161,7 @@ class Worker(QtCore.QObject):
                         "Subtitles file created without DONE marker; continuing.",
                         True,
                     )
-                    if self._write_subtitles_words_total is None:
-                        self._write_subtitles_words_total = count_alignment_words_in_srt(
-                            srt_candidate,
-                            "he",
-                        )
+                    self._refresh_write_subtitles_words_total(srt_candidate)
                     self._emit_write_subtitles_created_if_needed()
                 if return_code != 0:
                     _emit_log(
@@ -2343,10 +2347,14 @@ class Worker(QtCore.QObject):
             if not plan.output_path.parent.exists():
                 plan.output_path.parent.mkdir(parents=True, exist_ok=True)
             def _execute_alignment_run() -> int:
-                if self._write_subtitles_words_total is not None:
+                if (
+                    isinstance(self._write_subtitles_words_total, int)
+                    and self._write_subtitles_words_total > 0
+                ):
                     self._alignment_words_total = self._write_subtitles_words_total
                 else:
-                    self._alignment_words_total = count_alignment_words_in_srt(srt_path, "he")
+                    self._refresh_write_subtitles_words_total(srt_path)
+                    self._alignment_words_total = self._write_subtitles_words_total or 0
                 self._alignment_words_current = 0
                 self._alignment_last_emit = 0.0
                 self._alignment_has_real_progress = False
@@ -2364,15 +2372,54 @@ class Worker(QtCore.QObject):
                         self._alignment_words_total,
                     )
                 alignment_real_progress = threading.Event()
-                estimator_stop = threading.Event()
-                smoother_stop = threading.Event()
-                estimator_thread: Optional[threading.Thread] = None
-                smoother_thread: Optional[threading.Thread] = None
                 alignment_lock = threading.Lock()
                 alignment_target = {
                     "current": 0,
                     "total": self._alignment_words_total,
                 }
+                display_current = 0
+                last_total = alignment_target["total"]
+                start_time = time.monotonic()
+
+                def _advance_alignment_progress(now: float) -> None:
+                    nonlocal display_current
+                    nonlocal last_total
+                    with alignment_lock:
+                        current_target = alignment_target["current"]
+                        current_total = alignment_target["total"]
+                    if current_total <= 0:
+                        last_total = current_total
+                        return
+                    if not alignment_real_progress.is_set():
+                        elapsed = now - start_time
+                        ramp_seconds = min(max(current_total * 0.08, 40.0), 900.0)
+                        estimated_cap = current_total - 1 if current_total > 1 else current_total
+                        estimated_current = int(current_total * min(elapsed / ramp_seconds, 1.0))
+                        estimated_current = min(estimated_current, estimated_cap)
+                        if (
+                            estimated_current == 0
+                            and elapsed >= 0.25
+                            and estimated_cap > 0
+                        ):
+                            estimated_current = 1
+                        if estimated_current > current_target:
+                            current_target = estimated_current
+                            with alignment_lock:
+                                if estimated_current > alignment_target["current"]:
+                                    alignment_target["current"] = estimated_current
+                    if display_current > current_total:
+                        display_current = current_total
+                    if current_total > 0 and last_total <= 0:
+                        self._alignment_words_current = display_current
+                        self._alignment_words_total = current_total
+                        self._maybe_emit_alignment_progress(display_current, current_total)
+                    if display_current < current_target:
+                        step = max(1, int(current_total * 0.01))
+                        display_current = min(current_target, display_current + step)
+                        self._alignment_words_current = display_current
+                        self._alignment_words_total = current_total
+                        self._maybe_emit_alignment_progress(display_current, current_total)
+                    last_total = current_total
                 if emit_step_events:
                     if self._alignment_words_total > 0:
                         self._emit_step_event(
@@ -2388,73 +2435,8 @@ class Worker(QtCore.QObject):
                         self._emit_step_event(
                             ChecklistStep.TIMING_WORD_HIGHLIGHTS,
                             StepState.START,
-                            reason_text="Starting...",
+                            reason_text=None,
                         )
-                    start_time = time.monotonic()
-
-                    def _start_estimator_if_needed(total: int) -> None:
-                        nonlocal estimator_thread
-                        if estimator_thread is not None or total <= 0:
-                            return
-                        ramp_seconds = min(max(total * 0.08, 40.0), 900.0)
-                        cap_ratio = 0.97
-
-                        def _estimate_alignment_progress() -> None:
-                            while (
-                                not estimator_stop.is_set()
-                                and not alignment_real_progress.is_set()
-                            ):
-                                elapsed = time.monotonic() - start_time
-                                fraction = min(elapsed / ramp_seconds, 1.0) * cap_ratio
-                                estimated_current = int(total * fraction)
-                                if estimated_current == 0 and elapsed >= 1.0:
-                                    estimated_current = 1
-                                with alignment_lock:
-                                    if estimated_current > alignment_target["current"]:
-                                        alignment_target["current"] = estimated_current
-                                estimator_stop.wait(0.5)
-
-                        estimator_thread = threading.Thread(
-                            target=_estimate_alignment_progress,
-                            daemon=True,
-                        )
-                        estimator_thread.start()
-
-                    _start_estimator_if_needed(self._alignment_words_total)
-
-                    def _smooth_alignment_progress() -> None:
-                        display_current = 0
-                        last_total = 0
-                        while not smoother_stop.is_set():
-                            with alignment_lock:
-                                current_target = alignment_target["current"]
-                                current_total = alignment_target["total"]
-                            if current_total > 0 and last_total <= 0:
-                                self._alignment_words_current = display_current
-                                self._alignment_words_total = current_total
-                                self._maybe_emit_alignment_progress(
-                                    display_current,
-                                    current_total,
-                                )
-                            last_total = current_total
-                            if current_total <= 0:
-                                smoother_stop.wait(0.2)
-                                continue
-                            if display_current < current_target:
-                                step = max(1, int(current_total * 0.01))
-                                display_current = min(current_target, display_current + step)
-                                self._alignment_words_current = display_current
-                                self._alignment_words_total = current_total
-                                self._maybe_emit_alignment_progress(display_current, current_total)
-                                smoother_stop.wait(0.1)
-                            else:
-                                smoother_stop.wait(0.2)
-
-                    smoother_thread = threading.Thread(
-                        target=_smooth_alignment_progress,
-                        daemon=True,
-                    )
-                    smoother_thread.start()
                 self.signals.log.emit(
                     "Alignment starting: "
                     f"wav={audio_path} srt={srt_path} output={plan.output_path} "
@@ -2513,12 +2495,6 @@ class Worker(QtCore.QObject):
                             current = min(current, alignment_target["total"])
                         if current > alignment_target["current"]:
                             alignment_target["current"] = current
-                    if (
-                        emit_step_events
-                        and total > 0
-                        and not alignment_real_progress.is_set()
-                    ):
-                        _start_estimator_if_needed(total)
 
                 def _read_stream(
                     stream: Optional[Iterable[str]],
@@ -2551,7 +2527,13 @@ class Worker(QtCore.QObject):
                 stdout_thread.start()
                 stderr_thread.start()
                 try:
+                    next_alignment_tick = time.monotonic()
                     while True:
+                        if emit_step_events:
+                            now = time.monotonic()
+                            if now >= next_alignment_tick:
+                                _advance_alignment_progress(now)
+                                next_alignment_tick = now + 0.1
                         if self._cancelled.is_set():
                             process.terminate()
                             try:
@@ -2566,12 +2548,6 @@ class Worker(QtCore.QObject):
                 finally:
                     if self._process is process:
                         self._process = None
-                estimator_stop.set()
-                if estimator_thread:
-                    estimator_thread.join(timeout=1)
-                smoother_stop.set()
-                if smoother_thread:
-                    smoother_thread.join(timeout=1)
                 stdout_thread.join(timeout=1)
                 stderr_thread.join(timeout=1)
                 stderr_text = "\n".join(stderr_tail)
@@ -2983,6 +2959,17 @@ class Worker(QtCore.QObject):
             reason_text="Subtitles created",
         )
         self._write_subtitles_done_emitted = True
+
+    def _refresh_write_subtitles_words_total(self, srt_path: Path) -> None:
+        total = count_alignment_words_in_srt(srt_path, "he")
+        if total > 0:
+            self._write_subtitles_words_total = total
+            return
+        if (
+            not isinstance(self._write_subtitles_words_total, int)
+            or self._write_subtitles_words_total <= 0
+        ):
+            self._write_subtitles_words_total = None
 
     def _describe_language(self, language_code: str) -> str:
         language_map = {

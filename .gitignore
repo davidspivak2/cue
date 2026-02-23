@@ -14,6 +14,9 @@ docs/handoffs
 .cursor/
 .codex/
 docs/internal/SESSION_HANDOFF*.md
+_cargo_target_check*/
+build_temp/
+_tmp_backend_server.pyc.*
 
 # Desktop UI (Node)
 desktop/node_modules/

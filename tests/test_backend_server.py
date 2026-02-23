@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,7 +13,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app import backend_server, project_store
-from app.paths import get_projects_dir
+from app.paths import get_diagnostics_dir, get_logs_dir, get_projects_dir
 from app.srt_utils import compute_srt_sha256
 from app.word_timing_schema import (
     CueWordTimings,
@@ -296,6 +298,131 @@ def _setup_env(tmp_path: Path, monkeypatch) -> None:
     backend_server.JOBS.clear()
 
 
+def test_archive_exit_bundle_writes_zip_in_video_folder(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    settings = backend_server._read_settings_file()
+    settings["diagnostics"]["archive_on_exit"] = True
+    backend_server._write_settings_file(settings)
+
+    video_path = tmp_path / "sample.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+    project_dir = get_projects_dir() / project_id
+    (project_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+        encoding="utf-8",
+    )
+    (project_dir / "word_timings.json").write_text("{}", encoding="utf-8")
+
+    (tmp_path / "sample_subtitled.srt").write_text("srt", encoding="utf-8")
+    (tmp_path / "diag_create_subtitles_01.json").write_text("{}", encoding="utf-8")
+    (get_logs_dir() / "session.log").write_text("log", encoding="utf-8")
+    (get_diagnostics_dir() / "diag_create_subtitles_02.json").write_text("{}", encoding="utf-8")
+    active_trace = get_logs_dir() / "job_trace_active.jsonl"
+    active_trace.write_text('{"type":"progress"}\n', encoding="utf-8")
+    stale_log = get_logs_dir() / "stale.log"
+    stale_log.write_text("old", encoding="utf-8")
+    stale_mtime = backend_server.BACKEND_SESSION_STARTED_AT - 60.0
+    os.utime(stale_log, (stale_mtime, stale_mtime))
+    stale_trace = get_logs_dir() / "job_trace_stale.jsonl"
+    stale_trace.write_text('{"type":"progress"}\n', encoding="utf-8")
+    os.utime(stale_trace, (stale_mtime, stale_mtime))
+
+    archives = backend_server._archive_exit_bundles()
+    assert len(archives) == 1
+    archive_path = Path(archives[0])
+    assert archive_path.parent == video_path.parent
+    assert archive_path.exists()
+    assert archive_path.name.startswith("cue_log_bundle_")
+
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        names = set(archive.namelist())
+    assert "logs/session.log" in names
+    assert "logs/stale.log" not in names
+    assert "job_traces/job_trace_active.jsonl" in names
+    assert "job_traces/job_trace_stale.jsonl" not in names
+    assert "diagnostics/diag_create_subtitles_02.json" in names
+    assert "outputs/sample_subtitled.srt" in names
+    assert "outputs/diag_create_subtitles_01.json" in names
+    assert "project/subtitles.srt" in names
+    assert "project/word_timings.json" in names
+
+
+def test_archive_exit_bundle_endpoint_returns_created_archives(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    settings = backend_server._read_settings_file()
+    settings["diagnostics"]["archive_on_exit"] = True
+    backend_server._write_settings_file(settings)
+
+    older_video_path = tmp_path / "older.mp4"
+    older_video_path.write_text("video", encoding="utf-8")
+    project_store.create_project(str(older_video_path))
+
+    video_path = tmp_path / "sample2.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    latest_summary = project_store.create_project(str(video_path))
+    project_store.update_project(
+        latest_summary["project_id"],
+        subtitles_srt_text="1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+    )
+    (get_logs_dir() / "session.log").write_text("log", encoding="utf-8")
+
+    with TestClient(backend_server.app) as client:
+        response = client.post("/diagnostics/archive-on-exit")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert len(payload["archives"]) == 1
+    archive_path = Path(payload["archives"][0])
+    assert archive_path.exists()
+    assert archive_path.name.startswith("cue_log_bundle_")
+    assert archive_path.parent == video_path.parent
+
+
+def test_enqueue_event_appends_job_trace_jsonl(tmp_path: Path) -> None:
+    trace_path = tmp_path / "job_trace_test.jsonl"
+    job = backend_server.JobState(
+        job_id="job-trace",
+        status="running",
+        created_at=datetime.now(timezone.utc),
+        trace_path=trace_path,
+    )
+
+    backend_server._enqueue_event(
+        job,
+        backend_server._build_event(
+            job.job_id,
+            "progress",
+            step_id="ALIGN_WORDS",
+            step_progress=0.5,
+            pct=50,
+            message="Timing word highlighting",
+        ),
+    )
+    backend_server._enqueue_event(
+        job,
+        backend_server._build_event(
+            job.job_id,
+            "checklist",
+            step_id="timing_word_highlights",
+            state="start",
+            reason_text="50/100 words",
+        ),
+    )
+
+    lines = [line for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 2
+    first = json.loads(lines[0])
+    second = json.loads(lines[1])
+    assert first["type"] == "progress"
+    assert first["step_id"] == "ALIGN_WORDS"
+    assert second["type"] == "checklist"
+    assert second["reason_text"] == "50/100 words"
+
+
 def test_project_first_export_resolves_project_artifacts(tmp_path: Path, monkeypatch) -> None:
     _setup_env(tmp_path, monkeypatch)
     video_path = tmp_path / "source.mp4"
@@ -397,3 +524,89 @@ def test_enqueue_event_bounds_queue_without_dropping_terminal() -> None:
         assert any(event.get("type") == "completed" for event in buffered)
     finally:
         backend_server.MAX_JOB_EVENT_QUEUE_SIZE = original_limit
+
+
+def _new_running_job(job_id: str) -> backend_server.JobState:
+    return backend_server.JobState(
+        job_id=job_id,
+        status="running",
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+def test_progress_step_ids_are_canonicalized_without_duplicate_logical_rows() -> None:
+    job = _new_running_job("job-canonical")
+
+    backend_server._update_job_snapshot(
+        job,
+        backend_server._build_event(
+            job.job_id,
+            "progress",
+            step_id="ALIGN_WORDS",
+            pct=17,
+            message="Timing word highlighting",
+            step_progress=0.17,
+        ),
+    )
+    backend_server._update_job_snapshot(
+        job,
+        backend_server._build_event(
+            job.job_id,
+            "checklist",
+            step_id="timing_word_highlights",
+            state="start",
+            reason_text="17/100 words",
+        ),
+    )
+    backend_server._update_job_snapshot(
+        job,
+        backend_server._build_event(
+            job.job_id,
+            "checklist",
+            step_id="timing_word_highlights",
+            state="done",
+            reason_text="100/100 words",
+        ),
+    )
+
+    assert "ALIGN_WORDS" not in job.snapshot_checklist
+    assert job.snapshot_checklist_order == ["timing_word_highlights"]
+    assert job.snapshot_step_id == "timing_word_highlights"
+    row = job.snapshot_checklist["timing_word_highlights"]
+    assert row["state"] == "done"
+    assert row["detail"] == "100/100 words"
+
+    active_task = backend_server._serialize_active_task(job)
+    assert [item["id"] for item in active_task["checklist"]] == ["timing_word_highlights"]
+
+
+def test_progress_messages_do_not_overwrite_checklist_detail() -> None:
+    job = _new_running_job("job-detail-authority")
+
+    backend_server._update_job_snapshot(
+        job,
+        backend_server._build_event(
+            job.job_id,
+            "checklist",
+            step_id="timing_word_highlights",
+            state="start",
+            reason_text="3/50 words",
+        ),
+    )
+    backend_server._update_job_snapshot(
+        job,
+        backend_server._build_event(
+            job.job_id,
+            "progress",
+            step_id="ALIGN_WORDS",
+            pct=61,
+            message="61%",
+            step_progress=0.61,
+        ),
+    )
+
+    row = job.snapshot_checklist["timing_word_highlights"]
+    assert row["detail"] == "3/50 words"
+    assert row["state"] == "active"
+    assert job.snapshot_step_id == "timing_word_highlights"
+    assert job.snapshot_message == "61%"

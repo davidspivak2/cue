@@ -23,7 +23,9 @@ import subprocess
 import signal
 import sys
 import threading
+import time
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +38,8 @@ from pydantic import BaseModel, Field
 
 from app import project_store
 from app.config import apply_config_defaults
-from app.paths import get_config_path
+from app.ffmpeg_utils import ensure_ffmpeg_available, get_subprocess_kwargs
+from app.paths import get_config_path, get_diagnostics_dir, get_logs_dir, get_projects_dir
 from app.transcription_device import gpu_available
 
 
@@ -48,17 +51,68 @@ RUNNER_CANCEL_TIMEOUT_SECONDS = 8.0
 PROJECT_DELETE_CANCEL_TIMEOUT_SECONDS = 3.0
 
 logger = logging.getLogger(__name__)
+_startup_warmup_task: Optional[asyncio.Task[None]] = None
+BACKEND_SESSION_STARTED_AT = time.time()
+
+
+async def _run_startup_warmup() -> None:
+    logger.info("Startup warmup: begin")
+    try:
+        ffmpeg_path, ffprobe_path, mode = await asyncio.to_thread(ensure_ffmpeg_available)
+        if ffprobe_path:
+            logger.info(
+                "Startup warmup: ffmpeg ready (mode=%s, ffmpeg=%s, ffprobe=%s)",
+                mode,
+                ffmpeg_path,
+                ffprobe_path,
+            )
+        else:
+            logger.info(
+                "Startup warmup: ffmpeg ready (mode=%s, ffmpeg=%s, ffprobe missing)",
+                mode,
+                ffmpeg_path,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Startup warmup: ffmpeg check failed: %s", exc)
+
+    try:
+        from app.backend_inprocess_worker import warmup_inprocess_runtime
+
+        warmup = await asyncio.to_thread(warmup_inprocess_runtime)
+        if warmup.get("ok"):
+            logger.info(
+                "Startup warmup: in-process worker ready in %sms",
+                warmup.get("elapsed_ms", 0),
+            )
+        else:
+            logger.warning(
+                "Startup warmup: in-process worker warmup skipped (%s)",
+                warmup.get("error") or "unknown error",
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Startup warmup: in-process worker warmup failed: %s", exc)
+    logger.info("Startup warmup: complete")
 
 
 @asynccontextmanager
 async def _app_lifespan(app: FastAPI):  # noqa: ARG001
-    global _queue_worker_tasks
+    global _queue_worker_tasks, _startup_warmup_task
     _queue_worker_tasks = [
         asyncio.create_task(_queue_worker_create_subtitles()),
     ]
     for _ in range(EXPORT_CONCURRENCY):
         _queue_worker_tasks.append(asyncio.create_task(_queue_worker_export()))
+    _startup_warmup_task = asyncio.create_task(_run_startup_warmup())
     yield
+    if _startup_warmup_task is not None:
+        _startup_warmup_task.cancel()
+        try:
+            await _startup_warmup_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # noqa: BLE001 - ensure shutdown completes
+            pass
+        _startup_warmup_task = None
     for task in _queue_worker_tasks:
         task.cancel()
         try:
@@ -67,6 +121,12 @@ async def _app_lifespan(app: FastAPI):  # noqa: ARG001
             pass
         except Exception:  # noqa: BLE001 - ensure shutdown completes
             pass
+    try:
+        archives = await asyncio.to_thread(_archive_exit_bundles)
+        if archives:
+            logger.info("Exit archive created: %s", ", ".join(archives))
+    except Exception as exc:  # noqa: BLE001 - ensure shutdown completes
+        logger.warning("Failed to archive logs on exit: %s", exc)
     _queue_worker_tasks = []
 
 
@@ -101,6 +161,7 @@ UI_ONLY_JOB_OPTION_KEYS = {
 ACTIVE_TASK_JOB_KINDS = {"create_subtitles", "create_video_with_subtitles"}
 MAX_JOB_EVENT_QUEUE_SIZE = 600
 TASK_NOTICE_TTL_SECONDS = 600
+SSE_CONFLICT_WARN_INTERVAL_SECONDS = 10.0
 CHECKLIST_LABEL_BY_STEP_ID = {
     "extract_audio": "Extracting audio",
     "load_model": "Loading AI model",
@@ -113,6 +174,14 @@ CHECKLIST_LABEL_BY_STEP_ID = {
     "get_video_info": "Getting video info",
     "add_subtitles": "Adding subtitles to video",
     "save_video": "Saving video",
+}
+PROGRESS_STEP_TO_CHECKLIST_STEP_ID = {
+    "PREPARE_AUDIO": "extract_audio",
+    "TRANSCRIBE": "load_model",
+    "FIX_PUNCTUATION": "fix_punctuation",
+    "FIX_GAPS": "fix_missing_subtitles",
+    "ALIGN_WORDS": "timing_word_highlights",
+    "PREPARING_PREVIEW": "preparing_preview",
 }
 
 
@@ -138,10 +207,13 @@ class JobState:
     snapshot_checklist_order: list[str] = field(default_factory=list)
     snapshot_checklist: dict[str, dict[str, Any]] = field(default_factory=dict)
     enqueue_lock: threading.Lock = field(default_factory=threading.Lock)
+    trace_path: Optional[Path] = None
+    trace_warn_at: float = 0.0
 
 
 JOBS: dict[str, JobState] = {}
 PROJECT_TASK_NOTICES: dict[str, dict[str, Any]] = {}
+SSE_CONFLICT_WARN_AT: dict[str, float] = {}
 _inprocess_slot_lock: asyncio.Lock = asyncio.Lock()
 
 # Per-kind job queues: (JobState, JobRequest). Workers run jobs; create_job enqueues.
@@ -317,6 +389,162 @@ def _merge_settings(base: dict[str, Any], update: dict[str, Any]) -> dict[str, A
     return merged
 
 
+def _is_file_from_current_session(path: Path) -> bool:
+    try:
+        return path.stat().st_mtime >= BACKEND_SESSION_STARTED_AT - 1.0
+    except OSError:
+        return False
+
+
+def _parse_project_updated_at_ts(value: Any) -> float:
+    if not isinstance(value, str) or not value.strip():
+        return 0.0
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _collect_exit_archive_entries(
+    *,
+    project_id: str,
+    video_path: Path,
+    latest_export: Optional[dict[str, Any]],
+    zip_path: Path,
+) -> list[tuple[Path, str]]:
+    entries: dict[str, Path] = {}
+
+    logs_dir = get_logs_dir()
+    if logs_dir.exists():
+        for path in logs_dir.glob("*.log"):
+            if path.is_file() and _is_file_from_current_session(path):
+                entries.setdefault(f"logs/{path.name}", path)
+        for path in logs_dir.glob("job_trace_*.jsonl"):
+            if path.is_file() and _is_file_from_current_session(path):
+                entries.setdefault(f"job_traces/{path.name}", path)
+
+    diagnostics_dir = get_diagnostics_dir()
+    if diagnostics_dir.exists():
+        for path in diagnostics_dir.glob("diag_*.json"):
+            if path.is_file() and _is_file_from_current_session(path):
+                entries.setdefault(f"diagnostics/{path.name}", path)
+
+    project_dir = get_projects_dir() / project_id
+    for artifact_name in ("subtitles.srt", "word_timings.json", "style.json"):
+        artifact_path = project_dir / artifact_name
+        if artifact_path.exists() and artifact_path.is_file():
+            entries.setdefault(f"project/{artifact_name}", artifact_path)
+
+    stem = video_path.stem
+    output_dir = video_path.parent
+    if output_dir.exists():
+        for path in output_dir.iterdir():
+            if not path.is_file():
+                continue
+            if path == video_path or path == zip_path:
+                continue
+            if path.name.startswith(stem):
+                entries.setdefault(f"outputs/{path.name}", path)
+            elif path.name.startswith("diag_") and _is_file_from_current_session(path):
+                entries.setdefault(f"outputs/{path.name}", path)
+
+    if isinstance(latest_export, dict):
+        output_value = latest_export.get("output_video_path")
+        if isinstance(output_value, str) and output_value:
+            output_path = Path(output_value)
+            if (
+                output_path.exists()
+                and output_path.is_file()
+                and output_path != video_path
+                and output_path != zip_path
+            ):
+                entries.setdefault(f"outputs/{output_path.name}", output_path)
+
+    return [(path, arcname) for arcname, path in entries.items()]
+
+
+def _archive_exit_bundle_for_project(
+    *,
+    project_id: str,
+    video_path: Path,
+    latest_export: Optional[dict[str, Any]],
+) -> Optional[Path]:
+    destination_dir = video_path.parent
+    if not destination_dir.exists():
+        return None
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    zip_path = destination_dir / f"cue_log_bundle_{timestamp}.zip"
+    entries = _collect_exit_archive_entries(
+        project_id=project_id,
+        video_path=video_path,
+        latest_export=latest_export,
+        zip_path=zip_path,
+    )
+    if not entries:
+        return None
+    try:
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for source, arcname in entries:
+                archive.write(source, arcname)
+    except Exception:
+        with contextlib.suppress(OSError):
+            zip_path.unlink(missing_ok=True)
+        raise
+    return zip_path
+
+
+def _archive_exit_bundles() -> list[str]:
+    settings = _read_settings_file()
+    diagnostics = settings.get("diagnostics") if isinstance(settings, dict) else None
+    archive_on_exit = (
+        diagnostics.get("archive_on_exit")
+        if isinstance(diagnostics, dict) and isinstance(diagnostics.get("archive_on_exit"), bool)
+        else False
+    )
+    if not archive_on_exit:
+        return []
+
+    summaries = project_store.list_projects()
+    latest_candidate: tuple[Any, float] | None = None
+    for summary in summaries:
+        project_id = getattr(summary, "project_id", None)
+        video_path_text = getattr(summary, "video_path", None)
+        if not isinstance(project_id, str) or not project_id:
+            continue
+        if not isinstance(video_path_text, str) or not video_path_text:
+            continue
+        video_path = Path(video_path_text)
+        if not video_path.exists() or not video_path.is_file():
+            continue
+        updated_ts = _parse_project_updated_at_ts(getattr(summary, "updated_at", None))
+        if latest_candidate is None or updated_ts >= latest_candidate[1]:
+            latest_candidate = (summary, updated_ts)
+
+    if latest_candidate is None:
+        return []
+
+    summary = latest_candidate[0]
+    project_id = getattr(summary, "project_id", "")
+    video_path = Path(getattr(summary, "video_path", ""))
+    latest_export = getattr(summary, "latest_export", None)
+    try:
+        zip_path = _archive_exit_bundle_for_project(
+            project_id=project_id,
+            video_path=video_path,
+            latest_export=latest_export if isinstance(latest_export, dict) else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Exit archive failed for project %s (%s): %s",
+            project_id,
+            video_path,
+            exc,
+        )
+        return []
+    return [str(zip_path)] if zip_path is not None else []
+
+
 def _resolve_output_dir_for_export(
     video_path: str,
     requested_output_dir: Optional[str],
@@ -380,6 +608,10 @@ def _checklist_label(step_id: str) -> str:
     if label:
         return label
     return step_id.replace("_", " ").strip().title()
+
+
+def _canonical_snapshot_step_id(step_id: str) -> str:
+    return PROGRESS_STEP_TO_CHECKLIST_STEP_ID.get(step_id, step_id)
 
 
 def _ensure_snapshot_checklist_step(job: JobState, step_id: str) -> dict[str, Any]:
@@ -469,11 +701,12 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
     if event_type == "checklist":
         step_id = event.get("step_id")
         if isinstance(step_id, str) and step_id:
-            row = _ensure_snapshot_checklist_step(job, step_id)
+            canonical_step_id = _canonical_snapshot_step_id(step_id)
+            row = _ensure_snapshot_checklist_step(job, canonical_step_id)
             state = str(event.get("state") or "")
             if state == "start":
                 row["state"] = "active"
-                job.snapshot_step_id = step_id
+                job.snapshot_step_id = canonical_step_id
             elif state in {"done", "skipped", "failed"}:
                 row["state"] = state
             reason_text = event.get("reason_text")
@@ -483,7 +716,7 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
                 if detail:
                     job.snapshot_message = detail
             if row.get("state") == "active":
-                job.snapshot_step_id = step_id
+                job.snapshot_step_id = canonical_step_id
         return
 
     if event_type == "progress":
@@ -494,14 +727,12 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
         step_id = event.get("step_id")
         message = event.get("message")
         if isinstance(step_id, str) and step_id:
-            row = _ensure_snapshot_checklist_step(job, step_id)
+            canonical_step_id = _canonical_snapshot_step_id(step_id)
+            row = _ensure_snapshot_checklist_step(job, canonical_step_id)
             if row.get("state") in {"pending", None, ""}:
                 row["state"] = "active"
             if row.get("state") == "active":
-                job.snapshot_step_id = step_id
-            if isinstance(message, str):
-                detail = message.strip()
-                row["detail"] = detail or row.get("detail")
+                job.snapshot_step_id = canonical_step_id
         if isinstance(message, str) and message.strip():
             job.snapshot_message = message.strip()
         return
@@ -509,6 +740,7 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
     if event_type in TERMINAL_STATUSES:
         job.status = event_type
         job.finished_at = datetime.now(timezone.utc)
+        SSE_CONFLICT_WARN_AT.pop(job.job_id, None)
         message = event.get("message")
         if isinstance(message, str) and message.strip():
             job.snapshot_message = message.strip()
@@ -543,9 +775,25 @@ def _build_event(job_id: str, event_type: str, **fields: Any) -> dict[str, Any]:
     return payload
 
 
+def _append_job_trace_event(job: JobState, event: dict[str, Any]) -> None:
+    path = job.trace_path
+    if path is None:
+        return
+    try:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False))
+            handle.write("\n")
+    except Exception as exc:  # noqa: BLE001
+        now = time.monotonic()
+        if now - job.trace_warn_at >= 10.0:
+            job.trace_warn_at = now
+            logger.warning("Failed to append job trace %s: %s", path, exc)
+
+
 def _enqueue_event(job: JobState, event: dict[str, Any]) -> None:
     with job.enqueue_lock:
         _update_job_snapshot(job, event)
+        _append_job_trace_event(job, event)
         _prune_job_event_queue(job)
         job.event_queue.put_nowait(event)
 
@@ -934,6 +1182,7 @@ async def _run_runner_job(job: JobState, request: JobRequest) -> None:
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.PIPE,
             env=env,
+            **get_subprocess_kwargs(),
         )
     except Exception as exc:  # noqa: BLE001
         job.status = "error"
@@ -1207,12 +1456,19 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
         raise HTTPException(status_code=422, detail="srt_path_required")
 
     job_id = str(uuid.uuid4())
+    trace_path: Optional[Path] = None
+    try:
+        trace_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        trace_path = get_logs_dir() / f"job_trace_{job_id}_{trace_timestamp}.jsonl"
+    except Exception:  # noqa: BLE001
+        trace_path = None
     job = JobState(
         job_id=job_id,
         status="queued",
         created_at=datetime.now(timezone.utc),
         kind=payload.kind,
         project_id=payload.project_id,
+        trace_path=trace_path,
     )
     logger.info("Job %s request received (kind=%s)", job_id, payload.kind)
     JOBS[job_id] = job
@@ -1260,6 +1516,16 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
 async def job_events(job_id: str, request: Request) -> StreamingResponse:
     job = _job_or_404(job_id)
     if job.sse_client_connected:
+        now = time.monotonic()
+        last_warn = SSE_CONFLICT_WARN_AT.get(job_id, 0.0)
+        if now - last_warn >= SSE_CONFLICT_WARN_INTERVAL_SECONDS:
+            SSE_CONFLICT_WARN_AT[job_id] = now
+            logger.warning(
+                "SSE attach conflict for job %s (status=%s queue_size=%s)",
+                job_id,
+                job.status,
+                job.event_queue.qsize(),
+            )
         return JSONResponse(
             status_code=409,
             content={"error": "sse_client_already_connected", "job_id": job_id},
@@ -1444,6 +1710,12 @@ def update_settings(payload: SettingsUpdateRequest) -> dict[str, Any]:
     current = _read_settings_file()
     merged = _merge_settings(current, payload.settings)
     return _write_settings_file(merged)
+
+
+@app.post("/diagnostics/archive-on-exit")
+def archive_exit_bundle() -> dict[str, Any]:
+    archives = _archive_exit_bundles()
+    return {"ok": True, "archives": archives}
 
 
 @app.post("/preview-style")
