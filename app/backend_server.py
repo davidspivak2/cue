@@ -1091,7 +1091,32 @@ async def _queue_worker_create_subtitles() -> None:
             job.started_at = datetime.now(timezone.utc)
             _enqueue_event(
                 job,
-                _build_event(job.job_id, "started", heading="Creating subtitles"),
+                _build_event(
+                    job.job_id,
+                    "started",
+                    heading="Creating subtitles",
+                    message="Preparing audio",
+                ),
+            )
+            _enqueue_event(
+                job,
+                _build_event(
+                    job.job_id,
+                    "checklist",
+                    step_id="extract_audio",
+                    state="start",
+                ),
+            )
+            _enqueue_event(
+                job,
+                _build_event(
+                    job.job_id,
+                    "progress",
+                    step_id="PREPARE_AUDIO",
+                    step_progress=0.0,
+                    pct=0,
+                    message="Extracting audio",
+                ),
             )
         try:
             await _run_worker_job_maybe_inprocess(job, request)
@@ -1480,7 +1505,32 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
             job.started_at = datetime.now(timezone.utc)
             _enqueue_event(
                 job,
-                _build_event(job_id, "started", heading="Creating subtitles"),
+                _build_event(
+                    job_id,
+                    "started",
+                    heading="Creating subtitles",
+                    message="Preparing audio",
+                ),
+            )
+            _enqueue_event(
+                job,
+                _build_event(
+                    job_id,
+                    "checklist",
+                    step_id="extract_audio",
+                    state="start",
+                ),
+            )
+            _enqueue_event(
+                job,
+                _build_event(
+                    job_id,
+                    "progress",
+                    step_id="PREPARE_AUDIO",
+                    step_progress=0.0,
+                    pct=0,
+                    message="Extracting audio",
+                ),
             )
         _create_subtitles_queue.put_nowait((job, payload))
         events_url = f"http://{HOST}:{PORT}/jobs/{job_id}/events"

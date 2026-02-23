@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -89,6 +90,86 @@ def test_sse_stream_emits_result_payload(monkeypatch) -> None:
         assert result_payload.get("log_path")
         assert any(event.get("type") == "completed" for event in events)
         assert all(event.get("job_id") == job_id for event in events)
+
+
+def test_create_subtitles_emits_extract_audio_step_before_worker_events(monkeypatch) -> None:
+    async def fake_run_runner_job(
+        job: backend_server.JobState,
+        request: backend_server.JobRequest,  # noqa: ARG001 - test stub uses job only
+    ) -> None:
+        await asyncio.sleep(0.01)
+        backend_server._enqueue_event(
+            job,
+            backend_server._build_event(
+                job.job_id,
+                "result",
+                payload={
+                    "srt_path": r"C:\fake\output.srt",
+                    "log_path": r"C:\fake\session.log",
+                },
+            ),
+        )
+        job.status = "completed"
+        job.finished_at = datetime.now(timezone.utc)
+        backend_server._enqueue_event(
+            job,
+            backend_server._build_event(job.job_id, "completed", status=job.status),
+        )
+
+    backend_server.JOBS.clear()
+    monkeypatch.setattr(backend_server, "_run_worker_job_maybe_inprocess", fake_run_runner_job)
+
+    with TestClient(backend_server.app) as client:
+        response = client.post(
+            "/jobs",
+            json={
+                "kind": "create_subtitles",
+                "input_path": r"C:\fake\input.mp4",
+                "output_dir": r"C:\fake",
+            },
+        )
+
+        assert response.status_code == 201
+        job_id = response.json()["job_id"]
+
+        events: list[dict[str, Any]] = []
+        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
+            for line in stream.iter_lines():
+                if not line:
+                    continue
+                if line.startswith("data: "):
+                    data = line[6:]
+                elif line.startswith("data:"):
+                    data = line[5:]
+                else:
+                    continue
+                event = json.loads(data.strip())
+                events.append(event)
+                if event.get("type") == "completed":
+                    break
+
+        first_started = next(event for event in events if event.get("type") == "started")
+        assert first_started.get("message") == "Preparing audio"
+
+        checklist_index = next(
+            index
+            for index, event in enumerate(events)
+            if event.get("type") == "checklist"
+            and event.get("step_id") == "extract_audio"
+            and event.get("state") == "start"
+        )
+        progress_index = next(
+            index
+            for index, event in enumerate(events)
+            if event.get("type") == "progress"
+            and event.get("step_id") == "PREPARE_AUDIO"
+            and event.get("step_progress") == 0.0
+        )
+        result_index = next(
+            index for index, event in enumerate(events) if event.get("type") == "result"
+        )
+        assert checklist_index < result_index
+        assert progress_index < result_index
 
 
 def test_create_subtitles_job_updates_project_and_subtitles_file(
