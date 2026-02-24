@@ -46,6 +46,9 @@ from .graphics_preview_renderer import (
     render_graphics_preview,
 )
 from .graphics_overlay_export import (
+    OVERLAY_OUTLINE_METHOD,
+    OVERLAY_OUTLINE_SOFT_EDGE,
+    OVERLAY_RESOLUTION_SCALE,
     OverlaySegment,
     build_graphics_overlay_plan,
     build_static_overlay_segments,
@@ -946,6 +949,19 @@ class Worker(QtCore.QObject):
             f"Overlay stream: {plan.width}x{plan.height} @{plan.fps:.3f}fps",
             True,
         )
+        self.signals.log.emit(
+            f"Subtitle overlay: supersampling={OVERLAY_RESOLUTION_SCALE}x (smoother outline)",
+            True,
+        )
+        self.signals.log.emit(
+            f"Subtitle outline: method={OVERLAY_OUTLINE_METHOD} soft_edge={OVERLAY_OUTLINE_SOFT_EDGE}",
+            True,
+        )
+        if OVERLAY_RESOLUTION_SCALE > 1:
+            self.signals.log.emit(
+                f"Subtitle overlay: style scaled by {OVERLAY_RESOLUTION_SCALE}x for supersampling (export size matches preview)",
+                True,
+            )
 
         segments = self._build_overlay_segments(
             cues=cues,

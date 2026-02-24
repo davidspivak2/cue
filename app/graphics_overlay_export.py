@@ -297,6 +297,47 @@ def build_word_highlight_overlay_segments(
     return segments
 
 
+OVERLAY_RESOLUTION_SCALE = 4
+OVERLAY_OUTLINE_METHOD = "filled_path"
+OVERLAY_OUTLINE_SOFT_EDGE = "halo"
+
+
+def _scale_style_for_resolution(style: SubtitleStyle, scale: float) -> SubtitleStyle:
+    if scale <= 1.0:
+        return style
+    s = scale
+    return SubtitleStyle(
+        font_family=style.font_family,
+        font_size=max(1, int(round(style.font_size * s))),
+        font_style=style.font_style,
+        text_color=style.text_color,
+        text_opacity=style.text_opacity,
+        letter_spacing=style.letter_spacing * s,
+        outline_enabled=style.outline_enabled,
+        outline_width=style.outline_width * s,
+        outline_color=style.outline_color,
+        shadow_enabled=style.shadow_enabled,
+        shadow_strength=style.shadow_strength * s,
+        shadow_offset_x=style.shadow_offset_x * s,
+        shadow_offset_y=style.shadow_offset_y * s,
+        shadow_color=style.shadow_color,
+        shadow_opacity=style.shadow_opacity,
+        background_mode=style.background_mode,
+        line_bg_color=style.line_bg_color,
+        line_bg_opacity=style.line_bg_opacity,
+        line_bg_padding=style.line_bg_padding * s,
+        line_bg_radius=style.line_bg_radius * s,
+        word_bg_color=style.word_bg_color,
+        word_bg_opacity=style.word_bg_opacity,
+        word_bg_padding=style.word_bg_padding * s,
+        word_bg_radius=style.word_bg_radius * s,
+        vertical_anchor=style.vertical_anchor,
+        vertical_offset=style.vertical_offset * s,
+        subtitle_mode=style.subtitle_mode,
+        highlight_color=style.highlight_color,
+    )
+
+
 def render_overlay_frame(
     *,
     width: int,
@@ -312,12 +353,16 @@ def render_overlay_frame(
     from PySide6 import QtCore, QtGui
     from .graphics_preview_renderer import render_graphics_preview
 
-    frame = QtGui.QImage(width, height, QtGui.QImage.Format_RGBA8888)
+    scale = OVERLAY_RESOLUTION_SCALE
+    render_w = width * scale
+    render_h = height * scale
+    draw_style = _scale_style_for_resolution(style, scale)
+    frame = QtGui.QImage(render_w, render_h, QtGui.QImage.Format_RGBA8888)
     frame.fill(QtCore.Qt.transparent)
     result = render_graphics_preview(
         frame,
         subtitle_text=subtitle_text,
-        style=style,
+        style=draw_style,
         subtitle_mode=subtitle_mode,
         highlight_color=highlight_color,
         highlight_opacity=highlight_opacity,
@@ -325,6 +370,13 @@ def render_overlay_frame(
         render_context=render_context,
     )
     image = result.image.convertToFormat(QtGui.QImage.Format_RGBA8888)
+    if scale > 1:
+        image = image.scaled(
+            width,
+            height,
+            QtCore.Qt.IgnoreAspectRatio,
+            QtCore.Qt.SmoothTransformation,
+        )
     size = image.sizeInBytes()
     buffer = image.bits()
     if hasattr(buffer, "setsize"):
