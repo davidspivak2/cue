@@ -619,6 +619,10 @@ def _draw_shadow(
     painter.restore()
 
 
+OUTLINE_HALO_EXTRA_PX = 2.0
+OUTLINE_HALO_ALPHA = 0.35
+
+
 def _draw_outline(
     painter: QtGui.QPainter,
     paths: Iterable[QtGui.QPainterPath],
@@ -627,14 +631,28 @@ def _draw_outline(
     if not style.outline_enabled or style.outline_width <= 0:
         return
     outline_color = _resolve_color(style.outline_color, DEFAULT_OUTLINE_COLOR)
-    pen = QtGui.QPen(outline_color, style.outline_width * 2)
-    pen.setJoinStyle(QtCore.Qt.RoundJoin)
-    pen.setCapStyle(QtCore.Qt.RoundCap)
+    stroke_width = style.outline_width * 2
+    path_list = list(paths)
+    stroker = QtGui.QPainterPathStroker()
+    stroker.setJoinStyle(QtCore.Qt.RoundJoin)
+    stroker.setCapStyle(QtCore.Qt.RoundCap)
+    stroker.setCurveThreshold(0.1)
     painter.save()
-    painter.setPen(pen)
-    painter.setBrush(QtCore.Qt.NoBrush)
-    for path in paths:
-        painter.drawPath(path)
+    painter.setPen(QtCore.Qt.NoPen)
+    halo_width = stroke_width + OUTLINE_HALO_EXTRA_PX
+    if halo_width > stroke_width:
+        halo_color = QtGui.QColor(outline_color)
+        halo_color.setAlphaF(max(0.01, min(OUTLINE_HALO_ALPHA, 1.0)))
+        stroker.setWidth(halo_width)
+        painter.setBrush(halo_color)
+        for path in path_list:
+            outline_path = stroker.createStroke(path)
+            painter.drawPath(outline_path)
+    stroker.setWidth(stroke_width)
+    painter.setBrush(outline_color)
+    for path in path_list:
+        outline_path = stroker.createStroke(path)
+        painter.drawPath(outline_path)
     painter.restore()
 
 
