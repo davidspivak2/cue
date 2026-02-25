@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import io
 import json
 import logging
 import math
@@ -107,6 +108,19 @@ class AlignmentError(RuntimeError):
     def __init__(self, message: str, reason_code: str) -> None:
         super().__init__(message)
         self.reason_code = reason_code
+
+
+class _TwoProcessHolder:
+    def __init__(self, p1: subprocess.Popen, p2: subprocess.Popen) -> None:
+        self._p1 = p1
+        self._p2 = p2
+
+    def terminate(self) -> None:
+        self._p1.terminate()
+        self._p2.terminate()
+
+    def poll(self) -> Optional[int]:
+        return self._p2.poll()
 
 
 @dataclass
@@ -939,6 +953,7 @@ class Worker(QtCore.QObject):
             height=stream_info.height,
             fps=stream_info.fps,
             video_bitrate=stream_info.video_bitrate,
+            raw_path=None,
         )
         self._burn_in_subtitle_mode = self.subtitle_mode
         self._burn_in_pipeline = plan.pipeline
@@ -947,10 +962,21 @@ class Worker(QtCore.QObject):
         self.signals.log.emit(f"Export subtitle_mode={self.subtitle_mode}", True)
         self.signals.log.emit(f"Export pipeline={plan.pipeline}", True)
         if stream_info.video_bitrate and stream_info.video_bitrate > 0:
-            self.signals.log.emit(
-                "Export video: source quality (CRF 6)",
-                True,
-            )
+            if plan.two_pass_pass1_command and plan.two_pass_pass2_command:
+                self.signals.log.emit(
+                    f"Export video: two-pass, matching source bitrate {stream_info.video_bitrate} bps (~{stream_info.video_bitrate // 1_000_000} Mbps)",
+                    True,
+                )
+            elif plan.phase1_command and plan.phase2_command:
+                self.signals.log.emit(
+                    "Export video: source quality (two-step pipe: composite then encode)",
+                    True,
+                )
+            else:
+                self.signals.log.emit(
+                    "Export video: source quality (QP 10)",
+                    True,
+                )
         else:
             self.signals.log.emit(
                 "Export video: source bitrate unavailable, using CRF 15",
@@ -1057,38 +1083,205 @@ class Worker(QtCore.QObject):
         self.signals.log.emit("Adding subtitles to the video...", True)
         self._emit_step_progress(ProgressStep.EXPORT, 0.0, "Encoding", force=True)
         burn_start = time.monotonic()
-        copy_command = plan.base_command + ["-c:a", "copy", str(output_path)]
-        self._burn_in_command = subprocess.list2cmdline(copy_command)
-        self._burn_in_audio_mode = "copy"
         try:
-            self._run_ffmpeg_with_progress_streaming(
-                copy_command,
-                duration_seconds,
-                ProgressStep.EXPORT,
-                "Encoding",
-                make_frame_generator(),
-                progress_offset=0.10,
-                progress_scale=0.90,
-                detail_step_id=ChecklistStep.ADD_SUBTITLES,
-                detail_total_seconds=duration_seconds,
-            )
-            self._burn_in_seconds = time.monotonic() - burn_start
-            detail_text = None
-            if duration_seconds and duration_seconds > 0:
-                detail_text = format_fraction(duration_seconds, duration_seconds)
-            self._emit_step_event(
-                ChecklistStep.ADD_SUBTITLES,
-                StepState.DONE,
-                reason_text=detail_text,
-            )
-            self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
-            self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
-            if perf_stats:
-                self.signals.log.emit(perf_stats.summary_line(), True)
-            return {"output_path": str(output_path)}
+            phase2_cwd = str(output_path.parent)
+            if plan.phase2_pass1_command and plan.phase2_pass2_command:
+                self._burn_in_command = subprocess.list2cmdline(plan.phase1_command)
+                self._burn_in_command += " | (pass 1) " + subprocess.list2cmdline(plan.phase2_pass1_command)
+                self._burn_in_command += " ; " + subprocess.list2cmdline(plan.phase1_command)
+                self._burn_in_command += " | (pass 2) " + subprocess.list2cmdline(plan.phase2_pass2_command)
+                self._burn_in_audio_mode = "copy"
+                try:
+                    self._run_ffmpeg_two_step_pipe(
+                        plan.phase1_command,
+                        plan.phase2_pass1_command,
+                        duration_seconds,
+                        ProgressStep.EXPORT,
+                        "Encoding",
+                        make_frame_generator(),
+                        progress_offset_phase1=0.05,
+                        progress_scale_phase1=0.45,
+                        progress_offset_phase2=0.50,
+                        progress_scale_phase2=0.45,
+                        detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                        detail_total_seconds=duration_seconds,
+                        phase2_cwd=phase2_cwd,
+                    )
+                    if self._cancelled.is_set():
+                        raise CancelledError("Operation cancelled.")
+                    self._run_ffmpeg_two_step_pipe(
+                        plan.phase1_command,
+                        plan.phase2_pass2_command,
+                        duration_seconds,
+                        ProgressStep.EXPORT,
+                        "Encoding",
+                        make_frame_generator(),
+                        progress_offset_phase1=0.55,
+                        progress_scale_phase1=0.45,
+                        progress_offset_phase2=1.0,
+                        progress_scale_phase2=0.45,
+                        detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                        detail_total_seconds=duration_seconds,
+                        phase2_cwd=phase2_cwd,
+                    )
+                except RuntimeError as exc:
+                    if self._cancelled.is_set():
+                        raise CancelledError("Operation cancelled.") from exc
+                    self.signals.log.emit("Audio copy failed, trying AAC...", True)
+                    self.signals.log.emit(str(exc), True)
+                    if plan.phase2_pass2_aac_command:
+                        self._burn_in_command = subprocess.list2cmdline(plan.phase2_pass2_aac_command)
+                        self._burn_in_audio_mode = "aac"
+                        self._run_ffmpeg_two_step_pipe(
+                            plan.phase1_command,
+                            plan.phase2_pass2_aac_command,
+                            duration_seconds,
+                            ProgressStep.EXPORT,
+                            "Encoding",
+                            make_frame_generator(),
+                            progress_offset_phase1=0.55,
+                            progress_scale_phase1=0.45,
+                            progress_offset_phase2=1.0,
+                            progress_scale_phase2=0.45,
+                            detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                            detail_total_seconds=duration_seconds,
+                            phase2_cwd=phase2_cwd,
+                        )
+                self._burn_in_seconds = time.monotonic() - burn_start
+                detail_text = format_fraction(duration_seconds, duration_seconds) if duration_seconds and duration_seconds > 0 else None
+                self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE, reason_text=detail_text)
+                self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
+                self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
+                if perf_stats:
+                    self.signals.log.emit(perf_stats.summary_line(), True)
+                return {"output_path": str(output_path)}
+            if plan.two_pass_pass1_command and plan.two_pass_pass2_command:
+                self._burn_in_command = subprocess.list2cmdline(plan.two_pass_pass1_command)
+                self._burn_in_command += " ; " + subprocess.list2cmdline(plan.two_pass_pass2_command)
+                self._burn_in_audio_mode = "copy"
+                stats_base_name = output_path.stem + "_x264pass"
+                try:
+                    self._run_ffmpeg_two_pass_single_pipeline(
+                        plan.two_pass_pass1_command,
+                        plan.two_pass_pass2_command,
+                        duration_seconds,
+                        ProgressStep.EXPORT,
+                        "Encoding",
+                        make_frame_generator,
+                        output_path,
+                        detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                        detail_total_seconds=duration_seconds,
+                    )
+                except RuntimeError as exc:
+                    if self._cancelled.is_set():
+                        raise CancelledError("Operation cancelled.") from exc
+                    self.signals.log.emit("Audio copy failed, trying AAC...", True)
+                    self.signals.log.emit(str(exc), True)
+                    if plan.two_pass_pass2_aac_command:
+                        self._burn_in_command = subprocess.list2cmdline(plan.two_pass_pass2_aac_command)
+                        self._burn_in_audio_mode = "aac"
+                        cwd = str(output_path.parent)
+                        self._run_ffmpeg_with_progress_streaming(
+                            plan.two_pass_pass2_aac_command,
+                            duration_seconds,
+                            ProgressStep.EXPORT,
+                            "Encoding",
+                            make_frame_generator(),
+                            progress_offset=0.55,
+                            progress_scale=0.45,
+                            detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                            detail_total_seconds=duration_seconds,
+                            cwd=cwd,
+                        )
+                finally:
+                    for p in output_path.parent.glob(stats_base_name + "*"):
+                        try:
+                            p.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                self._burn_in_seconds = time.monotonic() - burn_start
+                detail_text = format_fraction(duration_seconds, duration_seconds) if duration_seconds and duration_seconds > 0 else None
+                self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE, reason_text=detail_text)
+                self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
+                self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
+                if perf_stats:
+                    self.signals.log.emit(perf_stats.summary_line(), True)
+                return {"output_path": str(output_path)}
+            if plan.phase1_command and plan.phase2_command:
+                self._burn_in_command = subprocess.list2cmdline(plan.phase1_command)
+                self._burn_in_command += " | " + subprocess.list2cmdline(plan.phase2_command)
+                self._burn_in_audio_mode = "copy"
+                try:
+                    self._run_ffmpeg_two_step_pipe(
+                        plan.phase1_command,
+                        plan.phase2_command,
+                        duration_seconds,
+                        ProgressStep.EXPORT,
+                        "Encoding",
+                        make_frame_generator(),
+                        progress_offset_phase1=0.10,
+                        progress_scale_phase1=0.45,
+                        progress_offset_phase2=0.55,
+                        progress_scale_phase2=0.45,
+                        detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                        detail_total_seconds=duration_seconds,
+                    )
+                except RuntimeError as exc:
+                    if self._cancelled.is_set():
+                        raise CancelledError("Operation cancelled.") from exc
+                    self.signals.log.emit("Audio copy failed, trying AAC...", True)
+                    self.signals.log.emit(str(exc), True)
+                    if plan.phase2_aac_command:
+                        self._burn_in_command = subprocess.list2cmdline(plan.phase2_aac_command)
+                        self._burn_in_audio_mode = "aac"
+                        self._run_ffmpeg_two_step_pipe(
+                            plan.phase1_command,
+                            plan.phase2_aac_command,
+                            duration_seconds,
+                            ProgressStep.EXPORT,
+                            "Encoding",
+                            make_frame_generator(),
+                            progress_offset_phase1=0.10,
+                            progress_scale_phase1=0.45,
+                            progress_offset_phase2=0.55,
+                            progress_scale_phase2=0.45,
+                            detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                            detail_total_seconds=duration_seconds,
+                        )
+                self._burn_in_seconds = time.monotonic() - burn_start
+                detail_text = format_fraction(duration_seconds, duration_seconds) if duration_seconds and duration_seconds > 0 else None
+                self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE, reason_text=detail_text)
+                self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
+                self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
+                if perf_stats:
+                    self.signals.log.emit(perf_stats.summary_line(), True)
+                return {"output_path": str(output_path)}
+            else:
+                copy_command = plan.base_command + ["-c:a", "copy", str(output_path)]
+                self._burn_in_command = subprocess.list2cmdline(copy_command)
+                self._burn_in_audio_mode = "copy"
+                self._run_ffmpeg_with_progress_streaming(
+                    copy_command,
+                    duration_seconds,
+                    ProgressStep.EXPORT,
+                    "Encoding",
+                    make_frame_generator(),
+                    progress_offset=0.10,
+                    progress_scale=0.90,
+                    detail_step_id=ChecklistStep.ADD_SUBTITLES,
+                    detail_total_seconds=duration_seconds,
+                )
+                self._burn_in_seconds = time.monotonic() - burn_start
+                detail_text = format_fraction(duration_seconds, duration_seconds) if duration_seconds and duration_seconds > 0 else None
+                self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE, reason_text=detail_text)
+                self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
+                self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
+                if perf_stats:
+                    self.signals.log.emit(perf_stats.summary_line(), True)
+                return {"output_path": str(output_path)}
         except RuntimeError as exc:
             if self._cancelled.is_set():
-                raise CancelledError("Operation cancelled.")
+                raise CancelledError("Operation cancelled.") from exc
             self.signals.log.emit("Audio copy failed, trying another format...", True)
             self.signals.log.emit(str(exc), True)
 
@@ -1107,14 +1300,8 @@ class Worker(QtCore.QObject):
             detail_total_seconds=duration_seconds,
         )
         self._burn_in_seconds = time.monotonic() - burn_start
-        detail_text = None
-        if duration_seconds and duration_seconds > 0:
-            detail_text = format_fraction(duration_seconds, duration_seconds)
-        self._emit_step_event(
-            ChecklistStep.ADD_SUBTITLES,
-            StepState.DONE,
-            reason_text=detail_text,
-        )
+        detail_text = format_fraction(duration_seconds, duration_seconds) if duration_seconds and duration_seconds > 0 else None
+        self._emit_step_event(ChecklistStep.ADD_SUBTITLES, StepState.DONE, reason_text=detail_text)
         self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.START)
         self._emit_step_event(ChecklistStep.SAVE_VIDEO, StepState.DONE)
         if perf_stats:
@@ -1350,11 +1537,15 @@ class Worker(QtCore.QObject):
         progress_scale: float = 1.0,
         detail_step_id: Optional[str] = None,
         detail_total_seconds: Optional[float] = None,
+        cwd: Optional[str] = None,
     ) -> None:
         if self._cancelled.is_set():
             raise CancelledError()
 
         self.signals.log.emit(f"Video tool command: {subprocess.list2cmdline(command)}", True)
+        popen_kwargs = {**get_subprocess_kwargs()}
+        if cwd is not None:
+            popen_kwargs["cwd"] = cwd
         process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -1363,7 +1554,7 @@ class Worker(QtCore.QObject):
             text=True,
             encoding="utf-8",
             errors="replace",
-            **get_subprocess_kwargs(),
+            **popen_kwargs,
         )
         self._process = process
         stderr_tail: deque[str] = deque(maxlen=50)
@@ -1483,6 +1674,247 @@ class Worker(QtCore.QObject):
             if writer_error:
                 tail_text = f"{tail_text}\nOverlay writer error: {writer_error}"
             raise RuntimeError("Video processing failed. Details:\n" + tail_text)
+
+    def _run_ffmpeg_two_pass_single_pipeline(
+        self,
+        pass1_command: list[str],
+        pass2_command: list[str],
+        duration_seconds: Optional[float],
+        step_id: str,
+        status_label: str,
+        make_frame_generator: Callable[[], Iterable[bytes]],
+        output_path: Path,
+        *,
+        detail_step_id: Optional[str] = None,
+        detail_total_seconds: Optional[float] = None,
+    ) -> None:
+        cwd = str(output_path.parent)
+        self.signals.log.emit(
+            f"Video tool command (pass 1): {subprocess.list2cmdline(pass1_command)}",
+            True,
+        )
+        self.signals.log.emit(
+            f"Video tool command (pass 2): {subprocess.list2cmdline(pass2_command)}",
+            True,
+        )
+        self._run_ffmpeg_with_progress_streaming(
+            pass1_command,
+            duration_seconds,
+            step_id,
+            status_label,
+            make_frame_generator(),
+            progress_offset=0.0,
+            progress_scale=0.45,
+            detail_step_id=detail_step_id,
+            detail_total_seconds=detail_total_seconds,
+            cwd=cwd,
+        )
+        if self._cancelled.is_set():
+            raise CancelledError("Operation cancelled.")
+        self._run_ffmpeg_with_progress_streaming(
+            pass2_command,
+            duration_seconds,
+            step_id,
+            status_label,
+            make_frame_generator(),
+            progress_offset=0.55,
+            progress_scale=0.45,
+            detail_step_id=detail_step_id,
+            detail_total_seconds=detail_total_seconds,
+            cwd=cwd,
+        )
+
+    def _run_ffmpeg_two_step_pipe(
+        self,
+        phase1_command: list[str],
+        phase2_command: list[str],
+        duration_seconds: Optional[float],
+        step_id: str,
+        status_label: str,
+        frame_iterator: Iterable[bytes],
+        *,
+        progress_offset_phase1: float = 0.0,
+        progress_scale_phase1: float = 0.5,
+        progress_offset_phase2: float = 0.5,
+        progress_scale_phase2: float = 0.5,
+        detail_step_id: Optional[str] = None,
+        detail_total_seconds: Optional[float] = None,
+        phase2_cwd: Optional[str] = None,
+    ) -> None:
+        if self._cancelled.is_set():
+            raise CancelledError()
+        self.signals.log.emit(
+            f"Video tool command (phase 1): {subprocess.list2cmdline(phase1_command)}",
+            True,
+        )
+        self.signals.log.emit(
+            f"Video tool command (phase 2): {subprocess.list2cmdline(phase2_command)}",
+            True,
+        )
+        kwargs = get_subprocess_kwargs()
+        p1 = subprocess.Popen(
+            phase1_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **kwargs,
+        )
+        p2_kwargs = {**kwargs}
+        if phase2_cwd is not None:
+            p2_kwargs["cwd"] = phase2_cwd
+        p2 = subprocess.Popen(
+            phase2_command,
+            stdin=p1.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **p2_kwargs,
+        )
+        p1.stdout.close()
+        self._process = _TwoProcessHolder(p1, p2)
+        stderr_tail: deque[str] = deque(maxlen=50)
+        log_lock = threading.Lock()
+        writer_error: Optional[BaseException] = None
+        last_detail_emit = 0.0
+        last_detail_text: Optional[str] = None
+
+        def _maybe_emit_detail(current_seconds: float) -> None:
+            nonlocal last_detail_emit, last_detail_text
+            if not detail_step_id or not detail_total_seconds or detail_total_seconds <= 0:
+                return
+            if self._cancelled.is_set():
+                return
+            clamped = max(0.0, min(current_seconds, detail_total_seconds))
+            detail_text = format_fraction(clamped, detail_total_seconds)
+            if detail_text == last_detail_text:
+                return
+            now = time.monotonic()
+            if now - last_detail_emit < 0.25:
+                return
+            last_detail_text = detail_text
+            last_detail_emit = now
+            self._emit_step_event(detail_step_id, StepState.START, reason_text=detail_text)
+
+        def _write_frames() -> None:
+            nonlocal writer_error
+            assert p1.stdin is not None
+            try:
+                for frame in frame_iterator:
+                    if self._cancelled.is_set():
+                        break
+                    p1.stdin.write(frame)
+                p1.stdin.close()
+            except Exception as exc:
+                writer_error = exc
+
+        def _read_p1_stderr() -> None:
+            assert p1.stderr is not None
+            try:
+                wrapper = io.TextIOWrapper(p1.stderr, encoding="utf-8", errors="replace")
+                for line in wrapper:
+                    if self._cancelled.is_set():
+                        break
+                    text = line.rstrip()
+                    stderr_tail.append(text)
+                    if text:
+                        with log_lock:
+                            self.signals.log.emit(text, True)
+                    if duration_seconds and text.startswith("out_time_ms="):
+                        try:
+                            out_time_ms = int(text.split("=", 1)[1])
+                            progress = out_time_ms / (duration_seconds * 1_000_000)
+                            progress = max(0.0, min(progress, 1.0))
+                            mapped = progress_offset_phase1 + progress_scale_phase1 * progress
+                            self._emit_step_progress(step_id, mapped, status_label)
+                            _maybe_emit_detail(out_time_ms / 1_000_000)
+                        except ValueError:
+                            pass
+                    elif text == "progress=end":
+                        self._emit_step_progress(
+                            step_id,
+                            progress_offset_phase1 + progress_scale_phase1,
+                            status_label,
+                            force=True,
+                        )
+            except (OSError, ValueError):
+                pass
+
+        def _read_p2_stderr() -> None:
+            assert p2.stderr is not None
+            try:
+                wrapper = io.TextIOWrapper(p2.stderr, encoding="utf-8", errors="replace")
+                for line in wrapper:
+                    text = line.rstrip()
+                    stderr_tail.append(text)
+                    if text:
+                        with log_lock:
+                            self.signals.log.emit(text, True)
+            except (OSError, ValueError):
+                pass
+
+        writer_thread = threading.Thread(target=_write_frames, daemon=True)
+        writer_thread.start()
+        p1_stderr_thread = threading.Thread(target=_read_p1_stderr, daemon=True)
+        p1_stderr_thread.start()
+        p2_stderr_thread = threading.Thread(target=_read_p2_stderr, daemon=True)
+        p2_stderr_thread.start()
+
+        if duration_seconds is None:
+            self._start_smooth_progress(step_id, status_label)
+        end_emitted = False
+        assert p2.stdout is not None
+        try:
+            wrapper = io.TextIOWrapper(p2.stdout, encoding="utf-8", errors="replace")
+            for line in wrapper:
+                if self._cancelled.is_set():
+                    if hasattr(self._process, "terminate"):
+                        self._process.terminate()
+                    raise CancelledError()
+                text = line.strip()
+                if duration_seconds and text.startswith("out_time_ms="):
+                    try:
+                        out_time_ms = int(text.split("=", 1)[1])
+                        progress = out_time_ms / (duration_seconds * 1_000_000)
+                        progress = max(0.0, min(progress, 1.0))
+                        mapped = progress_offset_phase2 + progress_scale_phase2 * progress
+                        self._emit_step_progress(step_id, mapped, status_label)
+                        _maybe_emit_detail(out_time_ms / 1_000_000)
+                    except ValueError:
+                        pass
+                elif text == "progress=end":
+                    self._emit_step_progress(
+                        step_id,
+                        progress_offset_phase2 + progress_scale_phase2,
+                        status_label,
+                        force=True,
+                    )
+                    end_emitted = True
+        except (OSError, ValueError):
+            pass
+
+        writer_thread.join(timeout=5)
+        p1_stderr_thread.join(timeout=2)
+        p2_stderr_thread.join(timeout=2)
+        p1.wait()
+        return_code = p2.wait()
+        self._process = None
+
+        if self._cancelled.is_set():
+            raise CancelledError("Operation cancelled.")
+        if duration_seconds and not end_emitted:
+            self._emit_step_progress(
+                step_id,
+                progress_offset_phase2 + progress_scale_phase2,
+                status_label,
+                force=True,
+            )
+        self._stop_smooth_progress()
+        if return_code != 0:
+            tail_text = "\n".join(stderr_tail)
+            if writer_error:
+                tail_text = f"{tail_text}\nOverlay writer error: {writer_error}"
+            raise RuntimeError("Video processing failed. Details:\n" + tail_text)
+        if writer_error:
+            raise RuntimeError(f"Overlay writer failed: {writer_error}")
 
     def _run_transcription_subprocess(
         self,

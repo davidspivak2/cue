@@ -2464,6 +2464,8 @@ const Workbench = () => {
         setCreateSubtitlesStartedAt(null);
         setCreateSubtitlesError(null);
         createSubtitlesJobIdRef.current = null;
+        createSubtitlesUnregisterRef.current?.();
+        createSubtitlesUnregisterRef.current = null;
         closeCreateSubtitlesStream("switch_to_export");
         setCreateStreamHealthValue("idle");
         clearTimingFallbackProgress();
@@ -2523,6 +2525,11 @@ const Workbench = () => {
     }
 
     const taskNotice = project.task_notice;
+    if (!activeTask && createSubtitlesJobIdRef.current) {
+      createSubtitlesUnregisterRef.current?.();
+      createSubtitlesUnregisterRef.current = null;
+      createSubtitlesJobIdRef.current = null;
+    }
     if (
       !activeTask &&
       isCreatingSubtitles &&
