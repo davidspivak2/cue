@@ -39,6 +39,7 @@ from .subtitle_style import (
 from .graphics_preview_renderer import (
     LAYOUT_CACHE_MAX_ENTRIES,
     LRUCache,
+    OUTLINE_CURVE_THRESHOLD,
     PATH_CACHE_MAX_ENTRIES,
     RenderContext,
     RenderPerfStats,
@@ -46,6 +47,7 @@ from .graphics_preview_renderer import (
     render_graphics_preview,
 )
 from .graphics_overlay_export import (
+    OVERLAY_DOWNSCALE_TWO_STEP,
     OVERLAY_OUTLINE_METHOD,
     OVERLAY_OUTLINE_SOFT_EDGE,
     OVERLAY_RESOLUTION_SCALE,
@@ -936,6 +938,7 @@ class Worker(QtCore.QObject):
             width=stream_info.width,
             height=stream_info.height,
             fps=stream_info.fps,
+            video_bitrate=stream_info.video_bitrate,
         )
         self._burn_in_subtitle_mode = self.subtitle_mode
         self._burn_in_pipeline = plan.pipeline
@@ -943,6 +946,16 @@ class Worker(QtCore.QObject):
         self._burn_in_filter = plan.filter_string
         self.signals.log.emit(f"Export subtitle_mode={self.subtitle_mode}", True)
         self.signals.log.emit(f"Export pipeline={plan.pipeline}", True)
+        if stream_info.video_bitrate and stream_info.video_bitrate > 0:
+            self.signals.log.emit(
+                "Export video: source quality (CRF 12)",
+                True,
+            )
+        else:
+            self.signals.log.emit(
+                "Export video: source bitrate unavailable, using CRF 15",
+                True,
+            )
         self.signals.log.emit(f"Export subtitles path={srt_path}", True)
         self.signals.log.emit(f"Export filter={plan.filter_string}", True)
         self.signals.log.emit(
@@ -954,7 +967,11 @@ class Worker(QtCore.QObject):
             True,
         )
         self.signals.log.emit(
-            f"Subtitle outline: method={OVERLAY_OUTLINE_METHOD} soft_edge={OVERLAY_OUTLINE_SOFT_EDGE}",
+            f"Subtitle outline: method={OVERLAY_OUTLINE_METHOD} soft_edge={OVERLAY_OUTLINE_SOFT_EDGE} curve_threshold={OUTLINE_CURVE_THRESHOLD}",
+            True,
+        )
+        self.signals.log.emit(
+            f"Subtitle overlay: downscale={'two_step' if OVERLAY_DOWNSCALE_TWO_STEP else 'single'}",
             True,
         )
         if OVERLAY_RESOLUTION_SCALE > 1:

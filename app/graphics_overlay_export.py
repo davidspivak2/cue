@@ -20,6 +20,7 @@ class VideoStreamInfo:
     width: int
     height: int
     fps: float
+    video_bitrate: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,28 @@ def resolve_video_stream_info(video_path: Path) -> VideoStreamInfo:
         frame_rate = _parse_frame_rate(video_stream.get("r_frame_rate"))
     if not frame_rate or frame_rate <= 0:
         frame_rate = 30.0
-    return VideoStreamInfo(width=int(width), height=int(height), fps=float(frame_rate))
+    raw_bitrate = video_stream.get("bit_rate")
+    video_bitrate: Optional[int] = None
+    if raw_bitrate is not None:
+        try:
+            video_bitrate = int(raw_bitrate)
+        except (TypeError, ValueError):
+            pass
+    if video_bitrate is None or video_bitrate <= 0:
+        format_br = ffprobe_json.get("format", {}).get("bit_rate")
+        if format_br is not None:
+            try:
+                total = int(format_br)
+                if total > 256000:
+                    video_bitrate = total - 256000
+            except (TypeError, ValueError):
+                pass
+    return VideoStreamInfo(
+        width=int(width),
+        height=int(height),
+        fps=float(frame_rate),
+        video_bitrate=video_bitrate,
+    )
 
 
 def build_graphics_overlay_plan(
@@ -92,9 +114,10 @@ def build_graphics_overlay_plan(
     width: int,
     height: int,
     fps: float,
+    video_bitrate: Optional[int] = None,
 ) -> GraphicsOverlayPlan:
     filter_string = "[0:v][1:v]overlay=0:0:format=auto[v]"
-    base_command = [
+    base_parts = [
         str(ffmpeg_path),
         "-y",
         "-hide_banner",
@@ -122,12 +145,15 @@ def build_graphics_overlay_plan(
         "-c:v",
         "libx264",
         "-preset",
-        "medium",
-        "-crf",
-        "18",
+        "slow",
         "-movflags",
         "+faststart",
     ]
+    if video_bitrate and video_bitrate > 0:
+        base_parts.extend(["-crf", "12"])
+    else:
+        base_parts.extend(["-crf", "15"])
+    base_command = base_parts
     return GraphicsOverlayPlan(
         base_command=base_command,
         pipeline=GRAPHICS_OVERLAY_PIPELINE,
@@ -300,6 +326,7 @@ def build_word_highlight_overlay_segments(
 OVERLAY_RESOLUTION_SCALE = 4
 OVERLAY_OUTLINE_METHOD = "filled_path"
 OVERLAY_OUTLINE_SOFT_EDGE = "halo"
+OVERLAY_DOWNSCALE_TWO_STEP = True
 
 
 def _scale_style_for_resolution(style: SubtitleStyle, scale: float) -> SubtitleStyle:
@@ -371,12 +398,21 @@ def render_overlay_frame(
     )
     image = result.image.convertToFormat(QtGui.QImage.Format_RGBA8888)
     if scale > 1:
-        image = image.scaled(
-            width,
-            height,
-            QtCore.Qt.IgnoreAspectRatio,
-            QtCore.Qt.SmoothTransformation,
-        )
+        if OVERLAY_DOWNSCALE_TWO_STEP and scale >= 2:
+            smooth = QtCore.Qt.SmoothTransformation
+            w, h = render_w, render_h
+            while w > width or h > height:
+                next_w = max(width, w // 2)
+                next_h = max(height, h // 2)
+                image = image.scaled(next_w, next_h, QtCore.Qt.IgnoreAspectRatio, smooth)
+                w, h = next_w, next_h
+        else:
+            image = image.scaled(
+                width,
+                height,
+                QtCore.Qt.IgnoreAspectRatio,
+                QtCore.Qt.SmoothTransformation,
+            )
     size = image.sizeInBytes()
     buffer = image.bits()
     if hasattr(buffer, "setsize"):

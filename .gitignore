@@ -17,6 +17,7 @@ docs/internal/SESSION_HANDOFF*.md
 _cargo_target_check*/
 build_temp/
 _tmp_backend_server.pyc.*
+logs/
 
 # Desktop UI (Node)
 desktop/node_modules/

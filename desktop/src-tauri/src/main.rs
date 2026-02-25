@@ -371,6 +371,8 @@ fn request_backend_archive_on_exit() {
 }
 
 fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
+    request_backend_archive_on_exit();
+
     let mut guard = match shared_child.lock() {
         Ok(lock) => lock,
         Err(err) => {
@@ -395,8 +397,6 @@ fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
             eprintln!("Failed to check backend process status: {err}");
         }
     }
-
-    request_backend_archive_on_exit();
 
     let pid = child.id();
 
