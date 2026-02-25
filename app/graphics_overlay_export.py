@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, TYPE_CHECKING
@@ -31,6 +32,15 @@ class GraphicsOverlayPlan:
     width: int
     height: int
     fps: float
+    phase1_command: Optional[list[str]] = None
+    phase2_command: Optional[list[str]] = None
+    phase2_aac_command: Optional[list[str]] = None
+    two_pass_pass1_command: Optional[list[str]] = None
+    two_pass_pass2_command: Optional[list[str]] = None
+    two_pass_pass2_aac_command: Optional[list[str]] = None
+    phase2_pass1_command: Optional[list[str]] = None
+    phase2_pass2_command: Optional[list[str]] = None
+    phase2_pass2_aac_command: Optional[list[str]] = None
 
 
 @dataclass(frozen=True)
@@ -115,8 +125,137 @@ def build_graphics_overlay_plan(
     height: int,
     fps: float,
     video_bitrate: Optional[int] = None,
+    raw_path: Optional[Path] = None,
 ) -> GraphicsOverlayPlan:
     filter_string = "[0:v][1:v]overlay=0:0:format=auto[v]"
+    use_two_step = False
+    if use_two_step:
+        filter_phase1 = "[0:v][1:v]overlay=0:0:format=auto[v];[v]format=yuv420p[vout]"
+        phase1_parts = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-i",
+            str(video_path),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-s",
+            f"{width}x{height}",
+            "-r",
+            f"{fps:.3f}",
+            "-i",
+            "pipe:0",
+            "-progress",
+            "pipe:2",
+            "-nostats",
+            "-filter_complex",
+            filter_phase1,
+            "-map",
+            "[vout]",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "yuv420p",
+            "pipe:1",
+        ]
+        br = video_bitrate
+        bufsize_phase2 = 4 * br
+        phase2_common = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-progress",
+            "pipe:1",
+            "-nostats",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "yuv420p",
+            "-s",
+            f"{width}x{height}",
+            "-r",
+            f"{fps:.3f}",
+            "-i",
+            "pipe:0",
+            "-i",
+            str(video_path),
+            "-map",
+            "0:v",
+            "-map",
+            "1:a?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-minrate",
+            str(br),
+            "-b:v",
+            str(br),
+            "-maxrate",
+            str(br),
+            "-bufsize",
+            str(bufsize_phase2),
+        ]
+        phase2_copy_parts = phase2_common + [
+            "-movflags",
+            "+faststart",
+            "-c:a",
+            "copy",
+            str(output_path),
+        ]
+        phase2_aac_parts = phase2_common + [
+            "-movflags",
+            "+faststart",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            str(output_path),
+        ]
+        phase2_pass1_parts = phase2_common + [
+            "-pass",
+            "1",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ]
+        phase2_pass2_parts = phase2_common + [
+            "-pass",
+            "2",
+            "-movflags",
+            "+faststart",
+            "-c:a",
+            "copy",
+            str(output_path),
+        ]
+        phase2_pass2_aac_parts = phase2_common + [
+            "-pass",
+            "2",
+            "-movflags",
+            "+faststart",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            str(output_path),
+        ]
+        phase1_command = phase1_parts
+        phase2_command = phase2_copy_parts
+        phase2_aac_command = phase2_aac_parts
+        phase2_pass1_command = phase2_pass1_parts
+        phase2_pass2_command = phase2_pass2_parts
+        phase2_pass2_aac_command = phase2_pass2_aac_parts
+    else:
+        phase1_command = None
+        phase2_command = None
+        phase2_aac_command = None
+        phase2_pass1_command = None
+        phase2_pass2_command = None
+        phase2_pass2_aac_command = None
+
     base_parts = [
         str(ffmpeg_path),
         "-y",
@@ -149,11 +288,90 @@ def build_graphics_overlay_plan(
         "-movflags",
         "+faststart",
     ]
-    if video_bitrate and video_bitrate > 0:
-        base_parts.extend(["-crf", "6"])
+    if video_bitrate and video_bitrate > 0 and not use_two_step:
+        base_parts.extend(["-qp", "10"])
     else:
         base_parts.extend(["-crf", "15"])
     base_command = base_parts
+
+    two_pass_pass1_command: Optional[list[str]] = None
+    two_pass_pass2_command: Optional[list[str]] = None
+    two_pass_pass2_aac_command: Optional[list[str]] = None
+    if video_bitrate and video_bitrate > 0:
+        br = video_bitrate
+        bufsize = 8 * br
+        stats_base = output_path.parent / (output_path.stem + "_x264pass")
+        single_pipeline_head = [
+            str(ffmpeg_path),
+            "-y",
+            "-hide_banner",
+            "-i",
+            str(video_path),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-s",
+            f"{width}x{height}",
+            "-r",
+            f"{fps:.3f}",
+            "-i",
+            "pipe:0",
+            "-progress",
+            "pipe:1",
+            "-nostats",
+            "-filter_complex",
+            filter_string,
+            "-map",
+            "[v]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-b:v",
+            str(br),
+            "-bufsize",
+            str(bufsize),
+        ]
+        two_pass_pass1_command = single_pipeline_head + [
+            "-pass",
+            "1",
+            "-passlogfile",
+            str(stats_base),
+            "-an",
+            "-f",
+            "null",
+            os.devnull,
+        ]
+        two_pass_pass2_command = single_pipeline_head + [
+            "-pass",
+            "2",
+            "-passlogfile",
+            str(stats_base),
+            "-movflags",
+            "+faststart",
+            "-map",
+            "0:a?",
+            "-c:a",
+            "copy",
+            str(output_path),
+        ]
+        two_pass_pass2_aac_command = single_pipeline_head + [
+            "-pass",
+            "2",
+            "-passlogfile",
+            str(stats_base),
+            "-movflags",
+            "+faststart",
+            "-map",
+            "0:a?",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            str(output_path),
+        ]
+
     return GraphicsOverlayPlan(
         base_command=base_command,
         pipeline=GRAPHICS_OVERLAY_PIPELINE,
@@ -161,6 +379,15 @@ def build_graphics_overlay_plan(
         width=width,
         height=height,
         fps=fps,
+        phase1_command=phase1_command,
+        phase2_command=phase2_command,
+        phase2_aac_command=phase2_aac_command,
+        two_pass_pass1_command=two_pass_pass1_command,
+        two_pass_pass2_command=two_pass_pass2_command,
+        two_pass_pass2_aac_command=two_pass_pass2_aac_command,
+        phase2_pass1_command=phase2_pass1_command,
+        phase2_pass2_command=phase2_pass2_command,
+        phase2_pass2_aac_command=phase2_pass2_aac_command,
     )
 
 
