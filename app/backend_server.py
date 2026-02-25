@@ -121,12 +121,12 @@ async def _app_lifespan(app: FastAPI):  # noqa: ARG001
             pass
         except Exception:  # noqa: BLE001 - ensure shutdown completes
             pass
-    try:
-        archives = await asyncio.to_thread(_archive_exit_bundles)
-        if archives:
-            logger.info("Exit archive created: %s", ", ".join(archives))
-    except Exception as exc:  # noqa: BLE001 - ensure shutdown completes
-        logger.warning("Failed to archive logs on exit: %s", exc)
+    # Do not create exit archive here. Archiving runs only when the desktop
+    # explicitly requests it via POST /diagnostics/archive-on-exit (on app exit).
+    # Otherwise a zip would be created on startup when run_desktop_all is used:
+    # the script starts the backend, then Tauri spawns a second backend that
+    # fails to bind (port in use); that process's lifespan shutdown would run
+    # and create a bundle.
     _queue_worker_tasks = []
 
 
@@ -494,7 +494,13 @@ def _archive_exit_bundle_for_project(
     return zip_path
 
 
+_exit_archive_created_this_session: bool = False
+
+
 def _archive_exit_bundles() -> list[str]:
+    global _exit_archive_created_this_session
+    if _exit_archive_created_this_session:
+        return []
     settings = _read_settings_file()
     diagnostics = settings.get("diagnostics") if isinstance(settings, dict) else None
     archive_on_exit = (
@@ -542,6 +548,8 @@ def _archive_exit_bundles() -> list[str]:
             exc,
         )
         return []
+    if zip_path is not None:
+        _exit_archive_created_this_session = True  # noqa: PLW0603
     return [str(zip_path)] if zip_path is not None else []
 
 

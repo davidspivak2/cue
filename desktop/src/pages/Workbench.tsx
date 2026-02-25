@@ -1547,6 +1547,7 @@ const Workbench = () => {
       return;
     }
     preparingPreviewCompletionScheduledRef.current = true;
+    setIsCreatingSubtitles(false);
     const startedAtMs = preparingPreviewStartedAtRef.current;
     const elapsedMs = startedAtMs != null ? Date.now() - startedAtMs : PREPARING_PREVIEW_MIN_ACTIVE_MS;
     const remainingActiveMs = Math.max(0, PREPARING_PREVIEW_MIN_ACTIVE_MS - elapsedMs);
@@ -1971,6 +1972,7 @@ const Workbench = () => {
     if (!audio) {
       audio = new Audio();
       elevatorAudioRef.current = audio;
+      audio.loop = true;
       audio.addEventListener("ended", () => setElevatorMusicPlaying(false));
     }
     const hadTrack = selectedElevatorTrackIndexRef.current !== null;
@@ -2193,7 +2195,10 @@ const Workbench = () => {
   );
 
   const startExport = React.useCallback(async () => {
-    if (!projectId || !project?.video?.path || isExporting || isCreatingSubtitles) {
+    if (!projectId || !project?.video?.path || isExporting) {
+      return;
+    }
+    if (isCreatingSubtitles && project?.active_task?.kind === "create_subtitles") {
       return;
     }
     if (!settings) {
@@ -2494,12 +2499,12 @@ const Workbench = () => {
     const taskNotice = project.task_notice;
     if (
       !activeTask &&
-      createSubtitlesJobIdRef.current &&
       isCreatingSubtitles &&
-      createSubtitlesStreamHealthRef.current !== "open"
+      (createSubtitlesStreamHealthRef.current !== "open" || !createSubtitlesJobIdRef.current)
     ) {
       clearPreparingPreviewTimers();
       preparingPreviewStartedAtRef.current = null;
+      const hadJobRef = Boolean(createSubtitlesJobIdRef.current);
       const finishedJobId = createSubtitlesJobIdRef.current;
       createSubtitlesJobIdRef.current = null;
       if (projectId) clearPersistedRunningJob(projectId);
@@ -2507,12 +2512,12 @@ const Workbench = () => {
       setCreateSubtitlesStartedAt(null);
       setCreateSubtitlesProgressMessage("");
       clearTimingFallbackProgress();
-      if (taskNotice?.job_id === finishedJobId && taskNotice.status !== "completed") {
+      if (hadJobRef && taskNotice?.job_id === finishedJobId && taskNotice.status !== "completed") {
         setCreateSubtitlesError(taskNotice.message);
         setCreateSubtitlesProgressPct(0);
       } else {
         setCreateSubtitlesProgressPct(100);
-        setSubtitlesReloadTick((prev) => prev + 1);
+        if (hadJobRef) setSubtitlesReloadTick((prev) => prev + 1);
       }
     }
     if (
@@ -2611,11 +2616,11 @@ const Workbench = () => {
   const previewSrc = videoPath ? (isTauriEnv ? convertFileSrc(videoPath) : videoPath) : "";
   const hasSubtitles = cues.length > 0;
   const latestOutputPath = exportOutputPath ?? project?.latest_export?.output_video_path ?? null;
+  const hasActiveCreateFromApi = project?.active_task?.kind === "create_subtitles";
   const canExport =
     hasSubtitles &&
-    !isCreatingSubtitles &&
     !isExporting &&
-    (project?.status === "ready" || project?.status === "done");
+    (!isCreatingSubtitles || !hasActiveCreateFromApi);
   const showNoSubtitlesState = !isLoading && !error && !subtitleLoadError && !hasSubtitles;
   const persistedCreateJob = projectId ? getPersistedRunningJob(projectId) : null;
   const hasActiveCreateSubtitles =
@@ -4031,43 +4036,49 @@ const Workbench = () => {
                       </Button>
                     )}
                   </div>
-                  {!isShortWindow && showElevatorMusicRow && (
-                    <div
-                      className="absolute bottom-6 left-0 right-0 flex justify-center animate-in fade-in duration-300"
-                      data-testid="workbench-elevator-music-row"
-                    >
-                      <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-muted-foreground">
-                        <span>Listen to some music while you wait?</span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleElevatorMusicToggle}
-                          className="inline-flex gap-1.5 shrink-0"
-                          aria-label={
-                            elevatorMusicPlaying
-                              ? "Pause background music"
-                              : "Play background music"
-                          }
-                        >
-                          {elevatorMusicPlaying ? (
-                            <>
-                              <Pause className="size-3.5" />
-                              Pause
-                            </>
-                          ) : (
-                            <>
-                              <Play className="size-3.5" />
-                              Play
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
                 </>
               );
             })()}
           </div>
+          {!isShortWindow &&
+            showElevatorMusicRow &&
+            hasActiveCreateSubtitles &&
+            !(
+              project?.active_task?.status === "queued" &&
+              project?.active_task?.kind === "create_subtitles"
+            ) && (
+              <div
+                className="absolute bottom-6 left-0 right-0 flex justify-center animate-in fade-in duration-300"
+                data-testid="workbench-elevator-music-row"
+              >
+                <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-muted-foreground">
+                  <span>Listen to some music while you wait?</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleElevatorMusicToggle}
+                    className="inline-flex gap-1.5 shrink-0"
+                    aria-label={
+                      elevatorMusicPlaying
+                        ? "Pause background music"
+                        : "Play background music"
+                    }
+                  >
+                    {elevatorMusicPlaying ? (
+                      <>
+                        <Pause className="size-3.5" />
+                        Pause
+                      </>
+                    ) : (
+                      <>
+                        <Play className="size-3.5" />
+                        Play
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
         </section>
       )}
 

@@ -621,6 +621,7 @@ def _draw_shadow(
 
 OUTLINE_HALO_EXTRA_PX = 2.0
 OUTLINE_HALO_ALPHA = 0.35
+OUTLINE_CURVE_THRESHOLD = 0.05
 
 
 def _draw_outline(
@@ -636,7 +637,7 @@ def _draw_outline(
     stroker = QtGui.QPainterPathStroker()
     stroker.setJoinStyle(QtCore.Qt.RoundJoin)
     stroker.setCapStyle(QtCore.Qt.RoundCap)
-    stroker.setCurveThreshold(0.1)
+    stroker.setCurveThreshold(OUTLINE_CURVE_THRESHOLD)
     painter.save()
     painter.setPen(QtCore.Qt.NoPen)
     halo_width = stroke_width + OUTLINE_HALO_EXTRA_PX
