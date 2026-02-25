@@ -55,6 +55,8 @@ export function ExitConfirmHandler() {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleCancel()}>
       <DialogContent
+        className="z-110"
+        overlayClassName="!z-110"
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => {
           handleCancel();
@@ -73,7 +75,7 @@ export function ExitConfirmHandler() {
           ))}
         </ul>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={handleCancel}>
+          <Button type="button" variant="tertiary" onClick={handleCancel}>
             Stay
           </Button>
           <Button type="button" variant="destructive" onClick={() => void handleExitAnyway()} disabled={exiting}>

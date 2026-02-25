@@ -948,7 +948,7 @@ class Worker(QtCore.QObject):
         self.signals.log.emit(f"Export pipeline={plan.pipeline}", True)
         if stream_info.video_bitrate and stream_info.video_bitrate > 0:
             self.signals.log.emit(
-                "Export video: source quality (CRF 12)",
+                "Export video: source quality (CRF 6)",
                 True,
             )
         else:

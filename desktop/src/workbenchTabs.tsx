@@ -16,8 +16,8 @@ const PERSIST_KEY = "cue_title_bar_tabs";
 type PersistedTabs = {
   projectIds: string[];
   lastActiveProjectId: string | typeof HOME_TAB_ID;
-  /** Optional per-tab meta so tab titles survive restart. Keyed by projectId. */
-  tabMeta?: Record<string, { title?: string }>;
+  /** Optional per-tab meta so tab titles and paths survive restart. Keyed by projectId. */
+  tabMeta?: Record<string, { title?: string; path?: string }>;
 };
 
 type WorkbenchTabsContextValue = {
@@ -78,10 +78,17 @@ function loadPersisted(): PersistedTabs | null {
 function savePersisted(tabs: WorkbenchTab[], lastActiveProjectId: string | typeof HOME_TAB_ID) {
   try {
     const projectIds = tabs.map((t) => t.projectId);
-    const tabMeta: Record<string, { title?: string }> = {};
+    const tabMeta: Record<string, { title?: string; path?: string }> = {};
     for (const t of tabs) {
+      const meta: { title?: string; path?: string } = {};
       if (t.title && t.title !== "Untitled" && t.title !== "Loading...") {
-        tabMeta[t.projectId] = { title: t.title };
+        meta.title = t.title;
+      }
+      if (t.path && t.path.length > 0) {
+        meta.path = t.path;
+      }
+      if (Object.keys(meta).length > 0) {
+        tabMeta[t.projectId] = meta;
       }
     }
     localStorage.setItem(
@@ -112,6 +119,7 @@ export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode 
     const initialTabs: WorkbenchTab[] = data.projectIds.map((id) => ({
       projectId: id,
       title: data.tabMeta?.[id]?.title ?? "Untitled",
+      path: data.tabMeta?.[id]?.path,
     }));
     setTabs(initialTabs);
     const last = data.lastActiveProjectId;

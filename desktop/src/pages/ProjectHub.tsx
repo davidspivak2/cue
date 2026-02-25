@@ -491,6 +491,7 @@ const ProjectHub = () => {
         openOrActivateTab({
           projectId: createdProject.project_id,
           title: resolveProjectTitle(createdProject),
+          path: createdProject.video_path ?? undefined,
           thumbnail_path: createdProject.thumbnail_path ?? undefined
         });
         navigate(`/workbench/${encodeURIComponent(createdProject.project_id)}`, {
@@ -776,6 +777,7 @@ const ProjectHub = () => {
     openOrActivateTab({
       projectId: project.project_id,
       title: resolveProjectTitle(project),
+      path: project.video_path ?? undefined,
       thumbnail_path: project.thumbnail_path ?? undefined
     });
     navigate(`/workbench/${encodeURIComponent(project.project_id)}`);
@@ -839,13 +841,13 @@ const ProjectHub = () => {
     <TooltipProvider delayDuration={300}>
       <div
         data-testid="project-hub"
-        className="space-y-6 rounded-lg border border-transparent p-1"
+        className="space-y-6 rounded-lg border border-transparent"
         onDragOver={enableRootDrop ? handleRootDragOver : undefined}
         onDrop={enableRootDrop ? handleDrop : undefined}
       >
       {!showEmptyState && (
         <PageHeader
-          title={<h1 className="text-2xl font-semibold text-foreground">Home</h1>}
+          title={<h1 className="text-lg font-semibold tracking-tight text-foreground">Home</h1>}
           onOpenSettings={openSettings}
           showSettings={!isTauriEnv}
           right={
@@ -856,7 +858,7 @@ const ProjectHub = () => {
                   variant="outline"
                   value={viewMode}
                   onValueChange={(v) => v && isValidViewMode(v) && setViewMode(v)}
-                  className="inline-flex [&_[data-slot=toggle-group-item]]:h-[38px]"
+                  className="inline-flex [&_[data-slot=toggle-group-item]]:h-8"
                 >
                   <ToggleGroupItem value="cards" aria-label="Card view" className="relative">
                     <Tooltip>
@@ -884,7 +886,7 @@ const ProjectHub = () => {
                   </ToggleGroupItem>
                 </ToggleGroup>
               )}
-              <Button onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
+              <Button size="sm" onClick={openFileDialog} disabled={isCreating || isBusyOperation}>
                 {ADD_VIDEO_BUTTON}
               </Button>
             </>
@@ -1044,6 +1046,10 @@ const ProjectHub = () => {
               typeof taskNotice.notice_id === "string" &&
               taskNotice.status !== "cancelled" &&
               !dismissedNoticeIds.has(taskNotice.notice_id);
+            const isMissingFile =
+              project.missing_video ||
+              project.status === "missing_file" ||
+              project.status === "needs_video";
             return (
               <div
                 key={project.project_id}
@@ -1147,7 +1153,7 @@ const ProjectHub = () => {
                       )}
                     </div>
                   )}
-                  {shouldShowTaskNotice && taskNotice && (
+                  {shouldShowTaskNotice && taskNotice && !isMissingFile && (
                     <div
                       className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
                       data-testid={`project-card-task-notice-${project.project_id}`}
@@ -1227,6 +1233,10 @@ const ProjectHub = () => {
                   typeof taskNotice.notice_id === "string" &&
                   taskNotice.status !== "cancelled" &&
                   !dismissedNoticeIds.has(taskNotice.notice_id);
+                const isMissingFileList =
+                  project.missing_video ||
+                  project.status === "missing_file" ||
+                  project.status === "needs_video";
                 return (
                   <TableRow
                     key={project.project_id}
@@ -1296,7 +1306,7 @@ const ProjectHub = () => {
                             </div>
                           )}
                         </div>
-                      ) : shouldShowTaskNotice && taskNotice ? (
+                      ) : shouldShowTaskNotice && taskNotice && !isMissingFileList ? (
                         <div className="flex items-center gap-2">
                           <span className="truncate text-xs text-destructive">
                             {taskNotice.message}
@@ -1358,7 +1368,7 @@ const ProjectHub = () => {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="z-110" overlayClassName="!z-110">
           <DialogHeader>
             <DialogTitle>{REMOVE_FROM_CUE_LABEL}?</DialogTitle>
             <DialogDescription>
@@ -1373,7 +1383,7 @@ const ProjectHub = () => {
           ) : null}
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="ghost" type="button" disabled={isDeleting}>
+              <Button variant="tertiary" type="button" disabled={isDeleting}>
                 Cancel
               </Button>
             </DialogClose>
@@ -1400,7 +1410,7 @@ const ProjectHub = () => {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="z-110" overlayClassName="!z-110">
           <DialogHeader>
             <DialogTitle>Video file not found</DialogTitle>
             <DialogDescription>
@@ -1410,7 +1420,7 @@ const ProjectHub = () => {
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="ghost" type="button">
+              <Button variant="tertiary" type="button">
                 Cancel
               </Button>
             </DialogClose>
@@ -1437,7 +1447,7 @@ const ProjectHub = () => {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="z-110" overlayClassName="!z-110">
           <DialogHeader>
             <DialogTitle>This file looks different</DialogTitle>
             <DialogDescription>
@@ -1453,7 +1463,7 @@ const ProjectHub = () => {
           ) : null}
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="ghost" type="button">
+              <Button variant="tertiary" type="button">
                 Cancel
               </Button>
             </DialogClose>

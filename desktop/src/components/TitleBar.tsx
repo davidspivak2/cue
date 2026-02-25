@@ -87,6 +87,27 @@ function SortableTitleTab({
     tab.path && tab.path.length > 0 ? truncatePathMiddle(tab.path, 56) : title;
 
   const [tabHover, setTabHover] = React.useState(false);
+  const hoverTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const TOOLTIP_DELAY_MS = 400;
+
+  const clearHoverTimeout = () => {
+    if (hoverTimeoutRef.current !== null) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+  };
+
+  const handlePointerEnter = () => {
+    clearHoverTimeout();
+    hoverTimeoutRef.current = setTimeout(() => setTabHover(true), TOOLTIP_DELAY_MS);
+  };
+
+  const handlePointerLeave = () => {
+    clearHoverTimeout();
+    setTabHover(false);
+  };
+
+  React.useEffect(() => () => clearHoverTimeout(), []);
 
   return (
     <div
@@ -103,13 +124,16 @@ function SortableTitleTab({
       )}
       {...attributes}
       {...listeners}
-      onPointerEnter={() => setTabHover(true)}
-      onPointerLeave={() => setTabHover(false)}
     >
-      <TooltipProvider delayDuration={300}>
-        <Tooltip open={tabHover}>
-          <TooltipTrigger asChild>
-            <button
+      <div
+        className="min-w-0 flex-1"
+        onPointerEnter={handlePointerEnter}
+        onPointerLeave={handlePointerLeave}
+      >
+        <TooltipProvider delayDuration={300}>
+          <Tooltip open={tabHover}>
+            <TooltipTrigger asChild>
+              <button
               type="button"
               onClick={(e) => {
                 if (isActive) {
@@ -146,6 +170,7 @@ function SortableTitleTab({
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
+      </div>
       <button
         type="button"
         onClick={(e) => onCloseTab(tab.projectId, e)}
@@ -159,52 +184,36 @@ function SortableTitleTab({
   );
 }
 
-function HomeTabWithTooltip({
+function HomeTab({
   activeView,
   onHomeClick,
 }: {
   activeView: ActiveView;
   onHomeClick: () => void;
 }) {
-  const [homeHover, setHomeHover] = React.useState(false);
   return (
-    <div
-      className="h-full"
-      onPointerEnter={() => setHomeHover(true)}
-      onPointerLeave={() => setHomeHover(false)}
+    <button
+      type="button"
+      onClick={(e) => {
+        if (activeView === HOME_TAB_ID) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        onHomeClick();
+      }}
+      aria-label="Home"
+      data-testid="title-bar-home"
+      aria-current={activeView === HOME_TAB_ID ? "true" : undefined}
+      className={cn(
+        "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 border-r border-foreground/15 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        activeView === HOME_TAB_ID
+          ? "!cursor-default border-b-foreground/30 bg-foreground/8 text-foreground"
+          : "border-b-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+      )}
     >
-      <TooltipProvider delayDuration={300}>
-        <Tooltip open={homeHover}>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={(e) => {
-                if (activeView === HOME_TAB_ID) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  return;
-                }
-                onHomeClick();
-              }}
-              aria-label="Home"
-              data-testid="title-bar-home"
-              aria-current={activeView === HOME_TAB_ID ? "true" : undefined}
-              className={cn(
-                "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 border-r border-foreground/15 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                activeView === HOME_TAB_ID
-                  ? "!cursor-default border-b-foreground/30 bg-foreground/8 text-foreground"
-                  : "border-b-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              )}
-            >
-              <Home className="h-4 w-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6}>
-            Home
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    </div>
+      <Home className="h-4 w-4" />
+    </button>
   );
 }
 
@@ -321,7 +330,7 @@ const TitleBar = () => {
           className="h-5 w-5 shrink-0 pointer-events-none"
           aria-hidden
         />
-        <span className="pointer-events-none text-lg font-medium tracking-tight text-foreground">
+        <span className="pointer-events-none text-base font-semibold tracking-tight text-foreground">
           Cue
         </span>
       </div>
@@ -332,7 +341,7 @@ const TitleBar = () => {
         data-tauri-drag-region
         onDoubleClick={handleMaximize}
       >
-        <HomeTabWithTooltip
+        <HomeTab
           activeView={activeView}
           onHomeClick={handleHomeClick}
         />

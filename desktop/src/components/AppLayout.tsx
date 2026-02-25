@@ -152,6 +152,12 @@ const AppLayout = () => {
           if (isSuppressedCancelledNotice) {
             continue;
           }
+          const pathname = locationRef.current.pathname;
+          const workbenchMatch = pathname.match(/^\/workbench\/(.+)$/);
+          const currentProjectId = workbenchMatch ? decodeURIComponent(workbenchMatch[1]) : null;
+          if (currentProjectId === project.project_id) {
+            continue;
+          }
           const title = notice.status === "cancelled" ? "Task cancelled" : "Task failed";
           const projectTitle = project.title || "Video";
           pushToast(projectTitle, `${title}: ${notice.message}`);
@@ -295,8 +301,10 @@ const AppLayout = () => {
                 role="status"
                 aria-live="polite"
               >
-                <div className="mb-1 flex items-start justify-between gap-2">
-                  <p className="text-sm font-semibold text-foreground">{toast.title}</p>
+                <div
+                  className={`flex items-start justify-between gap-2 ${toast.message || (toast.actions && toast.actions.length > 0) ? "mb-1" : ""}`}
+                >
+                  <p className="m-0 text-sm font-semibold text-foreground">{toast.title}</p>
                   <Button
                     type="button"
                     variant="ghost"
