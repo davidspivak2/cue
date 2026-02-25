@@ -79,6 +79,16 @@ const STATUS_LABELS: Record<string, string> = {
   missing_file: "Missing file"
 };
 
+const CREATE_SUBTITLES_FILE_NOT_FOUND_MESSAGE =
+  "The video file wasn't found. If you renamed or moved it, relink the video from the project hub and try again.";
+
+function normalizeCreateSubtitlesErrorMessage(raw: string | null | undefined): string {
+  if (raw == null || typeof raw !== "string") return raw ?? "Subtitle generation failed.";
+  const isFileNotFound =
+    raw.includes("No such file or directory") || raw.includes("Error opening input");
+  return isFileNotFound ? CREATE_SUBTITLES_FILE_NOT_FOUND_MESSAGE : raw;
+}
+
 const ELEVATOR_MUSIC_TRACK_NAMES = [
   "fogged-glass-reverie.mp3",
   "breezy-afternoon.mp3",
@@ -1252,9 +1262,12 @@ const Workbench = () => {
       return;
     }
     const title = resolveTitle(project);
+    const rawPath = project?.video?.path ?? project?.video?.filename ?? "";
+    const path =
+      rawPath && (rawPath.includes("/") || rawPath.includes("\\")) ? rawPath : undefined;
     updateTabMeta(projectId, {
       title,
-      path: project?.video?.path ?? project?.video?.filename ?? "",
+      ...(path && { path }),
       thumbnail_path: project?.video?.thumbnail_path ?? undefined
     });
   }, [project, projectId, updateTabMeta]);
@@ -1370,7 +1383,11 @@ const Workbench = () => {
         setErrorMessage("Choose a folder in Settings to save your subtitles.");
         return null;
       }
-      const selected = await openDialog({ directory: true, multiple: false });
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Choose folder to save subtitles"
+      });
       if (typeof selected !== "string" || !selected) {
         return null;
       }
@@ -1675,7 +1692,7 @@ const Workbench = () => {
         setCreateStreamHealthValue("idle");
         const message = asNonEmptyString(event.message);
         if (message) {
-          setCreateSubtitlesError(message);
+          setCreateSubtitlesError(normalizeCreateSubtitlesErrorMessage(message));
         }
         return;
       }
@@ -1698,7 +1715,10 @@ const Workbench = () => {
         createSubtitlesStreamCooldownUntilRef.current = 0;
         closeCreateSubtitlesStream("create_subtitles_error");
         setCreateStreamHealthValue("idle");
-        setCreateSubtitlesError(asNonEmptyString(event.message) ?? "Subtitle generation failed.");
+        setCreateSubtitlesError(
+          normalizeCreateSubtitlesErrorMessage(asNonEmptyString(event.message)) ??
+            "Subtitle generation failed."
+        );
       }
     },
     [
@@ -1793,11 +1813,6 @@ const Workbench = () => {
       return;
     }
 
-    const resolvedOutputDir = await resolveOutputDir(project.video.path, setCreateSubtitlesError);
-    if (!resolvedOutputDir) {
-      return;
-    }
-
     setCreateSubtitlesError(null);
     setCreateSubtitlesHeading("Creating subtitles");
     setCreateSubtitlesProgressPct(0);
@@ -1806,7 +1821,7 @@ const Workbench = () => {
     if (initialChecklist.length > 0) {
       initialChecklist[0] = { ...initialChecklist[0], state: "active" };
     }
-    setCreateSubtitlesProgressMessage(initialChecklist[0]?.label ?? "Extracting audio");
+    setCreateSubtitlesProgressMessage(initialChecklist[0]?.label ?? "Preparing…");
     setCreateSubtitlesChecklist(initialChecklist);
     clearPreparingPreviewTimers();
     preparingPreviewStartedAtRef.current = null;
@@ -1824,6 +1839,17 @@ const Workbench = () => {
     setIsCreatingSubtitles(true);
     setCreateSubtitlesStartedAt(new Date().toISOString());
     createSubtitlesJustStartedRef.current = true;
+
+    const resolvedOutputDir = await resolveOutputDir(project.video.path, setCreateSubtitlesError);
+    if (!resolvedOutputDir) {
+      setIsCreatingSubtitles(false);
+      setCreateSubtitlesStartedAt(null);
+      createSubtitlesJustStartedRef.current = false;
+      setCreateStreamHealthValue("idle");
+      return;
+    }
+
+    setCreateSubtitlesProgressMessage(initialChecklist[0]?.label ?? "Extracting audio");
     let streamOpened = false;
 
     try {
@@ -2504,6 +2530,8 @@ const Workbench = () => {
     ) {
       clearPreparingPreviewTimers();
       preparingPreviewStartedAtRef.current = null;
+      createSubtitlesUnregisterRef.current?.();
+      createSubtitlesUnregisterRef.current = null;
       const hadJobRef = Boolean(createSubtitlesJobIdRef.current);
       const finishedJobId = createSubtitlesJobIdRef.current;
       createSubtitlesJobIdRef.current = null;
@@ -2513,7 +2541,7 @@ const Workbench = () => {
       setCreateSubtitlesProgressMessage("");
       clearTimingFallbackProgress();
       if (hadJobRef && taskNotice?.job_id === finishedJobId && taskNotice.status !== "completed") {
-        setCreateSubtitlesError(taskNotice.message);
+        setCreateSubtitlesError(normalizeCreateSubtitlesErrorMessage(taskNotice.message));
         setCreateSubtitlesProgressPct(0);
       } else {
         setCreateSubtitlesProgressPct(100);
@@ -2526,6 +2554,8 @@ const Workbench = () => {
       isExporting &&
       exportStreamHealthRef.current !== "open"
     ) {
+      exportUnregisterRef.current?.();
+      exportUnregisterRef.current = null;
       const finishedJobId = exportJobIdRef.current;
       exportJobIdRef.current = null;
       setIsExporting(false);
@@ -3812,7 +3842,7 @@ const Workbench = () => {
 
   const exportAreaTopBar = hasSubtitles && (
     <div className="flex flex-wrap items-center gap-2">
-      {latestOutputPath && (
+      {latestOutputPath && !isExporting && (
         <>
           <Button
             variant="secondary"
@@ -3831,6 +3861,30 @@ const Workbench = () => {
             Open folder
           </Button>
         </>
+      )}
+      {isExporting && (
+        <div
+          className="flex flex-wrap items-center gap-2"
+          data-testid="workbench-export-progress-top"
+        >
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {Math.round(exportProgressPct)}%
+          </span>
+          <div
+            className="w-20 shrink-0"
+            title={exportProgressMessage || undefined}
+          >
+            <Progress value={exportProgressPct} className="h-1.5" />
+          </div>
+          <Button
+            variant="tertiary"
+            size="sm"
+            data-testid="workbench-cancel-export"
+            onClick={() => void cancelExport()}
+          >
+            Cancel
+          </Button>
+        </div>
       )}
       <Button
         size="sm"
@@ -3854,7 +3908,7 @@ const Workbench = () => {
           data-testid="workbench-heading"
         >
           <h1 className="min-w-0 max-w-[min(100%,280px)] truncate text-lg font-semibold tracking-tight text-foreground">
-            {title || "Untitled video"}
+            {title && title !== "Untitled video" ? title : ""}
           </h1>
         </div>
         <div className="min-w-0 flex-1" aria-hidden="true" />
@@ -3900,12 +3954,14 @@ const Workbench = () => {
             {!hasActiveCreateSubtitles ? (
               <>
                 <p className="text-lg font-semibold text-foreground">No subtitles yet.</p>
-                <Button
-                  data-testid="workbench-create-subtitles"
-                  onClick={() => void startCreateSubtitles()}
-                >
-                  Create subtitles
-                </Button>
+                <div className="flex justify-center">
+                  <Button
+                    data-testid="workbench-create-subtitles"
+                    onClick={() => void startCreateSubtitles()}
+                  >
+                    Create subtitles
+                  </Button>
+                </div>
               </>
             ) : project?.active_task?.status === "queued" &&
               project?.active_task?.kind === "create_subtitles" ? (
@@ -3991,7 +4047,7 @@ const Workbench = () => {
                       <>
                         <div className="flex flex-1 justify-start">
                           <Button
-                            variant="outline"
+                            variant="secondary"
                             size="sm"
                             onClick={handleElevatorMusicToggle}
                             className="inline-flex gap-1.5 shrink-0 animate-in fade-in duration-300"
@@ -4054,7 +4110,7 @@ const Workbench = () => {
                 <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-muted-foreground">
                   <span>Listen to some music while you wait?</span>
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     onClick={handleElevatorMusicToggle}
                     className="inline-flex gap-1.5 shrink-0"
@@ -4453,33 +4509,35 @@ const Workbench = () => {
                           "linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 70%, transparent 100%)"
                       }}
                     >
-                      <button
+                      <Button
                         type="button"
-                        className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded text-white hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        variant="overlay"
+                        size="iconSm"
                         onClick={handlePlayPauseToggle}
                         aria-label={isPlaying ? "Pause" : "Play"}
                         data-testid="workbench-video-play-pause"
                       >
                         {isPlaying ? (
-                          <Pause className="h-5 w-5" fill="currentColor" />
+                          <Pause fill="currentColor" />
                         ) : (
-                          <Play className="h-5 w-5" fill="currentColor" />
+                          <Play fill="currentColor" />
                         )}
-                      </button>
+                      </Button>
                       <div className="relative flex items-center gap-0">
-                        <button
+                        <Button
                           type="button"
-                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded text-white hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          variant="overlay"
+                          size="iconSm"
                           onClick={handleMuteToggle}
                           aria-label={isMuted ? "Unmute" : "Mute"}
                           data-testid="workbench-video-volume"
                         >
                           {isMuted ? (
-                            <VolumeX className="h-5 w-5" />
+                            <VolumeX />
                           ) : (
-                            <Volume2 className="h-5 w-5" />
+                            <Volume2 />
                           )}
-                        </button>
+                        </Button>
                         <div className="w-[100px] shrink-0 cursor-pointer">
                           <Slider
                             className="h-8 w-[100px] shrink-0 cursor-pointer px-1 [&_.bg-primary\\/20]:bg-white/40 [&_.bg-primary]:bg-white [&_.border-primary\\/50]:border-white/80 [&_.bg-background]:bg-white"
@@ -4504,16 +4562,18 @@ const Workbench = () => {
                       >
                         <Popover open={speedPopoverOpen} onOpenChange={handleSpeedPopoverOpenChange}>
                           <PopoverTrigger asChild>
-                            <button
+                            <Button
                               type="button"
-                              className="flex min-h-9 min-w-9 cursor-pointer items-center justify-center rounded text-xs font-medium text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                              variant="overlay"
+                              size="sm"
+                              className="min-h-9 min-w-9 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
                               style={{ textShadow: "0 0 2px rgba(0,0,0,1), 0 1px 3px rgba(0,0,0,0.9)" }}
                               aria-label="Playback speed"
                               data-testid="workbench-video-speed"
                               onClick={handleSpeedControlClick}
                             >
                               {formatSpeedLabel(playbackSpeed)}
-                            </button>
+                            </Button>
                           </PopoverTrigger>
                           <PopoverContent
                             side="top"
@@ -4675,7 +4735,7 @@ const Workbench = () => {
             </aside>
           )}
 
-          {hasSubtitles && isExporting && (
+          {false && hasSubtitles && isExporting && (
             <section
               className="rounded-lg border border-border bg-card p-4"
               data-testid="workbench-export-panel"

@@ -109,7 +109,7 @@ test("save policy enables the path controls", async ({ page }) => {
   await expect(pathField).toBeDisabled();
   await expect(browseButton).toBeDisabled();
 
-  await page.getByLabel("Always save to this folder").click();
+  await page.getByLabel("Specific folder").click();
   await expect(pathField).toBeEnabled();
   await expect(browseButton).toBeEnabled();
 });

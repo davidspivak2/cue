@@ -150,7 +150,7 @@ def build_graphics_overlay_plan(
         "+faststart",
     ]
     if video_bitrate and video_bitrate > 0:
-        base_parts.extend(["-crf", "12"])
+        base_parts.extend(["-crf", "6"])
     else:
         base_parts.extend(["-crf", "15"])
     base_command = base_parts

@@ -16,6 +16,12 @@ import {
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
+import {
   fetchDeviceInfo,
   fetchSettings,
   SettingsConfig,
@@ -96,10 +102,16 @@ const Settings = () => {
   const { theme, setTheme } = useTheme();
 
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
+  const settingsRef = React.useRef<SettingsConfig | null>(null);
+  settingsRef.current = settings;
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isBackendStarting, setIsBackendStarting] = React.useState(true);
   const [gpuAvailable, setGpuAvailable] = React.useState<boolean | null>(null);
+  const saveFolderInputRef = React.useRef<HTMLInputElement>(null);
+  const [saveFolderTruncated, setSaveFolderTruncated] = React.useState(false);
+  const savePolicy = settings?.save_policy ?? "same_folder";
+  const saveFolderValue = settings?.save_folder ?? "";
 
   React.useEffect(() => {
     let active = true;
@@ -175,24 +187,82 @@ const Settings = () => {
     [settings]
   );
 
-  const handleSavePolicyChange = (value: string) => {
-    persistSettings({ save_policy: value });
+  const openFolderDialog = React.useCallback(async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === "string" && settings) {
+        await persistSettings({ save_folder: selected, save_policy: "fixed_folder" });
+      }
+    } catch {
+      // Ignore dialog errors outside Tauri.
+    }
+  }, [settings, persistSettings]);
+
+  const handleSavePolicyChange = async (value: string) => {
+    await persistSettings({ save_policy: value });
+    if (value === "fixed_folder") {
+      await openFolderDialog();
+    }
   };
 
   const handleBrowseFolder = async () => {
     if (!settings || settings.save_policy !== "fixed_folder") {
       return;
     }
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({ directory: true, multiple: false });
-      if (typeof selected === "string") {
-        await persistSettings({ save_folder: selected, save_policy: "fixed_folder" });
-      }
-    } catch {
-      // Ignore dialog errors outside Tauri.
-    }
+    await openFolderDialog();
   };
+
+  React.useEffect(() => {
+    if (savePolicy !== "fixed_folder" || !saveFolderValue) {
+      setSaveFolderTruncated(false);
+      return;
+    }
+    const el = saveFolderInputRef.current;
+    if (!el) {
+      return;
+    }
+    let rafId: number;
+    let timeoutId: ReturnType<typeof setTimeout>;
+    let ro: ResizeObserver | null = null;
+    const check = () => {
+      try {
+        if (el.isConnected && el.scrollWidth > el.clientWidth) {
+          setSaveFolderTruncated(true);
+        } else {
+          setSaveFolderTruncated(false);
+        }
+      } catch {
+        setSaveFolderTruncated(false);
+      }
+    };
+    rafId = requestAnimationFrame(() => {
+      check();
+      timeoutId = setTimeout(check, 100);
+      try {
+        ro = new ResizeObserver(() => {
+          requestAnimationFrame(check);
+        });
+        ro.observe(el);
+      } catch {
+        setSaveFolderTruncated(false);
+      }
+    });
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(timeoutId);
+      ro?.disconnect();
+    };
+  }, [savePolicy, saveFolderValue]);
+
+  React.useEffect(() => {
+    return () => {
+      const current = settingsRef.current;
+      if (current?.save_policy === "fixed_folder" && !current?.save_folder) {
+        void updateSettings({ save_policy: "same_folder" });
+      }
+    };
+  }, []);
 
   if (isLoading) {
     return (
@@ -214,8 +284,6 @@ const Settings = () => {
   }
 
   const diagnosticsEnabled = settings.diagnostics?.enabled ?? false;
-  const savePolicy = settings.save_policy ?? "same_folder";
-  const saveFolderValue = settings.save_folder ?? "";
 
   return (
     <div className="flex flex-col gap-4 pb-6" data-testid="settings-content">
@@ -276,7 +344,7 @@ const Settings = () => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Save subtitles">
+      <SettingsSection title="Save subtitles to">
         <div className="space-y-3">
           <RadioGroup
             value={savePolicy}
@@ -287,31 +355,52 @@ const Settings = () => {
               <RadioGroupItem id="save-same" value="same_folder" />
               <Label htmlFor="save-same">Same folder as the video</Label>
             </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem id="save-fixed" value="fixed_folder" />
-              <Label htmlFor="save-fixed">Always save to this folder</Label>
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem id="save-fixed" value="fixed_folder" />
+                <Label htmlFor="save-fixed">Specific folder</Label>
+              </div>
+              {savePolicy === "fixed_folder" && (
+                <div className="flex gap-2 pl-6">
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="min-w-0 flex-1">
+                          <Input
+                            ref={saveFolderInputRef}
+                            placeholder="No folder selected"
+                            value={saveFolderValue}
+                            readOnly
+                            className="bg-muted cursor-default truncate focus-visible:ring-0"
+                          />
+                        </div>
+                      </TooltipTrigger>
+                      {saveFolderValue ? (
+                        <TooltipContent
+                          side="top"
+                          sideOffset={4}
+                          className="z-200 max-w-[min(90vw,28rem)] break-all"
+                        >
+                          {saveFolderValue}
+                        </TooltipContent>
+                      ) : null}
+                    </Tooltip>
+                  </TooltipProvider>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleBrowseFolder}
+                  >
+                    Browse...
+                  </Button>
+                </div>
+              )}
             </div>
             <div className="flex items-center space-x-2">
               <RadioGroupItem id="save-ask" value="ask_every_time" />
               <Label htmlFor="save-ask">Ask every time</Label>
             </div>
           </RadioGroup>
-          <div className="flex gap-2">
-            <Input
-              placeholder="No folder selected"
-              value={saveFolderValue}
-              readOnly
-              disabled={savePolicy !== "fixed_folder"}
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleBrowseFolder}
-              disabled={savePolicy !== "fixed_folder"}
-            >
-              Browse...
-            </Button>
-          </div>
         </div>
       </SettingsSection>
 

@@ -209,9 +209,8 @@ const StyleControls = ({
             </Select>
           </div>
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
-            className="h-8"
             onClick={onResetPreset}
           >
             Reset
@@ -345,9 +344,11 @@ const StyleControls = ({
 
       {/* ── Section 4: Advanced ── */}
       <section className="space-y-3">
-        <button
+        <Button
           type="button"
-          className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          variant="tertiary"
+          size="sm"
+          className="gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
           onClick={() => setAdvancedOpen((v) => !v)}
         >
           {advancedOpen ? (
@@ -356,7 +357,7 @@ const StyleControls = ({
             <ChevronRight className="h-3.5 w-3.5" />
           )}
           Advanced
-        </button>
+        </Button>
 
         {advancedOpen && (
           <div className="space-y-4">
