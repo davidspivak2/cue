@@ -171,87 +171,149 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   highlight_color: "#FFD400"
 };
 
-type PresetStyleDefaults = {
-  font_size: number;
-  outline: number;
-  shadow: number;
-  margin_v: number;
-  box_enabled: boolean;
-  box_opacity: number;
-  box_padding: number;
-};
+export const NAMED_PRESET_IDS = [
+  "classic_static",
+  "bold_outline_static",
+  "boxed_static",
+  "neon_karaoke",
+  "boxed_karaoke"
+] as const;
 
-const PRESET_STYLE_DEFAULTS: Record<"Default" | "Large outline" | "Large outline + box", PresetStyleDefaults> =
-  {
-    Default: {
-      font_size: 34,
-      outline: 1.5,
-      shadow: 1,
-      margin_v: 28,
-      box_enabled: false,
-      box_opacity: 55,
-      box_padding: 8
-    },
-    "Large outline": {
-      font_size: 38,
-      outline: 2,
-      shadow: 1,
-      margin_v: 30,
-      box_enabled: false,
-      box_opacity: 55,
-      box_padding: 9
-    },
-    "Large outline + box": {
-      font_size: 38,
-      outline: 2,
-      shadow: 1,
-      margin_v: 30,
-      box_enabled: true,
-      box_opacity: 55,
-      box_padding: 9
-    }
-  };
+export type NamedPresetId = (typeof NAMED_PRESET_IDS)[number];
 
-const applyPresetAppearance = (
-  source: SubtitleStyleAppearance,
-  presetName: string
-): SubtitleStyleAppearance => {
-  if (presetName === "Custom") {
-    return source;
-  }
-  const defaults =
-    presetName === "Large outline" || presetName === "Large outline + box"
-      ? PRESET_STYLE_DEFAULTS[presetName]
-      : PRESET_STYLE_DEFAULTS.Default;
-  return {
-    ...source,
-    font_family: DEFAULT_APPEARANCE.font_family,
-    font_size: defaults.font_size,
+const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
+  classic_static: {
+    ...DEFAULT_APPEARANCE,
+    subtitle_mode: "static",
+    font_family: "Heebo",
+    font_size: 45,
     font_style: "regular",
-    text_color: DEFAULT_APPEARANCE.text_color,
+    text_color: "#FFFFFF",
     text_opacity: 1,
     letter_spacing: 0,
-    outline_enabled: defaults.outline > 0,
-    outline_width: defaults.outline,
-    outline_color: DEFAULT_APPEARANCE.outline_color,
-    shadow_enabled: defaults.shadow > 0,
-    shadow_strength: defaults.shadow,
+    outline_enabled: true,
+    outline_width: 2.5,
+    outline_color: "#000000",
+    shadow_enabled: true,
+    shadow_strength: 2,
+    shadow_offset_x: 0,
+    shadow_offset_y: 2,
+    shadow_color: "#000000",
+    shadow_opacity: 0.3,
+    background_mode: "none",
+    vertical_anchor: "bottom",
+    vertical_offset: 40
+  },
+  bold_outline_static: {
+    ...DEFAULT_APPEARANCE,
+    subtitle_mode: "static",
+    font_family: "Heebo",
+    font_size: 51,
+    font_style: "regular",
+    text_color: "#FFFFFF",
+    text_opacity: 1,
+    letter_spacing: 0,
+    outline_enabled: true,
+    outline_width: 5.5,
+    outline_color: "#000000",
+    shadow_enabled: false,
+    shadow_strength: 0,
     shadow_offset_x: 0,
     shadow_offset_y: 0,
-    shadow_color: DEFAULT_APPEARANCE.shadow_color,
-    shadow_opacity: 1,
-    background_mode: defaults.box_enabled ? "line" : "none",
-    line_bg_color: DEFAULT_APPEARANCE.line_bg_color,
-    line_bg_opacity: defaults.box_opacity / 100,
-    line_bg_padding: defaults.box_padding,
-    line_bg_radius: 0,
-    word_bg_color: DEFAULT_APPEARANCE.word_bg_color,
-    word_bg_opacity: DEFAULT_APPEARANCE.word_bg_opacity,
-    word_bg_padding: defaults.box_padding,
-    word_bg_radius: 0,
+    shadow_color: "#000000",
+    shadow_opacity: 0,
+    background_mode: "none",
     vertical_anchor: "bottom",
-    vertical_offset: defaults.margin_v
-  };
+    vertical_offset: 40
+  },
+  boxed_static: {
+    ...DEFAULT_APPEARANCE,
+    subtitle_mode: "static",
+    font_family: "Heebo",
+    font_size: 45,
+    font_style: "regular",
+    text_color: "#FFFFFF",
+    text_opacity: 1,
+    letter_spacing: 0,
+    outline_enabled: true,
+    outline_width: 1.5,
+    outline_color: "#000000",
+    shadow_enabled: false,
+    shadow_strength: 0,
+    shadow_offset_x: 0,
+    shadow_offset_y: 0,
+    shadow_color: "#000000",
+    shadow_opacity: 0,
+    background_mode: "line",
+    line_bg_color: "#000000",
+    line_bg_opacity: 0.5,
+    line_bg_padding: 10,
+    line_bg_radius: 10,
+    vertical_anchor: "bottom",
+    vertical_offset: 40
+  },
+  neon_karaoke: {
+    ...DEFAULT_APPEARANCE,
+    subtitle_mode: "word_highlight",
+    font_family: "Heebo",
+    font_size: 45,
+    font_style: "regular",
+    text_color: "#FFFFFF",
+    text_opacity: 1,
+    letter_spacing: 0,
+    outline_enabled: true,
+    outline_width: 3.5,
+    outline_color: "#000000",
+    shadow_enabled: true,
+    shadow_strength: 2.5,
+    shadow_offset_x: 0,
+    shadow_offset_y: 2,
+    shadow_color: "#000000",
+    shadow_opacity: 0.3,
+    background_mode: "none",
+    highlight_color: "#00E5FF",
+    vertical_anchor: "bottom",
+    vertical_offset: 40
+  },
+  boxed_karaoke: {
+    ...DEFAULT_APPEARANCE,
+    subtitle_mode: "word_highlight",
+    font_family: "Heebo",
+    font_size: 45,
+    font_style: "regular",
+    text_color: "#FFFFFF",
+    text_opacity: 1,
+    letter_spacing: 0,
+    outline_enabled: true,
+    outline_width: 1.5,
+    outline_color: "#000000",
+    shadow_enabled: true,
+    shadow_strength: 1,
+    shadow_offset_x: 0,
+    shadow_offset_y: 0,
+    shadow_color: "#000000",
+    shadow_opacity: 0.2,
+    background_mode: "word",
+    word_bg_color: "#000000",
+    word_bg_opacity: 0.48,
+    word_bg_padding: 10,
+    word_bg_radius: 10,
+    highlight_color: "#FFD400",
+    vertical_anchor: "bottom",
+    vertical_offset: 40
+  }
+};
+
+const isNamedPresetId = (value: string): value is NamedPresetId =>
+  NAMED_PRESET_IDS.includes(value as NamedPresetId);
+
+const applyPresetAppearance = (
+  presetId: string
+): SubtitleStyleAppearance | null => {
+  if (presetId === "Custom" || !isNamedPresetId(presetId)) {
+    return null;
+  }
+  return { ...PRESET_DEFINITIONS[presetId] };
 };
 
 const MISSING_SUBTITLES_REASON_TEXT: Record<string, string> = {
@@ -641,7 +703,8 @@ const Workbench = () => {
   const [appearance, setAppearance] =
     React.useState<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
   const customAppearanceRef = React.useRef<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
-  const [preset, setPreset] = React.useState("Default");
+  const [preset, setPreset] = React.useState<string>("classic_static");
+  const [lastPresetId, setLastPresetId] = React.useState<string | null>(null);
   const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
   const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
   const [durationSeconds, setDurationSeconds] = React.useState(0);
@@ -998,6 +1061,15 @@ const Workbench = () => {
     };
   }, [projectId, subtitlesReloadTick]);
 
+  const LEGACY_PRESET_MAP: Record<string, string> = {
+    Default: "classic_static",
+    "Large outline": "bold_outline_static",
+    "Large outline + box": "boxed_static"
+  };
+
+  const resolvePresetFromStored = (stored: string | undefined): string =>
+    LEGACY_PRESET_MAP[stored ?? ""] ?? stored ?? "classic_static";
+
   const applyStyleFromSettings = React.useCallback((data: SettingsConfig) => {
     const style = data.subtitle_style;
     const app = (style.appearance as SubtitleStyleAppearance | undefined) ?? DEFAULT_APPEARANCE;
@@ -1007,9 +1079,21 @@ const Workbench = () => {
       subtitle_mode: data.subtitle_mode ?? app.subtitle_mode,
       highlight_color: style.highlight_color ?? app.highlight_color
     };
-    const resolvedPreset = style.preset ?? "Default";
+    const storedPreset = style.preset ?? "Default";
+    const resolvedPreset = resolvePresetFromStored(storedPreset);
+    const storedLastPresetId =
+      typeof (style as Record<string, unknown>).last_preset_id === "string"
+        ? (style as Record<string, unknown>).last_preset_id as string
+        : undefined;
     setAppearance(resolvedAppearance);
     setPreset(resolvedPreset);
+    setLastPresetId(
+      isNamedPresetId(resolvedPreset)
+        ? resolvedPreset
+        : storedLastPresetId && isNamedPresetId(storedLastPresetId)
+          ? storedLastPresetId
+          : null
+    );
     if (resolvedPreset === "Custom") {
       customAppearanceRef.current = resolvedAppearance;
     }
@@ -1056,14 +1140,26 @@ const Workbench = () => {
       subtitle_mode: styleMode ?? DEFAULT_APPEARANCE.subtitle_mode,
       highlight_color: highlightColor ?? DEFAULT_APPEARANCE.highlight_color
     };
-    const resolvedPreset =
+    const storedPreset =
       typeof styleSection.preset === "string" ? styleSection.preset : "Default";
+    const resolvedPreset = resolvePresetFromStored(storedPreset);
+    const storedLastPresetId =
+      typeof styleSection.last_preset_id === "string"
+        ? styleSection.last_preset_id
+        : undefined;
     const resolvedOpacity =
       typeof styleSection.highlight_opacity === "number"
         ? styleSection.highlight_opacity
         : 1.0;
     setAppearance(resolvedAppearance);
     setPreset(resolvedPreset);
+    setLastPresetId(
+      isNamedPresetId(resolvedPreset)
+        ? resolvedPreset
+        : storedLastPresetId && isNamedPresetId(storedLastPresetId)
+          ? storedLastPresetId
+          : null
+    );
     if (resolvedPreset === "Custom") {
       customAppearanceRef.current = resolvedAppearance;
     }
@@ -1075,11 +1171,13 @@ const Workbench = () => {
     (
       nextAppearance: SubtitleStyleAppearance,
       nextPreset: string,
-      nextHighlightOpacity: number
+      nextHighlightOpacity: number,
+      lastPresetIdValue: string | null
     ) => ({
       subtitle_mode: nextAppearance.subtitle_mode,
       subtitle_style: {
         preset: nextPreset,
+        last_preset_id: lastPresetIdValue ?? undefined,
         highlight_color: nextAppearance.highlight_color,
         highlight_opacity: nextHighlightOpacity,
         appearance: nextAppearance as unknown as Record<string, unknown>
@@ -1131,6 +1229,13 @@ const Workbench = () => {
     }
 
     applyStyleFromSettings(settings);
+    const storedPreset = settings.subtitle_style?.preset ?? "Default";
+    const resolvedPreset = resolvePresetFromStored(storedPreset);
+    const storedLast =
+      typeof (settings.subtitle_style as Record<string, unknown> | undefined)
+        ?.last_preset_id === "string"
+        ? (settings.subtitle_style as Record<string, unknown>).last_preset_id as string
+        : null;
     const fallbackPayload = buildProjectStylePayload(
       {
         ...DEFAULT_APPEARANCE,
@@ -1139,8 +1244,9 @@ const Workbench = () => {
         highlight_color:
           settings.subtitle_style?.highlight_color ?? DEFAULT_APPEARANCE.highlight_color
       },
-      settings.subtitle_style?.preset ?? "Default",
-      settings.subtitle_style?.highlight_opacity ?? 1.0
+      resolvedPreset,
+      settings.subtitle_style?.highlight_opacity ?? 1.0,
+      storedLast
     );
     void updateProject(projectId, { style: fallbackPayload })
       .then(() => {
@@ -2247,7 +2353,12 @@ const Workbench = () => {
 
     try {
       await updateProject(projectId, {
-        style: buildProjectStylePayload(appearance, preset, highlightOpacity)
+        style: buildProjectStylePayload(
+          appearance,
+          preset,
+          highlightOpacity,
+          lastPresetId
+        )
       });
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Failed to save style before export.");
@@ -3211,7 +3322,8 @@ const Workbench = () => {
     async (
       nextAppearance: SubtitleStyleAppearance,
       nextPreset: string,
-      nextHighlightOpacity: number
+      nextHighlightOpacity: number,
+      lastPresetIdValue: string | null
     ) => {
       if (!projectId) {
         return;
@@ -3223,7 +3335,8 @@ const Workbench = () => {
             style: buildProjectStylePayload(
               nextAppearance,
               nextPreset,
-              nextHighlightOpacity
+              nextHighlightOpacity,
+              lastPresetIdValue
             )
           }
         );
@@ -3239,9 +3352,15 @@ const Workbench = () => {
     (
       nextAppearance: SubtitleStyleAppearance,
       nextPreset: string,
-      nextHighlightOpacity: number
+      nextHighlightOpacity: number,
+      lastPresetIdValue: string | null
     ) => {
-      void persistStyleSettings(nextAppearance, nextPreset, nextHighlightOpacity);
+      void persistStyleSettings(
+        nextAppearance,
+        nextPreset,
+        nextHighlightOpacity,
+        lastPresetIdValue
+      );
     },
     500
   );
@@ -3254,7 +3373,7 @@ const Workbench = () => {
       const next = { ...prev, ...changes };
       customAppearanceRef.current = next;
       const nextPreset = preset === "Custom" ? preset : "Custom";
-      debouncedPersistStyle(next, nextPreset, highlightOpacity);
+      debouncedPersistStyle(next, nextPreset, highlightOpacity, lastPresetId);
       return next;
     });
     if (preset !== "Custom") {
@@ -3266,16 +3385,20 @@ const Workbench = () => {
     if (isExporting) {
       return;
     }
+    if (nextPreset === "Custom" || !isNamedPresetId(nextPreset)) {
+      return;
+    }
     if (preset === "Custom") {
       customAppearanceRef.current = appearance;
     }
-    const nextAppearance =
-      nextPreset === "Custom"
-        ? { ...customAppearanceRef.current }
-        : applyPresetAppearance(appearance, nextPreset);
+    const nextAppearance = applyPresetAppearance(nextPreset);
+    if (!nextAppearance) {
+      return;
+    }
     setPreset(nextPreset);
+    setLastPresetId(nextPreset);
     setAppearance(nextAppearance);
-    debouncedPersistStyle(nextAppearance, nextPreset, highlightOpacity);
+    debouncedPersistStyle(nextAppearance, nextPreset, highlightOpacity, nextPreset);
   };
 
   const handleHighlightOpacityChange = (nextHighlightOpacity: number) => {
@@ -3283,19 +3406,36 @@ const Workbench = () => {
       return;
     }
     setHighlightOpacity(nextHighlightOpacity);
-    debouncedPersistStyle(appearance, preset, nextHighlightOpacity);
+    debouncedPersistStyle(
+      appearance,
+      preset,
+      nextHighlightOpacity,
+      lastPresetId
+    );
   };
 
   const handleResetPreset = () => {
     if (isExporting) {
       return;
     }
-    const targetPreset = preset === "Custom" ? "Default" : preset;
-    const nextAppearance = applyPresetAppearance(appearance, targetPreset);
+    const targetPreset =
+      preset === "Custom" ? (lastPresetId ?? "classic_static") : preset;
+    const nextAppearance = isNamedPresetId(targetPreset)
+      ? applyPresetAppearance(targetPreset)
+      : null;
+    if (!nextAppearance) {
+      return;
+    }
     setPreset(targetPreset);
+    setLastPresetId(targetPreset);
     setAppearance(nextAppearance);
     customAppearanceRef.current = nextAppearance;
-    void persistStyleSettings(nextAppearance, targetPreset, highlightOpacity);
+    void persistStyleSettings(
+      nextAppearance,
+      targetPreset,
+      highlightOpacity,
+      targetPreset
+    );
   };
 
   const initializeEditHistory = React.useCallback((initialText: string) => {
