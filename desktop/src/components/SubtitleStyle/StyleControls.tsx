@@ -19,12 +19,18 @@ import {
   AccordionItem,
   AccordionTrigger
 } from "@/components/ui/accordion";
-import ColorSwatchInput from "./ColorSwatchInput";
+import { ChevronDown, Link, Unlink } from "lucide-react";
+import { ColorRow } from "./ColorPopover";
+import { OpacitySlider } from "@/components/ui/opacity-slider";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger
+} from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import type { SubtitleStyleAppearance } from "@/settingsClient";
 
 /* ---------- constants ---------- */
-
-const HIGHLIGHT_SWATCHES = ["#FFD400", "#46D9FF", "#00FF66"];
 
 const PRESET_OPTIONS: { value: string; label: string; disabled?: boolean }[] = [
   { value: "classic_static", label: "Classic (Static)" },
@@ -35,29 +41,19 @@ const PRESET_OPTIONS: { value: string; label: string; disabled?: boolean }[] = [
   { value: "Custom", label: "Custom", disabled: true }
 ];
 
-const FONT_FAMILY_OPTIONS = [
-  "Arial",
-  "Helvetica",
-  "DejaVu Sans",
-  "Liberation Sans",
-  "Noto Sans",
-  "Sans Serif"
-];
+const CURATED_FONTS = [
+  "Heebo",
+  "Assistant",
+  "Rubik",
+  "IBM Plex Sans Hebrew",
+  "Noto Sans Hebrew",
+  "Alef",
+  "Arimo",
+  "Secular One",
+  "Suez One",
+  "Frank Ruhl Libre"
+] as const;
 
-const FONT_STYLE_OPTIONS = [
-  { value: "regular", label: "Regular" },
-  { value: "bold", label: "Bold" },
-  { value: "italic", label: "Italic" }
-];
-
-const TEXT_COLOR_SWATCHES = [
-  "#FFFFFF",
-  "#FFD400",
-  "#46D9FF",
-  "#00FF66",
-  "#FF8A00",
-  "#FF5AA5"
-];
 
 const POSITION_ANCHOR_OPTIONS = [
   { value: "bottom", label: "Bottom" },
@@ -119,6 +115,159 @@ const SliderRow = ({
   </div>
 );
 
+type OpacityRowProps = {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  onChange: (v: number) => void;
+};
+
+const OpacityRow = ({
+  label,
+  value,
+  min = 0,
+  max = 100,
+  onChange
+}: OpacityRowProps) => (
+  <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <OpacitySlider
+        min={min}
+        max={max}
+        step={1}
+        value={[Math.round(value)]}
+        onValueChange={([v]) => onChange(v)}
+      />
+    </div>
+    <div className="flex items-center gap-1.5">
+      <Input
+        type="number"
+        className="h-7 w-16 px-2 text-xs"
+        min={min}
+        max={max}
+        step={1}
+        value={Math.round(value)}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          if (!Number.isNaN(n)) {
+            onChange(Math.min(max, Math.max(min, n)));
+          }
+        }}
+      />
+      <span className="text-xs text-muted-foreground">%</span>
+    </div>
+  </div>
+);
+
+const PADDING_MIN = 0;
+const PADDING_MAX = 40;
+const PADDING_STEP = 1;
+
+type PaddingRowProps = {
+  label: string;
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  linked: boolean;
+  onToggleLink: () => void;
+  onLinkedChange: (v: number) => void;
+  onTopChange: (v: number) => void;
+  onRightChange: (v: number) => void;
+  onBottomChange: (v: number) => void;
+  onLeftChange: (v: number) => void;
+};
+
+const PaddingRow = ({
+  label,
+  top,
+  right,
+  bottom,
+  left,
+  linked,
+  onToggleLink,
+  onLinkedChange,
+  onTopChange,
+  onRightChange,
+  onBottomChange,
+  onLeftChange
+}: PaddingRowProps) => {
+  const clamp = (v: number) =>
+    Math.min(PADDING_MAX, Math.max(PADDING_MIN, v));
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs text-muted-foreground">{label}</Label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0"
+          onClick={onToggleLink}
+          title={linked ? "Unlink padding" : "Link padding"}
+          aria-label={linked ? "Unlink padding" : "Link padding"}
+        >
+          {linked ? (
+            <Link className="h-3.5 w-3.5" />
+          ) : (
+            <Unlink className="h-3.5 w-3.5" />
+          )}
+        </Button>
+      </div>
+      {linked ? (
+        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+          <Slider
+            min={PADDING_MIN}
+            max={PADDING_MAX}
+            step={PADDING_STEP}
+            value={[top]}
+            onValueChange={([v]) => onLinkedChange(clamp(v))}
+          />
+          <Input
+            type="number"
+            className="h-7 w-16 px-2 text-xs"
+            min={PADDING_MIN}
+            max={PADDING_MAX}
+            step={PADDING_STEP}
+            value={top}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (!Number.isNaN(n)) onLinkedChange(clamp(n));
+            }}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-4 gap-1.5">
+          {[
+            { sub: "T", value: top, onChange: onTopChange },
+            { sub: "R", value: right, onChange: onRightChange },
+            { sub: "B", value: bottom, onChange: onBottomChange },
+            { sub: "L", value: left, onChange: onLeftChange }
+          ].map(({ sub, value, onChange }) => (
+            <div key={sub} className="space-y-0.5">
+              <Label className="text-[10px] text-muted-foreground">{sub}</Label>
+              <Input
+                type="number"
+                className="h-7 px-1.5 text-xs"
+                min={PADDING_MIN}
+                max={PADDING_MAX}
+                step={PADDING_STEP}
+                value={value}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isNaN(n)) onChange(clamp(n));
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ---------- props ---------- */
 
 export type StyleControlsProps = {
@@ -142,6 +291,9 @@ const StyleControls = ({
   onHighlightOpacityChange,
   onResetPreset
 }: StyleControlsProps) => {
+  const [fontSearchQuery, setFontSearchQuery] = React.useState("");
+  const [fontOpen, setFontOpen] = React.useState(false);
+
   const patch = (changes: Partial<SubtitleStyleAppearance>) => {
     onAppearanceChange(changes);
   };
@@ -155,22 +307,24 @@ const StyleControls = ({
     }
   }, [bgMode, isWordHighlight]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fontFamilyOptions = React.useMemo(() => {
-    if (FONT_FAMILY_OPTIONS.includes(appearance.font_family)) {
-      return FONT_FAMILY_OPTIONS;
-    }
-    return [appearance.font_family, ...FONT_FAMILY_OPTIONS];
-  }, [appearance.font_family]);
+  const filteredFonts = React.useMemo(() => {
+    const q = fontSearchQuery.trim().toLowerCase();
+    if (!q) return [...CURATED_FONTS];
+    return CURATED_FONTS.filter((f) => f.toLowerCase().includes(q));
+  }, [fontSearchQuery]);
 
   const textSummary = `${appearance.font_family} • ${appearance.font_size} • ${Math.round(appearance.text_opacity * 100)}% • Spacing ${appearance.letter_spacing}`;
   const outlineSummary =
     appearance.outline_width === 0
       ? "Off"
-      : `${appearance.outline_width} • ${appearance.outline_color}`;
+      : appearance.outline_color === "auto"
+        ? `${appearance.outline_width} • Auto`
+        : `${appearance.outline_width} • ${appearance.outline_color}`;
+  const shadowBlur = appearance.shadow_blur ?? 6;
   const shadowSummary =
     appearance.shadow_strength === 0
       ? "Off"
-      : `${appearance.shadow_strength} • X${appearance.shadow_offset_x} Y${appearance.shadow_offset_y} • ${Math.round(appearance.shadow_opacity * 100)}%`;
+      : `Blur ${shadowBlur} • X${appearance.shadow_offset_x} Y${appearance.shadow_offset_y} • ${Math.round(appearance.shadow_opacity * 100)}%`;
   const highlightSummary = `${appearance.highlight_color} • ${Math.round(highlightOpacity * 100)}%`;
   const backgroundOpacity =
     bgMode === "line"
@@ -259,39 +413,80 @@ const StyleControls = ({
           <AccordionContent className="space-y-3 px-3">
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Font</Label>
-              <Select
-                value={appearance.font_family}
-                onValueChange={(v) => patch({ font_family: v })}
-              >
-                <SelectTrigger className="h-7 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {fontFamilyOptions.map((fontName) => (
-                    <SelectItem key={fontName} value={fontName}>
-                      {fontName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={fontOpen} onOpenChange={(o) => { setFontOpen(o); if (!o) setFontSearchQuery(""); }}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-7 w-full justify-between text-xs font-normal"
+                  >
+                    <span className="truncate">{appearance.font_family}</span>
+                    <ChevronDown className="size-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <Input
+                    placeholder="Search fonts..."
+                    className="h-8 border-0 border-b rounded-none focus-visible:ring-0"
+                    value={fontSearchQuery}
+                    onChange={(e) => setFontSearchQuery(e.target.value)}
+                  />
+                  <ScrollArea className="h-[200px]">
+                    <div className="p-1">
+                      {filteredFonts.map((fontName) => (
+                        <button
+                          key={fontName}
+                          type="button"
+                          className="flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none"
+                          onClick={() => {
+                            patch({ font_family: fontName });
+                            setFontOpen(false);
+                            setFontSearchQuery("");
+                          }}
+                        >
+                          {fontName}
+                        </button>
+                      ))}
+                      {filteredFonts.length === 0 && (
+                        <div className="py-2 text-center text-xs text-muted-foreground">No matches</div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </PopoverContent>
+              </Popover>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Style</Label>
-              <Select
-                value={appearance.font_style}
-                onValueChange={(v) => patch({ font_style: v })}
+              <ToggleGroup
+                type="multiple"
+                value={
+                  appearance.font_style === "bold_italic"
+                    ? ["bold", "italic"]
+                    : appearance.font_style === "bold"
+                      ? ["bold"]
+                      : appearance.font_style === "italic"
+                        ? ["italic"]
+                        : []
+                }
+                onValueChange={(v) => {
+                  const style =
+                    v.includes("bold") && v.includes("italic")
+                      ? "bold_italic"
+                      : v.includes("bold")
+                        ? "bold"
+                        : v.includes("italic")
+                          ? "italic"
+                          : "regular";
+                  patch({ font_style: style });
+                }}
+                className="flex gap-1"
               >
-                <SelectTrigger className="h-7 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {FONT_STYLE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <ToggleGroupItem value="bold" aria-label="Bold" className="h-7 w-8 text-xs">
+                  B
+                </ToggleGroupItem>
+                <ToggleGroupItem value="italic" aria-label="Italic" className="h-7 w-8 text-xs">
+                  I
+                </ToggleGroupItem>
+              </ToggleGroup>
             </div>
             <SliderRow
               label="Size"
@@ -300,23 +495,46 @@ const StyleControls = ({
               max={72}
               onChange={(v) => patch({ font_size: v })}
             />
-            <SliderRow
-              label="Letter spacing"
-              value={appearance.letter_spacing}
-              min={-5}
-              max={20}
-              step={0.5}
-              onChange={(v) => patch({ letter_spacing: v })}
-            />
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Letter spacing</Label>
+              <p className="text-[10px] text-muted-foreground">Adjust space between letters</p>
+              <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                <Slider
+                  min={-5}
+                  max={20}
+                  step={0.5}
+                  value={[appearance.letter_spacing]}
+                  onValueChange={([v]) => patch({ letter_spacing: v })}
+                />
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    type="number"
+                    className="h-7 w-16 px-2 text-xs"
+                    min={-5}
+                    max={20}
+                    step={0.5}
+                    value={appearance.letter_spacing}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (!Number.isNaN(n)) {
+                        patch({ letter_spacing: Math.min(20, Math.max(-5, n)) });
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Text color</Label>
-              <ColorSwatchInput
+              <ColorRow
+                kind="text"
                 value={appearance.text_color}
                 onChange={(c) => patch({ text_color: c })}
-                swatches={TEXT_COLOR_SWATCHES}
+                opacity={appearance.text_opacity}
+                onOpacityChange={(o) => patch({ text_opacity: o })}
               />
             </div>
-            <SliderRow
+            <OpacityRow
               label="Opacity"
               value={Math.round(appearance.text_opacity * 100)}
               min={10}
@@ -351,10 +569,20 @@ const StyleControls = ({
               <Label className="text-xs text-muted-foreground">
                 Outline color
               </Label>
-              <ColorSwatchInput
+              <ColorRow
+                kind="outline"
                 value={appearance.outline_color}
                 onChange={(c) => patch({ outline_color: c })}
-                swatches={["#000000"]}
+                outlineAuto={appearance.outline_color === "auto"}
+                onOutlineAutoChange={(auto) =>
+                  patch({
+                    outline_color: auto
+                      ? "auto"
+                      : appearance.outline_color === "auto"
+                        ? "#000000"
+                        : appearance.outline_color
+                  })
+                }
               />
             </div>
           </AccordionContent>
@@ -384,13 +612,15 @@ const StyleControls = ({
               <Label className="text-xs text-muted-foreground">
                 Shadow color
               </Label>
-              <ColorSwatchInput
+              <ColorRow
+                kind="shadow"
                 value={appearance.shadow_color}
                 onChange={(c) => patch({ shadow_color: c })}
-                swatches={["#000000"]}
+                opacity={appearance.shadow_opacity}
+                onOpacityChange={(o) => patch({ shadow_opacity: o })}
               />
             </div>
-            <SliderRow
+            <OpacityRow
               label="Shadow opacity"
               value={Math.round(appearance.shadow_opacity * 100)}
               min={0}
@@ -413,6 +643,14 @@ const StyleControls = ({
               step={0.5}
               onChange={(v) => patch({ shadow_offset_y: v })}
             />
+            <SliderRow
+              label="Shadow blur"
+              value={shadowBlur}
+              min={0}
+              max={20}
+              step={1}
+              onChange={(v) => patch({ shadow_blur: v })}
+            />
           </AccordionContent>
         </AccordionItem>
 
@@ -431,13 +669,15 @@ const StyleControls = ({
                 <Label className="text-xs text-muted-foreground">
                   Highlight color
                 </Label>
-                <ColorSwatchInput
+                <ColorRow
+                  kind="highlight"
                   value={appearance.highlight_color}
                   onChange={(c) => patch({ highlight_color: c })}
-                  swatches={HIGHLIGHT_SWATCHES}
+                  opacity={highlightOpacity}
+                  onOpacityChange={onHighlightOpacityChange}
                 />
               </div>
-              <SliderRow
+              <OpacityRow
                 label="Highlight opacity"
                 value={Math.round(highlightOpacity * 100)}
                 min={0}
@@ -502,24 +742,57 @@ const StyleControls = ({
                   <Label className="text-xs text-muted-foreground">
                     Background color
                   </Label>
-                  <ColorSwatchInput
+                  <ColorRow
+                    kind="background"
                     value={appearance.line_bg_color}
                     onChange={(c) => patch({ line_bg_color: c })}
+                    opacity={appearance.line_bg_opacity}
+                    onOpacityChange={(o) => patch({ line_bg_opacity: o })}
                   />
                 </div>
-                <SliderRow
+                <OpacityRow
                   label="Background opacity"
                   value={Math.round(appearance.line_bg_opacity * 100)}
                   min={0}
                   max={100}
                   onChange={(v) => patch({ line_bg_opacity: v / 100 })}
                 />
-                <SliderRow
+                <PaddingRow
                   label="Padding"
-                  value={appearance.line_bg_padding}
-                  min={0}
-                  max={40}
-                  onChange={(v) => patch({ line_bg_padding: v })}
+                  top={appearance.line_bg_padding_top ?? appearance.line_bg_padding ?? 8}
+                  right={appearance.line_bg_padding_right ?? appearance.line_bg_padding ?? 8}
+                  bottom={appearance.line_bg_padding_bottom ?? appearance.line_bg_padding ?? 8}
+                  left={appearance.line_bg_padding_left ?? appearance.line_bg_padding ?? 8}
+                  linked={appearance.line_bg_padding_linked ?? true}
+                  onToggleLink={() => {
+                    const linked = appearance.line_bg_padding_linked ?? true;
+                    const top = appearance.line_bg_padding_top ?? appearance.line_bg_padding ?? 8;
+                    if (linked) {
+                      patch({ line_bg_padding_linked: false });
+                    } else {
+                      patch({
+                        line_bg_padding_linked: true,
+                        line_bg_padding: top,
+                        line_bg_padding_top: top,
+                        line_bg_padding_right: top,
+                        line_bg_padding_bottom: top,
+                        line_bg_padding_left: top
+                      });
+                    }
+                  }}
+                  onLinkedChange={(v) =>
+                    patch({
+                      line_bg_padding: v,
+                      line_bg_padding_top: v,
+                      line_bg_padding_right: v,
+                      line_bg_padding_bottom: v,
+                      line_bg_padding_left: v
+                    })
+                  }
+                  onTopChange={(v) => patch({ line_bg_padding_top: v })}
+                  onRightChange={(v) => patch({ line_bg_padding_right: v })}
+                  onBottomChange={(v) => patch({ line_bg_padding_bottom: v })}
+                  onLeftChange={(v) => patch({ line_bg_padding_left: v })}
                 />
                 <SliderRow
                   label="Corner radius"
@@ -536,24 +809,57 @@ const StyleControls = ({
                   <Label className="text-xs text-muted-foreground">
                     Background color
                   </Label>
-                  <ColorSwatchInput
+                  <ColorRow
+                    kind="background"
                     value={appearance.word_bg_color}
                     onChange={(c) => patch({ word_bg_color: c })}
+                    opacity={appearance.word_bg_opacity}
+                    onOpacityChange={(o) => patch({ word_bg_opacity: o })}
                   />
                 </div>
-                <SliderRow
+                <OpacityRow
                   label="Background opacity"
                   value={Math.round(appearance.word_bg_opacity * 100)}
                   min={0}
                   max={100}
                   onChange={(v) => patch({ word_bg_opacity: v / 100 })}
                 />
-                <SliderRow
+                <PaddingRow
                   label="Padding"
-                  value={appearance.word_bg_padding}
-                  min={0}
-                  max={40}
-                  onChange={(v) => patch({ word_bg_padding: v })}
+                  top={appearance.word_bg_padding_top ?? appearance.word_bg_padding ?? 8}
+                  right={appearance.word_bg_padding_right ?? appearance.word_bg_padding ?? 8}
+                  bottom={appearance.word_bg_padding_bottom ?? appearance.word_bg_padding ?? 8}
+                  left={appearance.word_bg_padding_left ?? appearance.word_bg_padding ?? 8}
+                  linked={appearance.word_bg_padding_linked ?? true}
+                  onToggleLink={() => {
+                    const linked = appearance.word_bg_padding_linked ?? true;
+                    const top = appearance.word_bg_padding_top ?? appearance.word_bg_padding ?? 8;
+                    if (linked) {
+                      patch({ word_bg_padding_linked: false });
+                    } else {
+                      patch({
+                        word_bg_padding_linked: true,
+                        word_bg_padding: top,
+                        word_bg_padding_top: top,
+                        word_bg_padding_right: top,
+                        word_bg_padding_bottom: top,
+                        word_bg_padding_left: top
+                      });
+                    }
+                  }}
+                  onLinkedChange={(v) =>
+                    patch({
+                      word_bg_padding: v,
+                      word_bg_padding_top: v,
+                      word_bg_padding_right: v,
+                      word_bg_padding_bottom: v,
+                      word_bg_padding_left: v
+                    })
+                  }
+                  onTopChange={(v) => patch({ word_bg_padding_top: v })}
+                  onRightChange={(v) => patch({ word_bg_padding_right: v })}
+                  onBottomChange={(v) => patch({ word_bg_padding_bottom: v })}
+                  onLeftChange={(v) => patch({ word_bg_padding_left: v })}
                 />
                 <SliderRow
                   label="Corner radius"

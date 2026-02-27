@@ -5,6 +5,7 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import EngineSkeletonLoader from "@/components/EngineSkeletonLoader";
 import PageHeader from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,10 @@ import {
   TooltipTrigger
 } from "@/components/ui/tooltip";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { getPersistedRunningJob } from "@/lib/runningJobPersistence";
+import {
+  clearPersistedRunningJob,
+  getPersistedRunningJob
+} from "@/lib/runningJobPersistence";
 import { normalizeLocalPath } from "@/lib/normalizeLocalPath";
 import { cn } from "@/lib/utils";
 import {
@@ -46,7 +50,11 @@ import {
   relinkProject
 } from "@/projectsClient";
 import { useWorkbenchTabs } from "@/workbenchTabs";
-import { waitForBackendHealthy } from "@/backendHealth";
+import {
+  BACKEND_UNREACHABLE_MESSAGE,
+  isBackendUnreachableError,
+  waitForBackendHealthy
+} from "@/backendHealth";
 
 type FileWithPath = File & { path?: string };
 
@@ -81,6 +89,7 @@ const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v", "webm"]);
 const MAX_DURATION_DIFF_SECONDS = 3;
 const HAS_HAD_VIDEOS_KEY = "cue_has_had_videos";
 const PROJECT_HUB_VIEW_KEY = "cue_project_hub_view";
+const PROJECT_HUB_LAST_COUNT_KEY = "cue_project_hub_last_count";
 const ADD_VIDEO_BUTTON = "Add video";
 const REMOVE_FROM_CUE_LABEL = "Remove from Cue";
 
@@ -204,10 +213,14 @@ const resolveStatusLabel = (project: ProjectSummary) => {
   if (project.missing_video) {
     return "Missing file";
   }
-  if (project.active_task?.kind === "create_subtitles") {
+  const task = project.active_task;
+  if (task?.status === "queued") {
+    return "Queued";
+  }
+  if (task?.kind === "create_subtitles") {
     return "Creating subtitles";
   }
-  if (project.active_task?.kind === "create_video_with_subtitles") {
+  if (task?.kind === "create_video_with_subtitles") {
     return "Exporting";
   }
   return STATUS_LABELS[project.status] ?? "Not started";
@@ -216,6 +229,9 @@ const resolveStatusLabel = (project: ProjectSummary) => {
 const resolveStatusBadgeClassName = (project: ProjectSummary): string => {
   if (project.missing_video) {
     return "border-transparent bg-red-500/15 text-red-700 dark:bg-red-400/20 dark:text-red-300";
+  }
+  if (project.active_task?.status === "queued") {
+    return "border-transparent bg-slate-500/15 text-slate-600 dark:bg-slate-400/20 dark:text-slate-300";
   }
   const taskKind = project.active_task?.kind;
   if (taskKind === "create_subtitles" || taskKind === "create_video_with_subtitles") {
@@ -278,7 +294,7 @@ const ProjectHub = () => {
   const navigate = useNavigate();
   const { openSettings } = useSettings();
   const { pushToast } = useToast();
-  const { closeTab, openOrActivateTab } = useWorkbenchTabs();
+  const { closeTab, ensureTab, openOrActivateTab } = useWorkbenchTabs();
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [optimisticallyHiddenProjectIds, setOptimisticallyHiddenProjectIds] =
     React.useState<Set<string>>(new Set());
@@ -359,23 +375,28 @@ const ProjectHub = () => {
       await waitForBackendHealthy();
       setIsBackendStarting(false);
       const data = await fetchProjects();
-      setProjects(data);
-      if (data.length > 0) {
-        try {
-          localStorage.setItem(HAS_HAD_VIDEOS_KEY, "true");
-        } catch {
-          /* ignore */
+      data.forEach((p) => {
+        if (p.status === "ready" && getPersistedRunningJob(p.project_id)?.kind === "create_subtitles") {
+          clearPersistedRunningJob(p.project_id);
         }
+      });
+      setProjects(data);
+      try {
+        localStorage.setItem(PROJECT_HUB_LAST_COUNT_KEY, String(data.length));
+        if (data.length > 0) {
+          localStorage.setItem(HAS_HAD_VIDEOS_KEY, "true");
+        }
+      } catch {
+        /* ignore */
       }
     } catch (err) {
       setBanner({
         type: "error",
-        message:
-          err instanceof Error && err.message === "backend_start_timeout"
-            ? "Cue is still starting in the background. Please wait a moment and try again."
-            : err instanceof Error
-              ? err.message
-              : "Failed to load videos."
+        message: isBackendUnreachableError(err)
+          ? BACKEND_UNREACHABLE_MESSAGE
+          : err instanceof Error
+            ? err.message
+            : "Failed to load videos."
       });
     } finally {
       setIsBackendStarting(false);
@@ -458,13 +479,19 @@ const ProjectHub = () => {
       try {
         const data = await fetchProjects();
         if (!cancelled) {
-          setProjects(data);
-          if (data.length > 0) {
-            try {
-              localStorage.setItem(HAS_HAD_VIDEOS_KEY, "true");
-            } catch {
-              /* ignore */
+          data.forEach((p) => {
+            if (p.status === "ready" && getPersistedRunningJob(p.project_id)?.kind === "create_subtitles") {
+              clearPersistedRunningJob(p.project_id);
             }
+          });
+          setProjects(data);
+          try {
+            localStorage.setItem(PROJECT_HUB_LAST_COUNT_KEY, String(data.length));
+            if (data.length > 0) {
+              localStorage.setItem(HAS_HAD_VIDEOS_KEY, "true");
+            }
+          } catch {
+            /* ignore */
           }
         }
       } catch {
@@ -766,21 +793,37 @@ const ProjectHub = () => {
     await handleRelinkSelection(project, resolvedPath, file.name, duration);
   };
 
-  const handleCardClick = (project: ProjectSummary) => {
-    if (isBusyOperation) {
-      return;
-    }
+  const openProjectTab = (project: ProjectSummary, inNewTab: boolean) => {
     if (project.missing_video || project.status === "missing_file") {
-      setRelinkPromptProject(project);
+      if (!inNewTab) setRelinkPromptProject(project);
       return;
     }
-    openOrActivateTab({
+    const tab = {
       projectId: project.project_id,
       title: resolveProjectTitle(project),
       path: project.video_path ?? undefined,
       thumbnail_path: project.thumbnail_path ?? undefined
-    });
-    navigate(`/workbench/${encodeURIComponent(project.project_id)}`);
+    };
+    if (inNewTab) {
+      ensureTab(tab);
+    } else {
+      openOrActivateTab(tab);
+      navigate(`/workbench/${encodeURIComponent(project.project_id)}`);
+    }
+  };
+
+  const handleCardClick = (event: React.MouseEvent, project: ProjectSummary) => {
+    if (isBusyOperation) return;
+    const inNewTab = event.button === 1 || event.ctrlKey || event.metaKey;
+    event.preventDefault();
+    openProjectTab(project, inNewTab);
+  };
+
+  const handleCardAuxClick = (event: React.MouseEvent, project: ProjectSummary) => {
+    if (event.button === 1) {
+      event.preventDefault();
+      if (!isBusyOperation) openProjectTab(project, true);
+    }
   };
 
   const confirmRelinkWarning = async () => {
@@ -822,7 +865,20 @@ const ProjectHub = () => {
       projects.filter((project) => !optimisticallyHiddenProjectIds.has(project.project_id)),
     [optimisticallyHiddenProjectIds, projects]
   );
+  const skeletonProjectCount = React.useMemo(() => {
+    if (visibleProjects.length > 0) return visibleProjects.length;
+    try {
+      const s = localStorage.getItem(PROJECT_HUB_LAST_COUNT_KEY);
+      if (s == null) return undefined;
+      const n = parseInt(s, 10);
+      return Number.isInteger(n) && n >= 0 ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [visibleProjects.length]);
   const showEmptyState = !isLoading && visibleProjects.length === 0;
+  const isBackendUnreachable =
+    banner?.type === "error" && banner?.message === BACKEND_UNREACHABLE_MESSAGE;
   const enableRootDrop = !isTauriEnv && !isBusyOperation;
 
   const dismissTaskNotice = (noticeId: string) => {
@@ -914,7 +970,7 @@ const ProjectHub = () => {
         data-testid="relink-input"
       />
 
-      {banner && (
+      {banner && !isBackendUnreachable && (
         <div
           data-testid="project-hub-banner"
           className={cn(
@@ -938,13 +994,26 @@ const ProjectHub = () => {
         </div>
       )}
 
-      {isLoading && (
-        <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
-          {isBackendStarting ? "Starting the engine..." : "Loading videos..."}
+      {isLoading && !isBackendUnreachable && (
+                <EngineSkeletonLoader
+                  variant="hub"
+                  hubView={viewMode}
+                  projectCount={skeletonProjectCount}
+                />
+              )}
+
+      {isBackendUnreachable && (
+        <div
+          className="flex min-h-[calc(100vh-8rem)] flex-1 flex-col items-center justify-center px-6 py-12"
+          data-testid="project-hub-backend-unreachable"
+        >
+          <p className="w-full max-w-md text-center text-sm text-destructive">
+            {BACKEND_UNREACHABLE_MESSAGE}
+          </p>
         </div>
       )}
 
-      {showEmptyState && (() => {
+      {showEmptyState && !isBackendUnreachable && (() => {
         const showWelcome =
           typeof window !== "undefined" &&
           localStorage.getItem(HAS_HAD_VIDEOS_KEY) !== "true";
@@ -1014,9 +1083,11 @@ const ProjectHub = () => {
             const cardDisabled = isBusyOperation;
             const persistedJob = getPersistedRunningJob(project.project_id);
             const hasPersistedCreate = persistedJob?.kind === "create_subtitles";
+            const usePersistedCreateFallback =
+              hasPersistedCreate && project.status === "needs_subtitles";
             const effectiveActiveTask =
               project.active_task ??
-              (hasPersistedCreate
+              (usePersistedCreateFallback
                 ? {
                     kind: "create_subtitles",
                     status: "running",
@@ -1055,14 +1126,15 @@ const ProjectHub = () => {
                 key={project.project_id}
                 role="button"
                 tabIndex={cardDisabled ? -1 : 0}
-                onClick={() => handleCardClick(project)}
+                onClick={(e) => handleCardClick(e, project)}
+                onAuxClick={(e) => handleCardAuxClick(e, project)}
                 onKeyDown={(event) => {
                   if (cardDisabled) {
                     return;
                   }
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    handleCardClick(project);
+                    openProjectTab(project, false);
                   }
                 }}
                 aria-disabled={cardDisabled}
@@ -1133,7 +1205,7 @@ const ProjectHub = () => {
                       className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-2"
                       data-testid={`project-card-active-task-${project.project_id}`}
                     >
-                      {!hideProgressLabelCard && (
+                      {effectiveActiveTask.status !== "queued" && !hideProgressLabelCard && (
                         <p className="text-xs font-medium text-foreground">{activeTaskHeading}</p>
                       )}
                       {effectiveActiveTask.status !== "queued" && (
@@ -1183,14 +1255,14 @@ const ProjectHub = () => {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border bg-muted/50 dark:bg-muted/30">
-          <Table>
+          <Table className="table-fixed w-full">
             <TableHeader>
               <TableRow>
-                <TableHead scope="col">Video</TableHead>
-                <TableHead scope="col" className="min-w-[5rem] pr-24 text-right">Duration</TableHead>
-                <TableHead scope="col">Status</TableHead>
-                <TableHead scope="col">Progress</TableHead>
-                <TableHead scope="col" className="w-[60px]">
+                <TableHead scope="col" className="min-w-0 px-2" style={{ width: "calc((100% - 60px) / 4)" }}>Video</TableHead>
+                <TableHead scope="col" className="min-w-0 pl-2 pr-6" style={{ width: "calc((100% - 60px) / 4)" }}>Duration</TableHead>
+                <TableHead scope="col" className="min-w-0 pl-6 pr-2" style={{ width: "calc((100% - 60px) / 4)" }}>Status</TableHead>
+                <TableHead scope="col" className="min-w-0 px-2" style={{ width: "calc((100% - 60px) / 4)" }}>Progress</TableHead>
+                <TableHead scope="col" className="w-[60px] shrink-0 px-2">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -1205,9 +1277,11 @@ const ProjectHub = () => {
                 const cardDisabled = isBusyOperation;
                 const persistedJobList = getPersistedRunningJob(project.project_id);
                 const hasPersistedCreateList = persistedJobList?.kind === "create_subtitles";
+                const usePersistedCreateFallbackList =
+                  hasPersistedCreateList && project.status === "needs_subtitles";
                 const effectiveActiveTaskList =
                   project.active_task ??
-                  (hasPersistedCreateList
+                  (usePersistedCreateFallbackList
                     ? {
                         kind: "create_subtitles",
                         status: "running",
@@ -1242,12 +1316,13 @@ const ProjectHub = () => {
                     key={project.project_id}
                     role="button"
                     tabIndex={cardDisabled ? -1 : 0}
-                    onClick={() => handleCardClick(project)}
+                    onClick={(e) => handleCardClick(e, project)}
+                    onAuxClick={(e) => handleCardAuxClick(e, project)}
                     onKeyDown={(event) => {
                       if (cardDisabled) return;
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        handleCardClick(project);
+                        openProjectTab(project, false);
                       }
                     }}
                     aria-disabled={cardDisabled}
@@ -1258,10 +1333,10 @@ const ProjectHub = () => {
                       isBusy ? "ring-1 ring-primary/40" : ""
                     )}
                   >
-                    <TableCell className="whitespace-nowrap">
-                      <div className="flex items-center gap-3">
+                    <TableCell className="min-w-0 overflow-hidden px-2">
+                      <div className="flex min-w-0 items-center gap-2">
                         <div
-                          className="relative h-9 w-16 shrink-0 overflow-hidden rounded border border-border bg-muted"
+                          className="relative h-9 w-14 shrink-0 overflow-hidden rounded border border-border bg-muted"
                           style={{ aspectRatio: "16 / 9" }}
                         >
                           {thumbnailSrc ? (
@@ -1276,23 +1351,30 @@ const ProjectHub = () => {
                             </div>
                           )}
                         </div>
-                        <p className="min-w-0 truncate text-sm font-medium text-foreground">
-                          {project.title || "Untitled video"}
+                        <p
+                          className="min-w-0 truncate text-sm font-medium text-foreground"
+                          title={resolveProjectTitle(project)}
+                        >
+                          {resolveProjectTitle(project)}
                         </p>
                       </div>
                     </TableCell>
-                    <TableCell className="min-w-[5rem] pr-24 text-right tabular-nums text-muted-foreground">
+                    <TableCell className="min-w-0 pl-2 pr-6 tabular-nums text-muted-foreground">
                       {durationLabel || "—"}
                     </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={resolveStatusBadgeClassName(project)}>
-                      {statusLabel}
-                    </Badge>
+                    <TableCell className="min-w-0 overflow-hidden pl-6 pr-2">
+                      <Badge
+                        variant="outline"
+                        className={cn("max-w-full truncate", resolveStatusBadgeClassName(project))}
+                        title={statusLabel}
+                      >
+                        <span className="truncate">{statusLabel}</span>
+                      </Badge>
                     </TableCell>
-                    <TableCell className="min-w-[140px]">
+                    <TableCell className="min-w-0 overflow-hidden px-2">
                       {effectiveActiveTaskList ? (
                         <div className="space-y-1">
-                          {!hideProgressLabelList && (
+                          {effectiveActiveTaskList.status !== "queued" && !hideProgressLabelList && (
                             <p className="truncate text-xs font-medium text-foreground">
                               {activeTaskHeading}
                             </p>
@@ -1325,11 +1407,9 @@ const ProjectHub = () => {
                             <X className="h-3.5 w-3.5" />
                           </Button>
                         </div>
-                      ) : (
-                        "—"
-                      )}
+                      ) : null}
                     </TableCell>
-                    <TableCell className="w-[60px]">
+                    <TableCell className="w-[60px] shrink-0 px-2">
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button

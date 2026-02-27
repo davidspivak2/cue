@@ -18,6 +18,7 @@ _cargo_target_check*/
 build_temp/
 _tmp_backend_server.pyc.*
 logs/
+debug-*.log
 
 # Desktop UI (Node)
 desktop/node_modules/

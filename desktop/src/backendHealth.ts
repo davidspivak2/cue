@@ -43,3 +43,24 @@ export const waitForBackendHealthy = async (
 
   throw new Error("backend_start_timeout");
 };
+
+export const BACKEND_UNREACHABLE_MESSAGE =
+  "Cue couldn't start. Try closing and reopening the app.";
+
+export function isBackendUnreachableError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    if (msg === "backend_start_timeout") return true;
+    if (msg === "failed to fetch") return true;
+    if (msg.includes("network") || msg.includes("connection")) return true;
+  }
+  if (typeof err === "object" && err !== null && "message" in err) {
+    const msg = String((err as { message: unknown }).message).toLowerCase();
+    if (msg === "failed to fetch") return true;
+  }
+  return false;
+}
+
+export function messageForBackendError(err: unknown, fallback: string): string {
+  return isBackendUnreachableError(err) ? BACKEND_UNREACHABLE_MESSAGE : fallback;
+}

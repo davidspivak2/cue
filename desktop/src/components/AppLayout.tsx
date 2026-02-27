@@ -1,5 +1,6 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
+import { Suspense } from "react";
 import { X } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { isTauri } from "@tauri-apps/api/core";
@@ -19,7 +20,9 @@ import { RunningJobsProvider } from "@/contexts/RunningJobsContext";
 import { SettingsProvider } from "@/contexts/SettingsContext";
 import { ToastProvider } from "@/contexts/ToastContext";
 import { ExitConfirmHandler } from "@/components/ExitConfirmHandler";
-import Settings from "@/pages/Settings";
+import EngineSkeletonLoader from "@/components/EngineSkeletonLoader";
+
+const Settings = React.lazy(() => import("@/pages/Settings"));
 import { fetchProjects } from "@/projectsClient";
 import { WorkbenchTabsProvider } from "@/workbenchTabs";
 
@@ -124,7 +127,8 @@ const AppLayout = () => {
       return;
     }
     hasLaunchedRef.current = true;
-    if (location.pathname !== "/") {
+    const onWorkbench = /^\/workbench\/[^/]+$/.test(location.pathname);
+    if (location.pathname !== "/" && !onWorkbench) {
       navigate("/", { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -287,7 +291,9 @@ const AppLayout = () => {
                 type="always"
                 className="min-h-0 flex-1 px-6 pr-4"
               >
-                <Settings />
+                <Suspense fallback={<EngineSkeletonLoader variant="settings" />}>
+                  <Settings />
+                </Suspense>
               </ScrollArea>
             </div>
           </SheetContent>

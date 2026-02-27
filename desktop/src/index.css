@@ -107,6 +107,12 @@
     @apply border-border;
   }
 
+  html,
+  body {
+    margin: 0;
+    overflow: hidden;
+  }
+
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
@@ -197,4 +203,9 @@ button[data-cue-title-bar-window-control],
     animation-duration: 0.01ms;
     animation-delay: 0s;
   }
+}
+
+/* After Tailwind layers so it overrides preflight textarea { font: inherit }. */
+textarea[data-workbench-subtitle-editor] {
+  font-family: var(--subtitle-editor-font) !important;
 }

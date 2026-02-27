@@ -28,14 +28,27 @@ import { cn } from "@/lib/utils";
 import { HOME_TAB_ID, useWorkbenchTabs } from "@/workbenchTabs";
 import type { ActiveView, WorkbenchTab } from "@/workbenchTabs";
 
-/** Breakpoints for title bar tab layout (window width). */
-const TITLE_BAR_WIDE = 720;
-const TITLE_BAR_MEDIUM = 520;
+/** Width reserved for logo + Cue label (px). */
+const TITLE_BAR_LOGO_WIDTH = 90;
+/** Width for Home tab (w-10). */
+const TITLE_BAR_HOME_WIDTH = 40;
+/** Width for window controls (4 × w-10). */
+const TITLE_BAR_CONTROLS_WIDTH = 160;
+/** Min width per tab in "wide" mode (max-w-[180px] + padding/close). */
+const TITLE_BAR_WIDE_TAB_PX = 180;
+/** Window width below which we use "narrow" when we can't fit wide tabs. */
+const TITLE_BAR_NARROW_BREAKPOINT = 520;
 type TabLayoutMode = "wide" | "medium" | "narrow";
 
-function getTabLayoutMode(width: number): TabLayoutMode {
-  if (width >= TITLE_BAR_WIDE) return "wide";
-  if (width >= TITLE_BAR_MEDIUM) return "medium";
+function getTabLayoutMode(
+  windowWidth: number,
+  tabCount: number
+): TabLayoutMode {
+  const availableForTabs =
+    windowWidth - TITLE_BAR_LOGO_WIDTH - TITLE_BAR_HOME_WIDTH - TITLE_BAR_CONTROLS_WIDTH;
+  const requiredForWide = tabCount * TITLE_BAR_WIDE_TAB_PX;
+  if (availableForTabs >= requiredForWide) return "wide";
+  if (windowWidth >= TITLE_BAR_NARROW_BREAKPOINT) return "medium";
   return "narrow";
 }
 
@@ -109,11 +122,20 @@ function SortableTitleTab({
 
   React.useEffect(() => () => clearHoverTimeout(), []);
 
+  const handleAuxClick = (e: React.MouseEvent) => {
+    if (e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      onCloseTab(tab.projectId, e);
+    }
+  };
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       data-testid={`title-bar-tab-${tab.projectId}`}
+      onAuxClick={handleAuxClick}
       className={cn(
         "flex h-full shrink-0 items-center gap-1 border-b-2 border-r border-foreground/15 pl-3 pr-2 transition-colors duration-200",
         maxWidthClass,
@@ -161,7 +183,7 @@ function SortableTitleTab({
                   <Video className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                 )
               ) : (
-                title
+                <span className="block min-w-0 truncate">{title}</span>
               )}
             </button>
           </TooltipTrigger>
@@ -187,9 +209,11 @@ function SortableTitleTab({
 function HomeTab({
   activeView,
   onHomeClick,
+  hasOtherTabs,
 }: {
   activeView: ActiveView;
   onHomeClick: () => void;
+  hasOtherTabs: boolean;
 }) {
   return (
     <button
@@ -206,7 +230,9 @@ function HomeTab({
       data-testid="title-bar-home"
       aria-current={activeView === HOME_TAB_ID ? "true" : undefined}
       className={cn(
-        "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 border-r border-foreground/15 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        "flex h-full w-10 shrink-0 items-center justify-center self-stretch border-b-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        hasOtherTabs && "border-r border-foreground/15",
+        hasOtherTabs && activeView === HOME_TAB_ID && "border-l border-foreground/15",
         activeView === HOME_TAB_ID
           ? "!cursor-default border-b-foreground/30 bg-foreground/8 text-foreground"
           : "border-b-transparent text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -225,9 +251,9 @@ function HomeTab({
 const TitleBar = () => {
   const navigate = useNavigate();
   const width = useWindowWidth();
-  const tabLayoutMode = getTabLayoutMode(width);
   const { openSettings, closeSettings, settingsOpen } = useSettings();
   const { tabs, activeView, setActiveView, closeTab, reorderTabs } = useWorkbenchTabs();
+  const tabLayoutMode = getTabLayoutMode(width, tabs.length);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -344,6 +370,7 @@ const TitleBar = () => {
         <HomeTab
           activeView={activeView}
           onHomeClick={handleHomeClick}
+          hasOtherTabs={tabs.length > 0}
         />
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext
