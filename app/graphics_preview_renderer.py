@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Iterable, Optional, TypeVar
 
 from PySide6 import QtCore, QtGui
@@ -21,6 +22,7 @@ from .subtitle_style import (
     DEFAULT_WORD_BG_COLOR,
     MIN_TEXT_OPACITY,
     SubtitleStyle,
+    resolve_outline_color,
 )
 
 _WORD_RE = re.compile(r"\S+")
@@ -37,6 +39,62 @@ FONT_FALLBACK_CHAIN = (
     "Noto Sans",
     "Sans Serif",
 )
+
+_application_fonts_loaded = False
+
+
+def _ensure_application_fonts_loaded() -> None:
+    global _application_fonts_loaded
+    if _application_fonts_loaded:
+        return
+    _application_fonts_loaded = True
+    try:
+        from .paths import get_app_data_dir
+        app_data_fonts = get_app_data_dir() / "fonts"
+    except Exception:
+        app_data_fonts = None
+    module_fonts = Path(__file__).resolve().parent / "fonts"
+    candidates = [
+        module_fonts,
+        Path.cwd() / "app" / "fonts",
+    ]
+    if app_data_fonts is not None:
+        candidates.append(app_data_fonts)
+    db = QtGui.QFontDatabase()
+    loaded_families: list[str] = []
+    used_dir: Path | None = None
+    for fonts_dir in candidates:
+        if not fonts_dir.is_dir():
+            continue
+        for path in sorted(fonts_dir.iterdir()):
+            if path.suffix.lower() in (".ttf", ".otf"):
+                fid = db.addApplicationFont(str(path))
+                if fid == -1:
+                    logger.warning("Failed to load application font: %s", path)
+                else:
+                    families = db.applicationFontFamilies(fid)
+                    if families:
+                        loaded_families.extend(families)
+                    logger.debug("Loaded application font: %s -> %s", path.name, families)
+        if loaded_families:
+            used_dir = fonts_dir
+            logger.info("Application font families registered from %s: %s", fonts_dir, loaded_families)
+            break
+    if not loaded_families:
+        logger.warning("No application font families loaded; tried: %s", candidates)
+        return
+    if app_data_fonts is not None and used_dir is not None and used_dir != app_data_fonts:
+        try:
+            app_data_fonts.mkdir(parents=True, exist_ok=True)
+            for path in used_dir.iterdir():
+                if path.suffix.lower() in (".ttf", ".otf"):
+                    dest = app_data_fonts / path.name
+                    if not dest.exists() or dest.stat().st_size != path.stat().st_size:
+                        import shutil
+                        shutil.copy2(path, dest)
+                        logger.debug("Copied font to app data: %s", path.name)
+        except Exception as e:
+            logger.debug("Could not copy fonts to app data: %s", e)
 
 
 @dataclass(frozen=True)
@@ -178,14 +236,23 @@ def build_preview_cache_key(
         "shadow_offset_y": style.shadow_offset_y,
         "shadow_color": style.shadow_color,
         "shadow_opacity": style.shadow_opacity,
+        "shadow_blur": style.shadow_blur,
         "background_mode": style.background_mode,
         "line_bg_color": style.line_bg_color,
         "line_bg_opacity": style.line_bg_opacity,
         "line_bg_padding": style.line_bg_padding,
+        "line_bg_padding_top": style.line_bg_padding_top,
+        "line_bg_padding_right": style.line_bg_padding_right,
+        "line_bg_padding_bottom": style.line_bg_padding_bottom,
+        "line_bg_padding_left": style.line_bg_padding_left,
         "line_bg_radius": style.line_bg_radius,
         "word_bg_color": style.word_bg_color,
         "word_bg_opacity": style.word_bg_opacity,
         "word_bg_padding": style.word_bg_padding,
+        "word_bg_padding_top": style.word_bg_padding_top,
+        "word_bg_padding_right": style.word_bg_padding_right,
+        "word_bg_padding_bottom": style.word_bg_padding_bottom,
+        "word_bg_padding_left": style.word_bg_padding_left,
         "word_bg_radius": style.word_bg_radius,
         "vertical_anchor": style.vertical_anchor,
         "vertical_offset": style.vertical_offset,
@@ -225,9 +292,9 @@ def render_graphics_preview(
 
     resolved_font_family, font_fallback_used = _resolve_qt_font_family(requested_font_family)
     font = QtGui.QFont(resolved_font_family, int(round(style.font_size)))
-    if style.font_style == "bold":
+    if style.font_style in ("bold", "bold_italic"):
         font.setBold(True)
-    elif style.font_style == "italic":
+    if style.font_style in ("italic", "bold_italic"):
         font.setItalic(True)
     if style.letter_spacing:
         font.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, style.letter_spacing)
@@ -337,7 +404,10 @@ def render_graphics_preview(
                 bg_rect,
                 style.line_bg_color,
                 1.0,
-                style.line_bg_padding,
+                style.line_bg_padding_top,
+                style.line_bg_padding_right,
+                style.line_bg_padding_bottom,
+                style.line_bg_padding_left,
                 style.line_bg_radius,
             )
             painter.restore()
@@ -353,7 +423,10 @@ def render_graphics_preview(
                 highlight_selection,
                 style.word_bg_color,
                 style.word_bg_opacity,
-                style.word_bg_padding,
+                style.word_bg_padding_top,
+                style.word_bg_padding_right,
+                style.word_bg_padding_bottom,
+                style.word_bg_padding_left,
                 style.word_bg_radius,
             )
         _draw_shadow(painter, line_paths, style)
@@ -400,6 +473,7 @@ def render_graphics_preview(
 
 
 def _resolve_qt_font_family(requested_font_family: str) -> tuple[str, bool]:
+    _ensure_application_fonts_loaded()
     requested = requested_font_family.strip() or DEFAULT_FONT_NAME
     db = QtGui.QFontDatabase()
     available_lookup = {family.casefold(): family for family in db.families()}
@@ -541,6 +615,15 @@ def _build_path_cache_key(
         style.shadow_offset_y,
         style.shadow_color,
         style.shadow_opacity,
+        style.shadow_blur,
+        style.line_bg_padding_top,
+        style.line_bg_padding_right,
+        style.line_bg_padding_bottom,
+        style.line_bg_padding_left,
+        style.word_bg_padding_top,
+        style.word_bg_padding_right,
+        style.word_bg_padding_bottom,
+        style.word_bg_padding_left,
     )
 
 
@@ -558,12 +641,15 @@ def _draw_line_background(
     text_rect: QtCore.QRectF,
     color: str,
     opacity: float,
-    padding: float,
+    padding_top: float,
+    padding_right: float,
+    padding_bottom: float,
+    padding_left: float,
     radius: float,
 ) -> None:
     bg_color = _resolve_color(color, DEFAULT_LINE_BG_COLOR, opacity)
     rect = QtCore.QRectF(text_rect)
-    rect.adjust(-padding, -padding, padding, padding)
+    rect.adjust(-padding_left, -padding_top, padding_right, padding_bottom)
     painter.save()
     painter.setPen(QtCore.Qt.NoPen)
     painter.setBrush(bg_color)
@@ -578,7 +664,10 @@ def _draw_word_background(
     selection: _HighlightSelection,
     color: str,
     opacity: float,
-    padding: float,
+    padding_top: float,
+    padding_right: float,
+    padding_bottom: float,
+    padding_left: float,
     radius: float,
 ) -> None:
     if opacity <= 0:
@@ -592,9 +681,63 @@ def _draw_word_background(
     painter.setBrush(bg_color)
     for rect in rects:
         padded = QtCore.QRectF(rect)
-        padded.adjust(-padding, -padding, padding, padding)
+        padded.adjust(-padding_left, -padding_top, padding_right, padding_bottom)
         painter.drawRoundedRect(padded, radius, radius)
     painter.restore()
+
+
+def _blur_image(image: QtGui.QImage, radius: float) -> QtGui.QImage:
+    if radius <= 0 or image.isNull():
+        return image
+    w = image.width()
+    h = image.height()
+    if w <= 0 or h <= 0:
+        return image
+    blur_r = max(1, min(25, int(round(radius))))
+    img = image.convertToFormat(QtGui.QImage.Format.Format_ARGB32)
+    if img.isNull():
+        return image
+    tmp = QtGui.QImage(w, h, QtGui.QImage.Format.Format_ARGB32)
+    tmp.fill(QtCore.Qt.transparent)
+    for y in range(h):
+        for x in range(w):
+            a_sum = r_sum = g_sum = b_sum = 0
+            count = 0
+            for dx in range(-blur_r, blur_r + 1):
+                nx = x + dx
+                if 0 <= nx < w:
+                    c = img.pixel(nx, y)
+                    a_sum += QtGui.qAlpha(c)
+                    r_sum += QtGui.qRed(c)
+                    g_sum += QtGui.qGreen(c)
+                    b_sum += QtGui.qBlue(c)
+                    count += 1
+            if count:
+                tmp.setPixel(
+                    x, y,
+                    QtGui.qRgba(r_sum // count, g_sum // count, b_sum // count, a_sum // count),
+                )
+    out = QtGui.QImage(w, h, QtGui.QImage.Format.Format_ARGB32)
+    out.fill(QtCore.Qt.transparent)
+    for y in range(h):
+        for x in range(w):
+            a_sum = r_sum = g_sum = b_sum = 0
+            count = 0
+            for dy in range(-blur_r, blur_r + 1):
+                ny = y + dy
+                if 0 <= ny < h:
+                    c = tmp.pixel(x, ny)
+                    a_sum += QtGui.qAlpha(c)
+                    r_sum += QtGui.qRed(c)
+                    g_sum += QtGui.qGreen(c)
+                    b_sum += QtGui.qBlue(c)
+                    count += 1
+            if count:
+                out.setPixel(
+                    x, y,
+                    QtGui.qRgba(r_sum // count, g_sum // count, b_sum // count, a_sum // count),
+                )
+    return out
 
 
 def _draw_shadow(
@@ -604,18 +747,62 @@ def _draw_shadow(
 ) -> None:
     if not style.shadow_enabled or style.shadow_opacity <= 0:
         return
+    path_list = list(paths)
+    if not path_list:
+        return
     offset_x = style.shadow_offset_x
     offset_y = style.shadow_offset_y
     if abs(offset_x) < 0.1 and abs(offset_y) < 0.1:
         offset_x = style.shadow_strength
         offset_y = style.shadow_strength
     shadow_color = _resolve_color(style.shadow_color, DEFAULT_SHADOW_COLOR, style.shadow_opacity)
+    blur_radius = max(0.0, float(style.shadow_blur))
+
+    if blur_radius <= 0:
+        painter.save()
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(shadow_color)
+        painter.translate(offset_x, offset_y)
+        for path in path_list:
+            painter.drawPath(path)
+        painter.restore()
+        return
+
+    path_rect = path_list[0].boundingRect()
+    for p in path_list[1:]:
+        path_rect = path_rect.united(p.boundingRect())
+    R = max(1, int(round(blur_radius)))
+    margin = R + 2
+    tw = int(path_rect.width()) + 2 * margin
+    th = int(path_rect.height()) + 2 * margin
+    if tw <= 0 or th <= 0:
+        return
+    temp = QtGui.QImage(tw, th, QtGui.QImage.Format_ARGB32_Premultiplied)
+    temp.fill(QtCore.Qt.transparent)
+    temp_painter = QtGui.QPainter(temp)
+    temp_painter.setPen(QtCore.Qt.NoPen)
+    temp_painter.setBrush(shadow_color)
+    dx = margin - path_rect.x()
+    dy = margin - path_rect.y()
+    temp_painter.translate(dx, dy)
+    for path in path_list:
+        temp_painter.drawPath(path)
+    temp_painter.end()
+    blurred = _blur_image(temp, blur_radius)
+    if blurred.isNull():
+        painter.save()
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(shadow_color)
+        painter.translate(offset_x, offset_y)
+        for path in path_list:
+            painter.drawPath(path)
+        painter.restore()
+        return
+    draw_x = path_rect.x() + offset_x - margin
+    draw_y = path_rect.y() + offset_y - margin
     painter.save()
-    painter.setPen(QtCore.Qt.NoPen)
-    painter.setBrush(shadow_color)
-    painter.translate(offset_x, offset_y)
-    for path in paths:
-        painter.drawPath(path)
+    painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
+    painter.drawImage(int(draw_x), int(draw_y), blurred)
     painter.restore()
 
 
@@ -631,7 +818,8 @@ def _draw_outline(
 ) -> None:
     if not style.outline_enabled or style.outline_width <= 0:
         return
-    outline_color = _resolve_color(style.outline_color, DEFAULT_OUTLINE_COLOR)
+    outline_hex = resolve_outline_color(style)
+    outline_color = _resolve_color(outline_hex, DEFAULT_OUTLINE_COLOR)
     stroke_width = style.outline_width * 2
     path_list = list(paths)
     stroker = QtGui.QPainterPathStroker()

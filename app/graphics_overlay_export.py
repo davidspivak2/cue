@@ -7,7 +7,7 @@ from typing import Iterable, Optional, TYPE_CHECKING
 
 from .ffmpeg_utils import get_ffprobe_json
 from .srt_utils import SrtCue
-from .subtitle_style import SubtitleStyle
+from .subtitle_style import SubtitleStyle, resolve_outline_color
 from .word_timing_schema import CueWordTimings, WordTimingDocument
 
 if TYPE_CHECKING:
@@ -569,21 +569,30 @@ def _scale_style_for_resolution(style: SubtitleStyle, scale: float) -> SubtitleS
         letter_spacing=style.letter_spacing * s,
         outline_enabled=style.outline_enabled,
         outline_width=style.outline_width * s,
-        outline_color=style.outline_color,
+        outline_color=resolve_outline_color(style),
         shadow_enabled=style.shadow_enabled,
         shadow_strength=style.shadow_strength * s,
         shadow_offset_x=style.shadow_offset_x * s,
         shadow_offset_y=style.shadow_offset_y * s,
         shadow_color=style.shadow_color,
         shadow_opacity=style.shadow_opacity,
+        shadow_blur=style.shadow_blur * s,
         background_mode=style.background_mode,
         line_bg_color=style.line_bg_color,
         line_bg_opacity=style.line_bg_opacity,
         line_bg_padding=style.line_bg_padding * s,
+        line_bg_padding_top=style.line_bg_padding_top * s,
+        line_bg_padding_right=style.line_bg_padding_right * s,
+        line_bg_padding_bottom=style.line_bg_padding_bottom * s,
+        line_bg_padding_left=style.line_bg_padding_left * s,
         line_bg_radius=style.line_bg_radius * s,
         word_bg_color=style.word_bg_color,
         word_bg_opacity=style.word_bg_opacity,
         word_bg_padding=style.word_bg_padding * s,
+        word_bg_padding_top=style.word_bg_padding_top * s,
+        word_bg_padding_right=style.word_bg_padding_right * s,
+        word_bg_padding_bottom=style.word_bg_padding_bottom * s,
+        word_bg_padding_left=style.word_bg_padding_left * s,
         word_bg_radius=style.word_bg_radius * s,
         vertical_anchor=style.vertical_anchor,
         vertical_offset=style.vertical_offset * s,

@@ -1883,9 +1883,18 @@ def preview_style(payload: PreviewStyleRequest) -> dict[str, Any]:
 def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
     import hashlib as _hashlib
 
-    from .graphics_preview_renderer import render_graphics_preview
+    from .graphics_preview_renderer import (
+        _ensure_application_fonts_loaded,
+        render_graphics_preview,
+        _resolve_qt_font_family,
+    )
     from .paths import get_preview_frames_dir
-    from .subtitle_style import normalize_style_model, preset_defaults, style_model_to_dict
+    from .subtitle_style import (
+        DEFAULT_FONT_NAME,
+        normalize_style_model,
+        preset_defaults,
+        style_model_to_dict,
+    )
 
     width = int(payload.width)
     height = int(payload.height)
@@ -1903,6 +1912,11 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
     resolved_highlight_color = payload.highlight_color
     resolved_highlight_opacity = max(0.0, min(float(payload.highlight_opacity), 1.0))
 
+    _ensure_application_fonts_loaded()
+    resolved_font_family, _ = _resolve_qt_font_family(
+        style.font_family.strip() if style.font_family else DEFAULT_FONT_NAME
+    )
+
     signature = json.dumps(
         {
             "width": width,
@@ -1910,6 +1924,7 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
             "subtitle_text": payload.subtitle_text,
             "highlight_word_index": payload.highlight_word_index,
             "style": style_model_to_dict(style),
+            "resolved_font_family": resolved_font_family,
             "subtitle_mode": payload.subtitle_mode,
             "highlight_color": resolved_highlight_color,
             "highlight_opacity": resolved_highlight_opacity,

@@ -107,13 +107,21 @@ export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode 
   const [activeView, setActiveViewState] = React.useState<ActiveView>(HOME_TAB_ID);
   const hasRestoredRef = React.useRef(false);
 
-  // Restore persisted tabs on first mount and navigate to last active
+  // Restore persisted tabs on first mount and navigate to last active (or stay on URL when refreshing on workbench)
   React.useEffect(() => {
     if (hasRestoredRef.current) return;
     hasRestoredRef.current = true;
     const data = loadPersisted();
+    const workbenchMatch = location.pathname.match(/^\/workbench\/(.+)$/);
+    const urlProjectId = workbenchMatch ? decodeURIComponent(workbenchMatch[1]) : null;
+
     if (!data) {
-      navigate("/", { replace: true });
+      if (urlProjectId) {
+        setTabs([{ projectId: urlProjectId, title: "Loading..." }]);
+        setActiveViewState(urlProjectId);
+      } else {
+        navigate("/", { replace: true });
+      }
       return;
     }
     const initialTabs: WorkbenchTab[] = data.projectIds.map((id) => ({
@@ -123,16 +131,30 @@ export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode 
     }));
     setTabs(initialTabs);
     const last = data.lastActiveProjectId;
-    setActiveViewState(last);
     if (last === HOME_TAB_ID) {
-      navigate("/", { replace: true });
+      if (urlProjectId) {
+        if (!initialTabs.some((t) => t.projectId === urlProjectId)) {
+          setTabs([...initialTabs, { projectId: urlProjectId, title: "Loading..." }]);
+        }
+        setActiveViewState(urlProjectId);
+      } else {
+        setActiveViewState(HOME_TAB_ID);
+        navigate("/", { replace: true });
+      }
     } else if (data.projectIds.includes(last)) {
-      navigate(`/workbench/${encodeURIComponent(last)}`, { replace: true });
+      setActiveViewState(last);
+      if (location.pathname !== `/workbench/${encodeURIComponent(last)}`) {
+        navigate(`/workbench/${encodeURIComponent(last)}`, { replace: true });
+      }
     } else {
-      navigate("/", { replace: true });
-      setActiveViewState(HOME_TAB_ID);
+      if (urlProjectId && data.projectIds.includes(urlProjectId)) {
+        setActiveViewState(urlProjectId);
+      } else {
+        setActiveViewState(HOME_TAB_ID);
+        navigate("/", { replace: true });
+      }
     }
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
   // Sync activeView from route so it stays correct when navigating (e.g. back/forward or programmatic)
   React.useEffect(() => {
@@ -155,6 +177,33 @@ export const WorkbenchTabsProvider = ({ children }: { children: React.ReactNode 
   React.useEffect(() => {
     savePersisted(tabs, activeView);
   }, [tabs, activeView]);
+
+  // Ctrl+Tab / Ctrl+Shift+Tab cycle through Home + video tabs
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || (!e.ctrlKey && !e.metaKey)) return;
+      const el = e.target as HTMLElement;
+      if (el?.closest?.("input, textarea, [contenteditable=\"true\"]")) return;
+      e.preventDefault();
+      const order: ActiveView[] = [HOME_TAB_ID, ...tabs.map((t) => t.projectId)];
+      if (order.length === 0) return;
+      const currentIndex =
+        activeView === HOME_TAB_ID ? 0 : order.indexOf(activeView);
+      const rawIndex = currentIndex === -1 ? 0 : currentIndex;
+      const nextIndex = e.shiftKey
+        ? (rawIndex - 1 + order.length) % order.length
+        : (rawIndex + 1) % order.length;
+      const next = order[nextIndex]!;
+      setActiveViewState(next);
+      if (next === HOME_TAB_ID) {
+        navigate("/");
+      } else {
+        navigate(`/workbench/${encodeURIComponent(next)}`);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [tabs, activeView, navigate]);
 
   const setActiveView = React.useCallback((view: ActiveView) => {
     setActiveViewState(view);

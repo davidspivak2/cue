@@ -1,11 +1,15 @@
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { useTheme } from "next-themes";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
+import { Loader2 } from "lucide-react";
 import AppLayout from "./components/AppLayout";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
+import { WorkbenchSkeleton } from "./components/WorkbenchSkeleton";
 import ProjectHub from "./pages/ProjectHub";
-import Workbench from "./pages/Workbench";
+
+const Workbench = lazy(() => import("./pages/Workbench"));
 
 /** Syncs favicon with in-app theme; taskbar/window icon with system theme only. */
 function ThemeIconSync() {
@@ -53,16 +57,36 @@ function ThemeIconSync() {
   return null;
 }
 
+function RouteFallback() {
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+      <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
+      <p className="text-sm">Loading...</p>
+    </div>
+  );
+}
+
 const App = () => {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ThemeIconSync />
-      <Routes>
-        <Route path="/" element={<AppLayout />}>
-          <Route index element={<ProjectHub />} />
-          <Route path="workbench/:projectId" element={<Workbench />} />
-        </Route>
-      </Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<AppLayout />}>
+            <Route index element={<ProjectHub />} />
+            <Route
+              path="workbench/:projectId"
+              element={
+                <RouteErrorBoundary>
+                  <Suspense fallback={<WorkbenchSkeleton />}>
+                    <Workbench />
+                  </Suspense>
+                </RouteErrorBoundary>
+              }
+            />
+          </Route>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 };

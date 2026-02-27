@@ -2,6 +2,7 @@ import * as React from "react";
 import { useTheme } from "next-themes";
 import { Laptop, Moon, Sun } from "lucide-react";
 
+import EngineSkeletonLoader from "@/components/EngineSkeletonLoader";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,12 @@ import {
   SettingsConfig,
   updateSettings
 } from "@/settingsClient";
-import { waitForBackendHealthy } from "@/backendHealth";
+import {
+  BACKEND_UNREACHABLE_MESSAGE,
+  isBackendUnreachableError,
+  messageForBackendError,
+  waitForBackendHealthy
+} from "@/backendHealth";
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends Record<string, unknown> ? DeepPartial<T[K]> : T[K];
@@ -131,8 +137,8 @@ const Settings = () => {
       } catch (err) {
         if (active) {
           setError(
-            err instanceof Error && err.message === "backend_start_timeout"
-              ? "Cue is still starting in the background. Please wait a moment and try again."
+            isBackendUnreachableError(err)
+              ? BACKEND_UNREACHABLE_MESSAGE
               : err instanceof Error
                 ? err.message
                 : "Failed to load settings."
@@ -180,7 +186,7 @@ const Settings = () => {
         const next = await updateSettings(update as Record<string, unknown>);
         setSettings(next);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to save settings.");
+        setError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to save settings."));
         setSettings(settings);
       }
     },
@@ -265,11 +271,7 @@ const Settings = () => {
   }, []);
 
   if (isLoading) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        {isBackendStarting ? "Starting the engine..." : "Loading settings..."}
-      </p>
-    );
+    return <EngineSkeletonLoader variant="settings" />;
   }
 
   if (!settings) {

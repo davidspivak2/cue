@@ -4,10 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" id="favicon" href="/light.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Alef:wght@400;700&family=Arimo:ital,wght@0,400..700&family=Assistant:wght@200..800&family=Frank+Ruhl+Libre:wght@300..900&family=Heebo:wght@100..900&family=IBM+Plex+Sans+Hebrew:wght@100..700&family=Noto+Sans+Hebrew:wght@100..900&family=Rubik:wght@300..900&family=Secular+One&family=Suez+One&display=swap"
+    />
     <title>Cue</title>
-  </head>
-  <body>
-    <div id="root" style="background:#09090b;min-height:100vh;"></div>
     <script>
       (function() {
         var d = document.documentElement;
@@ -15,6 +18,15 @@
         d.classList.add(m && m.matches ? 'dark' : 'light');
       })();
     </script>
+    <style>
+      html, body { margin: 0; overflow: hidden; min-height: 100vh; background: #09090b; }
+      html.light body { background: #f5f9ff; }
+      #root { min-height: 100vh; background: #09090b; }
+      html.light #root { background: #f5f9ff; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-tauri-drag-region></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

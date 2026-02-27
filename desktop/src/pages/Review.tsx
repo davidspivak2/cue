@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import StyleControls from "@/components/SubtitleStyle/StyleControls";
+import { messageForBackendError } from "@/backendHealth";
 import {
   fetchSettings,
   previewStyle,
@@ -26,7 +27,7 @@ export type ReviewLocationState = {
 const SESSION_KEY = "cue_review_state";
 
 const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
-  font_family: "Arial",
+  font_family: "Heebo",
   font_size: 28,
   font_style: "regular",
   text_color: "#FFFFFF",
@@ -45,10 +46,18 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   line_bg_color: "#000000",
   line_bg_opacity: 0.7,
   line_bg_padding: 8,
+  line_bg_padding_top: 8,
+  line_bg_padding_right: 8,
+  line_bg_padding_bottom: 8,
+  line_bg_padding_left: 8,
   line_bg_radius: 0,
   word_bg_color: "#000000",
   word_bg_opacity: 0.4,
   word_bg_padding: 8,
+  word_bg_padding_top: 8,
+  word_bg_padding_right: 8,
+  word_bg_padding_bottom: 8,
+  word_bg_padding_left: 8,
   word_bg_radius: 0,
   vertical_anchor: "bottom",
   vertical_offset: 28,
@@ -129,10 +138,18 @@ const applyPresetAppearance = (
     line_bg_color: DEFAULT_APPEARANCE.line_bg_color,
     line_bg_opacity: defaults.box_opacity / 100,
     line_bg_padding: defaults.box_padding,
+    line_bg_padding_top: defaults.box_padding,
+    line_bg_padding_right: defaults.box_padding,
+    line_bg_padding_bottom: defaults.box_padding,
+    line_bg_padding_left: defaults.box_padding,
     line_bg_radius: 0,
     word_bg_color: DEFAULT_APPEARANCE.word_bg_color,
     word_bg_opacity: DEFAULT_APPEARANCE.word_bg_opacity,
     word_bg_padding: defaults.box_padding,
+    word_bg_padding_top: defaults.box_padding,
+    word_bg_padding_right: defaults.box_padding,
+    word_bg_padding_bottom: defaults.box_padding,
+    word_bg_padding_left: defaults.box_padding,
     word_bg_radius: 0,
     vertical_anchor: "bottom",
     vertical_offset: defaults.margin_v
@@ -245,7 +262,7 @@ const Review = () => {
       .catch((err) => {
         if (active) {
           setError(
-            err instanceof Error ? err.message : "Failed to load settings."
+            messageForBackendError(err, err instanceof Error ? err.message : "Failed to load settings.")
           );
         }
       })
@@ -433,7 +450,7 @@ const Review = () => {
       });
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to save settings."
+        messageForBackendError(err, err instanceof Error ? err.message : "Failed to save settings.")
       );
       setExporting(false);
     }

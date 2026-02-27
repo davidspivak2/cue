@@ -18,6 +18,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import Checklist, { ChecklistItem } from "@/components/Checklist";
 import { useToast } from "@/contexts/ToastContext";
 import StyleControls from "@/components/SubtitleStyle/StyleControls";
+import { WorkbenchSkeleton } from "@/components/WorkbenchSkeleton";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
@@ -57,6 +58,7 @@ import {
 } from "@/lib/runningJobPersistence";
 import { useWorkbenchTabs } from "@/workbenchTabs";
 import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
+import { messageForBackendError } from "@/backendHealth";
 import {
   fetchSettings,
   previewOverlay,
@@ -141,7 +143,7 @@ const extractErrorDetail = (message: string): string => {
 };
 
 const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
-  font_family: "Arial",
+  font_family: "Heebo",
   font_size: 28,
   font_style: "regular",
   text_color: "#FFFFFF",
@@ -156,14 +158,25 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   shadow_offset_y: 0,
   shadow_color: "#000000",
   shadow_opacity: 1.0,
+  shadow_blur: 6,
   background_mode: "none",
   line_bg_color: "#000000",
   line_bg_opacity: 0.7,
   line_bg_padding: 8,
+  line_bg_padding_top: 8,
+  line_bg_padding_right: 8,
+  line_bg_padding_bottom: 8,
+  line_bg_padding_left: 8,
+  line_bg_padding_linked: true,
   line_bg_radius: 0,
   word_bg_color: "#000000",
   word_bg_opacity: 0.4,
   word_bg_padding: 8,
+  word_bg_padding_top: 8,
+  word_bg_padding_right: 8,
+  word_bg_padding_bottom: 8,
+  word_bg_padding_left: 8,
+  word_bg_padding_linked: true,
   word_bg_radius: 0,
   vertical_anchor: "bottom",
   vertical_offset: 28,
@@ -200,6 +213,7 @@ const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
     shadow_offset_y: 2,
     shadow_color: "#000000",
     shadow_opacity: 0.3,
+    shadow_blur: 6,
     background_mode: "none",
     vertical_anchor: "bottom",
     vertical_offset: 40
@@ -222,6 +236,7 @@ const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
     shadow_offset_y: 0,
     shadow_color: "#000000",
     shadow_opacity: 0,
+    shadow_blur: 0,
     background_mode: "none",
     vertical_anchor: "bottom",
     vertical_offset: 40
@@ -244,10 +259,15 @@ const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
     shadow_offset_y: 0,
     shadow_color: "#000000",
     shadow_opacity: 0,
+    shadow_blur: 0,
     background_mode: "line",
     line_bg_color: "#000000",
     line_bg_opacity: 0.5,
     line_bg_padding: 10,
+    line_bg_padding_top: 10,
+    line_bg_padding_right: 10,
+    line_bg_padding_bottom: 10,
+    line_bg_padding_left: 10,
     line_bg_radius: 10,
     vertical_anchor: "bottom",
     vertical_offset: 40
@@ -270,6 +290,7 @@ const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
     shadow_offset_y: 2,
     shadow_color: "#000000",
     shadow_opacity: 0.3,
+    shadow_blur: 8,
     background_mode: "none",
     highlight_color: "#00E5FF",
     vertical_anchor: "bottom",
@@ -293,10 +314,15 @@ const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
     shadow_offset_y: 0,
     shadow_color: "#000000",
     shadow_opacity: 0.2,
+    shadow_blur: 6,
     background_mode: "word",
     word_bg_color: "#000000",
     word_bg_opacity: 0.48,
     word_bg_padding: 10,
+    word_bg_padding_top: 10,
+    word_bg_padding_right: 10,
+    word_bg_padding_bottom: 10,
+    word_bg_padding_left: 10,
     word_bg_radius: 10,
     highlight_color: "#FFD400",
     vertical_anchor: "bottom",
@@ -306,6 +332,32 @@ const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
 
 const isNamedPresetId = (value: string): value is NamedPresetId =>
   NAMED_PRESET_IDS.includes(value as NamedPresetId);
+
+function migrateAppearancePadding(
+  a: SubtitleStyleAppearance
+): SubtitleStyleAppearance {
+  const top = a.line_bg_padding_top ?? a.line_bg_padding ?? 8;
+  const right = a.line_bg_padding_right ?? a.line_bg_padding ?? 8;
+  const bottom = a.line_bg_padding_bottom ?? a.line_bg_padding ?? 8;
+  const left = a.line_bg_padding_left ?? a.line_bg_padding ?? 8;
+  const wTop = a.word_bg_padding_top ?? a.word_bg_padding ?? 8;
+  const wRight = a.word_bg_padding_right ?? a.word_bg_padding ?? 8;
+  const wBottom = a.word_bg_padding_bottom ?? a.word_bg_padding ?? 8;
+  const wLeft = a.word_bg_padding_left ?? a.word_bg_padding ?? 8;
+  return {
+    ...a,
+    line_bg_padding_top: top,
+    line_bg_padding_right: right,
+    line_bg_padding_bottom: bottom,
+    line_bg_padding_left: left,
+    word_bg_padding_top: wTop,
+    word_bg_padding_right: wRight,
+    word_bg_padding_bottom: wBottom,
+    word_bg_padding_left: wLeft,
+    line_bg_padding_linked: a.line_bg_padding_linked ?? true,
+    word_bg_padding_linked: a.word_bg_padding_linked ?? true
+  };
+}
 
 const applyPresetAppearance = (
   presetId: string
@@ -466,6 +518,22 @@ const colorWithOpacity = (hex: string, opacity: number) => {
   const blue = Number.parseInt(hex.slice(5, 7), 16);
   return `rgba(${red}, ${green}, ${blue}, ${clampOpacity(opacity)})`;
 };
+
+export const OUTLINE_AUTO_SENTINEL = "auto";
+
+function resolveOutlineColor(outlineColor: string, textColor: string): string {
+  if (outlineColor !== OUTLINE_AUTO_SENTINEL) {
+    return outlineColor;
+  }
+  if (!HEX_COLOR_PATTERN.test(textColor)) {
+    return "#000000";
+  }
+  const r = Number.parseInt(textColor.slice(1, 3), 16) / 255;
+  const g = Number.parseInt(textColor.slice(3, 5), 16) / 255;
+  const b = Number.parseInt(textColor.slice(5, 7), 16) / 255;
+  const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+  return luminance > 0.5 ? "#000000" : "#FFFFFF";
+}
 
 const buildOutlineShadows = (color: string, width: number) => {
   const radius = Math.max(0, Math.round(width));
@@ -709,6 +777,9 @@ const Workbench = () => {
   const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
   const [durationSeconds, setDurationSeconds] = React.useState(0);
   const [isPlaying, setIsPlaying] = React.useState(false);
+  const [playPauseFeedback, setPlayPauseFeedback] = React.useState<"play" | "pause" | null>(null);
+  const [playPauseFeedbackVisible, setPlayPauseFeedbackVisible] = React.useState(false);
+  const playPauseFeedbackTimeoutsRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
   const [volume, setVolume] = React.useState(1);
   const [isMuted, setIsMuted] = React.useState(false);
   const [videoNaturalSize, setVideoNaturalSize] = React.useState({ width: 0, height: 0 });
@@ -944,6 +1015,8 @@ const Workbench = () => {
       }
       preparingPreviewCompletionScheduledRef.current = false;
       preparingPreviewStartedAtRef.current = null;
+      playPauseFeedbackTimeoutsRef.current.forEach(clearTimeout);
+      playPauseFeedbackTimeoutsRef.current = [];
     };
   }, []);
 
@@ -968,7 +1041,7 @@ const Workbench = () => {
       })
       .catch((err) => {
         if (!active || fetchSeq !== projectFetchSeqRef.current) return;
-        setError(err instanceof Error ? err.message : "Failed to load video.");
+        setError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to load video."));
       })
       .finally(() => {
         if (!active || fetchSeq !== projectFetchSeqRef.current) return;
@@ -1020,7 +1093,7 @@ const Workbench = () => {
           setSubtitleLoadError(null);
           return;
         }
-        setSubtitleLoadError(message);
+        setSubtitleLoadError(messageForBackendError(err, message));
       });
 
     return () => {
@@ -1073,12 +1146,12 @@ const Workbench = () => {
   const applyStyleFromSettings = React.useCallback((data: SettingsConfig) => {
     const style = data.subtitle_style;
     const app = (style.appearance as SubtitleStyleAppearance | undefined) ?? DEFAULT_APPEARANCE;
-    const resolvedAppearance = {
+    const resolvedAppearance = migrateAppearancePadding({
       ...DEFAULT_APPEARANCE,
       ...app,
       subtitle_mode: data.subtitle_mode ?? app.subtitle_mode,
       highlight_color: style.highlight_color ?? app.highlight_color
-    };
+    });
     const storedPreset = style.preset ?? "Default";
     const resolvedPreset = resolvePresetFromStored(storedPreset);
     const storedLastPresetId =
@@ -1134,12 +1207,12 @@ const Workbench = () => {
           : typeof rawAppearance.highlight_color === "string"
             ? rawAppearance.highlight_color
             : undefined;
-    const resolvedAppearance = {
+    const resolvedAppearance = migrateAppearancePadding({
       ...DEFAULT_APPEARANCE,
       ...(rawAppearance as unknown as SubtitleStyleAppearance),
       subtitle_mode: styleMode ?? DEFAULT_APPEARANCE.subtitle_mode,
       highlight_color: highlightColor ?? DEFAULT_APPEARANCE.highlight_color
-    };
+    });
     const storedPreset =
       typeof styleSection.preset === "string" ? styleSection.preset : "Default";
     const resolvedPreset = resolvePresetFromStored(storedPreset);
@@ -1197,7 +1270,7 @@ const Workbench = () => {
       })
       .catch((err) => {
         if (!active) return;
-        setStyleError(err instanceof Error ? err.message : "Failed to load style settings.");
+        setStyleError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to load style settings."));
         setIsStyleLoading(false);
       })
       .finally(() => {
@@ -1255,7 +1328,7 @@ const Workbench = () => {
       })
       .catch((err) => {
         setStyleError(
-          err instanceof Error ? err.message : "Failed to save video style settings."
+          messageForBackendError(err, err instanceof Error ? err.message : "Failed to save video style settings.")
         );
       })
       .finally(() => {
@@ -2036,7 +2109,7 @@ const Workbench = () => {
       setCreateStreamHealthValue("idle");
       setCreateSubtitlesStartedAt(null);
       setCreateSubtitlesError(
-        err instanceof Error ? err.message : "Failed to start subtitle generation."
+        messageForBackendError(err, err instanceof Error ? err.message : "Failed to start subtitle generation.")
       );
     }
   }, [
@@ -2069,6 +2142,15 @@ const Workbench = () => {
     preparingPreviewStartedAtRef.current = null;
     createSubtitlesUnregisterRef.current?.();
     createSubtitlesUnregisterRef.current = null;
+    if (elevatorMusicTimerRef.current) {
+      clearTimeout(elevatorMusicTimerRef.current);
+      elevatorMusicTimerRef.current = null;
+    }
+    elevatorMusicRowScheduledRef.current = false;
+    setShowElevatorMusicRow(false);
+    setElevatorMusicPlaying(false);
+    elevatorAudioRef.current?.pause();
+    selectedElevatorTrackIndexRef.current = null;
     const projectTitle = resolveTitle(project);
     navigate("/", {
       state: {
@@ -2361,7 +2443,7 @@ const Workbench = () => {
         )
       });
     } catch (err) {
-      setExportError(err instanceof Error ? err.message : "Failed to save style before export.");
+      setExportError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to save style before export."));
       return;
     }
     setExportError(null);
@@ -2438,7 +2520,7 @@ const Workbench = () => {
       closeExportStream("export_start_failed");
       setExportStreamHealthValue("idle");
       setExportStartedAt(null);
-      setExportError(err instanceof Error ? err.message : "Failed to start video export.");
+      setExportError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to start video export."));
     }
   }, [
     buildProjectStylePayload,
@@ -2838,7 +2920,10 @@ const Workbench = () => {
     currentTimeSeconds
   ]);
   const highlightWordColor = colorWithOpacity(appearance.highlight_color, highlightOpacity);
-  const wordPaddingX = Math.max(0, appearance.word_bg_padding / 2);
+  const wordPadT = appearance.word_bg_padding_top ?? appearance.word_bg_padding ?? 8;
+  const wordPadR = appearance.word_bg_padding_right ?? appearance.word_bg_padding ?? 8;
+  const wordPadB = appearance.word_bg_padding_bottom ?? appearance.word_bg_padding ?? 8;
+  const wordPadL = appearance.word_bg_padding_left ?? appearance.word_bg_padding ?? 8;
   const hasWordBackground = appearance.background_mode === "word";
   const activeCueHasRtlChars = activeCue ? RTL_CHAR_PATTERN.test(activeCue.text) : false;
   const subtitleDirection: "rtl" | "auto" = activeCueHasRtlChars ? "rtl" : "auto";
@@ -2846,18 +2931,17 @@ const Workbench = () => {
     ? {
         backgroundColor: colorWithOpacity(appearance.word_bg_color, appearance.word_bg_opacity),
         borderRadius: `${Math.max(0, appearance.word_bg_radius)}px`,
-        boxShadow: `0 0 0 ${wordPaddingX}px ${colorWithOpacity(
-          appearance.word_bg_color,
-          appearance.word_bg_opacity
-        )}`
+        padding: `${Math.max(0, wordPadT)}px ${Math.max(0, wordPadR)}px ${Math.max(0, wordPadB)}px ${Math.max(0, wordPadL)}px`
       }
     : {};
   const subtitleOverlaySrc = React.useMemo(() => {
     if (!subtitleOverlayPath) {
       return null;
     }
-    return isTauriEnv ? convertFileSrc(subtitleOverlayPath) : subtitleOverlayPath;
-  }, [isTauriEnv, subtitleOverlayPath]);
+    const base = isTauriEnv ? convertFileSrc(subtitleOverlayPath) : subtitleOverlayPath;
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}v=${encodeURIComponent(appearance.font_family)}`;
+  }, [isTauriEnv, subtitleOverlayPath, appearance.font_family]);
   const shouldRenderOverlayImage = Boolean(subtitleOverlaySrc && activeCue && !isEditingActiveCue);
   const shouldHideInteractiveSubtitlePreview = Boolean(
     subtitleOverlaySrc && activeCue && !isEditingActiveCue
@@ -2884,12 +2968,19 @@ const Workbench = () => {
       return;
     }
 
+    const resolvedAppearance = {
+      ...appearance,
+      outline_color: resolveOutlineColor(
+        appearance.outline_color,
+        appearance.text_color
+      )
+    };
     const requestPayload = {
       width: videoNaturalSize.width,
       height: videoNaturalSize.height,
       subtitle_text: activeCue.text,
       highlight_word_index: highlightedWordIndex,
-      subtitle_style: appearance,
+      subtitle_style: resolvedAppearance,
       subtitle_mode: appearance.subtitle_mode,
       highlight_color: appearance.highlight_color,
       highlight_opacity: highlightOpacity
@@ -3109,11 +3200,14 @@ const Workbench = () => {
         appearance.outline_width * visualScale
       );
       shadows.push(
-        ...buildOutlineShadows(appearance.outline_color, scaledOutlineWidth)
+        ...buildOutlineShadows(
+          resolveOutlineColor(appearance.outline_color, appearance.text_color),
+          scaledOutlineWidth
+        )
       );
     }
     if (appearance.shadow_enabled && appearance.shadow_strength > 0) {
-      const blurRadius = Math.max(0, Math.round(appearance.shadow_strength * visualScale * 1.5));
+      const blurRadius = Math.max(0, Math.round((appearance.shadow_blur ?? 6) * visualScale));
       shadows.push(
         `${appearance.shadow_offset_x * visualScale}px ${appearance.shadow_offset_y * visualScale}px ${blurRadius}px ${colorWithOpacity(
           appearance.shadow_color,
@@ -3128,10 +3222,16 @@ const Workbench = () => {
     const useLineBackground = appearance.background_mode === "line";
     if (useLineBackground) {
       const backgroundColor = colorWithOpacity(appearance.line_bg_color, appearance.line_bg_opacity);
-      const padding = appearance.line_bg_padding * visualScale;
+      const pt = (appearance.line_bg_padding_top ?? appearance.line_bg_padding ?? 8) * visualScale;
+      const pr = (appearance.line_bg_padding_right ?? appearance.line_bg_padding ?? 8) * visualScale;
+      const pb = (appearance.line_bg_padding_bottom ?? appearance.line_bg_padding ?? 8) * visualScale;
+      const pl = (appearance.line_bg_padding_left ?? appearance.line_bg_padding ?? 8) * visualScale;
       const radius = appearance.line_bg_radius * visualScale;
       style.backgroundColor = backgroundColor;
-      style.padding = `${Math.max(0, padding)}px`;
+      style.paddingTop = `${Math.max(0, pt)}px`;
+      style.paddingRight = `${Math.max(0, pr)}px`;
+      style.paddingBottom = `${Math.max(0, pb)}px`;
+      style.paddingLeft = `${Math.max(0, pl)}px`;
       style.borderRadius = `${Math.max(0, radius)}px`;
     }
 
@@ -3235,6 +3335,22 @@ const Workbench = () => {
     textarea.style.height = "auto";
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, subtitleEditorTextStyle]);
+
+  React.useLayoutEffect(() => {
+    if (!isEditingActiveCue) {
+      return;
+    }
+    const textarea = activeSubtitleRef.current;
+    if (!textarea) {
+      return;
+    }
+    const font =
+      appearance.font_family || DEFAULT_APPEARANCE.font_family;
+    textarea.style.setProperty("font-family", font, "important");
+    return () => {
+      textarea.style.removeProperty("font-family");
+    };
+  }, [isEditingActiveCue, appearance.font_family]);
 
   React.useLayoutEffect(() => {
     if (!showVideoControls || !activeCue) {
@@ -3567,7 +3683,7 @@ const Workbench = () => {
       resetEditSessionState();
       resumePlaybackIfNeeded();
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Failed to save subtitle changes.");
+      setEditError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to save subtitle changes."));
     } finally {
       setIsSavingCue(false);
     }
@@ -3785,6 +3901,23 @@ const Workbench = () => {
     if (videoSingleClickTimeoutRef.current) return;
     videoSingleClickTimeoutRef.current = window.setTimeout(() => {
       videoSingleClickTimeoutRef.current = null;
+      const el = videoRef.current;
+      if (el) {
+        const icon = el.paused ? "play" : "pause";
+        playPauseFeedbackTimeoutsRef.current.forEach(clearTimeout);
+        playPauseFeedbackTimeoutsRef.current = [];
+        setPlayPauseFeedback(icon);
+        setPlayPauseFeedbackVisible(true);
+        playPauseFeedbackTimeoutsRef.current.push(
+          setTimeout(() => setPlayPauseFeedbackVisible(false), 350)
+        );
+        playPauseFeedbackTimeoutsRef.current.push(
+          setTimeout(() => {
+            setPlayPauseFeedback(null);
+            playPauseFeedbackTimeoutsRef.current = [];
+          }, 650)
+        );
+      }
       handlePlayPauseToggle();
     }, 250);
   }, [handlePlayPauseToggle]);
@@ -4044,6 +4177,10 @@ const Workbench = () => {
     </div>
   );
 
+  if (isLoading) {
+    return <WorkbenchSkeleton isNarrow={isNarrow} />;
+  }
+
   return (
     <div data-testid="workbench" className="flex h-full min-h-0 flex-col gap-4">
       <header
@@ -4074,19 +4211,18 @@ const Workbench = () => {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
-      {isLoading && (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          Loading video…
+      {error ? (
+        <div
+          className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-12"
+          data-testid="workbench-backend-error"
+        >
+          <p className="w-full max-w-md text-center text-sm text-destructive">
+            {error}
+          </p>
         </div>
-      )}
-
-      {!isLoading && error && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-
-      {!isLoading && !error && showNoSubtitlesState && (
+      ) : (
+        <>
+      {showNoSubtitlesState && (
         <section
           className="relative flex min-h-0 flex-1 flex-col items-center rounded-lg border border-border bg-card p-6"
           data-testid="workbench-empty-state"
@@ -4098,7 +4234,9 @@ const Workbench = () => {
               </div>
             )}
 
-            {!hasActiveCreateSubtitles ? (
+            {!hasActiveCreateSubtitles &&
+            !pendingAutoStartSubtitles &&
+            !incomingState?.autoStartSubtitles ? (
               <>
                 <p className="text-lg font-semibold text-foreground">No subtitles yet.</p>
                 <div className="flex justify-center">
@@ -4143,12 +4281,16 @@ const Workbench = () => {
                       ? defaultChecklist(buildGenerateChecklist(settings))
                       : [];
               const checklist = withTimingFallbackChecklist(checklistBase);
-              const pct =
+              const rawPct =
                 isCreatingSubtitles || createSubtitlesProgressPct > 0
                   ? createSubtitlesProgressPct
                   : typeof at?.pct === "number"
                     ? Math.max(0, Math.min(100, at.pct))
                     : 0;
+              const pct =
+                createSubtitlesStreamHealth !== "open" && rawPct === 100
+                  ? 0
+                  : rawPct;
               const startedAt =
                 createSubtitlesStartedAt ||
                 (typeof at?.started_at === "string"
@@ -4183,65 +4325,53 @@ const Workbench = () => {
                     </div>
                     <Progress value={pct} />
                   </div>
-                  <div
-                    className={
-                      isShortWindow && showElevatorMusicRow
-                        ? "flex w-full items-center"
-                        : "flex justify-center"
-                    }
-                  >
-                    {isShortWindow && showElevatorMusicRow ? (
-                      <>
-                        <div className="flex flex-1 justify-start">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={handleElevatorMusicToggle}
-                            className="inline-flex gap-1.5 shrink-0 animate-in fade-in duration-300"
-                            aria-label={
-                              elevatorMusicPlaying
-                                ? "Pause background music"
-                                : "Play background music"
-                            }
-                            data-testid="workbench-elevator-music-row"
-                          >
-                            {elevatorMusicPlaying ? (
-                              <>
-                                <Pause className="size-3.5" />
-                                Pause
-                              </>
-                            ) : (
-                              <>
-                                <Play className="size-3.5" />
-                                Some music?
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                        <div className="flex flex-1 justify-center">
-                          <Button
-                            variant="secondary"
-                            data-testid="workbench-cancel-create-subtitles"
-                            onClick={() => void cancelCreateSubtitles()}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                        <div className="flex-1" />
-                      </>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        data-testid="workbench-cancel-create-subtitles"
-                        onClick={() => void cancelCreateSubtitles()}
-                      >
-                        Cancel
-                      </Button>
-                    )}
+                  <div className="flex justify-center">
+                    <Button
+                      variant="secondary"
+                      data-testid="workbench-cancel-create-subtitles"
+                      onClick={() => void cancelCreateSubtitles()}
+                    >
+                      Cancel
+                    </Button>
                   </div>
                 </>
               );
             })()}
+            {isShortWindow &&
+              showElevatorMusicRow &&
+              hasActiveCreateSubtitles &&
+              !(
+                project?.active_task?.status === "queued" &&
+                project?.active_task?.kind === "create_subtitles"
+              ) && (
+                <div
+                  className="absolute bottom-4 right-4 animate-in fade-in duration-300"
+                  data-testid="workbench-elevator-music-row"
+                >
+                  <Button
+                    variant="secondary"
+                    onClick={handleElevatorMusicToggle}
+                    className="inline-flex shrink-0 [&_svg]:size-4"
+                    aria-label={
+                      elevatorMusicPlaying
+                        ? "Pause background music"
+                        : "Play background music"
+                    }
+                  >
+                    {elevatorMusicPlaying ? (
+                      <>
+                        <Pause />
+                        Pause
+                      </>
+                    ) : (
+                      <>
+                        <Play />
+                        Some music?
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
           </div>
           {!isShortWindow &&
             showElevatorMusicRow &&
@@ -4258,9 +4388,8 @@ const Workbench = () => {
                   <span>Listen to some music while you wait?</span>
                   <Button
                     variant="secondary"
-                    size="sm"
                     onClick={handleElevatorMusicToggle}
-                    className="inline-flex gap-1.5 shrink-0"
+                    className="inline-flex shrink-0"
                     aria-label={
                       elevatorMusicPlaying
                         ? "Pause background music"
@@ -4269,12 +4398,12 @@ const Workbench = () => {
                   >
                     {elevatorMusicPlaying ? (
                       <>
-                        <Pause className="size-3.5" />
+                        <Pause />
                         Pause
                       </>
                     ) : (
                       <>
-                        <Play className="size-3.5" />
+                        <Play />
                         Play
                       </>
                     )}
@@ -4285,7 +4414,7 @@ const Workbench = () => {
         </section>
       )}
 
-      {!isLoading && !error && !showNoSubtitlesState && (
+      {!showNoSubtitlesState && (
         <>
           {hasSubtitles && showSubtitlesOverlay && showLeftToggle && (
             <div className="relative z-50 flex flex-wrap items-center gap-2">
@@ -4310,12 +4439,6 @@ const Workbench = () => {
                 <div
                   className="relative h-full w-full overflow-hidden rounded-md"
                   data-testid="workbench-center-panel-video-wrapper"
-                  onMouseEnter={() => {
-                    setShowVideoControls(true);
-                  }}
-                  onMouseLeave={() => {
-                    setShowVideoControls(false);
-                  }}
                 >
                   <video
                     ref={videoRef}
@@ -4352,8 +4475,37 @@ const Workbench = () => {
                     style={displayedVideoGeometryStyle}
                     onClick={handleVideoSurfaceClick}
                     onDoubleClick={handleVideoSurfaceDoubleClick}
+                    onMouseEnter={() => setShowVideoControls(true)}
+                    onMouseLeave={(e) => {
+                      const to = e.relatedTarget;
+                      if (to instanceof Node && (
+                        videoControlsBarRef.current?.contains(to) ||
+                        subtitleOverlayPositionLayerRef.current?.contains(to)
+                      ))
+                        return;
+                      setShowVideoControls(false);
+                    }}
                     aria-hidden
                   />
+                  <div
+                    className="absolute flex items-center justify-center pointer-events-none"
+                    style={displayedVideoGeometryStyle}
+                    aria-hidden
+                  >
+                    <div
+                      className={cn(
+                        "flex h-20 w-20 items-center justify-center rounded-full bg-black/50 transition-opacity duration-300 ease-out",
+                        playPauseFeedbackVisible ? "opacity-100" : "opacity-0"
+                      )}
+                    >
+                      {playPauseFeedback === "play" && (
+                        <Play className="h-12 w-12 text-white drop-shadow-md" fill="currentColor" />
+                      )}
+                      {playPauseFeedback === "pause" && (
+                        <Pause className="h-12 w-12 text-white drop-shadow-md" fill="currentColor" />
+                      )}
+                    </div>
+                  </div>
                   <div
                     className={cn("absolute", !isEditingActiveCue && "pointer-events-none")}
                     style={displayedVideoGeometryStyle}
@@ -4390,16 +4542,37 @@ const Workbench = () => {
                           ref={activeSubtitleWrapperRef}
                           className="pointer-events-auto relative z-11 w-fit max-w-full transition-transform duration-200"
                           style={subtitleControlsPushStyle}
+                          onMouseEnter={() => setShowVideoControls(true)}
+                          onMouseLeave={(e) => {
+                            const to = e.relatedTarget;
+                            if (to instanceof Node && (
+                              videoControlsBarRef.current?.contains(to) ||
+                              videoClickSurfaceRef.current?.contains(to)
+                            ))
+                              return;
+                            setShowVideoControls(false);
+                          }}
                         >
                           <div className="relative w-fit max-w-full">
                             {isEditingActiveCue ? (
-                              <div className="relative inline-block min-w-16 rounded-md px-3 py-2">
+                              <div
+                                className="relative inline-block min-w-16 rounded-md px-3 py-2"
+                                style={
+                                  {
+                                    fontFamily:
+                                      appearance.font_family || DEFAULT_APPEARANCE.font_family,
+                                    ["--subtitle-editor-font"]:
+                                      appearance.font_family || DEFAULT_APPEARANCE.font_family
+                                  } as React.CSSProperties
+                                }
+                              >
                                 <span
                                   aria-hidden
                                   className="block whitespace-pre-wrap text-center text-white"
                                   dir={subtitleDirection}
                                   style={{
                                     ...subtitleEditorTextStyle,
+                                    fontFamily: "inherit",
                                     visibility: "hidden",
                                     margin: 0,
                                     padding: 0,
@@ -4412,8 +4585,13 @@ const Workbench = () => {
                                 <textarea
                                   ref={activeSubtitleRef}
                                   data-testid="workbench-subtitle-editor"
+                                  data-workbench-subtitle-editor
                                   className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/25 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
-                                  style={subtitleEditorTextStyle}
+                                  style={(() => {
+                                    const { fontFamily: _f, ...rest } =
+                                      subtitleEditorTextStyle;
+                                    return rest;
+                                  })()}
                                   value={editingText}
                                   onChange={handleEditTextChange}
                                   onKeyDown={handleEditorKeyDown}
@@ -4567,6 +4745,16 @@ const Workbench = () => {
                       pointerEvents: showVideoControls ? "auto" : "none"
                     }}
                     data-testid="workbench-video-controls"
+                    onMouseEnter={() => setShowVideoControls(true)}
+                    onMouseLeave={(e) => {
+                      const to = e.relatedTarget;
+                      if (to instanceof Node && (
+                        videoClickSurfaceRef.current?.contains(to) ||
+                        subtitleOverlayPositionLayerRef.current?.contains(to)
+                      ))
+                        return;
+                      setShowVideoControls(false);
+                    }}
                   >
                     <div
                       className="flex shrink-0 flex-col justify-center px-3 py-2"
@@ -4948,6 +5136,8 @@ const Workbench = () => {
               </div>
             </section>
           )}
+        </>
+      )}
         </>
       )}
       </div>

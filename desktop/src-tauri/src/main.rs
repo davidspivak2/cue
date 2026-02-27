@@ -345,6 +345,20 @@ fn start_backend(app: &App) -> Option<Child> {
     start_packaged_backend(app)
 }
 
+fn wait_for_backend_listening(timeout: Duration, interval: Duration) {
+    let addr = match "127.0.0.1:8765".parse::<SocketAddr>() {
+        Ok(a) => a,
+        Err(_) => return,
+    };
+    let deadline = SystemTime::now() + timeout;
+    while SystemTime::now() < deadline {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok() {
+            return;
+        }
+        std::thread::sleep(interval);
+    }
+}
+
 fn request_backend_archive_on_exit() {
     let addr = match "127.0.0.1:8765".parse::<SocketAddr>() {
         Ok(value) => value,
@@ -476,6 +490,10 @@ fn main() {
                         eprintln!("Failed to store backend process handle: {err}");
                     }
                 }
+                wait_for_backend_listening(
+                    Duration::from_secs(30),
+                    Duration::from_millis(300),
+                );
             }
             Ok(())
         })

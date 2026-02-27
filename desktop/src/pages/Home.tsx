@@ -24,6 +24,7 @@ import {
   JobEventStream,
   JobKind
 } from "@/jobsClient";
+import { messageForBackendError } from "@/backendHealth";
 import { fetchSettings, SettingsConfig } from "@/settingsClient";
 import { cn } from "@/lib/utils";
 
@@ -140,7 +141,7 @@ const Home = () => {
       })
       .catch((err) => {
         if (active) {
-          setError(err instanceof Error ? err.message : "Failed to load settings.");
+          setError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to load settings."));
         }
       });
     return () => {
