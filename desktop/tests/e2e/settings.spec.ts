@@ -114,26 +114,33 @@ test("save policy enables the path controls", async ({ page }) => {
   await expect(browseButton).toBeEnabled();
 });
 
-test("diagnostics section is visible and master toggle gates categories", async ({ page }) => {
+test("diagnostics section is visible and master toggle gates categories", async ({
+  page
+}) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-content")).toBeVisible();
+
+  const settingsHeading = page.getByRole("heading", { name: "Settings" });
+  for (let i = 0; i < 7; i++) {
+    await settingsHeading.click();
+  }
 
   await expect(page.getByTestId("settings-diagnostics-section")).toBeVisible({
     timeout: 10000
   });
   await page.getByTestId("settings-diagnostics-section").scrollIntoViewIfNeeded();
 
-  const master = page.getByLabel("Enable diagnostics logging");
+  const master = page.getByLabel("Save diagnostics");
   await expect(master).toBeVisible({ timeout: 5000 });
 
-  const writeOnSuccess = page.getByLabel("Write diagnostics on successful completion");
-  const category = page.getByLabel("App + system info");
+  const writeOnSuccess = page.getByLabel("Also save when jobs succeed");
+  const category = page.getByLabel("Include app and system info");
 
   await expect(writeOnSuccess).toBeDisabled();
   await expect(category).toBeDisabled();
 
-  await master.check();
+  await master.click();
   await expect(writeOnSuccess).toBeEnabled();
   await expect(category).toBeEnabled();
 });

@@ -28,6 +28,12 @@ def _resolve_device_and_compute(
     *,
     gpu_available_fn: Callable[[], bool],
 ) -> tuple[str, str]:
+    if quality == "speed":
+        return ("cuda", "int8") if gpu_available_fn() else ("cpu", "int8")
+    if quality == "quality":
+        return ("cuda", "float16") if gpu_available_fn() else ("cpu", "float32")
+    if quality == "auto":
+        return ("cuda", "int8_float16") if gpu_available_fn() else ("cpu", "int16")
     if quality == "fast":
         return "cpu", "int8"
     if quality == "accurate":

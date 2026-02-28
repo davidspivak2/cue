@@ -15,9 +15,11 @@ select = ["E", "F"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-# Qt app must be ensured before importing FastAPI/other deps; imports after _ensure_qt_app() are intentional.
+# PySide6 must be ensured before importing FastAPI/other deps; imports after _ensure_qt_app() are intentional.
 "app/backend_server.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

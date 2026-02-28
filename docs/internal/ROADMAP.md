@@ -1073,8 +1073,7 @@ Last updated: 2026-02-27
   - Add new config keys for `subtitle_mode` and highlight styling settings.
   - No UI wiring and no pipeline changes.
 - **Primary files likely touched:**
-  - `app/main.py`
-  - `app/ui/state.py`
+  - `desktop/` (Tauri UI; legacy `app/main.py` and `app/ui/` removed)
   - `project context appendix in the UX spec`
 - **Implementation notes:**
   - Keep defaults as current behavior (static) until Task 10 is complete.
@@ -1090,9 +1089,7 @@ Last updated: 2026-02-27
   - Add UI elements only; do not change preview/export behavior.
   - Persist selection to config/state.
 - **Primary files likely touched:**
-  - `app/ui/subtitles_ready.py`
-  - `app/main.py`
-  - `app/ui/widgets/*`
+  - `desktop/` (Tauri UI; legacy `app/ui/` removed)
 - **Implementation notes:**
   - Default to Static until Task 10 (now complete; Word highlight is the default).
   - Provide clear explanatory labels/tooltips.
@@ -1114,7 +1111,6 @@ Last updated: 2026-02-27
   - Update cache keys to include subtitle mode + highlight settings.
 - **Primary files likely touched:**
   - `app/graphics_preview_renderer.py`
-  - `app/main.py`
   - `app/workers.py`
 - **Implementation notes:**
   - Ensure caching differentiates Static vs Word highlight modes.
@@ -1195,8 +1191,7 @@ Last updated: 2026-02-27
   - Tighten labels, hints, and diagnostics.
   - Update docs references.
 - **Primary files likely touched:**
-  - `app/main.py`
-  - `app/ui/subtitles_ready.py`
+  - `desktop/` (Tauri UI)
   - `app/diagnostics.py`
   - `project context appendix in the UX spec`
   - `word highlight plan appendix in ROADMAP`

@@ -5,8 +5,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
 import AppLayout from "./components/AppLayout";
+import AppSplash from "./components/AppSplash";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { WorkbenchSkeleton } from "./components/WorkbenchSkeleton";
+import { AppSplashProvider } from "./contexts/AppSplashContext";
 import ProjectHub from "./pages/ProjectHub";
 
 const Workbench = lazy(() => import("./pages/Workbench"));
@@ -68,26 +70,29 @@ function RouteFallback() {
 
 const App = () => {
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <ThemeIconSync />
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<AppLayout />}>
-            <Route index element={<ProjectHub />} />
-            <Route
-              path="workbench/:projectId"
-              element={
-                <RouteErrorBoundary>
-                  <Suspense fallback={<WorkbenchSkeleton />}>
-                    <Workbench />
-                  </Suspense>
-                </RouteErrorBoundary>
-              }
-            />
-          </Route>
-        </Routes>
-      </Suspense>
-    </BrowserRouter>
+    <AppSplashProvider>
+      <AppSplash />
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <ThemeIconSync />
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<AppLayout />}>
+              <Route index element={<ProjectHub />} />
+              <Route
+                path="workbench/:projectId"
+                element={
+                  <RouteErrorBoundary>
+                    <Suspense fallback={<WorkbenchSkeleton />}>
+                      <Workbench />
+                    </Suspense>
+                  </RouteErrorBoundary>
+                }
+              />
+            </Route>
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </AppSplashProvider>
   );
 };
 

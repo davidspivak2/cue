@@ -153,9 +153,10 @@ def _should_use_gpu(prefer_gpu: bool, force_cpu: bool) -> tuple[bool, str]:
 
 def _resolve_compute_type(requested_type: str, device: str) -> str:
     if requested_type != "auto":
-        # If the user asked for float16 but we're on CPU, fall back to int8.
-        if requested_type == "float16" and device != "cuda":
-            return "int8"
+        # GPU-only types on CPU fall back to int8.
+        if device != "cuda":
+            if requested_type == "float16" or requested_type == "int8_float16":
+                return "int8"
         return requested_type
     if device == "cuda":
         return "float16"
@@ -961,7 +962,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument(
         "--compute-type",
-        choices=["auto", "int8", "int16", "float16", "float32"],
+        choices=["auto", "int8", "int8_float16", "int16", "float16", "float32"],
         default="auto",
     )
     parser.add_argument("--duration-seconds", type=float)

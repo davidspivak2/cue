@@ -60,7 +60,6 @@ def _ensure_application_fonts_loaded() -> None:
     ]
     if app_data_fonts is not None:
         candidates.append(app_data_fonts)
-    db = QtGui.QFontDatabase()
     loaded_families: list[str] = []
     used_dir: Path | None = None
     for fonts_dir in candidates:
@@ -68,11 +67,11 @@ def _ensure_application_fonts_loaded() -> None:
             continue
         for path in sorted(fonts_dir.iterdir()):
             if path.suffix.lower() in (".ttf", ".otf"):
-                fid = db.addApplicationFont(str(path))
+                fid = QtGui.QFontDatabase.addApplicationFont(str(path))
                 if fid == -1:
                     logger.warning("Failed to load application font: %s", path)
                 else:
-                    families = db.applicationFontFamilies(fid)
+                    families = QtGui.QFontDatabase.applicationFontFamilies(fid)
                     if families:
                         loaded_families.extend(families)
                     logger.debug("Loaded application font: %s -> %s", path.name, families)
@@ -475,8 +474,9 @@ def render_graphics_preview(
 def _resolve_qt_font_family(requested_font_family: str) -> tuple[str, bool]:
     _ensure_application_fonts_loaded()
     requested = requested_font_family.strip() or DEFAULT_FONT_NAME
-    db = QtGui.QFontDatabase()
-    available_lookup = {family.casefold(): family for family in db.families()}
+    available_lookup = {
+        family.casefold(): family for family in QtGui.QFontDatabase.families()
+    }
 
     fallback_candidates = [
         requested,

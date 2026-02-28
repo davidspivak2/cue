@@ -29,7 +29,7 @@ def test_print_transcribe_config(monkeypatch, capsys) -> None:
     assert payload["model_name"] == transcribe_worker.MODEL_NAME
     assert "models_dir" in payload
     assert payload["device"] in {"cpu", "cuda"}
-    assert payload["compute_type"] in {"int8", "float16"}
+    assert payload["compute_type"] in {"int8", "float16", "int8_float16"}
     transcribe_kwargs = payload["transcribe_kwargs"]
     assert transcribe_kwargs["beam_size"] == 5
     assert transcribe_kwargs["vad_filter"] is True

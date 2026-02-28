@@ -1,7 +1,7 @@
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const JOBS_URL = `${BACKEND_BASE_URL}/jobs`;
 
-export type JobKind = "create_subtitles" | "create_video_with_subtitles";
+export type JobKind = "create_subtitles" | "create_video_with_subtitles" | "calibrate";
 export type JobConflictDetail = {
   error: "project_job_conflict";
   project_id: string;
@@ -139,6 +139,11 @@ export type CreateVideoWithSubtitlesJobParams = {
   outputDir?: string;
   srtPath?: string;
   projectId?: string;
+  options?: Record<string, unknown>;
+};
+
+export type CreateCalibrationJobParams = {
+  inputPath: string;
   options?: Record<string, unknown>;
 };
 
@@ -318,6 +323,21 @@ export const createVideoWithSubtitlesJob = async (
     output_dir: params.outputDir,
     srt_path: params.srtPath,
     project_id: params.projectId,
+    options: params.options ?? {}
+  });
+  return {
+    ...streamJobEvents(job.job_id, job.events_url, handlers),
+    status: job.status
+  };
+};
+
+export const createCalibrationJob = async (
+  params: CreateCalibrationJobParams,
+  handlers: JobEventHandlers = {}
+): Promise<JobStartResult> => {
+  const job = await createJob({
+    kind: "calibrate",
+    input_path: params.inputPath,
     options: params.options ?? {}
   });
   return {

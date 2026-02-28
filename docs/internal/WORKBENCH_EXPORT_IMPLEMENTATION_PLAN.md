@@ -77,7 +77,7 @@ During `WB_EXPORTING`, editing/styling controls are disabled.
 
 ### Runner + Worker
 
-- `app/qt_worker_runner.py`
+- `app/worker_runner.py`
   - accept `--style-path` and `--word-timings-path`
   - load + normalize project style
 - `app/workers.py`

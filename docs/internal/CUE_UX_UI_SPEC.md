@@ -373,7 +373,7 @@ Create Subtitles must output:
 Settings is a **full page** that replaces the current view. It uses the new design system and clarifies high-friction controls for non-technical users while preserving core pipeline behavior.
 
 ### J0) Legacy removal status (Subtitle Edit)
-- Subtitle Edit integration still exists in the legacy Qt UI, including the persisted config key **`subtitle_edit_path`**.
+- Subtitle Edit integration existed in the legacy Qt UI (removed). The config key **`subtitle_edit_path`** may still be present for compatibility.
 - Removal is tracked in `docs/internal/ROADMAP.md` (Milestone 9.4). The redesign should not add new dependencies on Subtitle Edit.
 
 ### J1) Transcription quality
@@ -484,7 +484,7 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 
 ## 0) One-page overview (for new maintainers)
 
-**What this app is:** a Windows desktop GUI that generates subtitles (any language) and (optionally) burns them into a new MP4. The legacy UI is built with **PySide6**; a new **Tauri + React** desktop UI lives in `desktop/` (historical PR notes omitted here; see `ROADMAP.md` for current status). The Qt UI still exists for now. Supports RTL languages like Hebrew/Arabic.
+**What this app is:** a Windows desktop GUI that generates subtitles (any language) and (optionally) burns them into a new MP4. The desktop UI is **Tauri + React** (`desktop/`). The backend uses **PySide6** for graphics rendering (preview/export). Supports RTL languages like Hebrew/Arabic.
 
 **Core workflow:**
 1) Create or open a project from **Project Hub**
@@ -499,7 +499,7 @@ For all upcoming tasks, see [`ROADMAP.md`](ROADMAP.md) (single source of truth).
 - `<video_stem>_subtitled.mp4`
 
 **Runtime modes:**
-- Runs from source (python `-m app.main`).
+- Runs from source (Tauri dev: see CONTRIBUTING.md; backend: `python -m app.backend_server`).
 - Runs as a packaged app (Tauri installer with bundled engine).
 - Worker process launch differs by mode (python module vs worker EXE).
 
@@ -527,11 +527,9 @@ Typical flow:
 ## 2) How it works (technical overview)
 
 ### Main moving parts
-- **New desktop UI shell (Tauri + React)**: `desktop/` (see `ROADMAP.md` for current status)
-- **Legacy GUI (PySide6)**: `app/main.py`
-  - state machine / stacked pages (Project Hub + Workbench + Settings)
-  - launches workers and updates UI
-- **Worker thread (PySide6 QRunnable/QThread)**: `app/workers.py`
+- **Desktop UI (Tauri + React)**: `desktop/` — state machine, Project Hub, Workbench, Settings
+- **Backend (FastAPI)**: `app/backend_server.py` — HTTP/SSE, job queue, settings, device info
+- **Pipeline worker**: `app/workers.py` (used by `app/worker_runner.py` subprocess)
   - runs FFmpeg extraction
   - spawns transcription worker subprocess
   - runs FFmpeg burn-in with real progress
@@ -558,12 +556,13 @@ Running it out-of-process:
 ## 2.5) Repo layout / architecture map
 
 **What to look at first (core pipeline):**
-- `app/main.py` — main UI + settings wiring + state machine
+- `desktop/` — main UI (Tauri + React), settings, state machine
+- `app/backend_server.py` — FastAPI server, job endpoints, SSE
 - `app/workers.py` — audio extraction, worker orchestration, burn-in, diagnostics
+- `app/worker_runner.py` — pipeline subprocess (Qt-safe)
 - `app/transcribe_worker.py` — faster‑whisper transcription + punctuation rescue logic
 
 **Supporting areas:**
-- `app/ui/*` — widgets, state helpers, styling/theme
 - `app/ffmpeg_utils.py` — ffmpeg discovery + subprocess settings
 - `app/srt_utils.py` — SRT formatting primitives
 - `app/srt_splitter.py` — cue splitting and word alignment recovery
@@ -630,7 +629,7 @@ Example:
 
 ## 3.25) Persisted settings (config.json) reference
 
-Settings are stored in `%LOCALAPPDATA%\Cue\config.json` and are loaded in `app/main.py`.
+Settings are stored in `%LOCALAPPDATA%\Cue\config.json` and are loaded by the backend and Tauri app.
 
 | Config key | UI label (exact) | Allowed values | Default | Pipeline impact |
 | --- | --- | --- | --- | --- |
@@ -671,7 +670,7 @@ Diagnostics category keys (from `diagnostics.categories`), with UI labels:
 - SRT formatting primitives → `app/srt_utils.py`
 - Cue splitting/word alignment fallback behavior → `app/srt_splitter.py`
 - Progress weights/aggregation behavior → `app/progress.py`
-- UI state machine, settings wiring/persistence (`config.json`), toggle behaviors, enabling/disabling buttons → `app/main.py`
+- UI state machine, settings wiring/persistence (`config.json`), toggle behaviors, enabling/disabling buttons → `desktop/` (Tauri)
 
 ---
 
@@ -722,7 +721,7 @@ The UI aggregates progress without regression (percent should not go backwards).
 - Export progress: stages cover video info, subtitle rendering/burn-in, and saving output (no WhisperX timing stage during export in the redesign contract).
 
 ### “Golden path” manual smoke test checklist (10–15 steps)
-1) Launch the app from source (`python -m app.main`).
+1) Launch the app from source (see CONTRIBUTING.md; e.g. `scripts\run_desktop_all.cmd` on Windows).
 2) In Settings, set Save policy to **Same folder as the video**.
 3) Ensure **Improve punctuation automatically (recommended)** is ON.
 4) Ensure **Clean up audio before transcription** is OFF (baseline).

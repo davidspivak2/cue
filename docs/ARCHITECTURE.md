@@ -34,9 +34,6 @@ Cue is a desktop app with two main layers:
 - **Backend** — A Python FastAPI server (`app/backend_server.py`) that manages jobs, settings, and device info. Spawns pipeline workers as subprocesses.
 - **Pipeline** — The actual work: audio extraction (FFmpeg), transcription (faster-whisper), word alignment (WhisperX), and subtitle burn-in (FFmpeg with graphics overlay).
 
-There is also a **legacy Qt/PySide6 UI** (`app/main.py`) that predates the Tauri app.
-It is now reference-only. The active user flow is the Tauri app (`Projects -> Workbench -> Export`).
-
 ---
 
 ## Processing pipeline
@@ -86,8 +83,7 @@ Transcription runs as a **separate subprocess** to keep the UI responsive, enabl
 app/                              # Python backend and pipeline
   backend_server.py               # FastAPI server (health, jobs, settings, device)
   project_store.py                # Project persistence (project folders, index, manifest)
-  qt_worker_runner.py             # Runs legacy Worker in a Qt-safe subprocess
-  main.py                         # Legacy Qt UI entry point (PySide6)
+  worker_runner.py                # Runs pipeline Worker in a Qt-safe subprocess
   workers.py                      # Audio extraction, worker orchestration, burn-in
   transcribe_worker.py            # Whisper transcription subprocess
   align_worker.py                 # WhisperX word-timing alignment
@@ -102,7 +98,6 @@ app/                              # Python backend and pipeline
   ffmpeg_utils.py                 # FFmpeg/FFprobe discovery and subprocess helpers
   config.py                       # Settings persistence (config.json)
   paths.py                        # App data directory resolution
-  ui/                             # Qt UI components, theme, widgets
 
 desktop/                          # Tauri + React desktop app
   src/                            # React frontend (TypeScript)
@@ -191,11 +186,3 @@ The desktop UI communicates with the Python backend over HTTP:
 
 Jobs emit typed SSE events: `started`, `checklist`, `progress`, `log`, `result`, `heartbeat`, `completed`, `cancelled`, `error`.
 `POST /jobs` accepts an optional `project_id`; for export jobs, `project_id` is the preferred contract and the backend resolves project artifacts (video, subtitles, style, word timings).
-
----
-
-## Legacy Qt UI
-
-The `app/main.py` file contains a full PySide6 (Qt) UI that predates the Tauri app. It is the original production UI and is kept temporarily as a reference for feature parity. It will be removed once the Tauri app is fully functional (tracked in `docs/internal/ROADMAP.md`, Milestone 9).
-
-Do not add new features to the Qt UI. All new UI work goes into the Tauri app under `desktop/`.

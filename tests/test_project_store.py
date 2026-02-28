@@ -11,7 +11,7 @@ from app.paths import get_projects_dir
 def _setup_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(project_store, "generate_thumbnail", lambda *args, **kwargs: None)
-    monkeypatch.setattr(project_store, "get_media_duration_seconds", lambda *args, **kwargs: None)
+    monkeypatch.setattr(project_store, "get_media_duration", lambda *args, **kwargs: None)
 
 
 def test_create_list_relink_update(tmp_path: Path, monkeypatch) -> None:

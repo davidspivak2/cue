@@ -16,6 +16,8 @@ import {
   SheetTitle
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useAppSplash } from "@/contexts/AppSplashContext";
+import { DeviceInfoProvider } from "@/contexts/DeviceInfoContext";
 import { RunningJobsProvider } from "@/contexts/RunningJobsContext";
 import { SettingsProvider } from "@/contexts/SettingsContext";
 import { ToastProvider } from "@/contexts/ToastContext";
@@ -44,7 +46,13 @@ type ToastItem = {
 const AppLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { setShowSplash } = useAppSplash();
   const hasLaunchedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    setShowSplash(false);
+    if (typeof document !== "undefined") document.body.removeAttribute("data-tauri-drag-region");
+  }, [setShowSplash]);
   const seenNoticeIdsRef = React.useRef<Set<string>>(new Set());
   const seenExportCompleteRef = React.useRef<Set<string>>(new Set());
   const locationRef = React.useRef(location);
@@ -52,7 +60,9 @@ const AppLayout = () => {
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [settingsScrolled, setSettingsScrolled] = React.useState(false);
+  const [diagnosticsRevealed, setDiagnosticsRevealed] = React.useState(false);
   const settingsScrollRef = React.useRef<HTMLDivElement>(null);
+  const settingsTapCountRef = React.useRef(0);
   const openSettings = React.useCallback(() => setSettingsOpen(true), []);
   const closeSettings = React.useCallback(() => setSettingsOpen(false), []);
 
@@ -216,10 +226,16 @@ const AppLayout = () => {
   }, [pushToast]);
 
   return (
-    <RunningJobsProvider>
-      <ExitConfirmHandler />
-      <WorkbenchTabsProvider>
-        <SettingsProvider openSettings={openSettings} closeSettings={closeSettings} settingsOpen={settingsOpen}>
+    <DeviceInfoProvider>
+      <RunningJobsProvider>
+        <ExitConfirmHandler />
+        <WorkbenchTabsProvider>
+        <SettingsProvider
+          openSettings={openSettings}
+          closeSettings={closeSettings}
+          settingsOpen={settingsOpen}
+          diagnosticsSectionVisible={diagnosticsRevealed}
+        >
           <ToastProvider
           pushToast={pushToast}
           markExportCompleteSeen={markExportCompleteSeen}
@@ -283,7 +299,41 @@ const AppLayout = () => {
                   "shadow-[0_4px_12px_-4px_rgba(0,0,0,0.2)] dark:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)]"
               )}
             >
-              <SheetTitle id="settings-dialog-title">Settings</SheetTitle>
+              <SheetTitle id="settings-dialog-title">
+                <span
+                  role="button"
+                  tabIndex={0}
+                  data-cursor-default
+                  className="outline-none"
+                  onClick={() => {
+                    settingsTapCountRef.current += 1;
+                    if (settingsTapCountRef.current >= 7) {
+                      setDiagnosticsRevealed(true);
+                      pushToast(
+                        "Diagnostics section is now visible at the bottom of Settings.",
+                        ""
+                      );
+                      settingsTapCountRef.current = 0;
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      settingsTapCountRef.current += 1;
+                      if (settingsTapCountRef.current >= 7) {
+                        setDiagnosticsRevealed(true);
+                        pushToast(
+                          "Diagnostics section is now visible at the bottom of Settings.",
+                          ""
+                        );
+                        settingsTapCountRef.current = 0;
+                      }
+                    }
+                  }}
+                >
+                  Settings
+                </span>
+              </SheetTitle>
             </SheetHeader>
             <div className="relative flex min-h-0 flex-1 flex-col">
               <ScrollArea
@@ -350,8 +400,9 @@ const AppLayout = () => {
           </div>
           </ToastProvider>
         </SettingsProvider>
-      </WorkbenchTabsProvider>
-    </RunningJobsProvider>
+        </WorkbenchTabsProvider>
+      </RunningJobsProvider>
+    </DeviceInfoProvider>
   );
 };
 

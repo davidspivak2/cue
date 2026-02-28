@@ -37,7 +37,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument(
         "--compute-type",
-        choices=["auto", "int8", "int16", "float16", "float32"],
+        choices=["auto", "int8", "int8_float16", "int16", "float16", "float32"],
         default="auto",
     )
     parser.add_argument(

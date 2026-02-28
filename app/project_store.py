@@ -13,8 +13,8 @@ from typing import Any, Optional
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from .ffmpeg_utils import generate_thumbnail, get_media_duration
 from .paths import get_projects_dir
-from .ui.utils import generate_thumbnail, get_media_duration_seconds
 
 
 logger = logging.getLogger(__name__)
@@ -215,7 +215,7 @@ def _build_video_info(video_path: Optional[str]) -> dict[str, Any]:
         info["mtime_ns"] = stat.st_mtime_ns
     except OSError:
         pass
-    duration = get_media_duration_seconds(path)
+    duration = get_media_duration(path)
     if duration is not None:
         info["duration_seconds"] = duration
     try:
