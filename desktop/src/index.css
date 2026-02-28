@@ -205,6 +205,58 @@ button[data-cue-title-bar-window-control],
   }
 }
 
+/* Settings sheet: custom easing so panel feels like it settles into place. */
+[data-slot="sheet-content"][data-state="open"],
+[data-slot="sheet-content"][data-state="closed"] {
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+[data-slot="sheet-content"][data-state="open"] {
+  animation-duration: 350ms;
+}
+[data-slot="sheet-content"][data-state="closed"] {
+  animation-duration: 280ms;
+}
+[data-slot="sheet-overlay"][data-state="open"],
+[data-slot="sheet-overlay"][data-state="closed"] {
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+[data-slot="sheet-overlay"][data-state="open"] {
+  animation-duration: 200ms;
+}
+[data-slot="sheet-overlay"][data-state="closed"] {
+  animation-duration: 180ms;
+}
+
+/* Settings icon: one-shot rotation on click (gear metaphor). Open: 0→90°, close: 90→0°. */
+@keyframes settings-icon-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(90deg);
+  }
+}
+@keyframes settings-icon-spin-reverse {
+  from {
+    transform: rotate(90deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+.animate-settings-icon-spin {
+  animation: settings-icon-spin 0.25s ease-out forwards;
+}
+.animate-settings-icon-spin-reverse {
+  animation: settings-icon-spin-reverse 0.25s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-settings-icon-spin,
+  .animate-settings-icon-spin-reverse {
+    animation-duration: 0.01ms;
+  }
+}
+
 /* After Tailwind layers so it overrides preflight textarea { font: inherit }. */
 textarea[data-workbench-subtitle-editor] {
   font-family: var(--subtitle-editor-font) !important;

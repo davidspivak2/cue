@@ -478,7 +478,12 @@ fn main() {
     let backend_child_for_setup = Arc::clone(&backend_child);
     let backend_child_for_run = Arc::clone(&backend_child);
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+    builder
         .setup(move |app| {
             app.manage(AllowCloseState::default());
             if let Some(child) = start_backend(app) {

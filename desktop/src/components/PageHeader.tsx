@@ -3,6 +3,7 @@ import { ArrowLeft, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Tooltip,
   TooltipContent,
@@ -32,7 +33,14 @@ const PageHeader = ({
   settingsDisabledTooltip
 }: PageHeaderProps) => {
   const navigate = useNavigate();
+  const [settingsSpinKey, setSettingsSpinKey] = React.useState(0);
   const handleBack = onBack ?? (() => navigate("/"));
+
+  const handleSettingsClick = React.useCallback(() => {
+    if (settingsDisabled) return;
+    setSettingsSpinKey((k) => k + 1);
+    onOpenSettings();
+  }, [settingsDisabled, onOpenSettings]);
 
   return (
     <header className="flex flex-wrap items-center justify-between gap-3">
@@ -62,9 +70,17 @@ const PageHeader = ({
                     size="icon"
                     aria-label="Settings"
                     disabled={settingsDisabled}
-                    onClick={() => !settingsDisabled && onOpenSettings()}
+                    onClick={handleSettingsClick}
                   >
-                    <Settings className="h-4 w-4" />
+                    <span
+                      key={settingsSpinKey}
+                      className={cn(
+                        "inline-block",
+                        settingsSpinKey > 0 && "animate-settings-icon-spin"
+                      )}
+                    >
+                      <Settings className="h-4 w-4" />
+                    </span>
                   </Button>
                 </span>
               </TooltipTrigger>
