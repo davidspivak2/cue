@@ -91,6 +91,10 @@ export type SettingsConfig = {
 
 export type DeviceInfo = {
   gpu_available: boolean;
+  gpu_name?: string | null;
+  cpu_cores?: number;
+  estimate_5min_sec?: { speed?: number; auto?: number; quality?: number };
+  calibration_done?: boolean;
 };
 
 export type PreviewStyleRequest = {

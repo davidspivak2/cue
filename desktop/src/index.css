@@ -171,6 +171,11 @@ button[data-cue-title-bar-window-control],
   cursor: default;
 }
 
+/* Exception: Settings overlay heading (secret 7-tap); no pointer cursor. */
+[data-cursor-default] {
+  cursor: default;
+}
+
 /* Empty state stagger: welcome -> rest of sentence -> upload */
 @keyframes empty-state-fade-in {
   from {

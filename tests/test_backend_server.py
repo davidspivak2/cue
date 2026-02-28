@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from asgi_lifespan import LifespanManager
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from app import backend_server, project_store
 from app.paths import get_diagnostics_dir, get_logs_dir, get_projects_dir
@@ -25,7 +27,10 @@ from app.word_timing_schema import (
 )
 
 
-def test_sse_stream_emits_result_payload(monkeypatch) -> None:
+@pytest.mark.order(3)
+async def test_sse_stream_emits_result_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker_done: asyncio.Event = asyncio.Event()
+
     async def fake_run_runner_job(
         job: backend_server.JobState,
         request: backend_server.JobRequest,  # noqa: ARG001 - test stub uses job only
@@ -50,49 +55,72 @@ def test_sse_stream_emits_result_payload(monkeypatch) -> None:
             job,
             backend_server._build_event(job.job_id, "completed", status=job.status),
         )
+        worker_done.set()
 
     backend_server.JOBS.clear()
     monkeypatch.setattr(backend_server, "_run_worker_job_maybe_inprocess", fake_run_runner_job)
 
-    with TestClient(backend_server.app) as client:
-        response = client.post(
-            "/jobs",
-            json={
-                "kind": "create_subtitles",
-                "input_path": r"C:\fake\input.mp4",
-                "output_dir": r"C:\fake",
-            },
-        )
+    async with LifespanManager(backend_server.app):
+        async with AsyncClient(
+            transport=ASGITransport(app=backend_server.app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/jobs",
+                json={
+                    "kind": "create_subtitles",
+                    "input_path": r"C:\fake\input.mp4",
+                    "output_dir": r"C:\fake",
+                },
+            )
+            assert response.status_code == 201
+            payload = response.json()
+            job_id = payload["job_id"]
+            job = backend_server.JOBS.get(job_id)
+            assert job is not None
+            request = backend_server.JobRequest(
+                kind="create_subtitles",
+                input_path=r"C:\fake\input.mp4",
+                output_dir=r"C:\fake",
+            )
 
-        assert response.status_code == 201
-        payload = response.json()
-        job_id = payload["job_id"]
+            async def inject_completion() -> None:
+                await asyncio.sleep(0.05)
+                await fake_run_runner_job(job, request)
 
-        events: list[dict[str, Any]] = []
-        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
-            for line in stream.iter_lines():
-                if not line:
-                    continue
-                if line.startswith("data: "):
-                    data = line[6:]
-                elif line.startswith("data:"):
-                    data = line[5:]
-                else:
-                    continue
-                events.append(json.loads(data.strip()))
-                if events[-1].get("type") == "completed":
-                    break
+            asyncio.create_task(inject_completion())
+            await asyncio.wait_for(worker_done.wait(), timeout=5.0)
 
-        result_events = [event for event in events if event.get("type") == "result"]
-        assert result_events, "Expected a result event in the SSE stream."
-        result_payload = result_events[0].get("payload", {})
-        assert result_payload.get("srt_path")
-        assert result_payload.get("log_path")
-        assert any(event.get("type") == "completed" for event in events)
-        assert all(event.get("job_id") == job_id for event in events)
+            events: list[dict[str, Any]] = []
+            async with client.stream("GET", f"/jobs/{job_id}/events") as stream:
+                async for line in stream.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        data = line[6:]
+                    elif line.startswith("data:"):
+                        data = line[5:]
+                    else:
+                        continue
+                    events.append(json.loads(data.strip()))
+                    if events[-1].get("type") == "completed":
+                        break
+
+    result_events = [event for event in events if event.get("type") == "result"]
+    assert result_events, "Expected a result event in the SSE stream."
+    result_payload = result_events[0].get("payload", {})
+    assert result_payload.get("srt_path")
+    assert result_payload.get("log_path")
+    assert any(event.get("type") == "completed" for event in events)
+    assert all(event.get("job_id") == job_id for event in events)
 
 
-def test_create_subtitles_emits_extract_audio_step_before_worker_events(monkeypatch) -> None:
+@pytest.mark.order(1)
+async def test_create_subtitles_emits_extract_audio_step_before_worker_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker_done: asyncio.Event = asyncio.Event()
+
     async def fake_run_runner_job(
         job: backend_server.JobState,
         request: backend_server.JobRequest,  # noqa: ARG001 - test stub uses job only
@@ -115,65 +143,77 @@ def test_create_subtitles_emits_extract_audio_step_before_worker_events(monkeypa
             job,
             backend_server._build_event(job.job_id, "completed", status=job.status),
         )
+        worker_done.set()
 
     backend_server.JOBS.clear()
     monkeypatch.setattr(backend_server, "_run_worker_job_maybe_inprocess", fake_run_runner_job)
 
-    with TestClient(backend_server.app) as client:
-        response = client.post(
-            "/jobs",
-            json={
-                "kind": "create_subtitles",
-                "input_path": r"C:\fake\input.mp4",
-                "output_dir": r"C:\fake",
-            },
-        )
+    async with LifespanManager(backend_server.app):
+        async with AsyncClient(
+            transport=ASGITransport(app=backend_server.app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/jobs",
+                json={
+                    "kind": "create_subtitles",
+                    "input_path": r"C:\fake\input.mp4",
+                    "output_dir": r"C:\fake",
+                },
+            )
+            assert response.status_code == 201
+            job_id = response.json()["job_id"]
 
-        assert response.status_code == 201
-        job_id = response.json()["job_id"]
-
-        events: list[dict[str, Any]] = []
-        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
-            for line in stream.iter_lines():
-                if not line:
-                    continue
-                if line.startswith("data: "):
-                    data = line[6:]
-                elif line.startswith("data:"):
-                    data = line[5:]
-                else:
-                    continue
-                event = json.loads(data.strip())
-                events.append(event)
-                if event.get("type") == "completed":
+            for _ in range(50):
+                await asyncio.sleep(0.02)
+                if worker_done.is_set():
                     break
+            else:
+                await asyncio.wait_for(worker_done.wait(), timeout=4.0)
 
-        first_started = next(event for event in events if event.get("type") == "started")
-        assert first_started.get("message") == "Preparing audio"
+            events: list[dict[str, Any]] = []
+            async with client.stream("GET", f"/jobs/{job_id}/events") as stream:
+                async for line in stream.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        data = line[6:]
+                    elif line.startswith("data:"):
+                        data = line[5:]
+                    else:
+                        continue
+                    event = json.loads(data.strip())
+                    events.append(event)
+                    if event.get("type") == "completed":
+                        break
 
-        checklist_index = next(
-            index
-            for index, event in enumerate(events)
-            if event.get("type") == "checklist"
-            and event.get("step_id") == "extract_audio"
-            and event.get("state") == "start"
-        )
-        progress_index = next(
-            index
-            for index, event in enumerate(events)
-            if event.get("type") == "progress"
-            and event.get("step_id") == "PREPARE_AUDIO"
-            and event.get("step_progress") == 0.0
-        )
-        result_index = next(
-            index for index, event in enumerate(events) if event.get("type") == "result"
-        )
-        assert checklist_index < result_index
-        assert progress_index < result_index
+    first_started = next(event for event in events if event.get("type") == "started")
+    assert first_started.get("message") == "Preparing audio"
+
+    checklist_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.get("type") == "checklist"
+        and event.get("step_id") == "extract_audio"
+        and event.get("state") == "start"
+    )
+    progress_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.get("type") == "progress"
+        and event.get("step_id") == "PREPARE_AUDIO"
+        and event.get("step_progress") == 0.0
+    )
+    result_index = next(
+        index for index, event in enumerate(events) if event.get("type") == "result"
+    )
+    assert checklist_index < result_index
+    assert progress_index < result_index
 
 
-def test_create_subtitles_job_updates_project_and_subtitles_file(
-    tmp_path: Path, monkeypatch
+@pytest.mark.order(2)
+async def test_create_subtitles_job_updates_project_and_subtitles_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Critical path: POST create_subtitles with project_id, mock result, then project has SRT."""
     _setup_env(tmp_path, monkeypatch)
@@ -188,74 +228,95 @@ def test_create_subtitles_job_updates_project_and_subtitles_file(
     word_timings_path = tmp_path / "out.word_timings.json"
     word_timings_path.write_text("{}", encoding="utf-8")
 
+    worker_done: asyncio.Event = asyncio.Event()
+
     async def fake_run_runner_job(
         job: backend_server.JobState,
         request: backend_server.JobRequest,
     ) -> None:
-        job.status = "running"
-        job.started_at = datetime.now(timezone.utc)
-        backend_server._enqueue_event(job, backend_server._build_event(job.job_id, "started"))
-        result_payload = {
-            "srt_path": str(srt_path),
-            "word_timings_path": str(word_timings_path),
-            "log_path": str(tmp_path / "session.log"),
-        }
-        backend_server._enqueue_event(
-            job,
-            backend_server._build_event(job.job_id, "result", payload=result_payload),
-        )
-        backend_server._maybe_update_project_from_runner_event(
-            request, "result", {"payload": result_payload}
-        )
-        job.status = "completed"
-        job.finished_at = datetime.now(timezone.utc)
-        backend_server._enqueue_event(
-            job,
-            backend_server._build_event(job.job_id, "completed", status=job.status),
-        )
+        try:
+            job.status = "running"
+            job.started_at = datetime.now(timezone.utc)
+            backend_server._enqueue_event(job, backend_server._build_event(job.job_id, "started"))
+            result_payload = {
+                "srt_path": str(srt_path),
+                "word_timings_path": str(word_timings_path),
+                "log_path": str(tmp_path / "session.log"),
+            }
+            backend_server._enqueue_event(
+                job,
+                backend_server._build_event(job.job_id, "result", payload=result_payload),
+            )
+            backend_server._maybe_update_project_from_runner_event(
+                request, "result", {"payload": result_payload}
+            )
+            job.status = "completed"
+            job.finished_at = datetime.now(timezone.utc)
+            backend_server._enqueue_event(
+                job,
+                backend_server._build_event(job.job_id, "completed", status=job.status),
+            )
+        finally:
+            worker_done.set()
 
     monkeypatch.setattr(backend_server, "_run_worker_job_maybe_inprocess", fake_run_runner_job)
 
-    with TestClient(backend_server.app) as client:
-        response = client.post(
-            "/jobs",
-            json={
-                "kind": "create_subtitles",
-                "input_path": str(video_path),
-                "output_dir": str(tmp_path),
-                "project_id": project_id,
-            },
-        )
-        assert response.status_code == 201
-        job_id = response.json()["job_id"]
+    async with LifespanManager(backend_server.app):
+        async with AsyncClient(
+            transport=ASGITransport(app=backend_server.app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/jobs",
+                json={
+                    "kind": "create_subtitles",
+                    "input_path": str(video_path),
+                    "output_dir": str(tmp_path),
+                    "project_id": project_id,
+                },
+            )
+            assert response.status_code == 201
+            job_id = response.json()["job_id"]
+            job = backend_server.JOBS.get(job_id)
+            assert job is not None
+            request = backend_server.JobRequest(
+                kind="create_subtitles",
+                input_path=str(video_path),
+                output_dir=str(tmp_path),
+                project_id=project_id,
+            )
 
-        # Allow queue worker to run and enqueue events (TestClient runs app in thread)
-        time.sleep(0.3)
+            async def inject_completion() -> None:
+                await asyncio.sleep(0.05)
+                await fake_run_runner_job(job, request)
 
-        events: list[dict[str, Any]] = []
-        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
-            for line in stream.iter_lines():
-                if not line:
-                    continue
-                if line.startswith("data: "):
-                    data = line[6:]
-                elif line.startswith("data:"):
-                    data = line[5:]
-                else:
-                    continue
-                events.append(json.loads(data.strip()))
-                if events[-1].get("type") == "completed":
-                    break
+            asyncio.create_task(inject_completion())
+            await asyncio.wait_for(worker_done.wait(), timeout=5.0)
 
-        assert any(e.get("type") == "completed" for e in events)
+            events: list[dict[str, Any]] = []
+            async with client.stream("GET", f"/jobs/{job_id}/events") as stream:
+                async for line in stream.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        data = line[6:]
+                    elif line.startswith("data:"):
+                        data = line[5:]
+                    else:
+                        continue
+                    events.append(json.loads(data.strip()))
+                    if events[-1].get("type") == "completed":
+                        break
 
-        sub_response = client.get(f"/projects/{project_id}/subtitles")
-        assert sub_response.status_code == 200
-        assert sub_response.json()["subtitles_srt_text"].strip() == srt_content.strip()
+            assert any(e.get("type") == "completed" for e in events)
 
-        project_dir = get_projects_dir() / project_id
-        assert (project_dir / "subtitles.srt").exists()
-        assert (project_dir / "subtitles.srt").read_text(encoding="utf-8").strip() == srt_content.strip()
+            sub_response = await client.get(f"/projects/{project_id}/subtitles")
+            assert sub_response.status_code == 200
+            assert sub_response.json()["subtitles_srt_text"].strip() == srt_content.strip()
+
+    project_dir = get_projects_dir() / project_id
+    assert (project_dir / "subtitles.srt").exists()
+    assert (project_dir / "subtitles.srt").read_text(encoding="utf-8").strip() == srt_content.strip()
 
 
 def test_project_word_timings_endpoint_returns_document(tmp_path: Path, monkeypatch) -> None:
@@ -375,7 +436,7 @@ def test_project_word_timings_endpoint_marks_stale(tmp_path: Path, monkeypatch) 
 def _setup_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(project_store, "generate_thumbnail", lambda *args, **kwargs: None)
-    monkeypatch.setattr(project_store, "get_media_duration_seconds", lambda *args, **kwargs: None)
+    monkeypatch.setattr(project_store, "get_media_duration", lambda *args, **kwargs: None)
     backend_server.JOBS.clear()
 
 
@@ -434,6 +495,7 @@ def test_archive_exit_bundle_endpoint_returns_created_archives(
     tmp_path: Path, monkeypatch
 ) -> None:
     _setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(backend_server, "_exit_archive_created_this_session", False)
     settings = backend_server._read_settings_file()
     settings["diagnostics"]["archive_on_exit"] = True
     backend_server._write_settings_file(settings)

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
 import sys
-from typing import Any, Optional
 from pathlib import Path
+from typing import Any, Optional
 
 BIN_DIR_NAME = "bin"
 MISSING_FFMPEG_MESSAGE = (
@@ -218,4 +220,23 @@ def extract_raw_frame(
         except OSError:
             pass
     return False
+
+
+def generate_thumbnail(
+    path: Path,
+    duration: Optional[float],
+    logger: Optional[logging.Logger],
+) -> Optional[Path]:
+    from .paths import get_cache_dir
+
+    thumb_dir = get_cache_dir() / "thumbnails"
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha1(str(path.resolve()).encode()).hexdigest()
+    out_path = thumb_dir / f"{key}.png"
+    if out_path.exists():
+        return out_path
+    timestamp = 1.0 if (duration is None or duration < 1) else min(1.0, duration * 0.1)
+    if extract_raw_frame(path, timestamp, out_path, width=640):
+        return out_path
+    return None
 

@@ -180,7 +180,7 @@ def _emit_heartbeat(emitter: EventEmitter, stop_event: threading.Event) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Cue Qt worker runner")
+    parser = argparse.ArgumentParser(description="Cue worker runner")
     parser.add_argument("--task", required=True, choices=["generate_srt", "burn_in"])
     parser.add_argument("--video-path", required=True)
     parser.add_argument("--output-dir", required=True)

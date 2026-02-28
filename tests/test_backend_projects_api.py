@@ -12,7 +12,7 @@ from app import backend_server, project_store
 def _setup_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(project_store, "generate_thumbnail", lambda *args, **kwargs: None)
-    monkeypatch.setattr(project_store, "get_media_duration_seconds", lambda *args, **kwargs: None)
+    monkeypatch.setattr(project_store, "get_media_duration", lambda *args, **kwargs: None)
     backend_server.JOBS.clear()
 
 
@@ -197,7 +197,7 @@ def test_projects_include_active_task_snapshot(tmp_path: Path, monkeypatch) -> N
         assert checklist
         assert checklist[0].get("id") == "load_model"
         assert checklist[0].get("state") == "active"
-        assert checklist[0].get("detail") == "Loading AI model"
+        assert checklist[0].get("detail") == "Loading weights"
 
         detail_response = client.get(f"/projects/{project_id}")
         assert detail_response.status_code == 200

@@ -437,7 +437,7 @@ Acceptance:
 
 
 \### PR1 — Add Tauri + React UI shell (no backend integration)
-Status: Done (UI shell only; legacy Qt UI still exists).
+Status: Done (legacy Qt UI has been removed; Tauri is the only UI).
 
 \- \[x] Create `desktop/` with Vite + React + TS
 
@@ -717,7 +717,7 @@ Every PR must include:
 
 \### 2026-02-01
 
-\- PR1: Added initial `desktop/` Tauri + React shell with MUI theming, navigation, and placeholder screens (UI shell only; legacy Qt UI still exists).
+\- PR1: Added initial `desktop/` Tauri + React shell with MUI theming, navigation, and placeholder screens (legacy Qt UI has since been removed).
 
 
 

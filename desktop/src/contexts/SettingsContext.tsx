@@ -4,6 +4,7 @@ type SettingsContextValue = {
   openSettings: () => void;
   closeSettings: () => void;
   settingsOpen: boolean;
+  diagnosticsSectionVisible: boolean;
 };
 
 const SettingsContext = React.createContext<SettingsContextValue | null>(null);
@@ -20,14 +21,18 @@ export const SettingsProvider = ({
   children,
   openSettings,
   closeSettings,
-  settingsOpen
+  settingsOpen,
+  diagnosticsSectionVisible
 }: {
   children: React.ReactNode;
   openSettings: () => void;
   closeSettings: () => void;
   settingsOpen: boolean;
+  diagnosticsSectionVisible: boolean;
 }) => (
-  <SettingsContext.Provider value={{ openSettings, closeSettings, settingsOpen }}>
+  <SettingsContext.Provider
+    value={{ openSettings, closeSettings, settingsOpen, diagnosticsSectionVisible }}
+  >
     {children}
   </SettingsContext.Provider>
 );

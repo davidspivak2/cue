@@ -60,6 +60,7 @@ from .graphics_overlay_export import (
     resolve_video_stream_info,
 )
 from .paths import get_models_dir, get_preview_frames_dir
+from .transcription_rtf import get_rtf_est
 from .srt_utils import (
     SrtCue,
     compute_srt_sha256,
@@ -1925,6 +1926,7 @@ class Worker(QtCore.QObject):
         *,
         safe_mode: bool = False,
     ) -> None:
+        self._detected_language = None
         try:
             if not self.transcription_settings:
                 raise ValueError("Missing transcription settings")
@@ -1934,6 +1936,8 @@ class Worker(QtCore.QObject):
                 device = "cpu"
                 if compute_type == "float16":
                     compute_type = "int16"
+                elif compute_type == "int8_float16":
+                    compute_type = "int8"
             prefer_gpu = device == "cuda" and not force_cpu
             force_cpu_flag = force_cpu or device == "cpu"
             if safe_mode:
@@ -1985,7 +1989,7 @@ class Worker(QtCore.QObject):
                 "--srt",
                 str(srt_path),
                 "--lang",
-                "he",
+                "auto",
             ]
             if force_cpu_flag:
                 command.append("--force-cpu")
@@ -2577,6 +2581,7 @@ class Worker(QtCore.QObject):
                         language_code = (
                             language_match.group(1).lower() if language_match else "unknown"
                         )
+                        self._detected_language = language_code if language_code != "unknown" else None
                         language_name = self._describe_language(language_code)
                         self._emit_step_event(
                             ChecklistStep.DETECT_LANGUAGE,
@@ -2683,6 +2688,18 @@ class Worker(QtCore.QObject):
             return False
         return settings.categories.get(key, False)
 
+    def _get_subtitle_language(self, srt_path: Path) -> str:
+        if getattr(self, "_detected_language", None):
+            return self._detected_language
+        wt_path = word_timings_path_for_srt(srt_path)
+        if wt_path.exists():
+            try:
+                doc = load_word_timings_json(wt_path)
+                return doc.language
+            except (WordTimingValidationError, OSError):
+                pass
+        return "en"
+
     def _resolve_word_timings_path(self, srt_path: Path) -> Path:
         if self.word_timings_path is not None:
             return self.word_timings_path
@@ -2719,7 +2736,7 @@ class Worker(QtCore.QObject):
         ]
         try:
             doc = build_word_timing_stub(
-                language="he",
+                language=self._get_subtitle_language(srt_path),
                 srt_sha256=compute_srt_sha256(srt_path),
                 cues=cue_payload,
             )
@@ -2772,7 +2789,7 @@ class Worker(QtCore.QObject):
                 subtitle_mode=self.subtitle_mode,
                 srt_path=srt_path,
                 audio_path=audio_path,
-                language="he",
+                language=self._get_subtitle_language(srt_path),
                 prefer_gpu=not force_cpu,
                 device="cpu" if force_cpu else None,
             )
@@ -3426,7 +3443,7 @@ class Worker(QtCore.QObject):
         self._write_subtitles_done_emitted = True
 
     def _refresh_write_subtitles_words_total(self, srt_path: Path) -> None:
-        total = count_alignment_words_in_srt(srt_path, "he")
+        total = count_alignment_words_in_srt(srt_path, self._get_subtitle_language(srt_path))
         if total > 0:
             self._write_subtitles_words_total = total
             return
@@ -3568,16 +3585,7 @@ class Worker(QtCore.QObject):
         device: str,
         compute_type: str,
     ) -> float:
-        quality = settings.quality
-        if quality == "fast":
-            return 4.0
-        if quality == "accurate":
-            return 6.0
-        if quality == "ultra":
-            return 10.0
-        if device == "cuda" and compute_type == "float16":
-            return 1.5
-        return 6.0
+        return get_rtf_est(settings.quality, device, compute_type)
 
     def _stop_transcribe_estimator(self) -> None:
         if self._transcribe_estimator_stop:

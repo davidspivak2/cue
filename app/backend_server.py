@@ -22,6 +22,7 @@ import os
 import subprocess
 import signal
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -39,8 +40,16 @@ from pydantic import BaseModel, Field
 from app import project_store
 from app.config import apply_config_defaults
 from app.ffmpeg_utils import ensure_ffmpeg_available, get_subprocess_kwargs
-from app.paths import get_config_path, get_diagnostics_dir, get_logs_dir, get_projects_dir
-from app.transcription_device import gpu_available
+from app.paths import (
+    get_app_data_dir,
+    get_config_path,
+    get_diagnostics_dir,
+    get_logs_dir,
+    get_projects_dir,
+)
+from app.backend_pipeline_adapter import _resolve_device_and_compute
+from app.transcription_device import get_cpu_cores, get_gpu_name, gpu_available
+from app.transcription_rtf import get_rtf_est, get_rtf_est_for_device
 
 
 HOST = "127.0.0.1"
@@ -229,6 +238,7 @@ class JobRequest(BaseModel):
         "pipeline",
         "create_subtitles",
         "create_video_with_subtitles",
+        "calibrate",
     ] = "pipeline"
     input_path: Optional[str] = None
     output_dir: Optional[str] = None
@@ -279,7 +289,8 @@ class ProjectRelinkRequest(BaseModel):
 
 
 VALID_SAVE_POLICIES = {"same_folder", "fixed_folder", "ask_every_time"}
-VALID_TRANSCRIPTION_QUALITIES = {"auto", "fast", "accurate", "ultra"}
+VALID_TRANSCRIPTION_QUALITIES = {"auto", "speed", "quality"}
+LEGACY_QUALITY_TO_NEW = {"fast": "speed", "accurate": "auto", "ultra": "quality"}
 DEFAULT_DIAGNOSTICS_CATEGORIES = {
     "app_system": True,
     "video_info": True,
@@ -304,8 +315,10 @@ def _normalize_settings(raw: dict[str, Any]) -> dict[str, Any]:
         data["save_folder"] = ""
 
     transcription_quality = data.get("transcription_quality")
-    if transcription_quality not in VALID_TRANSCRIPTION_QUALITIES:
-        data["transcription_quality"] = "auto"
+    if transcription_quality in LEGACY_QUALITY_TO_NEW:
+        data["transcription_quality"] = LEGACY_QUALITY_TO_NEW[transcription_quality]
+    elif transcription_quality not in VALID_TRANSCRIPTION_QUALITIES:
+        data["transcription_quality"] = "quality"
 
     data["punctuation_rescue_fallback_enabled"] = (
         data.get("punctuation_rescue_fallback_enabled")
@@ -754,6 +767,55 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
             job.snapshot_message = message.strip()
         if event_type in {"cancelled", "error"}:
             _set_project_task_notice(job, event)
+        if event_type == "completed" and getattr(job, "kind", None) == "calibrate":
+            try:
+                if job.started_at and job.finished_at:
+                    elapsed = (job.finished_at - job.started_at).total_seconds()
+                    effective_sec = max(
+                        0.0, elapsed - CALIBRATION_PREPARING_PREVIEW_SEC
+                    )
+                    rtf_speed_measured = effective_sec / 60.0
+                    device_speed, compute_speed = _resolve_device_and_compute(
+                        "speed", gpu_available_fn=gpu_available
+                    )
+                    rtf_speed_est = get_rtf_est(
+                        "speed", device_speed, compute_speed
+                    )
+                    estimate_speed = int(
+                        round(AUDIO_DURATION_5MIN_SEC * rtf_speed_measured)
+                    )
+                    device_auto, compute_auto = _resolve_device_and_compute(
+                        "auto", gpu_available_fn=gpu_available
+                    )
+                    device_quality, compute_quality = _resolve_device_and_compute(
+                        "quality", gpu_available_fn=gpu_available
+                    )
+                    rtf_auto = get_rtf_est(
+                        "auto", device_auto, compute_auto
+                    )
+                    rtf_quality = get_rtf_est(
+                        "quality", device_quality, compute_quality
+                    )
+                    estimate_5min_sec: dict[str, int] = {
+                        "speed": estimate_speed,
+                        "auto": int(
+                            round(
+                                AUDIO_DURATION_5MIN_SEC
+                                * rtf_speed_measured
+                                * (rtf_auto / rtf_speed_est)
+                            )
+                        ),
+                        "quality": int(
+                            round(
+                                AUDIO_DURATION_5MIN_SEC
+                                * rtf_speed_measured
+                                * (rtf_quality / rtf_speed_est)
+                            )
+                        ),
+                    }
+                    _save_calibration_estimates(estimate_5min_sec)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Calibration save failed: %s", exc)
 
 
 def _prune_job_event_queue(job: JobState) -> None:
@@ -948,7 +1010,7 @@ def _build_runner_command(request: JobRequest) -> list[str]:
         command = [
             sys.executable,
             "-m",
-            "app.qt_worker_runner",
+            "app.worker_runner",
         ]
     command += [
         "--task",
@@ -1480,10 +1542,10 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
         project_store.get_project(payload.project_id)
     if payload.kind == "create_video_with_subtitles" and payload.project_id:
         _resolve_export_request_from_project(payload)
-    if payload.kind in {"pipeline", "create_subtitles", "create_video_with_subtitles"}:
+    if payload.kind in {"pipeline", "create_subtitles", "create_video_with_subtitles", "calibrate"}:
         if not payload.input_path:
             raise HTTPException(status_code=422, detail="input_path_required")
-        if not payload.output_dir:
+        if payload.kind != "calibrate" and not payload.output_dir:
             raise HTTPException(status_code=422, detail="output_dir_required")
     if payload.kind == "create_video_with_subtitles" and not payload.srt_path:
         raise HTTPException(status_code=422, detail="srt_path_required")
@@ -1506,6 +1568,56 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
     logger.info("Job %s request received (kind=%s)", job_id, payload.kind)
     JOBS[job_id] = job
 
+    if payload.kind == "calibrate":
+        output_dir = tempfile.mkdtemp(prefix="cue_calibrate_")
+        calibrate_options = dict(payload.options or {})
+        calibrate_options["quality"] = "speed"
+        calibrate_options["transcription_quality"] = "speed"
+        calibrate_request = JobRequest(
+            kind="calibrate",
+            input_path=payload.input_path,
+            output_dir=output_dir,
+            options=calibrate_options,
+        )
+        slot_free = (
+            _count_running_by_kind("create_subtitles") == 0
+            and _count_running_by_kind("calibrate") == 0
+        )
+        if slot_free:
+            job.status = "running"
+            job.started_at = datetime.now(timezone.utc)
+            _enqueue_event(
+                job,
+                _build_event(
+                    job_id,
+                    "started",
+                    heading="Calibrating",
+                    message="Extracting audio",
+                ),
+            )
+            _enqueue_event(
+                job,
+                _build_event(
+                    job_id,
+                    "checklist",
+                    step_id="extract_audio",
+                    state="start",
+                ),
+            )
+            _enqueue_event(
+                job,
+                _build_event(
+                    job_id,
+                    "progress",
+                    step_id="PREPARE_AUDIO",
+                    step_progress=0.0,
+                    pct=0,
+                    message="Extracting audio",
+                ),
+            )
+        _create_subtitles_queue.put_nowait((job, calibrate_request))
+        events_url = f"http://{HOST}:{PORT}/jobs/{job_id}/events"
+        return {"job_id": job_id, "events_url": events_url, "status": job.status}
     if payload.kind == "create_subtitles":
         slot_free = _count_running_by_kind("create_subtitles") == 0
         if slot_free:
@@ -1972,13 +2084,79 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
     }
 
 
+AUDIO_DURATION_5MIN_SEC = 300
+CALIBRATION_PREPARING_PREVIEW_SEC = 5
+CALIBRATION_FILENAME = "calibration.json"
+
+
+def _load_calibration_estimates() -> Optional[dict[str, int]]:
+    path = get_app_data_dir() / CALIBRATION_FILENAME
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        est = data.get("estimate_5min_sec") if isinstance(data, dict) else None
+        if isinstance(est, dict) and all(
+            isinstance(v, (int, float)) for v in est.values()
+        ):
+            return {k: int(v) for k, v in est.items()}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _save_calibration_estimates(estimate_5min_sec: dict[str, int]) -> None:
+    path = get_app_data_dir() / CALIBRATION_FILENAME
+    try:
+        path.write_text(
+            json.dumps({"estimate_5min_sec": estimate_5min_sec}, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Failed to save calibration: %s", exc)
+
+
 @app.get("/device")
 def device_info() -> dict[str, Any]:
     try:
         available = bool(gpu_available())
     except Exception:  # noqa: BLE001
         available = False
-    return {"gpu_available": available}
+    out: dict[str, Any] = {"gpu_available": available}
+    try:
+        gpu_name = get_gpu_name()
+        if gpu_name is not None:
+            out["gpu_name"] = gpu_name
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        out["cpu_cores"] = get_cpu_cores()
+    except Exception:  # noqa: BLE001
+        out["cpu_cores"] = 1
+    estimate_5min_sec: dict[str, int] = {}
+    calibration = _load_calibration_estimates()
+    if calibration:
+        estimate_5min_sec = calibration
+        out["calibration_done"] = True
+    else:
+        for q in ("speed", "auto", "quality"):
+            try:
+                device, compute_type = _resolve_device_and_compute(
+                    q, gpu_available_fn=gpu_available
+                )
+                rtf = get_rtf_est_for_device(
+                    q,
+                    device,
+                    compute_type,
+                    gpu_name=out.get("gpu_name"),
+                    cpu_cores=out.get("cpu_cores"),
+                )
+                estimate_5min_sec[q] = int(round(AUDIO_DURATION_5MIN_SEC * rtf))
+            except Exception:  # noqa: BLE001
+                pass
+    if estimate_5min_sec:
+        out["estimate_5min_sec"] = estimate_5min_sec
+    return out
 
 
 def _load_version_from_tauri_config() -> Optional[str]:

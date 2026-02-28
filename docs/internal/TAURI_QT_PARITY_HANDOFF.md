@@ -44,7 +44,7 @@ Before marking work done or handing off:
 
 ## 1) Non-negotiables (must follow)
 
-- The legacy Qt/PySide6 UI is now reference-only for historical copy/checklist context.
+- The legacy Qt/PySide6 UI has been removed.
 - The new UI is the Tauri + React app under `desktop/`.
 - Do NOT use MUI anywhere in the desktop app. Remove it now, not later.
 - Do not use text symbol icons (like check marks or gears). Use real icons from `lucide-react`.
@@ -59,7 +59,7 @@ As of 2026-02-11, in this repo:
 
 Backend
 - `app/backend_server.py` supports `create_subtitles` and `create_video_with_subtitles`, plus `/settings`, `/preview-style`, `/preview-overlay`, and `/device`.
-- `app/qt_worker_runner.py` exists and emits JSONL events.
+- `app/worker_runner.py` exists and emits JSONL events.
 - `app/workers.py` includes ffmpeg watchdog + audio filter fallback and safer transcription subprocess handling.
 - Settings stored in `config.json` under the app data dir (same as Qt).
 - Project system backend:
@@ -97,11 +97,12 @@ If any item above is no longer true, update this section before you continue.
 
 ## 3) Legacy Qt source of truth (read before coding)
 
-Primary files
-- `app/main.py` (state machine, copy, checklist mapping)
-- `app/ui/widgets.py` (DropZone, VideoCard, SavingToLine)
+The legacy Qt UI has been removed. Copy and state machine behavior now live in the Tauri app.
+
+Primary files (current)
+- `desktop/` (Tauri + React: state machine, copy, checklist mapping)
 - `app/progress.py` (checklist step IDs)
-- `app/workers.py` (Worker signals used by Qt UI)
+- `app/workers.py` (Worker signals used by worker_runner subprocess)
 
 State machine (Home screen)
 `EMPTY -> VIDEO_SELECTED -> WORKING -> SUBTITLES_READY -> EXPORT_DONE`
@@ -170,7 +171,7 @@ Goal: Fix the 25% hang by running the legacy Worker inside a Qt-safe subprocess.
 Depends on: None
 
 Tasks
-- Add `app/qt_worker_runner.py` that creates a Qt app context and runs the legacy Worker.
+- Add `app/worker_runner.py` that creates a Qt app context and runs the legacy Worker.
 - Emit JSONL events to stdout: started, checklist, progress, log, result, heartbeat, terminal.
 - Watch stdin for "cancel" and call `worker.cancel()`.
 - Update `app/backend_server.py` to spawn the runner per job and stream events via SSE.
@@ -794,7 +795,7 @@ Agent: gpt-5.2-codex-xhigh
 Phase: Phase 1
 Status: Done
 Summary:
-- Added `app/qt_worker_runner.py` to run legacy Worker in a Qt-safe subprocess and emit JSON events (started, checklist, progress, log, result, heartbeat, terminal).
+- Added `app/worker_runner.py` to run legacy Worker in a Qt-safe subprocess and emit JSON events (started, checklist, progress, log, result, heartbeat, terminal).
 - Updated `app/backend_server.py` to support `create_subtitles` / `create_video_with_subtitles` and spawn the runner with cancel handling.
 - Fixed audio extraction hang: added `-nostdin`, a no-output watchdog for ffmpeg, and fallback retry without filters.
 - Hardened transcription: unbuffered `-u`, env `PYTHONUNBUFFERED`, safe-mode retry (CPU int8, no VAD/rescue), and stdin set to DEVNULL.
@@ -802,7 +803,7 @@ Summary:
 - Alignment subprocess now runs unbuffered and stdin=DEVNULL to avoid blocking.
 - Removed passing `--ffmpeg-args-json` to the transcription worker to avoid hanging in this environment.
 - Manual test succeeded on `C:\\Users\\david\\Desktop\\test_30s.mp4` with full result payload.
-- Tests run: `python -m app.qt_worker_runner --task generate_srt` (manual).
+- Tests run: `python -m app.worker_runner --task generate_srt` (manual).
 - Known issues: None observed in the final run; additional UI and tests still pending.
 - Suggested next step: Phase 2 (frontend job client + typed events + legacy copy), then Phase 3 (Home UI).
 

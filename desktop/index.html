@@ -14,19 +14,70 @@
     <script>
       (function() {
         var d = document.documentElement;
-        var m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
-        d.classList.add(m && m.matches ? 'dark' : 'light');
+        var theme = 'system';
+        try { theme = localStorage.getItem('theme') || 'system'; } catch (_) {}
+        var isLight = false;
+        if (theme === 'light') { d.classList.add('light'); isLight = true; }
+        else if (theme === 'dark') d.classList.add('dark');
+        else {
+          var m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+          isLight = !(m && m.matches);
+          d.classList.add(isLight ? 'light' : 'dark');
+        }
+        var bg = isLight ? '#f5f9ff' : '#09090b';
+        d.style.backgroundColor = bg;
+        document.body.style.backgroundColor = bg;
+        try {
+          if (sessionStorage.getItem('cue-splash-dismissed') === '1') d.classList.add('splash-skip');
+        } catch (_) {}
       })();
     </script>
     <style>
-      html, body { margin: 0; overflow: hidden; min-height: 100vh; background: #0b1220; }
+      /* Splash/page backgrounds: keep in sync with --background in src/index.css (.dark and :root) */
+      html, body { margin: 0; overflow: hidden; min-height: 100vh; background: #09090b; }
       html.light body { background: #f5f9ff; }
-      #root { min-height: 100vh; background: #0b1220; }
+      #root { min-height: 100vh; background: #09090b; }
       html.light #root { background: #f5f9ff; }
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #09090b;
+      }
+      html.light #app-splash { background: #f5f9ff; }
+      #app-splash-spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #334155;
+        border-top-color: #94a3b8;
+        border-radius: 50%;
+        animation: app-splash-spin 0.8s linear infinite;
+      }
+      html.light #app-splash-spinner {
+        border-color: #c9d8f0;
+        border-top-color: #5b6b85;
+      }
+      @keyframes app-splash-spin { to { transform: rotate(360deg); } }
+      #app-splash-text {
+        margin-top: 1rem;
+        font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+        font-size: 0.875rem;
+        color: #94a3b8;
+      }
+      html.light #app-splash-text { color: #5b6b85; }
+      html.splash-skip #app-splash { display: none !important; }
     </style>
   </head>
-  <body>
-    <div id="root" data-tauri-drag-region></div>
+  <body data-tauri-drag-region>
+    <div id="app-splash" data-tauri-drag-region aria-live="polite" aria-label="Starting Cue">
+      <div id="app-splash-spinner" aria-hidden="true"></div>
+      <p id="app-splash-text">Starting Cue...</p>
+    </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

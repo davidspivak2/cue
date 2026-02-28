@@ -21,6 +21,7 @@ use tauri::{path::BaseDirectory, App, AppHandle, Emitter, Manager, RunEvent, Win
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 use zip::ZipArchive;
 
+const CALIBRATION_VIDEO_FILENAME: &str = "calibration_60s.mp4";
 const ENGINE_PAYLOAD_FILENAME: &str = "engine_payload.zip";
 const ENGINE_READY_SENTINEL: &str = ".extract-complete";
 const ENGINE_PAYLOAD_METADATA_FILENAME: &str = ".payload-metadata";
@@ -442,6 +443,18 @@ impl Default for AllowCloseState {
 }
 
 #[tauri::command]
+fn get_calibration_video_path(app: AppHandle) -> Result<String, String> {
+    let path = app
+        .path()
+        .resolve(CALIBRATION_VIDEO_FILENAME, BaseDirectory::Resource)
+        .map_err(|e| format!("Failed to resolve calibration video path: {e}"))?;
+    if !path.exists() {
+        return Err(format!("Calibration video not found: {}", path.display()));
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn allow_exit_and_close(app: AppHandle) -> Result<(), String> {
     app.try_state::<AllowCloseState>()
         .ok_or_else(|| "AllowCloseState not found".to_string())?
@@ -520,7 +533,10 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![allow_exit_and_close])
+        .invoke_handler(tauri::generate_handler![
+            get_calibration_video_path,
+            allow_exit_and_close
+        ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(move |_app, event| {

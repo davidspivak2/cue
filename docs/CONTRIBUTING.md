@@ -136,18 +136,6 @@ npm run tauri build
 
 ---
 
-## Legacy Qt UI (PySide6) — reference only
-
-The legacy Qt UI under `app/main.py` is the original production interface. It is kept as a reference while the Tauri app reaches full feature parity. **Do not add new features to the Qt UI.** It will be removed once the Tauri app is fully functional.
-
-To run it (Windows only, for reference):
-```bat
-.venv\Scripts\activate
-python -m app.main
-```
-
----
-
 ## Development workflow
 
 - **Branching:** Create feature branches from `main`, e.g. `feature/short-description`.
@@ -184,7 +172,7 @@ scripts\run_tests.cmd
 ```
 
 Notes:
-- Qt-based tests auto-create a `QApplication`. If PySide6 is not installed, those tests are skipped automatically.
+- Some tests use PySide6 for graphics/preview rendering. If PySide6 is not installed, those tests are skipped automatically.
 - Set `RUN_TESTS_NO_PAUSE=1` to skip the final pause in non-interactive runs on Windows.
 
 ### Linting

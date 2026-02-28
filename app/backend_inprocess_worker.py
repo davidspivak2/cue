@@ -31,7 +31,7 @@ def warmup_inprocess_runtime() -> dict[str, Any]:
         result["qt_ready"] = True
 
         # Warm module imports used in run_worker_inprocess without starting a job.
-        from app.qt_worker_runner import (  # noqa: F401
+        from app.worker_runner import (  # noqa: F401
             _build_progress_controller,
             _resolve_settings,
             _resolve_subtitle_style,
@@ -65,7 +65,7 @@ def run_worker_inprocess(
         app = QtWidgets.QApplication(sys.argv if hasattr(sys, "argv") else [])
 
     from app.progress import StepEvent
-    from app.qt_worker_runner import (
+    from app.worker_runner import (
         _build_progress_controller,
         _resolve_settings,
         _resolve_subtitle_style,
@@ -74,7 +74,7 @@ def run_worker_inprocess(
 
     task_type = (
         TaskType.GENERATE_SRT
-        if getattr(request, "kind", None) == "create_subtitles"
+        if getattr(request, "kind", None) in ("create_subtitles", "calibrate")
         else TaskType.BURN_IN
     )
     options = getattr(request, "options", None) or {}
