@@ -4471,7 +4471,7 @@ const Workbench = () => {
                   />
                   <div
                     ref={videoClickSurfaceRef}
-                    className="absolute cursor-pointer"
+                    className="absolute cursor-default"
                     style={displayedVideoGeometryStyle}
                     onClick={handleVideoSurfaceClick}
                     onDoubleClick={handleVideoSurfaceDoubleClick}
@@ -4737,7 +4737,7 @@ const Workbench = () => {
                   <div
                     ref={videoControlsBarRef}
                     className={cn(
-                      "flex cursor-pointer flex-col justify-end rounded-b-md transition-opacity duration-200",
+                      "flex cursor-default flex-col justify-end rounded-b-md transition-opacity duration-200",
                       showVideoControls ? "opacity-100" : "opacity-0"
                     )}
                     style={{
@@ -4837,7 +4837,7 @@ const Workbench = () => {
                       </div>
                     </div>
                     <div
-                      className="flex cursor-pointer items-center gap-2 px-2 py-1.5"
+                      className="flex cursor-default items-center gap-2 px-2 py-1.5"
                       style={{
                         height: VIDEO_CONTROL_BAR_HEIGHT_PX,
                         background:

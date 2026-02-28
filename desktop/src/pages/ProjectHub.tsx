@@ -1187,6 +1187,19 @@ const ProjectHub = () => {
                     </TooltipTrigger>
                     <TooltipContent side="top" collisionPadding={8}>{REMOVE_FROM_CUE_LABEL}</TooltipContent>
                   </Tooltip>
+                  {effectiveActiveTask && effectiveActiveTask.status !== "queued" && (
+                    <div
+                      className="absolute bottom-0 left-0 right-0 bg-black/70 px-2 py-1.5"
+                      data-testid={`project-card-progress-overlay-${project.project_id}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-white">
+                          {Math.round(activeTaskPct)}%
+                        </span>
+                      </div>
+                      <Progress value={activeTaskPct} className="h-1 mt-1 bg-white/20" />
+                    </div>
+                  )}
                 </div>
                 <div className="mt-3 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1199,31 +1212,6 @@ const ProjectHub = () => {
                   </div>
                   {durationLabel && (
                     <p className="text-xs text-muted-foreground">{durationLabel}</p>
-                  )}
-                  {effectiveActiveTask && (
-                    <div
-                      className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-2"
-                      data-testid={`project-card-active-task-${project.project_id}`}
-                    >
-                      {effectiveActiveTask.status !== "queued" && !hideProgressLabelCard && (
-                        <p className="text-xs font-medium text-foreground">{activeTaskHeading}</p>
-                      )}
-                      {effectiveActiveTask.status !== "queued" && (
-                        <>
-                          {!hideProgressLabelCard && activeTaskDetail && (
-                            <p className="truncate text-xs text-muted-foreground">
-                              {activeTaskDetail}
-                            </p>
-                          )}
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between text-xs text-muted-foreground">
-                              <span>{Math.round(activeTaskPct)}%</span>
-                            </div>
-                            <Progress value={activeTaskPct} />
-                          </div>
-                        </>
-                      )}
-                    </div>
                   )}
                   {shouldShowTaskNotice && taskNotice && !isMissingFile && (
                     <div

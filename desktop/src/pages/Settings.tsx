@@ -6,6 +6,7 @@ import EngineSkeletonLoader from "@/components/EngineSkeletonLoader";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
@@ -406,53 +407,40 @@ const Settings = () => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Punctuation">
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id="punctuation-rescue"
-            checked={settings.punctuation_rescue_fallback_enabled}
-            onCheckedChange={(checked) =>
-              persistSettings({ punctuation_rescue_fallback_enabled: Boolean(checked) })
-            }
-          />
-          <Label htmlFor="punctuation-rescue">
-            Improve punctuation automatically (recommended)
-          </Label>
+      <SettingsSection title="Transcription options">
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="punctuation-rescue">Improve punctuation</Label>
+              <p className="text-xs text-muted-foreground">
+                If subtitles come out with little or no punctuation, Cue will retry
+                transcription in a compatibility mode. This can take longer.
+              </p>
+            </div>
+            <Switch
+              id="punctuation-rescue"
+              checked={settings.punctuation_rescue_fallback_enabled}
+              onCheckedChange={(checked) =>
+                persistSettings({ punctuation_rescue_fallback_enabled: Boolean(checked) })
+              }
+            />
+          </div>
+          <div className="flex items-start justify-between gap-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="audio-filter">Clean up audio before transcription</Label>
+              <p className="text-xs text-muted-foreground">
+                May help noisy recordings, but can reduce punctuation.
+              </p>
+            </div>
+            <Switch
+              id="audio-filter"
+              checked={settings.apply_audio_filter}
+              onCheckedChange={(checked) =>
+                persistSettings({ apply_audio_filter: Boolean(checked) })
+              }
+            />
+          </div>
         </div>
-        <p className="pl-6 text-sm text-muted-foreground">
-          If subtitles come out with little or no punctuation, the app will retry
-          transcription in a compatibility mode and use that result. This can take longer.
-        </p>
-      </SettingsSection>
-
-      <SettingsSection title="Audio">
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id="audio-filter"
-            checked={settings.apply_audio_filter}
-            onCheckedChange={(checked) =>
-              persistSettings({ apply_audio_filter: Boolean(checked) })
-            }
-          />
-          <Label htmlFor="audio-filter">Clean up audio before transcription</Label>
-        </div>
-        <p className="pl-6 text-sm text-muted-foreground">
-          May help noisy recordings, but can reduce punctuation. Recommended: OFF unless
-          needed.
-        </p>
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id="keep-audio"
-            checked={settings.keep_extracted_audio}
-            onCheckedChange={(checked) =>
-              persistSettings({ keep_extracted_audio: Boolean(checked) })
-            }
-          />
-          <Label htmlFor="keep-audio">Keep extracted WAV file</Label>
-        </div>
-        <p className="pl-6 text-sm text-muted-foreground">
-          Keeps the *_audio_for_whisper.wav file after transcription completes.
-        </p>
       </SettingsSection>
 
       <div data-testid="settings-diagnostics-section">

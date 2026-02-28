@@ -252,8 +252,31 @@ const TitleBar = () => {
   const navigate = useNavigate();
   const width = useWindowWidth();
   const { openSettings, closeSettings, settingsOpen } = useSettings();
+  const [settingsSpinKey, setSettingsSpinKey] = React.useState(0);
+  const [settingsSpinDirection, setSettingsSpinDirection] = React.useState<
+    "open" | "close" | null
+  >(null);
+  const prevSettingsOpenRef = React.useRef(settingsOpen);
   const { tabs, activeView, setActiveView, closeTab, reorderTabs } = useWorkbenchTabs();
   const tabLayoutMode = getTabLayoutMode(width, tabs.length);
+
+  React.useEffect(() => {
+    if (prevSettingsOpenRef.current && !settingsOpen) {
+      setSettingsSpinDirection("close");
+      setSettingsSpinKey((k) => k + 1);
+    }
+    prevSettingsOpenRef.current = settingsOpen;
+  }, [settingsOpen]);
+
+  const handleSettingsClick = React.useCallback(() => {
+    if (settingsOpen) {
+      closeSettings();
+    } else {
+      setSettingsSpinDirection("open");
+      setSettingsSpinKey((k) => k + 1);
+      openSettings();
+    }
+  }, [settingsOpen, openSettings, closeSettings]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -394,12 +417,23 @@ const TitleBar = () => {
       {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
       <div className="relative z-10 flex shrink-0 self-stretch items-stretch">
         <TitleBarButton
-          onClick={settingsOpen ? closeSettings : openSettings}
+          onClick={handleSettingsClick}
           title="Settings"
           aria-label="Settings"
           selected={settingsOpen}
         >
-          <Settings className="h-4 w-4" />
+          <span
+            key={settingsSpinKey}
+            className={cn(
+              "inline-block",
+              settingsSpinKey > 0 &&
+                (settingsSpinDirection === "open"
+                  ? "animate-settings-icon-spin"
+                  : "animate-settings-icon-spin-reverse")
+            )}
+          >
+            <Settings className="h-4 w-4" />
+          </span>
         </TitleBarButton>
         <TitleBarButton
           onClick={handleMinimize}
