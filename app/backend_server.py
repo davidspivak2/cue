@@ -48,7 +48,13 @@ from app.paths import (
     get_projects_dir,
 )
 from app.backend_pipeline_adapter import _resolve_device_and_compute
-from app.transcription_device import get_cpu_cores, get_gpu_name, gpu_available
+from app.transcription_device import (
+    get_cpu_cores,
+    get_gpu_name,
+    gpu_available,
+    ultra_available,
+    ultra_device,
+)
 from app.transcription_rtf import get_rtf_est, get_rtf_est_for_device
 
 
@@ -289,8 +295,8 @@ class ProjectRelinkRequest(BaseModel):
 
 
 VALID_SAVE_POLICIES = {"same_folder", "fixed_folder", "ask_every_time"}
-VALID_TRANSCRIPTION_QUALITIES = {"auto", "speed", "quality"}
-LEGACY_QUALITY_TO_NEW = {"fast": "speed", "accurate": "auto", "ultra": "quality"}
+VALID_TRANSCRIPTION_QUALITIES = {"auto", "speed", "quality", "ultra"}
+LEGACY_QUALITY_TO_NEW = {"fast": "speed", "accurate": "auto"}
 DEFAULT_DIAGNOSTICS_CATEGORIES = {
     "app_system": True,
     "video_info": True,
@@ -318,6 +324,8 @@ def _normalize_settings(raw: dict[str, Any]) -> dict[str, Any]:
     if transcription_quality in LEGACY_QUALITY_TO_NEW:
         data["transcription_quality"] = LEGACY_QUALITY_TO_NEW[transcription_quality]
     elif transcription_quality not in VALID_TRANSCRIPTION_QUALITIES:
+        data["transcription_quality"] = "quality"
+    if data["transcription_quality"] == "ultra" and not ultra_available():
         data["transcription_quality"] = "quality"
 
     data["punctuation_rescue_fallback_enabled"] = (
@@ -813,6 +821,20 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
                             )
                         ),
                     }
+                    if ultra_available():
+                        device_ultra, compute_ultra = _resolve_device_and_compute(
+                            "ultra", gpu_available_fn=gpu_available
+                        )
+                        rtf_ultra = get_rtf_est(
+                            "ultra", device_ultra, compute_ultra
+                        )
+                        estimate_5min_sec["ultra"] = int(
+                            round(
+                                AUDIO_DURATION_5MIN_SEC
+                                * rtf_speed_measured
+                                * (rtf_ultra / rtf_speed_est)
+                            )
+                        )
                     _save_calibration_estimates(estimate_5min_sec)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Calibration save failed: %s", exc)
@@ -1579,10 +1601,7 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
             output_dir=output_dir,
             options=calibrate_options,
         )
-        slot_free = (
-            _count_running_by_kind("create_subtitles") == 0
-            and _count_running_by_kind("calibrate") == 0
-        )
+        slot_free = _count_running_by_kind("calibrate") == 0
         if slot_free:
             job.status = "running"
             job.started_at = datetime.now(timezone.utc)
@@ -2133,13 +2152,24 @@ def device_info() -> dict[str, Any]:
         out["cpu_cores"] = get_cpu_cores()
     except Exception:  # noqa: BLE001
         out["cpu_cores"] = 1
+    try:
+        out["ultra_available"] = ultra_available()
+        out["ultra_device"] = ultra_device()
+    except Exception:  # noqa: BLE001
+        out["ultra_available"] = False
+        out["ultra_device"] = None
     estimate_5min_sec: dict[str, int] = {}
     calibration = _load_calibration_estimates()
     if calibration:
-        estimate_5min_sec = calibration
+        estimate_5min_sec = dict(calibration)
         out["calibration_done"] = True
+        if "quality" in estimate_5min_sec and "ultra" in estimate_5min_sec and estimate_5min_sec["quality"] == estimate_5min_sec["ultra"]:
+            estimate_5min_sec["ultra"] = int(round(estimate_5min_sec["quality"] * 1.5))
     else:
-        for q in ("speed", "auto", "quality"):
+        qualities = ("speed", "auto", "quality") + (
+            ("ultra",) if ultra_available() else ()
+        )
+        for q in qualities:
             try:
                 device, compute_type = _resolve_device_and_compute(
                     q, gpu_available_fn=gpu_available

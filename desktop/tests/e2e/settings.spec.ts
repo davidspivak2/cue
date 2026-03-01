@@ -100,7 +100,7 @@ test.beforeEach(async ({ page }) => {
 
 test("save policy enables the path controls", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByTestId("title-bar").getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-content")).toBeVisible();
 
   const pathField = page.getByPlaceholder("No folder selected");
@@ -118,7 +118,7 @@ test("diagnostics section is visible and master toggle gates categories", async 
   page
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByTestId("title-bar").getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-content")).toBeVisible();
 
   const settingsHeading = page.getByRole("heading", { name: "Settings" });
@@ -146,18 +146,48 @@ test("diagnostics section is visible and master toggle gates categories", async 
 });
 
 test("transcription quality updates settings", async ({ page }) => {
+  await page.route("**://127.0.0.1:8765/device", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        gpu_available: true,
+        cpu_cores: 8,
+        ultra_available: false,
+        ultra_device: null
+      })
+    });
+  });
+
   await page.goto("/");
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByTestId("title-bar").getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-content")).toBeVisible();
+
+  const qualityRoot = page.getByTestId("transcription-quality-slider");
+  await qualityRoot.scrollIntoViewIfNeeded();
 
   const requestPromise = page.waitForRequest(
     (request) => request.url().includes("/settings") && request.method() === "PUT"
   );
 
-  await page.locator("#transcription-quality").click();
-  await page.getByRole("option", { name: "Fast (int8)" }).click();
-
-  const request = await requestPromise;
-  const payload = request.postDataJSON();
-  expect(payload.settings.transcription_quality).toBe("fast");
+  const sliderThumb = qualityRoot.locator("[role=slider]");
+  const description = page.locator("#transcription-quality-description");
+  if ((await sliderThumb.count()) > 0) {
+    await sliderThumb.waitFor({ state: "visible" });
+    await sliderThumb.focus();
+    await page.keyboard.press("ArrowLeft");
+    const request = await requestPromise;
+    const payload = request.postDataJSON();
+    expect(payload.settings.transcription_quality).toBe("speed");
+    await expect(description).toBeVisible();
+    await expect(description).toContainText("Fastest transcription");
+  } else {
+    await page.getByRole("button", { name: "Faster" }).click();
+    const request = await requestPromise;
+    const payload = request.postDataJSON();
+    expect(payload.settings.transcription_quality).toBe("speed");
+    await expect(description).toBeVisible();
+    await expect(description).toContainText("For nerds:");
+  }
 });

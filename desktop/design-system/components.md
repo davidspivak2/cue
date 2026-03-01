@@ -96,7 +96,7 @@ Use `border-input`, `focus-visible:ring-ring`; avoid custom border colors so dar
 - **Tabs** (`@/components/ui/tabs`): Section switching (e.g. Workbench tabs).
 - **Scroll area** (`@/components/ui/scroll-area`): When custom scroll styling is needed.
 - **Separator** (`@/components/ui/separator`): Visual dividers; use `bg-border`.
-- **Toggle / Toggle group** (`@/components/ui/toggle`, `toggle-group`): On/off or single-select from a small set.
+- **Toggle / Toggle group** (`@/components/ui/toggle`, `toggle-group`): On/off or single-select from a small set (segmented control). Use variant `outline` for segmented controls (e.g. quality, theme, view mode). Palette: unselected `bg-background border-input shadow-sm`, selected/hover `bg-secondary text-secondary-foreground`, focus `ring-1 ring-ring`.
 
 ---
 

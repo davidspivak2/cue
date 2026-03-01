@@ -1,22 +1,18 @@
 import * as React from "react";
 import { useTheme } from "next-themes";
-import { Laptop, Moon, Sun } from "lucide-react";
+import { Laptop, Moon, Sun, Rabbit, Crosshair } from "lucide-react";
 
 import EngineSkeletonLoader from "@/components/EngineSkeletonLoader";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger
-} from "@/components/ui/tooltip";
-import { useDeviceInfo, useDeviceInfoRefetch } from "@/contexts/DeviceInfoContext";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCalibration } from "@/contexts/CalibrationContext";
+import { useDeviceInfo } from "@/contexts/DeviceInfoContext";
 import { useSettings } from "@/contexts/SettingsContext";
 import { fetchSettings, SettingsConfig, updateSettings } from "@/settingsClient";
 import {
@@ -25,8 +21,6 @@ import {
   messageForBackendError,
   waitForBackendHealthy
 } from "@/backendHealth";
-import { createCalibrationJob } from "@/jobsClient";
-import { invoke, isTauri } from "@tauri-apps/api/core";
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends Record<string, unknown> ? DeepPartial<T[K]> : T[K];
@@ -51,28 +45,58 @@ const mergeDeep = <T,>(base: T, update: DeepPartial<T>): T => {
   return next as T;
 };
 
-const TRANSCRIPTION_QUALITY_OPTIONS = [
-  {
-    value: "speed",
-    label: "Prioritize speed",
-    hint: "Faster transcription; slightly lower accuracy."
-  },
-  {
-    value: "auto",
-    label: "Balanced",
-    hint: "Balances speed and accuracy."
-  },
-  {
-    value: "quality",
-    label: "Prioritize quality",
-    hint: "Best accuracy; takes longer."
+const TRANSCRIPTION_QUALITY_OPTIONS: ReadonlyArray<{
+  value: "speed" | "auto" | "quality" | "ultra";
+}> = [
+  { value: "speed" },
+  { value: "auto" },
+  { value: "quality" },
+  { value: "ultra" }
+];
+
+function getDefaultTranscriptionQuality(gpuAvailable: boolean | null): "quality" | "auto" {
+  return gpuAvailable === true ? "quality" : "auto";
+}
+
+function getQualityDisplayLabel(
+  value: "speed" | "auto" | "quality" | "ultra",
+  ultraAvailable: boolean,
+  isDefault = false
+): string {
+  let label: string;
+  switch (value) {
+    case "speed":
+      label = "Fastest transcription";
+      break;
+    case "auto":
+      label = "Balanced speed and accuracy";
+      break;
+    case "quality":
+      label = ultraAvailable ? "Better accuracy" : "Maximum accuracy";
+      break;
+    case "ultra":
+      label = "Maximum accuracy";
+      break;
+    default:
+      label = "Balanced speed and accuracy";
   }
-] as const;
+  return isDefault ? `${label} (default)` : label;
+}
+
+function getQualityOption(value: "speed" | "auto" | "quality" | "ultra") {
+  return TRANSCRIPTION_QUALITY_OPTIONS.find((o) => o.value === value);
+}
 
 function getQualityNerdsLine(
-  value: "speed" | "auto" | "quality",
-  gpuAvailable: boolean | null
+  value: "speed" | "auto" | "quality" | "ultra",
+  gpuAvailable: boolean | null,
+  ultraDevice?: "gpu" | "cpu" | null
 ): string {
+  if (value === "ultra") {
+    if (ultraDevice === "gpu") return "Runs on GPU (float32).";
+    if (ultraDevice === "cpu") return "Runs on CPU (float32).";
+    return "Checking...";
+  }
   if (gpuAvailable === null) {
     return "Checking...";
   }
@@ -92,14 +116,35 @@ function formatEstimate5Min(sec: number): string {
   return `Est. ~${label} min per 5 min of video.`;
 }
 
+function getDisplayEstimateSec(
+  est: { quality?: number; ultra?: number; [k: string]: number | undefined },
+  selectedValue: string
+): number | undefined {
+  const raw = est[selectedValue];
+  if (raw == null) return undefined;
+  if (
+    selectedValue === "ultra" &&
+    est.quality != null &&
+    est.ultra != null &&
+    est.quality === est.ultra
+  ) {
+    return Math.round(est.quality * 1.5);
+  }
+  return raw;
+}
+
 const SettingsSection = ({
   title,
-  children
+  children,
+  sectionClassName
 }: {
   title: string;
   children: React.ReactNode;
+  sectionClassName?: string;
 }) => (
-  <section className="rounded-lg border border-border bg-card p-6 shadow-sm">
+  <section
+    className={`rounded-lg border border-border bg-card p-6 shadow-[var(--shadow-card)] ${sectionClassName ?? ""}`}
+  >
     <h2 className="text-lg font-semibold text-foreground">{title}</h2>
     <div className="mt-4 space-y-3">{children}</div>
   </section>
@@ -125,12 +170,35 @@ const Settings = () => {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isBackendStarting, setIsBackendStarting] = React.useState(true);
   const deviceInfo = useDeviceInfo();
-  const refetchDevice = useDeviceInfoRefetch();
+  const { isCalibrating, calibrationPct } = useCalibration();
   const gpuAvailable = deviceInfo?.gpu_available ?? null;
+  const ultraAvailable = deviceInfo?.ultra_available === true;
+  const ultraDevice = deviceInfo?.ultra_device ?? null;
   const calibrationDone = Boolean(deviceInfo?.calibration_done);
-  const [isCalibrating, setIsCalibrating] = React.useState(false);
-  const [calibrationPct, setCalibrationPct] = React.useState(0);
-  const calibrationStreamRef = React.useRef<{ close: () => void; cancel: () => Promise<void> } | null>(null);
+  const showUltra = ultraAvailable && ultraDevice === "gpu";
+  const steps = React.useMemo(
+    (): ReadonlyArray<"speed" | "auto" | "quality" | "ultra"> =>
+      showUltra
+        ? (["speed", "auto", "quality", "ultra"] as const)
+        : ultraAvailable
+          ? (["speed", "auto", "quality"] as const)
+          : (["speed", "auto"] as const),
+    [showUltra, ultraAvailable]
+  );
+  const defaultQuality = getDefaultTranscriptionQuality(gpuAvailable);
+  const storedQuality = settings?.transcription_quality ?? defaultQuality;
+  const effectiveQuality = steps.includes(
+    storedQuality as (typeof steps)[number]
+  )
+    ? storedQuality
+    : (steps[steps.length - 1] as typeof storedQuality);
+  const sliderIndex = (() => {
+    const i = steps.indexOf(
+      effectiveQuality === "ultra" ? "ultra" : effectiveQuality
+    );
+    return i >= 0 ? i : Math.min(0, steps.length - 1);
+  })();
+  const downgradeUltraPersistedRef = React.useRef(false);
   const saveFolderInputRef = React.useRef<HTMLInputElement>(null);
   const [saveFolderTruncated, setSaveFolderTruncated] = React.useState(false);
   const savePolicy = settings?.save_policy ?? "same_folder";
@@ -191,6 +259,20 @@ const Settings = () => {
     },
     [settings]
   );
+
+  React.useEffect(() => {
+    if (
+      !settings ||
+      downgradeUltraPersistedRef.current ||
+      steps.includes(storedQuality as (typeof steps)[number])
+    ) {
+      return;
+    }
+    downgradeUltraPersistedRef.current = true;
+    void persistSettings({
+      transcription_quality: steps[steps.length - 1]
+    });
+  }, [settings, storedQuality, steps, persistSettings]);
 
   const openFolderDialog = React.useCallback(async () => {
     try {
@@ -269,56 +351,6 @@ const Settings = () => {
     };
   }, []);
 
-  const startCalibration = React.useCallback(async () => {
-    if (!settings || !isTauri()) return;
-    try {
-      const path = await invoke<string>("get_calibration_video_path");
-      const options: Record<string, unknown> = {
-        transcription_quality: settings.transcription_quality,
-        punctuation_rescue_fallback_enabled: settings.punctuation_rescue_fallback_enabled,
-        apply_audio_filter: settings.apply_audio_filter,
-        subtitle_mode: settings.subtitle_mode,
-        highlight_color: settings.subtitle_style?.highlight_color ?? "#FFD400",
-        vad_gap_rescue_enabled: true
-      };
-      setIsCalibrating(true);
-      setCalibrationPct(0);
-      const stream = await createCalibrationJob(
-        { inputPath: path, options },
-        {
-          onEvent(ev) {
-            if (ev.type === "progress" && typeof ev.pct === "number") {
-              setCalibrationPct(Math.round(ev.pct));
-            }
-            if (ev.type === "completed") {
-              calibrationStreamRef.current = null;
-              setIsCalibrating(false);
-              void refetchDevice();
-            }
-            if (ev.type === "cancelled" || ev.type === "error") {
-              calibrationStreamRef.current = null;
-              setIsCalibrating(false);
-              void refetchDevice();
-            }
-          }
-        }
-      );
-      calibrationStreamRef.current = stream;
-    } catch {
-      setIsCalibrating(false);
-    }
-  }, [settings, refetchDevice]);
-
-  const cancelCalibration = React.useCallback(async () => {
-    const stream = calibrationStreamRef.current;
-    if (stream) {
-      calibrationStreamRef.current = null;
-      await stream.cancel();
-      setIsCalibrating(false);
-      void refetchDevice();
-    }
-  }, [refetchDevice]);
-
   if (isLoading) {
     return <EngineSkeletonLoader variant="settings" />;
   }
@@ -340,88 +372,154 @@ const Settings = () => {
     <div className="flex flex-col gap-4 pb-6" data-testid="settings-content">
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <SettingsSection title="Transcription quality">
-        <RadioGroup
-          value={settings.transcription_quality}
-          onValueChange={(value) =>
-            persistSettings({ transcription_quality: value })
-          }
-          className="space-y-2"
-        >
-          {TRANSCRIPTION_QUALITY_OPTIONS.map((option) => {
-            const id = `transcription-quality-${option.value}`;
-            const showEstimate =
-              calibrationDone &&
-              deviceInfo?.estimate_5min_sec?.[option.value] != null;
-            return (
-              <div key={option.value} className="flex items-start gap-2">
-                <div className="flex h-5 shrink-0 items-center">
-                  <RadioGroupItem id={id} value={option.value} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <Label htmlFor={id} className="cursor-pointer">
-                    {option.label}
-                  </Label>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {option.hint}
-                  </p>
-                  <div
-                    className="overflow-hidden transition-[max-height,opacity] duration-300 ease-out"
-                    style={{
-                      maxHeight: isCalibrating ? 24 : 0,
-                      opacity: isCalibrating ? 1 : 0
-                    }}
+      <SettingsSection title="Transcription quality" sectionClassName="pb-4">
+        <div className="space-y-3">
+          {steps.length === 2 ? (
+            (() => {
+              const safeIndex = Math.max(0, Math.min(sliderIndex, steps.length - 1));
+              const selectedValue = steps[safeIndex];
+              const showEstimate =
+                calibrationDone &&
+                selectedValue &&
+                deviceInfo?.estimate_5min_sec?.[selectedValue] != null;
+              return (
+                <div className="flex flex-col items-start gap-2 mt-5">
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    value={selectedValue}
+                    onValueChange={(v) => v && persistSettings({ transcription_quality: v })}
+                    className="inline-flex"
+                    data-testid="transcription-quality-slider"
+                    aria-label="Transcription quality"
                   >
-                    <div className="mt-0.5 h-4 flex items-center">
-                      <Skeleton className="h-3 w-48" />
-                    </div>
-                  </div>
-                  {showEstimate && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {formatEstimate5Min(deviceInfo!.estimate_5min_sec![option.value]!)}
+                    <ToggleGroupItem value="speed" aria-label="Faster" className="gap-1.5">
+                      <Rabbit className="h-4 w-4 shrink-0" aria-hidden />
+                      Faster
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="auto" aria-label="Accurate" className="gap-1.5">
+                      <Crosshair className="h-4 w-4 shrink-0" aria-hidden />
+                      Accurate
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                  <div
+                    id="transcription-quality-description"
+                    className="text-sm text-muted-foreground space-y-0.5"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {!calibrationDone && isCalibrating && (
+                      <p className="text-xs text-muted-foreground">
+                        Estimating transcription time… {calibrationPct}%
+                      </p>
+                    )}
+                    {showEstimate && selectedValue && (
+                      <p className="text-xs">
+                        {formatEstimate5Min(
+                          getDisplayEstimateSec(
+                            deviceInfo!.estimate_5min_sec!,
+                            selectedValue
+                          )!
+                        )}
+                      </p>
+                    )}
+                    <p className="text-xs">
+                      For nerds:{" "}
+                      {getQualityNerdsLine(
+                        selectedValue,
+                        gpuAvailable,
+                        ultraDevice
+                      )}
                     </p>
-                  )}
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    For nerds: {getQualityNerdsLine(option.value, gpuAvailable)}
-                  </p>
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            <>
+              {(() => {
+                const safeIndex = Math.max(0, Math.min(sliderIndex, steps.length - 1));
+                const selectedValue = steps[safeIndex];
+                const option = selectedValue ? getQualityOption(selectedValue) : null;
+                const showEstimate =
+                  calibrationDone &&
+                  selectedValue &&
+                  deviceInfo?.estimate_5min_sec?.[selectedValue] != null;
+                return option ? (
+                  <div className="flex flex-col items-start gap-0.5 mt-5 text-left">
+                    <p
+                      id="transcription-quality-description"
+                      className="text-sm font-medium text-foreground"
+                    >
+                      {getQualityDisplayLabel(
+                        option.value,
+                        showUltra,
+                        option.value === defaultQuality
+                      )}
+                    </p>
+                    <div className="text-xs text-muted-foreground" role="status" aria-live="polite">
+                      {!calibrationDone && isCalibrating && (
+                        <p className="mt-0.5">Estimating transcription time… {calibrationPct}%</p>
+                      )}
+                      {showEstimate && selectedValue && (
+                        <p className="mt-0.5">
+                          {formatEstimate5Min(
+                            getDisplayEstimateSec(
+                              deviceInfo!.estimate_5min_sec!,
+                              selectedValue
+                            )!
+                          )}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      For nerds:{" "}
+                      {getQualityNerdsLine(
+                        selectedValue,
+                        gpuAvailable,
+                        ultraDevice
+                      )}
+                    </p>
+                  </div>
+                ) : null;
+              })()}
+              <div className="flex w-full flex-col gap-3 mt-5">
+                <div className="w-full px-1.5">
+                  <Slider
+                    data-testid="transcription-quality-slider"
+                    aria-label="Transcription quality"
+                    aria-describedby="transcription-quality-description"
+                    value={[sliderIndex]}
+                    onValueChange={([v]) => {
+                      const idx = typeof v === "number" ? v : 0;
+                      const clamped = Math.max(0, Math.min(idx, steps.length - 1));
+                      persistSettings({
+                        transcription_quality: steps[clamped]
+                      });
+                    }}
+                    min={0}
+                    max={steps.length - 1}
+                    step={1}
+                    stops={steps.length}
+                    hideRange
+                    thumbEdgeOffset={5}
+                    className="w-full"
+                  />
+                </div>
+                <div className="flex w-full justify-between text-muted-foreground">
+                  <div className="flex flex-col items-start">
+                    <Rabbit className="h-5 w-5" aria-hidden />
+                    <span className="text-sm font-medium text-foreground mt-0.5">Faster</span>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <Crosshair className="h-5 w-5" aria-hidden />
+                    <span className="text-sm font-medium text-foreground mt-0.5 text-right">Accurate</span>
+                  </div>
                 </div>
               </div>
-            );
-          })}
-        </RadioGroup>
-        {!calibrationDone && (isCalibrating || isTauri()) && (
-          <div className="mt-5 text-left">
-            {isCalibrating ? (
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">
-                  Calibrating... {calibrationPct}%
-                </span>
-                <Button
-                  type="button"
-                  variant="tertiary"
-                  size="sm"
-                  data-testid="settings-cancel-calibration"
-                  onClick={() => void cancelCalibration()}
-                >
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <p className="text-sm font-medium text-foreground">
-                <Button
-                  type="button"
-                  variant="link"
-                  className="h-auto p-0 text-sm font-medium text-primary underline underline-offset-2 hover:text-primary-hover"
-                  data-testid="settings-calibrate-cta"
-                  onClick={() => void startCalibration()}
-                >
-                  Calibrate
-                </Button>{" "}
-                to get time estimates for your device.
-              </p>
-            )}
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Transcription options">

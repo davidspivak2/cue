@@ -67,6 +67,7 @@ All colors are semantic. Use these names in Tailwind (for example `bg-primary`, 
 - **Borders**: `border-border`, `border-input`.
 - **Actions**: `bg-primary` for main CTA, `bg-secondary` or `outline` for secondary, `bg-destructive` for destructive only.
 - **Selection/active**: Use `bg-accent text-accent-foreground` together for focused, open, or selected states.
+- **Segmented control (Toggle group outline)**: Unselected segment: `bg-background`, `border-input`, `shadow-sm`; selected/hover: `bg-secondary text-secondary-foreground` (matches secondary buttons, bluish in light theme). Focus: `ring-1 ring-ring`.
 - **Focus**: `ring-ring` (and `focus-visible:ring-1` or `ring-2` as needed).
 - **Overlays**: `bg-overlay` for modals/sheets and `bg-overlay-soft` for lighter scrims.
 
