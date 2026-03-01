@@ -4,6 +4,20 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Noto Color Emoji for consistent emoji rendering (e.g. welcome wave) */
+@font-face {
+  font-family: "Noto Color Emoji";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(https://cdn.jsdelivr.net/fontsource/fonts/noto-color-emoji@latest/emoji-400-normal.woff2) format("woff2"),
+       url(https://cdn.jsdelivr.net/fontsource/fonts/noto-color-emoji@latest/emoji-400-normal.woff) format("woff");
+}
+
+.noto-color-emoji {
+  font-family: "Noto Color Emoji", sans-serif;
+}
+
 :root {
   /* Motion: use for transition-duration when not using Tailwind duration-* */
   --duration-fast: 150ms;
@@ -196,12 +210,12 @@ button[data-cue-title-bar-window-control],
 
 .empty-state-reveal-welcome-rest {
   opacity: 0;
-  animation: empty-state-fade-in 0.8s ease-out 1s forwards;
+  animation: empty-state-fade-in 0.8s ease-out 1.4s forwards;
 }
 
 .empty-state-reveal-upload {
   opacity: 0;
-  animation: empty-state-fade-in 0.9s ease-out 2.8s forwards;
+  animation: empty-state-fade-in 0.9s ease-out 3.4s forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

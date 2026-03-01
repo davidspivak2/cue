@@ -97,7 +97,7 @@ type ViewMode = "cards" | "list";
 
 const isValidViewMode = (v: string): v is ViewMode =>
   v === "cards" || v === "list";
-const EMPTY_WELCOME_LEAD = "Welcome!";
+const EMPTY_WELCOME_LEAD = "Hello 👋";
 const EMPTY_WELCOME_REST =
   " Cue adds subtitles to your videos using OpenAI's Whisper speech recognition.";
 const EMPTY_MAIN = "Drop a video here or click to browse to generate subtitles.";
@@ -1025,7 +1025,8 @@ const ProjectHub = () => {
                 {isNewUser ? (
                   <>
                     <span className={isNewUser ? "empty-state-reveal-welcome" : undefined}>
-                      {EMPTY_WELCOME_LEAD}
+                      Hello{" "}
+                      <span className="noto-color-emoji" aria-hidden>👋</span>
                     </span>
                     <span className={cn(isNewUser && "empty-state-reveal-welcome-rest")}>
                       {EMPTY_WELCOME_REST}
