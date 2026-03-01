@@ -440,6 +440,169 @@ def _setup_env(tmp_path: Path, monkeypatch) -> None:
     backend_server.JOBS.clear()
 
 
+def test_device_endpoint_returns_ultra_availability_fields(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    with TestClient(backend_server.app) as client:
+        response = client.get("/device")
+    assert response.status_code == 200
+    data = response.json()
+    assert "ultra_available" in data
+    assert "ultra_device" in data
+    assert isinstance(data["ultra_available"], bool)
+    assert data["ultra_device"] is None or data["ultra_device"] in ("gpu", "cpu")
+
+
+def test_normalize_settings_resets_ultra_to_quality_when_ultra_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(backend_server, "ultra_available", lambda: False)
+    raw = {"transcription_quality": "ultra"}
+    normalized = backend_server._normalize_settings(raw)
+    assert normalized["transcription_quality"] == "quality"
+
+
+def test_normalize_settings_keeps_ultra_when_ultra_available(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(backend_server, "ultra_available", lambda: True)
+    raw = {"transcription_quality": "ultra"}
+    normalized = backend_server._normalize_settings(raw)
+    assert normalized["transcription_quality"] == "ultra"
+
+
+def test_settings_put_accepts_ultra_when_available(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(backend_server, "ultra_available", lambda: True)
+    with TestClient(backend_server.app) as client:
+        response = client.put(
+            "/settings",
+            json={"settings": {"transcription_quality": "ultra"}},
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("transcription_quality") == "ultra"
+
+
+def test_device_endpoint_includes_estimate_5min_sec_ultra_when_calibration_has_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from app.paths import get_app_data_dir
+
+    _setup_env(tmp_path, monkeypatch)
+    calibration_path = get_app_data_dir() / backend_server.CALIBRATION_FILENAME
+    calibration_path.parent.mkdir(parents=True, exist_ok=True)
+    calibration_path.write_text(
+        json.dumps(
+            {
+                "estimate_5min_sec": {
+                    "speed": 300,
+                    "auto": 400,
+                    "quality": 600,
+                    "ultra": 900,
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    with TestClient(backend_server.app) as client:
+        response = client.get("/device")
+    assert response.status_code == 200
+    data = response.json()
+    assert "estimate_5min_sec" in data
+    assert "ultra" in data["estimate_5min_sec"]
+    assert isinstance(data["estimate_5min_sec"]["ultra"], (int, float))
+
+
+def test_calibration_completion_includes_ultra_when_ultra_available(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    saved: list[dict[str, int]] = []
+
+    def capture_save(estimate_5min_sec: dict[str, int]) -> None:
+        saved.append(dict(estimate_5min_sec))
+
+    monkeypatch.setattr(backend_server, "ultra_available", lambda: True)
+    monkeypatch.setattr(backend_server, "_save_calibration_estimates", capture_save)
+    monkeypatch.setattr(
+        backend_server,
+        "_resolve_device_and_compute",
+        lambda *args, **kwargs: ("cuda", "int8") if args[0] != "ultra" else ("cuda", "float32"),
+    )
+    monkeypatch.setattr(backend_server, "get_rtf_est", lambda *args, **kwargs: 0.5)
+
+    started = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    finished = datetime(2025, 1, 1, 12, 1, 10, tzinfo=timezone.utc)
+    job = backend_server.JobState(
+        job_id="cal-test",
+        status="running",
+        created_at=started,
+        started_at=started,
+        finished_at=finished,
+        kind="calibrate",
+    )
+    backend_server._update_job_snapshot(job, {"type": "completed"})
+
+    assert len(saved) == 1
+    assert "ultra" in saved[0]
+    assert isinstance(saved[0]["ultra"], int)
+
+
+def test_calibrate_accepted_while_create_subtitles_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Calibration is not blocked by a running create_subtitles job (Chunk 1)."""
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+    cal_video = tmp_path / "cal.mp4"
+    cal_video.write_text("cal", encoding="utf-8")
+
+    def blocking_fake_run(
+        job: backend_server.JobState,
+        request: backend_server.JobRequest,
+    ) -> None:
+        if getattr(request, "kind", None) == "create_subtitles":
+            time.sleep(2.0)
+        # calibrate or other: return immediately
+
+    monkeypatch.setattr(backend_server, "_run_worker_job_maybe_inprocess", blocking_fake_run)
+
+    with TestClient(backend_server.app) as client:
+        create_resp = client.post(
+            "/jobs",
+            json={
+                "kind": "create_subtitles",
+                "input_path": str(video_path),
+                "output_dir": str(tmp_path),
+                "project_id": project_id,
+            },
+        )
+        assert create_resp.status_code == 201
+        create_data = create_resp.json()
+        assert create_data["status"] == "running"
+
+        time.sleep(0.2)
+
+        cal_resp = client.post(
+            "/jobs",
+            json={
+                "kind": "calibrate",
+                "input_path": str(cal_video),
+            },
+        )
+        assert cal_resp.status_code == 201
+        cal_data = cal_resp.json()
+        assert cal_data["job_id"] in backend_server.JOBS
+        assert cal_data["status"] == "running"
+        assert backend_server.JOBS[cal_data["job_id"]].kind == "calibrate"
+
+
 def test_archive_exit_bundle_writes_zip_in_video_folder(tmp_path: Path, monkeypatch) -> None:
     _setup_env(tmp_path, monkeypatch)
     settings = backend_server._read_settings_file()

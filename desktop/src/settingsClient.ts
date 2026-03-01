@@ -93,8 +93,15 @@ export type DeviceInfo = {
   gpu_available: boolean;
   gpu_name?: string | null;
   cpu_cores?: number;
-  estimate_5min_sec?: { speed?: number; auto?: number; quality?: number };
+  estimate_5min_sec?: {
+    speed?: number;
+    auto?: number;
+    quality?: number;
+    ultra?: number;
+  };
   calibration_done?: boolean;
+  ultra_available?: boolean;
+  ultra_device?: "gpu" | "cpu" | null;
 };
 
 export type PreviewStyleRequest = {

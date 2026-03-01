@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAppSplash } from "@/contexts/AppSplashContext";
+import { CalibrationProvider } from "@/contexts/CalibrationContext";
 import { DeviceInfoProvider } from "@/contexts/DeviceInfoContext";
 import { RunningJobsProvider } from "@/contexts/RunningJobsContext";
 import { SettingsProvider } from "@/contexts/SettingsContext";
@@ -227,6 +228,7 @@ const AppLayout = () => {
 
   return (
     <DeviceInfoProvider>
+      <CalibrationProvider>
       <RunningJobsProvider>
         <ExitConfirmHandler />
         <WorkbenchTabsProvider>
@@ -243,11 +245,7 @@ const AppLayout = () => {
         >
           <div
             className="flex h-screen flex-col bg-background text-foreground"
-            style={
-              isTauri()
-                ? ({ paddingTop: TITLE_BAR_HEIGHT_PX } as React.CSSProperties)
-                : undefined
-            }
+            style={{ paddingTop: TITLE_BAR_HEIGHT_PX } as React.CSSProperties}
           >
             {createPortal(<TitleBar />, document.body)}
             <main className="flex min-h-0 flex-1 flex-col px-6 py-6">
@@ -339,11 +337,14 @@ const AppLayout = () => {
               <ScrollArea
                 ref={settingsScrollRef}
                 type="always"
-                className="min-h-0 flex-1 px-6 pr-4"
+                className="min-h-0 flex-1"
               >
-                <Suspense fallback={<EngineSkeletonLoader variant="settings" />}>
-                  <Settings />
-                </Suspense>
+                {/* Padding ≥40px so card shadow has room; no negative margin (would pull content back to clip edge). */}
+                <div className="min-h-full px-6">
+                  <Suspense fallback={<EngineSkeletonLoader variant="settings" />}>
+                    <Settings />
+                  </Suspense>
+                </div>
               </ScrollArea>
             </div>
           </SheetContent>
@@ -402,6 +403,7 @@ const AppLayout = () => {
         </SettingsProvider>
         </WorkbenchTabsProvider>
       </RunningJobsProvider>
+      </CalibrationProvider>
     </DeviceInfoProvider>
   );
 };

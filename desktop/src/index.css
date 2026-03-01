@@ -32,6 +32,7 @@
   --ring: #2563eb;
   --overlay: rgb(15 23 42 / 0.50);
   --overlay-soft: rgb(15 23 42 / 0.40);
+  --shadow-card: 0 12px 28px rgba(15, 23, 42, 0.12);
   --table-row-hover: #d4dcee;
   --radius: 10px;
   --radius-sm: 6px;
@@ -66,6 +67,8 @@
   --ring: #60a5fa;
   --overlay: rgb(9 9 11 / 0.62);
   --overlay-soft: rgb(9 9 11 / 0.50);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 16px 36px rgba(0, 0, 0, 0.55);
   --table-row-hover: var(--muted);
 }
 

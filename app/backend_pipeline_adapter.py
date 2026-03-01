@@ -39,7 +39,16 @@ def _resolve_device_and_compute(
     if quality == "accurate":
         return "cpu", "int16"
     if quality == "ultra":
-        return "cpu", "float32"
+        from app.transcription_device import ultra_device
+
+        ud = ultra_device()
+        if ud == "gpu":
+            return ("cuda", "float32")
+        if ud == "cpu":
+            return ("cpu", "float32")
+        if gpu_available_fn():
+            return ("cuda", "float16")
+        return ("cpu", "float32")
     if gpu_available_fn():
         return "cuda", "float16"
     return "cpu", "int16"

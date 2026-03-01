@@ -19,13 +19,31 @@ export const useDeviceInfoRefetch = (): (() => Promise<void>) => {
   return ctx?.refetch ?? (() => Promise.resolve());
 };
 
+const deviceSimCached: "cpu-strong" | "cpu-weak" | null =
+  typeof window !== "undefined"
+    ? (() => {
+        const d = new URLSearchParams(window.location.search).get("device");
+        return d === "cpu-strong" || d === "cpu-weak" ? d : null;
+      })()
+    : null;
+
 export const DeviceInfoProvider = ({ children }: { children: React.ReactNode }) => {
   const [deviceInfo, setDeviceInfo] = React.useState<DeviceInfo | null>(null);
 
   const refetch = React.useCallback(async () => {
     try {
       await waitForBackendHealthy();
-      const data = await fetchDeviceInfo();
+      let data = await fetchDeviceInfo();
+      const deviceSim = deviceSimCached;
+      if (deviceSim === "cpu-strong" || deviceSim === "cpu-weak") {
+        data = {
+          ...data,
+          gpu_available: false,
+          gpu_name: null,
+          ultra_device: deviceSim === "cpu-strong" ? "cpu" : null,
+          ultra_available: deviceSim === "cpu-strong"
+        };
+      }
       setDeviceInfo(data);
     } catch {
       // Leave existing state

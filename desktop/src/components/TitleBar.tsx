@@ -334,10 +334,6 @@ const TitleBar = () => {
     appWindow?.close();
   }, [appWindow]);
 
-  if (!isTauri()) {
-    return null;
-  }
-
   const handleHomeClick = () => {
     setActiveView(HOME_TAB_ID);
     navigate("/");
@@ -414,7 +410,7 @@ const TitleBar = () => {
         </DndContext>
       </div>
 
-      {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close */}
+      {/* Window controls: order left-to-right = Settings, Minimize, Maximize, Close (latter three only in Tauri) */}
       <div className="relative z-10 flex shrink-0 self-stretch items-stretch">
         <TitleBarButton
           onClick={handleSettingsClick}
@@ -435,35 +431,39 @@ const TitleBar = () => {
             <Settings className="h-4 w-4" />
           </span>
         </TitleBarButton>
-        <TitleBarButton
-          onClick={handleMinimize}
-          title="Minimize"
-          aria-label="Minimize"
-          windowControl
-        >
-          <Minus className="h-4 w-4" />
-        </TitleBarButton>
-        <TitleBarButton
-          onClick={handleMaximize}
-          title={maximized ? "Restore" : "Maximize"}
-          aria-label={maximized ? "Restore" : "Maximize"}
-          windowControl
-        >
-          {maximized ? (
-            <Maximize2 className="h-4 w-4" />
-          ) : (
-            <Square className="h-3.5 w-4" strokeWidth={2} />
-          )}
-        </TitleBarButton>
-        <TitleBarButton
-          onClick={handleClose}
-          title="Close"
-          className="hover:bg-destructive hover:text-destructive-foreground"
-          aria-label="Close"
-          windowControl
-        >
-          <X className="h-4 w-4" />
-        </TitleBarButton>
+        {isTauri() && (
+          <>
+            <TitleBarButton
+              onClick={handleMinimize}
+              title="Minimize"
+              aria-label="Minimize"
+              windowControl
+            >
+              <Minus className="h-4 w-4" />
+            </TitleBarButton>
+            <TitleBarButton
+              onClick={handleMaximize}
+              title={maximized ? "Restore" : "Maximize"}
+              aria-label={maximized ? "Restore" : "Maximize"}
+              windowControl
+            >
+              {maximized ? (
+                <Maximize2 className="h-4 w-4" />
+              ) : (
+                <Square className="h-3.5 w-4" strokeWidth={2} />
+              )}
+            </TitleBarButton>
+            <TitleBarButton
+              onClick={handleClose}
+              title="Close"
+              className="hover:bg-destructive hover:text-destructive-foreground"
+              aria-label="Close"
+              windowControl
+            >
+              <X className="h-4 w-4" />
+            </TitleBarButton>
+          </>
+        )}
       </div>
     </header>
   );
