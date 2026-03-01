@@ -558,7 +558,7 @@ const Settings = () => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Save subtitles to">
+      <SettingsSection title="Save subtitled videos to">
         <div className="space-y-3">
           <RadioGroup
             value={savePolicy}
