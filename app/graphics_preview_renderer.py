@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Iterable, Optional, TypeVar
 
+import numpy as np
 from PySide6 import QtCore, QtGui
 
 from .subtitle_style import (
@@ -686,6 +687,59 @@ def _draw_word_background(
     painter.restore()
 
 
+def _qimage_to_argb32_array(img: QtGui.QImage) -> np.ndarray:
+    """Copy QImage (Format_ARGB32) to numpy array (h, w, 4), same byte order."""
+    w, h = img.width(), img.height()
+    bpl = img.bytesPerLine()
+    size = img.sizeInBytes()
+    buffer = img.bits()
+    if hasattr(buffer, "setsize"):
+        buffer.setsize(size)
+        data = bytes(buffer)
+    else:
+        data = buffer.tobytes()[:size]
+    arr_flat = np.frombuffer(data, dtype=np.uint8)
+    if bpl == w * 4:
+        return arr_flat.reshape(h, w, 4).copy()
+    out = np.empty((h, w, 4), dtype=np.uint8)
+    for y in range(h):
+        out[y] = np.frombuffer(
+            data[y * bpl : y * bpl + w * 4], dtype=np.uint8
+        ).reshape(w, 4)
+    return out
+
+
+def _argb32_array_to_qimage(arr: np.ndarray, w: int, h: int) -> QtGui.QImage:
+    """Create QImage (Format_ARGB32) from numpy array (h, w, 4)."""
+    img = QtGui.QImage(arr.tobytes(), w, h, w * 4, QtGui.QImage.Format.Format_ARGB32)
+    return img.copy()
+
+
+def _box_blur_1d_band(band: np.ndarray, radius: int, axis: int) -> np.ndarray:
+    """Separable box blur one channel with in-bounds-only kernel (integral image)."""
+    cum = np.cumsum(band.astype(np.uint32), axis=axis)
+    if axis == 0:
+        cum = np.concatenate([np.zeros((1, band.shape[1]), dtype=np.uint32), cum], axis=0)
+        idx = np.arange(band.shape[0])
+        left = np.maximum(0, idx - radius)
+        right = np.minimum(band.shape[0], idx + radius + 1)
+        count = right - left
+        return (
+            (cum[right, :] - cum[left, :])
+            // np.broadcast_to(count[:, np.newaxis], (band.shape[0], band.shape[1]))
+        ).astype(np.uint8)
+    else:
+        cum = np.concatenate([np.zeros((band.shape[0], 1), dtype=np.uint32), cum], axis=1)
+        idx = np.arange(band.shape[1])
+        left = np.maximum(0, idx - radius)
+        right = np.minimum(band.shape[1], idx + radius + 1)
+        count = right - left
+        return (
+            (cum[:, right] - cum[:, left])
+            // np.broadcast_to(count[np.newaxis, :], (band.shape[0], band.shape[1]))
+        ).astype(np.uint8)
+
+
 def _blur_image(image: QtGui.QImage, radius: float) -> QtGui.QImage:
     if radius <= 0 or image.isNull():
         return image
@@ -697,47 +751,13 @@ def _blur_image(image: QtGui.QImage, radius: float) -> QtGui.QImage:
     img = image.convertToFormat(QtGui.QImage.Format.Format_ARGB32)
     if img.isNull():
         return image
-    tmp = QtGui.QImage(w, h, QtGui.QImage.Format.Format_ARGB32)
-    tmp.fill(QtCore.Qt.transparent)
-    for y in range(h):
-        for x in range(w):
-            a_sum = r_sum = g_sum = b_sum = 0
-            count = 0
-            for dx in range(-blur_r, blur_r + 1):
-                nx = x + dx
-                if 0 <= nx < w:
-                    c = img.pixel(nx, y)
-                    a_sum += QtGui.qAlpha(c)
-                    r_sum += QtGui.qRed(c)
-                    g_sum += QtGui.qGreen(c)
-                    b_sum += QtGui.qBlue(c)
-                    count += 1
-            if count:
-                tmp.setPixel(
-                    x, y,
-                    QtGui.qRgba(r_sum // count, g_sum // count, b_sum // count, a_sum // count),
-                )
-    out = QtGui.QImage(w, h, QtGui.QImage.Format.Format_ARGB32)
-    out.fill(QtCore.Qt.transparent)
-    for y in range(h):
-        for x in range(w):
-            a_sum = r_sum = g_sum = b_sum = 0
-            count = 0
-            for dy in range(-blur_r, blur_r + 1):
-                ny = y + dy
-                if 0 <= ny < h:
-                    c = tmp.pixel(x, ny)
-                    a_sum += QtGui.qAlpha(c)
-                    r_sum += QtGui.qRed(c)
-                    g_sum += QtGui.qGreen(c)
-                    b_sum += QtGui.qBlue(c)
-                    count += 1
-            if count:
-                out.setPixel(
-                    x, y,
-                    QtGui.qRgba(r_sum // count, g_sum // count, b_sum // count, a_sum // count),
-                )
-    return out
+    arr = _qimage_to_argb32_array(img)
+    tmp = np.empty_like(arr)
+    for c in range(4):
+        tmp[:, :, c] = _box_blur_1d_band(arr[:, :, c], blur_r, axis=1)
+    for c in range(4):
+        arr[:, :, c] = _box_blur_1d_band(tmp[:, :, c], blur_r, axis=0)
+    return _argb32_array_to_qimage(arr, w, h)
 
 
 def _draw_shadow(
