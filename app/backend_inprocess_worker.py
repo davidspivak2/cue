@@ -56,7 +56,7 @@ def run_worker_inprocess(
 ) -> None:
     """Run Worker in this thread; bridge signals to enqueue_event_cb. Sets worker_ref[0] = worker for cancel."""
     try:
-        from PySide6 import QtWidgets
+        from PySide6 import QtCore, QtWidgets
     except ImportError as e:
         raise RuntimeError(f"PySide6 unavailable: {e}") from e
 
@@ -210,11 +210,12 @@ def run_worker_inprocess(
         diagnostics_settings=None,
         session_log_path=log_path,
     )
-    worker.signals.log.connect(_on_log)
-    worker.signals.started.connect(_on_started)
-    worker.signals.progress.connect(_on_progress)
-    worker.signals.step_event.connect(_on_step_event)
-    worker.signals.finished.connect(_on_finished)
+    direct = QtCore.Qt.ConnectionType.DirectConnection
+    worker.signals.log.connect(_on_log, direct)
+    worker.signals.started.connect(_on_started, direct)
+    worker.signals.progress.connect(_on_progress, direct)
+    worker.signals.step_event.connect(_on_step_event, direct)
+    worker.signals.finished.connect(_on_finished, direct)
 
     try:
         worker_ref.clear()

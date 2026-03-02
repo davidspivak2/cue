@@ -258,7 +258,7 @@ Create Subtitles is **not complete** until **both** succeed:
 
 ### F2) Progress checklist requirement
 Progress checklist **must include** a step named exactly:
-- **“Matching individual words to speech”**
+- **“Building word-by-word karaoke effect”**
 
 ### F2a) Startup transparency requirement
 - Startup/preprocessing work (before first transcription tokens) must be surfaced in progress UI.
@@ -357,7 +357,7 @@ Create Subtitles must output:
 | --- | --- | --- | --- | --- | --- |
 | WB_NEEDS_VIDEO | Project exists but no linked video | **“Choose video…”** | Settings enabled (unless task running) | Panels closed/disabled | Editor accessible via tab, but requires relink. |
 | WB_VIDEO_LINKED_READY | Video linked, ready to create subtitles | **“Create subtitles”** | Settings enabled (unless task running) | Panels hidden; show strict empty state with only message + CTA | Center preview and style controls appear after subtitles are created. |
-| WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Matching individual words to speech”; Back is allowed and task continues in background. |
+| WB_CREATING_SUBTITLES | Running Create Subtitles (includes WhisperX step) | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Checklist includes “Building word-by-word karaoke effect”; Back is allowed and task continues in background. |
 | WB_SUBTITLES_READY | Subtitles + word timings available (user-facing status: Ready to review) | **“Export”** | Settings enabled | Left panel user-controlled; right inspector docked/overlay per width | Subtitle text editable; timestamps read-only. |
 | WB_EXPORTING | Export in progress | **Cancel** (progress UI) | Settings **disabled** | Panels closed; editing disabled | Export uses existing artifacts only; Back is allowed and task continues in background. |
 | WB_EXPORT_SUCCESS | Export completed | **“Export”** | Settings enabled | Panels user-controlled | Show success UI with “Play video” + “Open folder”; opener failures surface clear non-blocking feedback. |
@@ -424,7 +424,7 @@ Settings is a **full page** that replaces the current view. It uses the new desi
 - “Choose video…”
 - “Create subtitles”
 - “Creating subtitles”
-- “Matching individual words to speech”
+- “Building word-by-word karaoke effect”
 - “Needs edits”
 - “Ready to review”
 - “Subtitles created”

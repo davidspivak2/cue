@@ -655,7 +655,7 @@ class Worker(QtCore.QObject):
             self._emit_step_progress(
                 ProgressStep.FIX_GAPS,
                 0.0,
-                "Checking for missed speech",
+                "Making sure no words were missed",
                 force=True,
             )
             self._emit_step_event(
@@ -2458,7 +2458,7 @@ class Worker(QtCore.QObject):
                             self._emit_step_progress(
                                 ProgressStep.FIX_GAPS,
                                 0.0,
-                                "Checking for missed speech",
+                                "Making sure no words were missed",
                                 force=True,
                             )
                             self._emit_step_event(
@@ -2803,7 +2803,7 @@ class Worker(QtCore.QObject):
                     self._emit_step_progress(
                         ProgressStep.ALIGN_WORDS,
                         1.0,
-                        "Timing word highlighting",
+                        "Building word-by-word karaoke effect",
                         force=True,
                     )
                 return StepState.SKIPPED, "already timed"
@@ -2845,7 +2845,7 @@ class Worker(QtCore.QObject):
                     self._emit_step_progress(
                         ProgressStep.ALIGN_WORDS,
                         0.0,
-                        "Timing word highlighting",
+                        "Building word-by-word karaoke effect",
                         force=True,
                     )
                 if self._alignment_words_total == 0:
@@ -3094,7 +3094,7 @@ class Worker(QtCore.QObject):
                     self._emit_step_progress(
                         ProgressStep.ALIGN_WORDS,
                         1.0,
-                        "Timing word highlighting",
+                        "Building word-by-word karaoke effect",
                         force=True,
                     )
                 return total_words
@@ -3502,7 +3502,7 @@ class Worker(QtCore.QObject):
                 self._emit_step_progress(
                     ProgressStep.ALIGN_WORDS,
                     current / total,
-                    "Timing word highlighting",
+                    "Building word-by-word karaoke effect",
                     force=True,
                 )
             self._update_export_alignment_progress(current, total)

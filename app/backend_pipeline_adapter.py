@@ -241,7 +241,7 @@ async def run_pipeline_job(
     if srt_path is None or not srt_path.exists():
         raise RuntimeError("Pipeline output missing subtitles file.")
 
-    await emit_event({"type": "step", "step": "align", "message": "Syncing word timings."})
+    await emit_event({"type": "step", "step": "align", "message": "Building word-by-word karaoke effect"})
     await emit_event({"type": "progress", "pct": 60})
     if cancel_event.is_set():
         raise PipelineCancelledError()

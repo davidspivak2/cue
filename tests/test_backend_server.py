@@ -705,7 +705,7 @@ def test_enqueue_event_appends_job_trace_jsonl(tmp_path: Path) -> None:
             step_id="ALIGN_WORDS",
             step_progress=0.5,
             pct=50,
-            message="Timing word highlighting",
+            message="Building word-by-word karaoke effect",
         ),
     )
     backend_server._enqueue_event(
@@ -850,7 +850,7 @@ def test_progress_step_ids_are_canonicalized_without_duplicate_logical_rows() ->
             "progress",
             step_id="ALIGN_WORDS",
             pct=17,
-            message="Timing word highlighting",
+            message="Building word-by-word karaoke effect",
             step_progress=0.17,
         ),
     )

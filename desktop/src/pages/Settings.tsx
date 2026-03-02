@@ -113,7 +113,7 @@ function formatEstimate5Min(sec: number): string {
   const min = sec / 60;
   const label =
     min < 10 ? (min % 1 === 0 ? `${min}` : min.toFixed(1)) : `${Math.round(min)}`;
-  return `Est. ~${label} min per 5 min of video.`;
+  return `Est. ${label} min per 5 min of video.`;
 }
 
 function getDisplayEstimateSec(

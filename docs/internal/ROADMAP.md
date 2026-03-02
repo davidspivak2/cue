@@ -483,7 +483,7 @@ Definition of done:
 
 5.2 Progress UI update
 - Deliverable:
-  - Progress checklist includes “Matching individual words to speech”
+  - Progress checklist includes “Building word-by-word karaoke effect”
   - Pre-transcription startup work is surfaced instead of appearing idle at 0%.
 - Acceptance criteria:
   - Step appears and reports progress accurately.
