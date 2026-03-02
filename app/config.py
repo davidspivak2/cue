@@ -72,6 +72,7 @@ def apply_config_defaults(config: dict) -> dict:
         preset_effective,
         subtitle_mode=config["subtitle_mode"],
         highlight_color=highlight_color,
+        preset_name=preset,
     )
     style_model = normalize_style_model(raw_style.get("appearance"), fallback_style)
     raw_style["appearance"] = style_model_to_dict(style_model)

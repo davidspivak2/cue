@@ -117,7 +117,7 @@ const applyPresetAppearance = (
     presetName === "Large outline" || presetName === "Large outline + box"
       ? PRESET_STYLE_DEFAULTS[presetName]
       : PRESET_STYLE_DEFAULTS.Default;
-  return {
+  const base = {
     ...source,
     font_family: DEFAULT_APPEARANCE.font_family,
     font_size: defaults.font_size,
@@ -154,6 +154,18 @@ const applyPresetAppearance = (
     vertical_anchor: "bottom",
     vertical_offset: defaults.margin_v
   };
+  if (presetName === "Lift") {
+    return {
+      ...base,
+      shadow_enabled: true,
+      shadow_strength: 2.5,
+      shadow_offset_x: 2,
+      shadow_offset_y: 2,
+      shadow_blur: 8,
+      shadow_opacity: 0.85
+    };
+  }
+  return base;
 };
 
 /* ---------- hooks ---------- */

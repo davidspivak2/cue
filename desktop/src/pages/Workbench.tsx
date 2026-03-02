@@ -193,6 +193,7 @@ export const NAMED_PRESET_IDS = [
   "classic_static",
   "bold_outline_static",
   "boxed_static",
+  "lift_static",
   "neon_karaoke",
   "boxed_karaoke"
 ] as const;
@@ -274,6 +275,29 @@ const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
     line_bg_padding_bottom: 10,
     line_bg_padding_left: 10,
     line_bg_radius: 10,
+    vertical_anchor: "bottom",
+    vertical_offset: 40
+  },
+  lift_static: {
+    ...DEFAULT_APPEARANCE,
+    subtitle_mode: "static",
+    font_family: "Heebo",
+    font_size: 45,
+    font_style: "regular",
+    text_color: "#FFFFFF",
+    text_opacity: 1,
+    letter_spacing: 0,
+    outline_enabled: true,
+    outline_width: 2.5,
+    outline_color: "#000000",
+    shadow_enabled: true,
+    shadow_strength: 2.5,
+    shadow_offset_x: 2,
+    shadow_offset_y: 2,
+    shadow_color: "#000000",
+    shadow_opacity: 0.85,
+    shadow_blur: 8,
+    background_mode: "none",
     vertical_anchor: "bottom",
     vertical_offset: 40
   },
@@ -1143,7 +1167,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const LEGACY_PRESET_MAP: Record<string, string> = {
     Default: "classic_static",
     "Large outline": "bold_outline_static",
-    "Large outline + box": "boxed_static"
+    "Large outline + box": "boxed_static",
+    Lift: "lift_static"
+  };
+
+  const PRESET_ID_TO_BACKEND_NAME: Record<string, string> = {
+    classic_static: "Default",
+    bold_outline_static: "Large outline",
+    boxed_static: "Large outline + box",
+    lift_static: "Lift",
+    neon_karaoke: "Default",
+    boxed_karaoke: "Default"
   };
 
   const resolvePresetFromStored = (stored: string | undefined): string =>
@@ -1255,7 +1289,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     ) => ({
       subtitle_mode: nextAppearance.subtitle_mode,
       subtitle_style: {
-        preset: nextPreset,
+        preset: PRESET_ID_TO_BACKEND_NAME[nextPreset] ?? nextPreset,
         last_preset_id: lastPresetIdValue ?? undefined,
         highlight_color: nextAppearance.highlight_color,
         highlight_opacity: nextHighlightOpacity,

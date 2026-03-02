@@ -36,6 +36,7 @@ const PRESET_OPTIONS: { value: string; label: string; disabled?: boolean }[] = [
   { value: "classic_static", label: "Classic (Static)" },
   { value: "bold_outline_static", label: "Bold Outline (Static)" },
   { value: "boxed_static", label: "Boxed (Static)" },
+  { value: "lift_static", label: "Lift (Static)" },
   { value: "neon_karaoke", label: "Neon Karaoke (Karaoke)" },
   { value: "boxed_karaoke", label: "Boxed Karaoke (Karaoke)" },
   { value: "Custom", label: "Custom", disabled: true }
