@@ -72,6 +72,11 @@ type WorkbenchLocationState = {
   cancelledCreateProjectTitle?: string;
 } | null;
 
+type WorkbenchProps = {
+  /** When provided (e.g. from TabHost), used instead of route params so the same instance can stay mounted. */
+  projectId?: string;
+};
+
 const STATUS_LABELS: Record<string, string> = {
   needs_video: "Needs video",
   needs_subtitles: "Not started",
@@ -738,11 +743,12 @@ function useDebounce<T extends (...args: never[]) => void>(
   ) as T;
 }
 
-const Workbench = () => {
+const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const location = useLocation();
   const incomingState = location.state as WorkbenchLocationState;
   const navigate = useNavigate();
-  const { projectId } = useParams();
+  const paramsProjectId = useParams().projectId;
+  const projectId = projectIdProp ?? paramsProjectId ?? undefined;
   const { pushToast, markExportCompleteSeen, haveExportCompleteBeenSeen } = useToast();
   const { tabs, ensureTab, updateTabMeta } = useWorkbenchTabs();
   const width = useWindowWidth();
