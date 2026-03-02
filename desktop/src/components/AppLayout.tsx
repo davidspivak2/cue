@@ -2,7 +2,8 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { Suspense } from "react";
 import { X } from "lucide-react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import TabHost from "@/pages/TabHost";
 import { isTauri } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
@@ -249,7 +250,7 @@ const AppLayout = () => {
           >
             {createPortal(<TitleBar />, document.body)}
             <main className="flex min-h-0 flex-1 flex-col px-6 py-6">
-              <Outlet />
+              <TabHost />
             </main>
         <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
           <SheetContent

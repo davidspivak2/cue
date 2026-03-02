@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useTheme } from "next-themes";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -6,12 +6,8 @@ import { isTauri } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
 import AppLayout from "./components/AppLayout";
 import AppSplash from "./components/AppSplash";
-import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
-import { WorkbenchSkeleton } from "./components/WorkbenchSkeleton";
 import { AppSplashProvider } from "./contexts/AppSplashContext";
-import ProjectHub from "./pages/ProjectHub";
-
-const Workbench = lazy(() => import("./pages/Workbench"));
+import TabHost from "./pages/TabHost";
 
 /** Syncs favicon with in-app theme; taskbar/window icon with system theme only. */
 function ThemeIconSync() {
@@ -76,19 +72,7 @@ const App = () => {
         <ThemeIconSync />
         <Suspense fallback={<RouteFallback />}>
           <Routes>
-            <Route path="/" element={<AppLayout />}>
-              <Route index element={<ProjectHub />} />
-              <Route
-                path="workbench/:projectId"
-                element={
-                  <RouteErrorBoundary>
-                    <Suspense fallback={<WorkbenchSkeleton />}>
-                      <Workbench />
-                    </Suspense>
-                  </RouteErrorBoundary>
-                }
-              />
-            </Route>
+            <Route path="/*" element={<AppLayout />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

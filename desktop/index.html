@@ -26,7 +26,7 @@
         }
         var bg = isLight ? '#f5f9ff' : '#09090b';
         d.style.backgroundColor = bg;
-        document.body.style.backgroundColor = bg;
+        if (document.body) document.body.style.backgroundColor = bg;
         try {
           if (sessionStorage.getItem('cue-splash-dismissed') === '1') d.classList.add('splash-skip');
         } catch (_) {}

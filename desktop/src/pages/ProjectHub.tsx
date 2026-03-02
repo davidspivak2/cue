@@ -368,8 +368,11 @@ const ProjectHub = () => {
     });
   }, []);
 
-  const loadProjects = React.useCallback(async () => {
-    setIsLoading(true);
+  const loadProjects = React.useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setIsLoading(true);
+    }
     setIsBackendStarting(true);
     try {
       await waitForBackendHealthy();
@@ -415,7 +418,7 @@ const ProjectHub = () => {
     prevPathRef.current = location.pathname;
     if (isOnHub && wasElsewhere && !isLoading) {
       const t = window.setTimeout(() => {
-        void loadProjects();
+        void loadProjects({ silent: true });
       }, 300);
       return () => clearTimeout(t);
     }
