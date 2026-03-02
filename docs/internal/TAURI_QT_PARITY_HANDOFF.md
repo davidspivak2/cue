@@ -148,8 +148,8 @@ Checklist labels (generate subtitles)
 - "Detecting language"
 - "Writing subtitles"
 - "Reviewing punctuation" (if punctuation rescue enabled)
-- "Checking for missed speech" (if VAD gap rescue enabled)
-- "Matching individual words to speech" (if subtitle_mode == word_highlight)
+- "Making sure no words were missed" (if VAD gap rescue enabled)
+- "Building word-by-word karaoke effect" (if subtitle_mode == word_highlight)
 - "Preparing preview"
 
 Checklist labels (export)

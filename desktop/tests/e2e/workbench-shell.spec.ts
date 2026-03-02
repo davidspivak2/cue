@@ -1092,7 +1092,7 @@ test("workbench timing fallback shows incremental words from ALIGN_WORDS progres
     kind: "create_subtitles",
     status: "running",
     heading: "Creating subtitles",
-    message: "Timing word highlighting",
+    message: "Building word-by-word karaoke effect",
     pct: 18,
     step_id: "timing_word_highlights",
     started_at: ts,
@@ -1100,7 +1100,7 @@ test("workbench timing fallback shows incremental words from ALIGN_WORDS progres
     checklist: [
       {
         id: "timing_word_highlights",
-        label: "Matching individual words to speech",
+        label: "Building word-by-word karaoke effect",
         state: "active",
         detail: "0/100 words"
       }
@@ -1123,7 +1123,7 @@ test("workbench timing fallback shows incremental words from ALIGN_WORDS progres
         step_id: "ALIGN_WORDS",
         step_progress: 0.35,
         pct: 35,
-        message: "Timing word highlighting"
+        message: "Building word-by-word karaoke effect"
       }
     ])
   );
@@ -1150,7 +1150,7 @@ test("workbench timing fallback ignores stale snapshot detail with newer updated
     kind: "create_subtitles",
     status: "running",
     heading: "Creating subtitles",
-    message: "Timing word highlighting",
+    message: "Building word-by-word karaoke effect",
     pct: 18,
     step_id: "timing_word_highlights",
     started_at: startedAt,
@@ -1158,7 +1158,7 @@ test("workbench timing fallback ignores stale snapshot detail with newer updated
     checklist: [
       {
         id: "timing_word_highlights",
-        label: "Matching individual words to speech",
+        label: "Building word-by-word karaoke effect",
         state: "active",
         detail: "0/100 words"
       }
@@ -1182,7 +1182,7 @@ test("workbench timing fallback ignores stale snapshot detail with newer updated
         step_id: "ALIGN_WORDS",
         step_progress: 0.35,
         pct: 35,
-        message: "Timing word highlighting"
+        message: "Building word-by-word karaoke effect"
       }
     ])
   );
