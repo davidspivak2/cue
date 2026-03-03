@@ -835,6 +835,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
+  const [isHoveringActiveSubtitle, setIsHoveringActiveSubtitle] = React.useState(false);
   const [progressHoverSeconds, setProgressHoverSeconds] = React.useState<number | null>(null);
   const [progressHoverXPx, setProgressHoverXPx] = React.useState<number | null>(null);
   const lastProgressHoverXPxRef = React.useRef<number>(0);
@@ -2982,10 +2983,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const sep = base.includes("?") ? "&" : "?";
     return `${base}${sep}v=${encodeURIComponent(appearance.font_family)}`;
   }, [isTauriEnv, subtitleOverlayPath, appearance.font_family]);
+  const SHOW_SUBTITLE_OVERLAY_IN_APP = false;
   const shouldRenderOverlayImage = Boolean(subtitleOverlaySrc && activeCue && !isEditingActiveCue);
-  const shouldHideInteractiveSubtitlePreview = Boolean(
-    subtitleOverlaySrc && activeCue && !isEditingActiveCue
-  );
 
   React.useEffect(() => {
     setSubtitleOverlayPath(null);
@@ -3657,6 +3656,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       shouldResumePlaybackRef.current = resumePlaybackOnExit;
       setSelectedCueId(cue.id);
       setEditingCueId(cue.id);
+      setIsHoveringActiveSubtitle(false);
       setEditingText(cue.text);
       setEditError(null);
       initializeEditHistory(cue.text);
@@ -4550,8 +4550,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     className={cn("absolute", !isEditingActiveCue && "pointer-events-none")}
                     style={displayedVideoGeometryStyle}
                   >
-                    {shouldRenderOverlayImage && (
-                      <img
+{SHOW_SUBTITLE_OVERLAY_IN_APP && shouldRenderOverlayImage && (
+                        <img
                         className="pointer-events-none absolute inset-0 h-full w-full transition-transform duration-200"
                         src={subtitleOverlaySrc ?? ""}
                         alt="Subtitle preview overlay"
@@ -4582,9 +4582,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                           ref={activeSubtitleWrapperRef}
                           className="pointer-events-auto relative z-11 w-fit max-w-full transition-transform duration-200"
                           style={subtitleControlsPushStyle}
-                          onMouseEnter={() => setShowVideoControls(true)}
+                          onMouseEnter={() => {
+                            setShowVideoControls(true);
+                            setIsHoveringActiveSubtitle(true);
+                          }}
                           onMouseLeave={(e) => {
                             const to = e.relatedTarget;
+                            setIsHoveringActiveSubtitle(false);
                             if (to instanceof Node && (
                               videoControlsBarRef.current?.contains(to) ||
                               videoClickSurfaceRef.current?.contains(to)
@@ -4648,8 +4652,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 tabIndex={0}
                                 data-testid="workbench-active-subtitle"
                                 className={cn(
-                                  "m-0 inline-block cursor-text box-border rounded-md border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:ring-1 hover:ring-primary/40",
-                                  shouldHideInteractiveSubtitlePreview && "opacity-0",
+                                  "m-0 inline-block cursor-text box-border rounded-md border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:bg-background/25 hover:ring-1 hover:ring-primary/45",
+                                  isHoveringActiveSubtitle && "bg-background/25 ring-1 ring-primary/45",
                                   isActiveCueSelected
                                     ? "outline-2 outline-offset-2 outline-primary ring-1 ring-primary/50"
                                     : "outline-none"

@@ -1565,7 +1565,7 @@ test("vertical anchor middle offset matches overlay direction in wide and narrow
   }
 });
 
-test("controls overlap causes push and preserves overlay/edit parity", async ({ page }) => {
+test("controls overlap causes push and click opens editor", async ({ page }) => {
   await page.addInitScript(initTauriRuntimeMock);
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
@@ -1580,11 +1580,8 @@ test("controls overlap causes push and preserves overlay/edit parity", async ({ 
   await setVerticalOffset(page, "0");
 
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
-  const overlay = page.getByTestId("workbench-subtitle-overlay");
   await expect(subtitleButton).toHaveCount(1);
-  await expect(overlay).toHaveCount(1);
   const subtitleRectBefore = await readClientRect(subtitleButton);
-  const overlayRectBefore = await readClientRect(overlay);
 
   await showVideoControls(page);
   await expect
@@ -1592,11 +1589,8 @@ test("controls overlap causes push and preserves overlay/edit parity", async ({ 
     .toBeLessThan(subtitleRectBefore.top - 1);
 
   const subtitleRectAfter = await readClientRect(subtitleButton);
-  const overlayRectAfter = await readClientRect(overlay);
   const subtitleDeltaY = subtitleRectAfter.top - subtitleRectBefore.top;
-  const overlayDeltaY = overlayRectAfter.top - overlayRectBefore.top;
   expect(subtitleDeltaY).toBeLessThan(-1);
-  expect(Math.abs(subtitleDeltaY - overlayDeltaY)).toBeLessThanOrEqual(1);
 
   await subtitleButton.evaluate((element) => {
     if (element instanceof HTMLElement) {
