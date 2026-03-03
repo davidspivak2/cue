@@ -786,6 +786,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const activeSubtitleWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const subtitleEditorControlsRef = React.useRef<HTMLDivElement | null>(null);
   const videoControlsBarRef = React.useRef<HTMLDivElement | null>(null);
+  const videoWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const shouldResumePlaybackRef = React.useRef(false);
   const editHistoryRef = React.useRef<string[]>([]);
   const editHistoryIndexRef = React.useRef(0);
@@ -3437,7 +3438,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     displayedVideoRect.scale,
     displayedVideoRect.width,
     editingText,
-    isEditingActiveCue,
     showVideoControls,
     subtitleEditorTextStyle,
     subtitlePreviewTextStyle
@@ -3450,15 +3450,21 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
     const positionLayer = subtitleOverlayPositionLayerRef.current;
     const textarea = activeSubtitleRef.current;
-    const controls = subtitleEditorControlsRef.current;
-    if (!positionLayer || !textarea || !controls) {
+    const editorControls = subtitleEditorControlsRef.current;
+    const controlsBar = videoControlsBarRef.current;
+    if (!positionLayer || !textarea || !editorControls) {
       return;
     }
     const positionLayerRect = positionLayer.getBoundingClientRect();
     const textareaRect = textarea.getBoundingClientRect();
-    const controlsHeight = controls.offsetHeight;
-    const spaceBelow = positionLayerRect.bottom - textareaRect.bottom;
-    const requiredBelowSpace = controlsHeight + SUBTITLE_EDITOR_CONTROLS_GAP_PX;
+    const editorControlsHeight = editorControls.offsetHeight;
+    const requiredBelowSpace = editorControlsHeight + SUBTITLE_EDITOR_CONTROLS_GAP_PX;
+    const layerBottom = positionLayerRect.bottom;
+    const bottomLimit =
+      controlsBar
+        ? Math.min(layerBottom, controlsBar.getBoundingClientRect().top)
+        : layerBottom;
+    const spaceBelow = bottomLimit - textareaRect.bottom;
     const nextPlacement = spaceBelow < requiredBelowSpace ? "above" : "below";
     setSubtitleEditorControlsPlacement((previous) =>
       previous === nextPlacement ? previous : nextPlacement
@@ -4477,8 +4483,15 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             >
               {hasVideoPreview ? (
                 <div
+                  ref={videoWrapperRef}
                   className="relative h-full w-full overflow-hidden rounded-md"
                   data-testid="workbench-center-panel-video-wrapper"
+                  onMouseEnter={() => setShowVideoControls(true)}
+                  onMouseLeave={(e) => {
+                    const to = e.relatedTarget;
+                    if (to instanceof Node && videoWrapperRef.current?.contains(to)) return;
+                    setShowVideoControls(false);
+                  }}
                 >
                   <video
                     ref={videoRef}
@@ -4591,7 +4604,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                             setIsHoveringActiveSubtitle(false);
                             if (to instanceof Node && (
                               videoControlsBarRef.current?.contains(to) ||
-                              videoClickSurfaceRef.current?.contains(to)
+                              videoClickSurfaceRef.current?.contains(to) ||
+                              subtitleOverlayPositionLayerRef.current?.contains(to)
                             ))
                               return;
                             setShowVideoControls(false);
