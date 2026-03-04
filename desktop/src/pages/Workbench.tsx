@@ -2972,20 +2972,30 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   ]);
   const highlightWordColor = colorWithOpacity(appearance.highlight_color, highlightOpacity);
   const defaultSubtitleTextColor = colorWithOpacity(appearance.text_color, appearance.text_opacity);
+  const hasWordBackground = appearance.background_mode === "word";
+  const activeCueHasRtlChars = activeCue ? RTL_CHAR_PATTERN.test(activeCue.text) : false;
+  const subtitleDirection: "rtl" | "auto" = activeCueHasRtlChars ? "rtl" : "auto";
   const wordPadT = appearance.word_bg_padding_top ?? appearance.word_bg_padding ?? 8;
   const wordPadR = appearance.word_bg_padding_right ?? appearance.word_bg_padding ?? 8;
   const wordPadB = appearance.word_bg_padding_bottom ?? appearance.word_bg_padding ?? 8;
   const wordPadL = appearance.word_bg_padding_left ?? appearance.word_bg_padding ?? 8;
-  const hasWordBackground = appearance.background_mode === "word";
-  const activeCueHasRtlChars = activeCue ? RTL_CHAR_PATTERN.test(activeCue.text) : false;
-  const subtitleDirection: "rtl" | "auto" = activeCueHasRtlChars ? "rtl" : "auto";
   const activeWordStyle: React.CSSProperties = hasWordBackground
-    ? {
-        backgroundColor: colorWithOpacity(appearance.word_bg_color, appearance.word_bg_opacity),
-        borderRadius: `${Math.max(0, appearance.word_bg_radius)}px`,
-        padding: `${Math.max(0, wordPadT)}px ${Math.max(0, wordPadR)}px ${Math.max(0, wordPadB)}px ${Math.max(0, wordPadL)}px`
-      }
+    ? {}
     : {};
+  const wordBgBackingStyle: React.CSSProperties =
+    hasWordBackground
+      ? {
+          position: "absolute",
+          left: -Math.max(0, wordPadL),
+          top: -Math.max(0, wordPadT),
+          right: -Math.max(0, wordPadR),
+          bottom: -Math.max(0, wordPadB),
+          backgroundColor: colorWithOpacity(appearance.word_bg_color, appearance.word_bg_opacity),
+          borderRadius: `${Math.max(0, appearance.word_bg_radius)}px`,
+          zIndex: -1,
+          pointerEvents: "none"
+        }
+      : {};
   const subtitleOverlaySrc = React.useMemo(() => {
     if (!subtitleOverlayPath) {
       return null;
@@ -4666,6 +4676,24 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                             isWord &&
                                             highlightedWordIndex !== null &&
                                             seenWordIndex === highlightedWordIndex;
+                                          if (isActiveWord && hasWordBackground) {
+                                            return (
+                                              <span
+                                                key={`${idx}-${segment}`}
+                                                style={{
+                                                  position: "relative",
+                                                  display: "inline-block",
+                                                  color: highlightWordColor
+                                                }}
+                                              >
+                                                <span
+                                                  aria-hidden
+                                                  style={wordBgBackingStyle}
+                                                />
+                                                {segment}
+                                              </span>
+                                            );
+                                          }
                                           return (
                                             <span
                                               key={`${idx}-${segment}`}
@@ -4789,6 +4817,24 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                           }
                                           const isActiveWord =
                                             isWord && seenWordIndex === highlightedWordIndex;
+                                          if (isActiveWord && hasWordBackground) {
+                                            return (
+                                              <span
+                                                key={`${idx}-${segment}`}
+                                                style={{
+                                                  position: "relative",
+                                                  display: "inline-block",
+                                                  color: highlightWordColor
+                                                }}
+                                              >
+                                                <span
+                                                  aria-hidden
+                                                  style={wordBgBackingStyle}
+                                                />
+                                                {segment}
+                                              </span>
+                                            );
+                                          }
                                           return (
                                             <span
                                               key={`${idx}-${segment}`}

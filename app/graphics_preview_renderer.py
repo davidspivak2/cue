@@ -427,7 +427,7 @@ def render_graphics_preview(
                 style.word_bg_padding_right,
                 style.word_bg_padding_bottom,
                 style.word_bg_padding_left,
-                style.word_bg_radius,
+                max(0.0, style.word_bg_radius),
             )
         _draw_shadow(painter, line_paths, style)
         _draw_outline(painter, line_paths, style)
