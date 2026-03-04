@@ -4624,7 +4624,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                           <div className="relative w-fit max-w-full">
                             {isEditingActiveCue ? (
                               <div
-                                className="relative inline-block min-w-16 rounded-md px-3 py-2"
+                                className={cn(
+                                  "relative inline-block min-w-16 rounded-md",
+                                  !(
+                                    appearance.subtitle_mode === "word_highlight" &&
+                                    editingWordCount > 0 &&
+                                    appearance.background_mode === "line"
+                                  ) && "px-3 py-2"
+                                )}
                                 style={
                                   {
                                     fontFamily:
@@ -4680,8 +4687,18 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       data-workbench-subtitle-editor
                                       className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-transparent px-3 py-2 text-center whitespace-pre-wrap text-transparent caret-white shadow-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
                                       style={(() => {
-                                        const { fontFamily: _f, color: _c, textShadow: _s, ...rest } =
-                                          subtitleEditorTextStyle;
+                                        const {
+                                          fontFamily: _f,
+                                          color: _c,
+                                          textShadow: _s,
+                                          backgroundColor: _bg,
+                                          paddingTop: _pt,
+                                          paddingRight: _pr,
+                                          paddingBottom: _pb,
+                                          paddingLeft: _pl,
+                                          borderRadius: _br,
+                                          ...rest
+                                        } = subtitleEditorTextStyle;
                                         return { ...rest, color: "transparent" };
                                       })()}
                                       value={editingText}
