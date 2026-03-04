@@ -4506,7 +4506,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                   ref={videoWrapperRef}
                   className="relative h-full w-full overflow-hidden rounded-md"
                   data-testid="workbench-center-panel-video-wrapper"
-                  onMouseEnter={() => setShowVideoControls(true)}
                   onMouseLeave={(e) => {
                     const to = e.relatedTarget;
                     if (to instanceof Node && videoWrapperRef.current?.contains(to)) return;
@@ -4553,7 +4552,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                       const to = e.relatedTarget;
                       if (to instanceof Node && (
                         videoControlsBarRef.current?.contains(to) ||
-                        subtitleOverlayPositionLayerRef.current?.contains(to)
+                        subtitleOverlayPositionLayerRef.current?.contains(to) ||
+                        activeSubtitleWrapperRef.current?.contains(to)
                       ))
                         return;
                       setShowVideoControls(false);
@@ -4601,6 +4601,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                           subtitleVerticalClass
                         )}
                         style={subtitleOverlayPositionStyle}
+                        onMouseEnter={() => setShowVideoControls(true)}
+                        onMouseLeave={(e) => {
+                          const to = e.relatedTarget;
+                          if (to instanceof Node && (
+                            videoControlsBarRef.current?.contains(to) ||
+                            videoClickSurfaceRef.current?.contains(to) ||
+                            activeSubtitleWrapperRef.current?.contains(to)
+                          ))
+                            return;
+                          setShowVideoControls(false);
+                        }}
                       >
                         <div
                           className={cn(
@@ -4654,9 +4665,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 {appearance.subtitle_mode === "word_highlight" &&
                                 editingWordCount > 0 ? (
                                   <>
+                                    <div
+                                      aria-hidden
+                                      className="pointer-events-none absolute inset-0 rounded-md bg-background/50"
+                                    />
                                     <span
                                       aria-hidden
-                                      className="block whitespace-pre-wrap text-center"
+                                      className="relative z-1 block whitespace-pre-wrap text-center"
                                       dir={subtitleDirection}
                                       style={{
                                         ...subtitlePreviewTextStyle,
@@ -4713,7 +4728,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       ref={activeSubtitleRef}
                                       data-testid="workbench-subtitle-editor"
                                       data-workbench-subtitle-editor
-                                      className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-transparent px-3 py-2 text-center whitespace-pre-wrap text-transparent caret-white shadow-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+                                      className="z-2 m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-transparent px-3 py-2 text-center whitespace-pre-wrap text-transparent caret-white shadow-none ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45"
                                       style={(() => {
                                         const {
                                           fontFamily: _f,
@@ -4761,7 +4776,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       ref={activeSubtitleRef}
                                       data-testid="workbench-subtitle-editor"
                                       data-workbench-subtitle-editor
-                                      className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/25 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
+                                      className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/50 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45"
                                       style={(() => {
                                         const { fontFamily: _f, ...rest } =
                                           subtitleEditorTextStyle;
@@ -4785,10 +4800,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 tabIndex={0}
                                 data-testid="workbench-active-subtitle"
                                 className={cn(
-                                  "m-0 inline-block cursor-text box-border rounded-md border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:bg-background/25 hover:ring-1 hover:ring-primary/45",
-                                  isHoveringActiveSubtitle && "bg-background/25 ring-1 ring-primary/45",
+                                  "m-0 inline-block cursor-text box-border rounded-md border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:bg-background/50 hover:ring-2 hover:ring-primary/45",
+                                  isHoveringActiveSubtitle && "bg-background/50 ring-2 ring-primary/45",
                                   isActiveCueSelected
-                                    ? "outline-2 outline-offset-2 outline-primary ring-1 ring-primary/50"
+                                    ? "outline-2 outline-offset-2 outline-primary ring-2 ring-primary/50"
                                     : "outline-none"
                                 )}
                                 style={subtitlePreviewTextStyle}
@@ -4945,6 +4960,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                       const to = e.relatedTarget;
                       if (to instanceof Node && (
                         videoClickSurfaceRef.current?.contains(to) ||
+                        activeSubtitleWrapperRef.current?.contains(to) ||
                         subtitleOverlayPositionLayerRef.current?.contains(to)
                       ))
                         return;
