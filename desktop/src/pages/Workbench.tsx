@@ -2944,6 +2944,15 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     () => cueSegments.reduce((count, segment) => count + (/\S/.test(segment) ? 1 : 0), 0),
     [cueSegments]
   );
+  const editingSegments = React.useMemo(
+    () => (isEditingActiveCue ? editingText.split(/(\s+)/) : []),
+    [editingText, isEditingActiveCue]
+  );
+  const editingWordCount = React.useMemo(
+    () =>
+      editingSegments.reduce((count, segment) => count + (/\S/.test(segment) ? 1 : 0), 0),
+    [editingSegments]
+  );
   const highlightedWordIndex = React.useMemo(() => {
     if (!activeCue || appearance.subtitle_mode !== "word_highlight" || cueWordCount <= 0) {
       return null;
@@ -2962,6 +2971,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     currentTimeSeconds
   ]);
   const highlightWordColor = colorWithOpacity(appearance.highlight_color, highlightOpacity);
+  const defaultSubtitleTextColor = colorWithOpacity(appearance.text_color, appearance.text_opacity);
   const wordPadT = appearance.word_bg_padding_top ?? appearance.word_bg_padding ?? 8;
   const wordPadR = appearance.word_bg_padding_right ?? appearance.word_bg_padding ?? 8;
   const wordPadB = appearance.word_bg_padding_bottom ?? appearance.word_bg_padding ?? 8;
@@ -4624,41 +4634,105 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   } as React.CSSProperties
                                 }
                               >
-                                <span
-                                  aria-hidden
-                                  className="block whitespace-pre-wrap text-center text-white"
-                                  dir={subtitleDirection}
-                                  style={{
-                                    ...subtitleEditorTextStyle,
-                                    fontFamily: "inherit",
-                                    visibility: "hidden",
-                                    margin: 0,
-                                    padding: 0,
-                                    border: "none",
-                                    boxSizing: "content-box"
-                                  }}
-                                >
-                                  {editingText || "\u00A0"}
-                                </span>
-                                <textarea
-                                  ref={activeSubtitleRef}
-                                  data-testid="workbench-subtitle-editor"
-                                  data-workbench-subtitle-editor
-                                  className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/25 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
-                                  style={(() => {
-                                    const { fontFamily: _f, ...rest } =
-                                      subtitleEditorTextStyle;
-                                    return rest;
-                                  })()}
-                                  value={editingText}
-                                  onChange={handleEditTextChange}
-                                  onKeyDown={handleEditorKeyDown}
-                                  rows={1}
-                                  wrap="soft"
-                                  readOnly={isSavingCue || isExporting}
-                                  aria-label="Active subtitle editor"
-                                  dir={subtitleDirection}
-                                />
+                                {appearance.subtitle_mode === "word_highlight" &&
+                                editingWordCount > 0 ? (
+                                  <>
+                                    <span
+                                      aria-hidden
+                                      className="block whitespace-pre-wrap text-center"
+                                      dir={subtitleDirection}
+                                      style={{
+                                        ...subtitlePreviewTextStyle,
+                                        fontFamily: "inherit",
+                                        unicodeBidi: "plaintext",
+                                        color: defaultSubtitleTextColor
+                                      }}
+                                    >
+                                      {(() => {
+                                        let seenWordIndex = -1;
+                                        return editingSegments.map((segment, idx) => {
+                                          const isWord = /\S/.test(segment);
+                                          if (isWord) {
+                                            seenWordIndex += 1;
+                                          }
+                                          const isActiveWord =
+                                            isWord &&
+                                            highlightedWordIndex !== null &&
+                                            seenWordIndex === highlightedWordIndex;
+                                          return (
+                                            <span
+                                              key={`${idx}-${segment}`}
+                                              style={
+                                                isActiveWord
+                                                  ? { ...activeWordStyle, color: highlightWordColor }
+                                                  : { color: defaultSubtitleTextColor }
+                                              }
+                                            >
+                                              {segment}
+                                            </span>
+                                          );
+                                        });
+                                      })()}
+                                    </span>
+                                    <textarea
+                                      ref={activeSubtitleRef}
+                                      data-testid="workbench-subtitle-editor"
+                                      data-workbench-subtitle-editor
+                                      className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-transparent px-3 py-2 text-center whitespace-pre-wrap text-transparent caret-white shadow-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+                                      style={(() => {
+                                        const { fontFamily: _f, color: _c, textShadow: _s, ...rest } =
+                                          subtitleEditorTextStyle;
+                                        return { ...rest, color: "transparent" };
+                                      })()}
+                                      value={editingText}
+                                      onChange={handleEditTextChange}
+                                      onKeyDown={handleEditorKeyDown}
+                                      rows={1}
+                                      wrap="soft"
+                                      readOnly={isSavingCue || isExporting}
+                                      aria-label="Active subtitle editor"
+                                      dir={subtitleDirection}
+                                    />
+                                  </>
+                                ) : (
+                                  <>
+                                    <span
+                                      aria-hidden
+                                      className="block whitespace-pre-wrap text-center text-white"
+                                      dir={subtitleDirection}
+                                      style={{
+                                        ...subtitleEditorTextStyle,
+                                        fontFamily: "inherit",
+                                        visibility: "hidden",
+                                        margin: 0,
+                                        padding: 0,
+                                        border: "none",
+                                        boxSizing: "content-box"
+                                      }}
+                                    >
+                                      {editingText || "\u00A0"}
+                                    </span>
+                                    <textarea
+                                      ref={activeSubtitleRef}
+                                      data-testid="workbench-subtitle-editor"
+                                      data-workbench-subtitle-editor
+                                      className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/25 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none"
+                                      style={(() => {
+                                        const { fontFamily: _f, ...rest } =
+                                          subtitleEditorTextStyle;
+                                        return rest;
+                                      })()}
+                                      value={editingText}
+                                      onChange={handleEditTextChange}
+                                      onKeyDown={handleEditorKeyDown}
+                                      rows={1}
+                                      wrap="soft"
+                                      readOnly={isSavingCue || isExporting}
+                                      aria-label="Active subtitle editor"
+                                      dir={subtitleDirection}
+                                    />
+                                  </>
+                                )}
                               </div>
                             ) : (
                               <div
