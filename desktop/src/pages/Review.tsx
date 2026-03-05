@@ -61,6 +61,8 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   word_bg_radius: 0,
   vertical_anchor: "bottom",
   vertical_offset: 28,
+  position_x: 0.5,
+  position_y: 0.92,
   subtitle_mode: "word_highlight",
   highlight_color: "#FFD400"
 };
@@ -152,7 +154,9 @@ const applyPresetAppearance = (
     word_bg_padding_left: defaults.box_padding,
     word_bg_radius: 0,
     vertical_anchor: "bottom",
-    vertical_offset: defaults.margin_v
+    vertical_offset: defaults.margin_v,
+    position_x: 0.5,
+    position_y: 1 - defaults.margin_v / 1000
   };
   if (presetName === "Lift") {
     return {

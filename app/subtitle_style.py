@@ -83,6 +83,8 @@ class SubtitleStyle:
     word_bg_radius: float
     vertical_anchor: str
     vertical_offset: float
+    position_x: float
+    position_y: float
     subtitle_mode: str
     highlight_color: str
 
@@ -236,6 +238,8 @@ def style_model_from_preset(
         word_bg_radius=0.0,
         vertical_anchor="bottom",
         vertical_offset=preset.margin_v,
+        position_x=0.5,
+        position_y=_position_y_from_anchor_offset("bottom", preset.margin_v),
         subtitle_mode=subtitle_mode,
         highlight_color=highlight_color,
     )
@@ -276,10 +280,33 @@ def style_model_from_preset(
             word_bg_radius=style.word_bg_radius,
             vertical_anchor=style.vertical_anchor,
             vertical_offset=style.vertical_offset,
+            position_x=style.position_x,
+            position_y=style.position_y,
             subtitle_mode=style.subtitle_mode,
             highlight_color=style.highlight_color,
         )
     return style
+
+
+def _position_y_from_anchor_offset(vertical_anchor: str, vertical_offset: float) -> float:
+    """Convert vertical_anchor + vertical_offset (px) to position_y in [0, 1]. Nominal height 1000."""
+    h = 1000.0
+    o = max(0.0, min(vertical_offset, h))
+    if vertical_anchor == "top":
+        return o / h
+    if vertical_anchor == "middle":
+        return 0.5 - (o / h) * 0.5
+    return 1.0 - (o / h)
+
+
+def _position_y_from_normalize_raw(
+    raw: object, fallback: SubtitleStyle, vertical_anchor: str, vertical_offset: float
+) -> float:
+    """position_y for normalize: from raw if present, else derived from anchor+offset."""
+    if isinstance(raw, dict) and raw.get("position_y") is not None:
+        default_y = getattr(fallback, "position_y", 0.92)
+        return max(0.0, min(1.0, _coerce_float(raw.get("position_y"), default_y)))
+    return max(0.0, min(1.0, _position_y_from_anchor_offset(vertical_anchor, vertical_offset)))
 
 
 def preset_defaults(
@@ -349,6 +376,18 @@ def normalize_style_model(raw: object, fallback: SubtitleStyle) -> SubtitleStyle
             raw.get("vertical_anchor"), VALID_VERTICAL_ANCHORS, fallback.vertical_anchor
         ),
         vertical_offset=_coerce_float(raw.get("vertical_offset"), fallback.vertical_offset),
+        position_x=max(
+            0.0,
+            min(1.0, _coerce_float(raw.get("position_x"), getattr(fallback, "position_x", 0.5))),
+        ),
+        position_y=_position_y_from_normalize_raw(
+            raw,
+            fallback,
+            _coerce_enum(
+                raw.get("vertical_anchor"), VALID_VERTICAL_ANCHORS, fallback.vertical_anchor
+            ),
+            _coerce_float(raw.get("vertical_offset"), fallback.vertical_offset),
+        ),
         subtitle_mode=_coerce_enum(
             raw.get("subtitle_mode"), VALID_SUBTITLE_MODES, fallback.subtitle_mode
         ),
@@ -393,6 +432,8 @@ def style_model_to_dict(style: SubtitleStyle) -> dict[str, object]:
         "word_bg_radius": style.word_bg_radius,
         "vertical_anchor": style.vertical_anchor,
         "vertical_offset": style.vertical_offset,
+        "position_x": style.position_x,
+        "position_y": style.position_y,
         "subtitle_mode": style.subtitle_mode,
         "highlight_color": style.highlight_color,
     }
