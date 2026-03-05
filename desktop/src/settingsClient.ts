@@ -65,6 +65,8 @@ export type SubtitleStyleAppearance = {
   word_bg_radius: number;
   vertical_anchor: string;
   vertical_offset: number;
+  position_x?: number;
+  position_y?: number;
   subtitle_mode: string;
   highlight_color: string;
 };

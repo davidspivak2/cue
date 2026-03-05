@@ -86,6 +86,9 @@ const STATUS_LABELS: Record<string, string> = {
   missing_file: "Missing file"
 };
 
+const SUBTITLE_FONT_SIZE_MIN = 18;
+const SUBTITLE_FONT_SIZE_MAX = 72;
+
 const CREATE_SUBTITLES_FILE_NOT_FOUND_MESSAGE =
   "The video file wasn't found. If you renamed or moved it, relink the video from the project hub and try again.";
 
@@ -185,6 +188,8 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   word_bg_radius: 0,
   vertical_anchor: "bottom",
   vertical_offset: 28,
+  position_x: 0.5,
+  position_y: 0.92,
   subtitle_mode: "word_highlight",
   highlight_color: "#FFD400"
 };
@@ -537,6 +542,40 @@ const formatElapsedSince = (startedAt: string | null): string => {
 };
 
 const clampOpacity = (value: number) => Math.max(0, Math.min(1, value));
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+const clampSubtitleCenterToVisibleBounds = (
+  x: number,
+  y: number,
+  layerWidth: number,
+  layerHeight: number,
+  boxWidth: number,
+  boxHeight: number
+) => {
+  const safeX = clamp01(x);
+  const safeY = clamp01(y);
+  if (layerWidth <= 0 || layerHeight <= 0) {
+    return { x: safeX, y: safeY };
+  }
+  const constrainedBoxWidth = Math.max(0, Math.min(boxWidth, layerWidth));
+  const constrainedBoxHeight = Math.max(0, Math.min(boxHeight, layerHeight));
+  const halfW = Math.min(0.5, constrainedBoxWidth / (2 * layerWidth));
+  const halfH = Math.min(0.5, constrainedBoxHeight / (2 * layerHeight));
+  const minX = halfW;
+  const maxX = 1 - halfW;
+  const minY = halfH;
+  const maxY = 1 - halfH;
+  if (minX >= maxX) {
+    return { x: 0.5, y: Math.max(minY, Math.min(maxY, safeY)) };
+  }
+  if (minY >= maxY) {
+    return { x: Math.max(minX, Math.min(maxX, safeX)), y: 0.5 };
+  }
+  return {
+    x: Math.max(minX, Math.min(maxX, safeX)),
+    y: Math.max(minY, Math.min(maxY, safeY))
+  };
+};
 
 const colorWithOpacity = (hex: string, opacity: number) => {
   if (!HEX_COLOR_PATTERN.test(hex)) {
@@ -837,6 +876,19 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
   const [isHoveringActiveSubtitle, setIsHoveringActiveSubtitle] = React.useState(false);
+  type SubtitleResizeHandleCorner = "nw" | "ne" | "se" | "sw";
+  const [subtitleResizeDrag, setSubtitleResizeDrag] = React.useState<{
+    corner: SubtitleResizeHandleCorner;
+    startX: number;
+    startY: number;
+    startFontSize: number;
+  } | null>(null);
+  const [subtitlePositionDrag, setSubtitlePositionDrag] = React.useState<{
+    startX: number;
+    startY: number;
+    startPositionX: number;
+    startPositionY: number;
+  } | null>(null);
   const [progressHoverSeconds, setProgressHoverSeconds] = React.useState<number | null>(null);
   const [progressHoverXPx, setProgressHoverXPx] = React.useState<number | null>(null);
   const lastProgressHoverXPxRef = React.useRef<number>(0);
@@ -2936,6 +2988,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const isEditingCue = editingCueId !== null;
   const isActiveCueSelected = activeCue ? selectedCueId === activeCue.id : false;
   const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
+  const showSubtitleResizeHandles =
+    (isEditingActiveCue || isActiveCueSelected || isHoveringActiveSubtitle || subtitleResizeDrag !== null || subtitlePositionDrag !== null) &&
+    !isSavingCue &&
+    !isExporting;
+  const shouldShowVideoControls =
+    subtitlePositionDrag === null && (showVideoControls || subtitleResizeDrag !== null);
   const cueSegments = React.useMemo(
     () => (activeCue ? activeCue.text.split(/(\s+)/) : []),
     [activeCue]
@@ -3160,33 +3218,44 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
   }, [isTauriEnv, latestOutputPath, openSystemPath]);
 
-  const subtitleVerticalClass =
-    appearance.vertical_anchor === "top"
-      ? "items-start"
-      : appearance.vertical_anchor === "middle"
-        ? "items-center"
-        : "items-end";
-  /** For flex-col containers: vertical position is controlled by justify-content, not align-items. */
-  const subtitleVerticalJustifyClass =
-    appearance.vertical_anchor === "top"
-      ? "justify-start"
-      : appearance.vertical_anchor === "middle"
-        ? "justify-center"
-        : "justify-end";
+  const subtitleOverlayPosition = React.useMemo(() => {
+    const px = appearance.position_x ?? 0.5;
+    const py = appearance.position_y ?? (() => {
+      const anchor = appearance.vertical_anchor ?? "bottom";
+      const offset = appearance.vertical_offset ?? 28;
+      const h = 1000;
+      const o = Math.max(0, Math.min(offset, h));
+      if (anchor === "top") return o / h;
+      if (anchor === "middle") return 0.5 - (o / h) * 0.5;
+      return 1 - o / h;
+    })();
+    return { x: clamp01(px), y: clamp01(py) };
+  }, [appearance.position_x, appearance.position_y, appearance.vertical_anchor, appearance.vertical_offset]);
 
-  const subtitleOverlayPositionStyle = React.useMemo<React.CSSProperties>(() => {
-    const scaledOffset = Math.max(0, appearance.vertical_offset * displayedVideoRect.scale);
-    const offsetPx = `${scaledOffset}px`;
-    let style: React.CSSProperties;
-    if (appearance.vertical_anchor === "top") {
-      style = { paddingTop: offsetPx };
-    } else if (appearance.vertical_anchor === "middle") {
-      style = { transform: `translateY(-${scaledOffset}px)` };
-    } else {
-      style = { paddingBottom: offsetPx };
+  const clampOverlayPositionToVisibleBounds = React.useCallback((x: number, y: number) => {
+    const layer = subtitleOverlayPositionLayerRef.current;
+    const wrapper = activeSubtitleWrapperRef.current;
+    if (!layer || !wrapper) {
+      return { x: clamp01(x), y: clamp01(y) };
     }
-    return style;
-  }, [appearance.vertical_anchor, appearance.vertical_offset, displayedVideoRect.scale]);
+    const layerRect = layer.getBoundingClientRect();
+    if (layerRect.width <= 0 || layerRect.height <= 0) {
+      return { x: clamp01(x), y: clamp01(y) };
+    }
+    return clampSubtitleCenterToVisibleBounds(
+      x,
+      y,
+      layerRect.width,
+      layerRect.height,
+      wrapper.offsetWidth,
+      wrapper.offsetHeight
+    );
+  }, []);
+
+  const subtitleOverlayVisiblePosition = clampOverlayPositionToVisibleBounds(
+    subtitleOverlayPosition.x,
+    subtitleOverlayPosition.y
+  );
 
   const displayedVideoGeometryStyle = React.useMemo<React.CSSProperties>(
     () => ({
@@ -3413,7 +3482,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [isEditingActiveCue, appearance.font_family]);
 
   React.useLayoutEffect(() => {
-    if (!showVideoControls || !activeCue) {
+    if (!shouldShowVideoControls || !activeCue) {
       setSubtitleControlsPushPx((prev) =>
         Math.abs(prev) <= SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX ? prev : 0
       );
@@ -3458,7 +3527,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     displayedVideoRect.scale,
     displayedVideoRect.width,
     editingText,
-    showVideoControls,
+    shouldShowVideoControls,
     subtitleEditorTextStyle,
     subtitlePreviewTextStyle
   ]);
@@ -3561,6 +3630,129 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setPreset("Custom");
     }
   };
+  const handleAppearanceChangeRef = React.useRef(handleAppearanceChange);
+  handleAppearanceChangeRef.current = handleAppearanceChange;
+  const SUBTITLE_POSITION_AUTOCORRECT_EPSILON = 0.0005;
+
+  React.useLayoutEffect(() => {
+    if (!activeCue || subtitlePositionDrag || isExporting) {
+      return;
+    }
+    const nextPosition = clampOverlayPositionToVisibleBounds(
+      subtitleOverlayPosition.x,
+      subtitleOverlayPosition.y
+    );
+    const needsCorrection =
+      Math.abs(nextPosition.x - subtitleOverlayPosition.x) > SUBTITLE_POSITION_AUTOCORRECT_EPSILON ||
+      Math.abs(nextPosition.y - subtitleOverlayPosition.y) > SUBTITLE_POSITION_AUTOCORRECT_EPSILON;
+    if (!needsCorrection) {
+      return;
+    }
+    handleAppearanceChangeRef.current({
+      position_x: nextPosition.x,
+      position_y: nextPosition.y
+    });
+  }, [
+    activeCue?.id,
+    appearance,
+    clampOverlayPositionToVisibleBounds,
+    displayedVideoRect.height,
+    displayedVideoRect.width,
+    editingText,
+    isEditingActiveCue,
+    isExporting,
+    showSubtitleResizeHandles,
+    subtitleOverlayPosition.x,
+    subtitleOverlayPosition.y,
+    subtitlePositionDrag
+  ]);
+
+  React.useEffect(() => {
+    const drag = subtitleResizeDrag;
+    if (!drag) return;
+    const onMouseMove = (e: MouseEvent) => {
+      const dy = e.clientY - drag.startY;
+      const deltaSize = -dy * 0.25;
+      const raw = drag.startFontSize + deltaSize;
+      const newSize = Math.round(
+        Math.max(SUBTITLE_FONT_SIZE_MIN, Math.min(SUBTITLE_FONT_SIZE_MAX, raw))
+      );
+      handleAppearanceChangeRef.current({ font_size: newSize });
+    };
+    const onMouseUp = () => setSubtitleResizeDrag(null);
+    document.addEventListener("mousemove", onMouseMove, true);
+    document.addEventListener("mouseup", onMouseUp, true);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove, true);
+      document.removeEventListener("mouseup", onMouseUp, true);
+    };
+  }, [subtitleResizeDrag]);
+
+  const SUBTITLE_POSITION_SNAP_THRESHOLD = 0.02;
+  React.useEffect(() => {
+    const drag = subtitlePositionDrag;
+    if (!drag) return;
+    const onMouseMove = (e: MouseEvent) => {
+      const layer = subtitleOverlayPositionLayerRef.current;
+      if (!layer) return;
+      const rect = layer.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const deltaX = (e.clientX - drag.startX) / rect.width;
+      const deltaY = (e.clientY - drag.startY) / rect.height;
+      let px = drag.startPositionX + deltaX;
+      let py = drag.startPositionY + deltaY;
+      if (Math.abs(px - 0.5) < SUBTITLE_POSITION_SNAP_THRESHOLD) px = 0.5;
+      const wrapper = activeSubtitleWrapperRef.current;
+      const clamped = clampSubtitleCenterToVisibleBounds(
+        px,
+        py,
+        rect.width,
+        rect.height,
+        wrapper?.offsetWidth ?? 0,
+        wrapper?.offsetHeight ?? 0
+      );
+      handleAppearanceChangeRef.current({ position_x: clamped.x, position_y: clamped.y });
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      const layer = subtitleOverlayPositionLayerRef.current;
+      if (layer) {
+        const rect = layer.getBoundingClientRect();
+        const isInsideByCoords =
+          rect.width > 0 &&
+          rect.height > 0 &&
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom;
+        const isInsideByHover =
+          layer.matches(":hover") ||
+          activeSubtitleWrapperRef.current?.matches(":hover") ||
+          videoClickSurfaceRef.current?.matches(":hover");
+        setShowVideoControls(Boolean(isInsideByCoords || isInsideByHover));
+      } else {
+        setShowVideoControls(false);
+      }
+      setSubtitlePositionDrag(null);
+    };
+    document.addEventListener("mousemove", onMouseMove, true);
+    document.addEventListener("mouseup", onMouseUp, true);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove, true);
+      document.removeEventListener("mouseup", onMouseUp, true);
+    };
+  }, [subtitlePositionDrag]);
+
+  React.useEffect(() => {
+    if ((isSavingCue || isExporting) && subtitleResizeDrag) {
+      setSubtitleResizeDrag(null);
+    }
+  }, [isSavingCue, isExporting, subtitleResizeDrag]);
+
+  React.useEffect(() => {
+    if ((isSavingCue || isExporting) && subtitlePositionDrag) {
+      setSubtitlePositionDrag(null);
+    }
+  }, [isSavingCue, isExporting, subtitlePositionDrag]);
 
   const handlePresetChange = (nextPreset: string) => {
     if (isExporting) {
@@ -4547,7 +4739,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     style={displayedVideoGeometryStyle}
                     onClick={handleVideoSurfaceClick}
                     onDoubleClick={handleVideoSurfaceDoubleClick}
-                    onMouseEnter={() => setShowVideoControls(true)}
+                    onMouseEnter={() => {
+                      if (subtitlePositionDrag !== null) return;
+                      setShowVideoControls(true);
+                    }}
                     onMouseLeave={(e) => {
                       const to = e.relatedTarget;
                       if (to instanceof Node && (
@@ -4580,7 +4775,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     </div>
                   </div>
                   <div
-                    className={cn("absolute", !isEditingActiveCue && "pointer-events-none")}
+                    className={cn("absolute", !isEditingActiveCue && !subtitleResizeDrag && !subtitlePositionDrag && "pointer-events-none")}
                     style={displayedVideoGeometryStyle}
                   >
 {SHOW_SUBTITLE_OVERLAY_IN_APP && shouldRenderOverlayImage && (
@@ -4596,12 +4791,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                       <div
                         ref={subtitleOverlayPositionLayerRef}
                         data-testid="workbench-subtitle-overlay-position-layer"
-                        className={cn(
-                          "absolute inset-0 flex justify-center",
-                          subtitleVerticalClass
-                        )}
-                        style={subtitleOverlayPositionStyle}
-                        onMouseEnter={() => setShowVideoControls(true)}
+                        className="absolute inset-0"
+                        onMouseEnter={() => {
+                      if (subtitlePositionDrag !== null) return;
+                      setShowVideoControls(true);
+                    }}
                         onMouseLeave={(e) => {
                           const to = e.relatedTarget;
                           if (to instanceof Node && (
@@ -4613,21 +4807,37 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                           setShowVideoControls(false);
                         }}
                       >
-                        <div
-                          className={cn(
-                            "pointer-events-none flex min-h-0 min-w-0 flex-1 flex-col items-center",
-                            subtitleVerticalJustifyClass
-                          )}
-                          style={{
-                            height: "100%"
-                          }}
-                        >
+                        {subtitlePositionDrag !== null && Math.abs(subtitleOverlayVisiblePosition.x - 0.5) < SUBTITLE_POSITION_SNAP_THRESHOLD && (
+                          <div
+                            className="pointer-events-none absolute inset-y-0 left-1/2 z-0 w-px -translate-x-1/2 bg-primary/60"
+                            aria-hidden
+                          />
+                        )}
                         <div
                           ref={activeSubtitleWrapperRef}
-                          className="pointer-events-auto relative z-11 w-fit max-w-full transition-transform duration-200"
-                          style={subtitleControlsPushStyle}
+                          className={cn("pointer-events-auto absolute z-11 w-max max-w-full transition-transform duration-200", !isEditingActiveCue && "cursor-move")}
+                          style={{
+                            left: `${subtitleOverlayVisiblePosition.x * 100}%`,
+                            top: `${subtitleOverlayVisiblePosition.y * 100}%`,
+                            transform: subtitleControlsPushStyle.transform
+                              ? `translate(-50%, -50%) ${subtitleControlsPushStyle.transform}`
+                              : "translate(-50%, -50%)"
+                          }}
+                          onMouseDown={(e) => {
+                            if (subtitleResizeDrag || (e.target as HTMLElement).closest("[data-subtitle-resize-handle]")) return;
+                            e.preventDefault();
+                            setShowVideoControls(false);
+                            setSubtitlePositionDrag({
+                              startX: e.clientX,
+                              startY: e.clientY,
+                              startPositionX: subtitleOverlayVisiblePosition.x,
+                              startPositionY: subtitleOverlayVisiblePosition.y
+                            });
+                          }}
                           onMouseEnter={() => {
-                            setShowVideoControls(true);
+                            if (subtitlePositionDrag === null) {
+                              setShowVideoControls(true);
+                            }
                             setIsHoveringActiveSubtitle(true);
                           }}
                           onMouseLeave={(e) => {
@@ -4642,11 +4852,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                             setShowVideoControls(false);
                           }}
                         >
-                          <div className="relative w-fit max-w-full">
+                          <div className="relative w-max max-w-full">
                             {isEditingActiveCue ? (
                               <div
                                 className={cn(
-                                  "relative inline-block min-w-16 rounded-md",
+                                  "relative inline-block min-w-16",
+                                  showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
                                   !(
                                     appearance.subtitle_mode === "word_highlight" &&
                                     editingWordCount > 0 &&
@@ -4667,7 +4878,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   <>
                                     <div
                                       aria-hidden
-                                      className="pointer-events-none absolute inset-0 rounded-md bg-background/50"
+                                      className={cn(
+                                        "pointer-events-none absolute inset-0 bg-background/50",
+                                        showSubtitleResizeHandles ? "rounded-sm" : "rounded-md"
+                                      )}
                                     />
                                     <span
                                       aria-hidden
@@ -4728,7 +4942,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       ref={activeSubtitleRef}
                                       data-testid="workbench-subtitle-editor"
                                       data-workbench-subtitle-editor
-                                      className="z-2 m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-transparent px-3 py-2 text-center whitespace-pre-wrap text-transparent caret-white shadow-none ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45"
+                                      className={cn(
+                                        "z-2 m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden border-0 bg-transparent px-3 py-2 text-center whitespace-pre-wrap text-transparent caret-white shadow-none ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45",
+                                        showSubtitleResizeHandles ? "rounded-sm" : "rounded-md"
+                                      )}
                                       style={(() => {
                                         const {
                                           fontFamily: _f,
@@ -4776,7 +4993,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       ref={activeSubtitleRef}
                                       data-testid="workbench-subtitle-editor"
                                       data-workbench-subtitle-editor
-                                      className="m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden rounded-md border-0 bg-background/50 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45"
+                                      className={cn(
+                                        "m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden border-0 bg-background/50 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45",
+                                        showSubtitleResizeHandles ? "rounded-sm" : "rounded-md"
+                                      )}
                                       style={(() => {
                                         const { fontFamily: _f, ...rest } =
                                           subtitleEditorTextStyle;
@@ -4800,8 +5020,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 tabIndex={0}
                                 data-testid="workbench-active-subtitle"
                                 className={cn(
-                                  "m-0 inline-block cursor-text box-border rounded-md border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:bg-background/50 hover:ring-2 hover:ring-primary/45",
-                                  isHoveringActiveSubtitle && "bg-background/50 ring-2 ring-primary/45",
+                                  "m-0 inline-block cursor-text box-border border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:bg-background hover:ring-2 hover:ring-primary/45",
+                                  showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
+                                  (isHoveringActiveSubtitle || subtitleResizeDrag || subtitlePositionDrag) && "bg-background ring-2 ring-primary/45",
                                   isActiveCueSelected
                                     ? "outline-2 outline-offset-2 outline-primary ring-2 ring-primary/50"
                                     : "outline-none"
@@ -4868,6 +5089,82 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 </span>
                               </div>
                             )}
+                            {showSubtitleResizeHandles && (
+                              <>
+                                <div
+                                  data-subtitle-resize-handle
+                                  role="button"
+                                  tabIndex={-1}
+                                  aria-label="Resize subtitle from top-left"
+                                  className="group absolute left-0 top-0 z-20 flex min-h-7 min-w-7 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize! items-center justify-center"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setSubtitleResizeDrag({
+                                      corner: "nw",
+                                      startX: e.clientX,
+                                      startY: e.clientY,
+                                      startFontSize: appearance.font_size
+                                    });
+                                  }}
+                                >
+                                  <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
+                                </div>
+                                <div
+                                  data-subtitle-resize-handle
+                                  role="button"
+                                  tabIndex={-1}
+                                  aria-label="Resize subtitle from top-right"
+                                  className="group absolute right-0 top-0 z-20 flex min-h-7 min-w-7 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize! items-center justify-center"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setSubtitleResizeDrag({
+                                      corner: "ne",
+                                      startX: e.clientX,
+                                      startY: e.clientY,
+                                      startFontSize: appearance.font_size
+                                    });
+                                  }}
+                                >
+                                  <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
+                                </div>
+                                <div
+                                  data-subtitle-resize-handle
+                                  role="button"
+                                  tabIndex={-1}
+                                  aria-label="Resize subtitle from bottom-right"
+                                  className="group absolute bottom-0 right-0 z-20 flex min-h-7 min-w-7 translate-x-1/2 translate-y-1/2 cursor-nwse-resize! items-center justify-center"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setSubtitleResizeDrag({
+                                      corner: "se",
+                                      startX: e.clientX,
+                                      startY: e.clientY,
+                                      startFontSize: appearance.font_size
+                                    });
+                                  }}
+                                >
+                                  <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
+                                </div>
+                                <div
+                                  data-subtitle-resize-handle
+                                  role="button"
+                                  tabIndex={-1}
+                                  aria-label="Resize subtitle from bottom-left"
+                                  className="group absolute bottom-0 left-0 z-20 flex min-h-7 min-w-7 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize! items-center justify-center"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setSubtitleResizeDrag({
+                                      corner: "sw",
+                                      startX: e.clientX,
+                                      startY: e.clientY,
+                                      startFontSize: appearance.font_size
+                                    });
+                                  }}
+                                >
+                                  <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
+                                </div>
+                              </>
+                            )}
                             {isEditingActiveCue && (
                               <div
                                 ref={subtitleEditorControlsRef}
@@ -4923,7 +5220,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                             </div>
                           </div>
                         </div>
-                        </div>
                     )}
                   </div>
                   {seekFeedback && (
@@ -4948,14 +5244,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     ref={videoControlsBarRef}
                     className={cn(
                       "flex cursor-default flex-col justify-end rounded-b-md transition-opacity duration-200",
-                      showVideoControls ? "opacity-100" : "opacity-0"
+                      shouldShowVideoControls ? "opacity-100" : "opacity-0"
                     )}
                     style={{
                       ...videoControlsBarContainerStyle,
-                      pointerEvents: showVideoControls ? "auto" : "none"
+                      pointerEvents: shouldShowVideoControls ? "auto" : "none"
                     }}
                     data-testid="workbench-video-controls"
-                    onMouseEnter={() => setShowVideoControls(true)}
+                    onMouseEnter={() => {
+                      if (subtitlePositionDrag !== null) return;
+                      setShowVideoControls(true);
+                    }}
                     onMouseLeave={(e) => {
                       const to = e.relatedTarget;
                       if (to instanceof Node && (
@@ -5357,3 +5656,4 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 };
 
 export default Workbench;
+

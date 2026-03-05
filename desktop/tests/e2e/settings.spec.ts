@@ -43,6 +43,8 @@ const buildSettings = () => ({
       outline_width: 2,
       shadow_strength: 1,
       vertical_offset: 28,
+      position_x: 0.5,
+      position_y: 0.92,
       background_mode: "none",
       line_bg_opacity: 0.7,
       line_bg_padding: 8,

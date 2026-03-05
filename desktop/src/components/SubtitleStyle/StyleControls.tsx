@@ -56,12 +56,6 @@ const CURATED_FONTS = [
 ] as const;
 
 
-const POSITION_ANCHOR_OPTIONS = [
-  { value: "bottom", label: "Bottom" },
-  { value: "middle", label: "Middle" },
-  { value: "top", label: "Top" }
-] as const;
-
 /* ---------- helpers ---------- */
 
 type SliderRowProps = {
@@ -335,14 +329,6 @@ const StyleControls = ({
         : 0;
   const backgroundSummary =
     bgMode === "none" ? "None" : `${bgMode === "line" ? "Line" : "Word"} • ${backgroundOpacity}%`;
-  const positionSummary = `${appearance.vertical_anchor.charAt(0).toUpperCase() + appearance.vertical_anchor.slice(1)} • ${appearance.vertical_offset}`;
-
-  const offsetLabel =
-    appearance.vertical_anchor === "bottom"
-      ? "Offset from bottom"
-      : appearance.vertical_anchor === "top"
-        ? "Offset from top"
-        : "Offset from center";
 
   return (
     <div className="space-y-4">
@@ -399,7 +385,7 @@ const StyleControls = ({
       {/* ── Accordion groups ── */}
       <Accordion
         type="multiple"
-        defaultValue={["text", "position"]}
+        defaultValue={["text"]}
         className="rounded-md border border-border"
       >
         <AccordionItem value="text">
@@ -871,48 +857,6 @@ const StyleControls = ({
                 />
               </div>
             )}
-          </AccordionContent>
-        </AccordionItem>
-
-        <AccordionItem value="position">
-          <AccordionTrigger className="px-3 hover:no-underline">
-            <span className="flex flex-col items-start gap-0.5">
-              <span className="font-medium">Position</span>
-              <span className="text-xs font-normal text-muted-foreground">
-                {positionSummary}
-              </span>
-            </span>
-          </AccordionTrigger>
-          <AccordionContent className="space-y-3 px-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">
-                Vertical position
-              </Label>
-              <ToggleGroup
-                type="single"
-                value={appearance.vertical_anchor}
-                onValueChange={(v) => v && patch({ vertical_anchor: v })}
-                className="grid grid-cols-3 gap-1"
-              >
-                {POSITION_ANCHOR_OPTIONS.map((opt) => (
-                  <ToggleGroupItem
-                    key={opt.value}
-                    value={opt.value}
-                    className="text-xs"
-                    aria-label={opt.label}
-                  >
-                    {opt.label}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            </div>
-            <SliderRow
-              label={offsetLabel}
-              value={appearance.vertical_offset}
-              min={0}
-              max={200}
-              onChange={(v) => patch({ vertical_offset: v })}
-            />
           </AccordionContent>
         </AccordionItem>
       </Accordion>

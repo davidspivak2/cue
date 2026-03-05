@@ -596,6 +596,8 @@ def _scale_style_for_resolution(style: SubtitleStyle, scale: float) -> SubtitleS
         word_bg_radius=style.word_bg_radius * s,
         vertical_anchor=style.vertical_anchor,
         vertical_offset=style.vertical_offset * s,
+        position_x=style.position_x,
+        position_y=style.position_y,
         subtitle_mode=style.subtitle_mode,
         highlight_color=style.highlight_color,
     )

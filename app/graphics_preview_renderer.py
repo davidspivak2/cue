@@ -256,6 +256,8 @@ def build_preview_cache_key(
         "word_bg_radius": style.word_bg_radius,
         "vertical_anchor": style.vertical_anchor,
         "vertical_offset": style.vertical_offset,
+        "position_x": style.position_x,
+        "position_y": style.position_y,
         "subtitle_mode": subtitle_mode,
         "highlight_color": highlight_color,
         "highlight_opacity": highlight_opacity,
@@ -329,8 +331,8 @@ def render_graphics_preview(
             font,
             width=rendered.width(),
             height=rendered.height(),
-            vertical_offset=style.vertical_offset,
-            vertical_anchor=style.vertical_anchor,
+            position_x=style.position_x,
+            position_y=style.position_y,
         )
         text_rect = _compute_text_rect_from_lines(lines)
         if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
@@ -340,8 +342,8 @@ def render_graphics_preview(
                 font,
                 rendered.width(),
                 rendered.height(),
-                style.vertical_anchor,
-                style.vertical_offset,
+                style.position_x,
+                style.position_y,
                 metrics=metrics,
             )
         if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
@@ -536,8 +538,8 @@ def _build_text_layout(
     *,
     width: int,
     height: int,
-    vertical_offset: float,
-    vertical_anchor: str,
+    position_x: float,
+    position_y: float,
 ) -> tuple[QtGui.QTextLayout, list[QtGui.QTextLine], float]:
     layout = QtGui.QTextLayout(text, font)
     option = QtGui.QTextOption()
@@ -560,17 +562,15 @@ def _build_text_layout(
         lines.append(line)
     layout.endLayout()
     total_height = y
-    margin_v = float(vertical_offset)
-    if vertical_anchor == "top":
-        top_y = margin_v
-    elif vertical_anchor == "middle":
-        top_y = (height - total_height) / 2 - margin_v
-    else:
-        top_y = height - margin_v - total_height
-    top_y = max(0.0, top_y)
+    center_x = float(width) * max(0.0, min(1.0, position_x))
+    center_y = float(height) * max(0.0, min(1.0, position_y))
+    top_y = center_y - total_height / 2.0
+    top_y = max(0.0, min(float(height) - total_height, top_y))
     for line in lines:
-        centered_x = (line_width - line.naturalTextWidth()) / 2
-        line.setPosition(QtCore.QPointF(centered_x, line.position().y() + top_y))
+        line_w = line.naturalTextWidth()
+        line_x = center_x - line_w / 2.0
+        line_x = max(0.0, min(float(width) - line_w, line_x))
+        line.setPosition(QtCore.QPointF(line_x, line.position().y() + top_y))
     return layout, lines, line_width
 
 
@@ -593,8 +593,8 @@ def _build_layout_cache_key(
         style.font_size,
         style.font_style,
         style.letter_spacing,
-        style.vertical_anchor,
-        style.vertical_offset,
+        style.position_x,
+        style.position_y,
         subtitle_mode,
     )
 
@@ -1091,8 +1091,8 @@ def _compute_text_rect_from_metrics(
     font: QtGui.QFont,
     width: int,
     height: int,
-    vertical_anchor: str,
-    vertical_offset: float,
+    position_x: float,
+    position_y: float,
     *,
     metrics: Optional[QtGui.QFontMetricsF] = None,
 ) -> QtCore.QRectF:
@@ -1101,16 +1101,12 @@ def _compute_text_rect_from_metrics(
     advance = metrics.horizontalAdvance(text)
     text_w = max(1.0, bounding.width(), advance)
     text_h = max(1.0, metrics.height())
-    margin_v = float(vertical_offset)
-    if vertical_anchor == "top":
-        top_y = margin_v
-    elif vertical_anchor == "middle":
-        top_y = (height - text_h) / 2 - margin_v
-    else:
-        top_y = height - margin_v - text_h
-    top_y = max(0.0, min(float(height) - text_h, top_y))
-    x = (width - text_w) / 2
+    center_x = float(width) * max(0.0, min(1.0, position_x))
+    center_y = float(height) * max(0.0, min(1.0, position_y))
+    x = center_x - text_w / 2.0
+    top_y = center_y - text_h / 2.0
     x = max(0.0, min(float(width) - text_w, x))
+    top_y = max(0.0, min(float(height) - text_h, top_y))
     return QtCore.QRectF(x, top_y, text_w, text_h)
 
 
@@ -1121,16 +1117,12 @@ def _compute_text_rect_from_frame(
     frame_height = float(frame.height())
     text_w = max(1.0, frame_width * 0.6)
     text_h = max(1.0, frame_height * 0.1)
-    margin_v = float(style.vertical_offset)
-    if style.vertical_anchor == "top":
-        top_y = margin_v
-    elif style.vertical_anchor == "middle":
-        top_y = (frame_height - text_h) / 2 - margin_v
-    else:
-        top_y = frame_height - margin_v - text_h
-    top_y = max(0.0, min(frame_height - text_h, top_y))
-    x = (frame_width - text_w) / 2
+    center_x = frame_width * max(0.0, min(1.0, style.position_x))
+    center_y = frame_height * max(0.0, min(1.0, style.position_y))
+    x = center_x - text_w / 2.0
+    top_y = center_y - text_h / 2.0
     x = max(0.0, min(frame_width - text_w, x))
+    top_y = max(0.0, min(frame_height - text_h, top_y))
     return QtCore.QRectF(x, top_y, text_w, text_h)
 
 
