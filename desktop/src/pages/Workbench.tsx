@@ -3633,6 +3633,30 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const handleAppearanceChangeRef = React.useRef(handleAppearanceChange);
   handleAppearanceChangeRef.current = handleAppearanceChange;
   const SUBTITLE_POSITION_AUTOCORRECT_EPSILON = 0.0005;
+  const SUBTITLE_MOVE_HANDLE_THICKNESS_PX = 12;
+  const SUBTITLE_MOVE_HANDLE_OUTSET_PX = 6;
+
+  const handleSubtitleMoveHandleMouseDown = React.useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0 || subtitleResizeDrag) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      setShowVideoControls(false);
+      setSubtitlePositionDrag({
+        startX: e.clientX,
+        startY: e.clientY,
+        startPositionX: subtitleOverlayVisiblePosition.x,
+        startPositionY: subtitleOverlayVisiblePosition.y
+      });
+    },
+    [
+      subtitleResizeDrag,
+      subtitleOverlayVisiblePosition.x,
+      subtitleOverlayVisiblePosition.y
+    ]
+  );
 
   React.useLayoutEffect(() => {
     if (!activeCue || subtitlePositionDrag || isExporting) {
@@ -3693,6 +3717,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const drag = subtitlePositionDrag;
     if (!drag) return;
     const onMouseMove = (e: MouseEvent) => {
+      if ((e.buttons & 1) !== 1) {
+        setSubtitlePositionDrag(null);
+        return;
+      }
       const layer = subtitleOverlayPositionLayerRef.current;
       if (!layer) return;
       const rect = layer.getBoundingClientRect();
@@ -4815,24 +4843,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                         )}
                         <div
                           ref={activeSubtitleWrapperRef}
-                          className={cn("pointer-events-auto absolute z-11 w-max max-w-full transition-transform duration-200", !isEditingActiveCue && "cursor-move")}
+                          className="pointer-events-auto absolute z-11 w-max max-w-full transition-transform duration-200"
                           style={{
                             left: `${subtitleOverlayVisiblePosition.x * 100}%`,
                             top: `${subtitleOverlayVisiblePosition.y * 100}%`,
                             transform: subtitleControlsPushStyle.transform
                               ? `translate(-50%, -50%) ${subtitleControlsPushStyle.transform}`
                               : "translate(-50%, -50%)"
-                          }}
-                          onMouseDown={(e) => {
-                            if (subtitleResizeDrag || (e.target as HTMLElement).closest("[data-subtitle-resize-handle]")) return;
-                            e.preventDefault();
-                            setShowVideoControls(false);
-                            setSubtitlePositionDrag({
-                              startX: e.clientX,
-                              startY: e.clientY,
-                              startPositionX: subtitleOverlayVisiblePosition.x,
-                              startPositionY: subtitleOverlayVisiblePosition.y
-                            });
                           }}
                           onMouseEnter={() => {
                             if (subtitlePositionDrag === null) {
@@ -4853,6 +4870,60 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                           }}
                         >
                           <div className="relative w-max max-w-full">
+                            <div
+                              className="pointer-events-none absolute inset-0"
+                              style={{ zIndex: 15 }}
+                              aria-hidden
+                            >
+                              <div
+                                data-subtitle-move-handle
+                                className="pointer-events-auto absolute"
+                                style={{
+                                  left: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  right: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  top: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  height: SUBTITLE_MOVE_HANDLE_THICKNESS_PX,
+                                  cursor: "move"
+                                }}
+                                onMouseDown={handleSubtitleMoveHandleMouseDown}
+                              />
+                              <div
+                                data-subtitle-move-handle
+                                className="pointer-events-auto absolute"
+                                style={{
+                                  left: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  right: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  bottom: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  height: SUBTITLE_MOVE_HANDLE_THICKNESS_PX,
+                                  cursor: "move"
+                                }}
+                                onMouseDown={handleSubtitleMoveHandleMouseDown}
+                              />
+                              <div
+                                data-subtitle-move-handle
+                                className="pointer-events-auto absolute"
+                                style={{
+                                  left: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  top: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  bottom: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  width: SUBTITLE_MOVE_HANDLE_THICKNESS_PX,
+                                  cursor: "move"
+                                }}
+                                onMouseDown={handleSubtitleMoveHandleMouseDown}
+                              />
+                              <div
+                                data-subtitle-move-handle
+                                className="pointer-events-auto absolute"
+                                style={{
+                                  right: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  top: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  bottom: -SUBTITLE_MOVE_HANDLE_OUTSET_PX,
+                                  width: SUBTITLE_MOVE_HANDLE_THICKNESS_PX,
+                                  cursor: "move"
+                                }}
+                                onMouseDown={handleSubtitleMoveHandleMouseDown}
+                              />
+                            </div>
                             {isEditingActiveCue ? (
                               <div
                                 className={cn(
@@ -5097,16 +5168,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   tabIndex={-1}
                                   aria-label="Resize subtitle from top-left"
                                   className="group absolute left-0 top-0 z-20 flex min-h-7 min-w-7 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize! items-center justify-center"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    setSubtitleResizeDrag({
-                                      corner: "nw",
-                                      startX: e.clientX,
-                                      startY: e.clientY,
-                                      startFontSize: appearance.font_size
-                                    });
-                                  }}
-                                >
+                                        >
                                   <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
                                 </div>
                                 <div
@@ -5115,16 +5177,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   tabIndex={-1}
                                   aria-label="Resize subtitle from top-right"
                                   className="group absolute right-0 top-0 z-20 flex min-h-7 min-w-7 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize! items-center justify-center"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    setSubtitleResizeDrag({
-                                      corner: "ne",
-                                      startX: e.clientX,
-                                      startY: e.clientY,
-                                      startFontSize: appearance.font_size
-                                    });
-                                  }}
-                                >
+                                        >
                                   <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
                                 </div>
                                 <div
@@ -5133,16 +5186,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   tabIndex={-1}
                                   aria-label="Resize subtitle from bottom-right"
                                   className="group absolute bottom-0 right-0 z-20 flex min-h-7 min-w-7 translate-x-1/2 translate-y-1/2 cursor-nwse-resize! items-center justify-center"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    setSubtitleResizeDrag({
-                                      corner: "se",
-                                      startX: e.clientX,
-                                      startY: e.clientY,
-                                      startFontSize: appearance.font_size
-                                    });
-                                  }}
-                                >
+                                        >
                                   <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
                                 </div>
                                 <div
@@ -5151,16 +5195,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   tabIndex={-1}
                                   aria-label="Resize subtitle from bottom-left"
                                   className="group absolute bottom-0 left-0 z-20 flex min-h-7 min-w-7 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize! items-center justify-center"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    setSubtitleResizeDrag({
-                                      corner: "sw",
-                                      startX: e.clientX,
-                                      startY: e.clientY,
-                                      startFontSize: appearance.font_size
-                                    });
-                                  }}
-                                >
+                                        >
                                   <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
                                 </div>
                               </>
@@ -5656,4 +5691,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 };
 
 export default Workbench;
+
+
+
 

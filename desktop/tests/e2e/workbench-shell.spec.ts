@@ -722,10 +722,75 @@ const dragActiveSubtitleTo = async (
 
   const layerRect = await readClientRect(layer);
   const sourceRect = await readClientRect(sourceLocator);
+  const moveHandle = page.locator("[data-subtitle-move-handle]").first();
+  const moveHandleCount = await moveHandle.count();
+  let dragStartX = sourceRect.left + sourceRect.width / 2;
+  let dragStartY = sourceRect.top + sourceRect.height / 2;
+  if (moveHandleCount > 0) {
+    const handleRect = await readClientRect(moveHandle);
+    if (handleRect.width > 0 && handleRect.height > 0) {
+      dragStartX = handleRect.left + handleRect.width / 2;
+      dragStartY = handleRect.top + handleRect.height / 2;
+    }
+  }
+  await page.mouse.move(dragStartX, dragStartY);
+  await page.mouse.down();
   await page.mouse.move(
-    sourceRect.left + sourceRect.width / 2,
-    sourceRect.top + sourceRect.height / 2
+    layerRect.left + layerRect.width * xNorm,
+    layerRect.top + layerRect.height * yNorm,
+    { steps: 12 }
   );
+  await page.mouse.up();
+};
+
+const dragActiveSubtitleFromCenterTo = async (
+  page,
+  xNorm,
+  yNorm,
+  source: "preview" | "editor" = "preview"
+) => {
+  const layer = await ensureSubtitleLayerReady(page);
+  const preview = page.getByTestId("workbench-active-subtitle");
+  const editor = page.locator("[data-workbench-subtitle-editor]");
+  const previewCount = await preview.count();
+  const editorCount = await editor.count();
+  const sourceLocator =
+    source === "editor"
+      ? editorCount > 0
+        ? editor
+        : preview
+      : previewCount > 0
+        ? preview
+        : editor;
+
+  const layerRect = await readClientRect(layer);
+  const sourceRect = await readClientRect(sourceLocator);
+  const dragStart = await page.evaluate(({ rect }) => {
+    const candidates = [
+      { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 },
+      { x: rect.left + rect.width * 0.4, y: rect.top + rect.height * 0.5 },
+      { x: rect.left + rect.width * 0.6, y: rect.top + rect.height * 0.5 },
+      { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.4 },
+      { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.6 }
+    ];
+    for (const point of candidates) {
+      const element = document.elementFromPoint(point.x, point.y);
+      const onMoveHandle =
+        element instanceof Element &&
+        Boolean(element.closest("[data-subtitle-move-handle]"));
+      if (!onMoveHandle) {
+        return { ...point, onMoveHandle: false };
+      }
+    }
+    const fallback = candidates[0];
+    return { ...fallback, onMoveHandle: true };
+  }, { rect: sourceRect });
+  if (dragStart.onMoveHandle) {
+    throw new Error("Could not find a center drag start point outside subtitle move handles");
+  }
+  const dragStartX = dragStart.x;
+  const dragStartY = dragStart.y;
+  await page.mouse.move(dragStartX, dragStartY);
   await page.mouse.down();
   await page.mouse.move(
     layerRect.left + layerRect.width * xNorm,
@@ -1719,6 +1784,47 @@ test("subtitle width stays stable when dragging horizontally", async ({ page }) 
     Math.abs(rightRect.width - leftRect.width)
   );
   expect(maxWidthDelta).toBeLessThanOrEqual(1);
+});
+
+test("subtitle move starts only from border handles", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  await ensureSubtitleLayerReady(page);
+
+  await dragActiveSubtitleTo(page, 0.5, 0.6);
+  await page.waitForTimeout(40);
+
+  await subtitleButton.click();
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toHaveCount(1);
+
+  const beforeInsideDrag = await readActiveSubtitleRect(page);
+  await dragActiveSubtitleFromCenterTo(page, 0.9, 0.2, "editor");
+  await page.waitForTimeout(40);
+  const afterInsideDrag = await readActiveSubtitleRect(page);
+  const insideDragDelta = Math.hypot(
+    afterInsideDrag.left + afterInsideDrag.width / 2 - (beforeInsideDrag.left + beforeInsideDrag.width / 2),
+    afterInsideDrag.top + afterInsideDrag.height / 2 - (beforeInsideDrag.top + beforeInsideDrag.height / 2)
+  );
+  expect(insideDragDelta).toBeLessThanOrEqual(2);
+
+  await dragActiveSubtitleTo(page, 0.9, 0.2, "editor");
+  await page.waitForTimeout(40);
+  const afterBorderDrag = await readActiveSubtitleRect(page);
+  const borderDragDelta = Math.hypot(
+    afterBorderDrag.left + afterBorderDrag.width / 2 - (afterInsideDrag.left + afterInsideDrag.width / 2),
+    afterBorderDrag.top + afterBorderDrag.height / 2 - (afterInsideDrag.top + afterInsideDrag.height / 2)
+  );
+  expect(borderDragDelta).toBeGreaterThan(20);
 });
 
 test("preview subtitle stays fully inside video when dragged to extremes", async ({ page }) => {
