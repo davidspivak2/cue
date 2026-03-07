@@ -735,6 +735,7 @@ const dragActiveSubtitleTo = async (
   }
   await page.mouse.move(dragStartX, dragStartY);
   await page.mouse.down();
+  await page.waitForTimeout(20);
   await page.mouse.move(
     layerRect.left + layerRect.width * xNorm,
     layerRect.top + layerRect.height * yNorm,
@@ -792,12 +793,70 @@ const dragActiveSubtitleFromCenterTo = async (
   const dragStartY = dragStart.y;
   await page.mouse.move(dragStartX, dragStartY);
   await page.mouse.down();
+  await page.waitForTimeout(20);
   await page.mouse.move(
     layerRect.left + layerRect.width * xNorm,
     layerRect.top + layerRect.height * yNorm,
     { steps: 12 }
   );
   await page.mouse.up();
+};
+
+const dragResizeHandleByDeltaY = async (
+  page,
+  handleAriaLabel: string,
+  deltaY: number
+) => {
+  const start = await page.evaluate((label) => {
+    const selector = `[data-subtitle-resize-handle][aria-label="${label}"]`;
+    const handle = document.querySelector(selector);
+    if (!(handle instanceof HTMLElement)) {
+      throw new Error(`Resize handle not found: ${label}`);
+    }
+    const rect = handle.getBoundingClientRect();
+    const startX = rect.left + rect.width / 2;
+    const startY = rect.top + rect.height / 2;
+    handle.dispatchEvent(
+      new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons: 1,
+        clientX: startX,
+        clientY: startY
+      })
+    );
+    return { x: startX, y: startY };
+  }, handleAriaLabel);
+
+  await page.waitForTimeout(50);
+
+  await page.evaluate(
+    ({ startX, startY, dy }) => {
+      for (let step = 1; step <= 10; step += 1) {
+        document.dispatchEvent(
+          new MouseEvent("mousemove", {
+            bubbles: true,
+            cancelable: true,
+            buttons: 1,
+            clientX: startX,
+            clientY: startY + (dy * step) / 10
+          })
+        );
+      }
+      document.dispatchEvent(
+        new MouseEvent("mouseup", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 0,
+          clientX: startX,
+          clientY: startY + dy
+        })
+      );
+    },
+    { startX: start.x, startY: start.y, dy: deltaY }
+  );
 };
 
 
@@ -1784,6 +1843,51 @@ test("subtitle width stays stable when dragging horizontally", async ({ page }) 
     Math.abs(rightRect.width - leftRect.width)
   );
   expect(maxWidthDelta).toBeLessThanOrEqual(1);
+});
+
+test("subtitle corner handles resize text", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  await subtitleButton.click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toHaveCount(1);
+
+  const topLeftHandle = page.locator(
+    "[data-subtitle-resize-handle][aria-label='Resize subtitle from top-left']"
+  );
+  await expect(topLeftHandle).toHaveCount(1);
+  const bottomRightHandle = page.locator(
+    "[data-subtitle-resize-handle][aria-label='Resize subtitle from bottom-right']"
+  );
+  await expect(bottomRightHandle).toHaveCount(1);
+
+  const beforeFontSizePx = Number.parseFloat((await readTypographyMetrics(editor)).fontSize);
+  expect(Number.isFinite(beforeFontSizePx)).toBe(true);
+
+  await dragResizeHandleByDeltaY(page, "Resize subtitle from top-left", -80);
+  await page.waitForTimeout(80);
+
+  const afterFontSizePx = Number.parseFloat((await readTypographyMetrics(editor)).fontSize);
+  expect(Number.isFinite(afterFontSizePx)).toBe(true);
+  expect(afterFontSizePx).toBeGreaterThan(beforeFontSizePx + 2);
+
+  const beforeBottomDragFontSizePx = afterFontSizePx;
+  await dragResizeHandleByDeltaY(page, "Resize subtitle from bottom-right", 80);
+  await page.waitForTimeout(80);
+
+  const afterBottomDragFontSizePx = Number.parseFloat((await readTypographyMetrics(editor)).fontSize);
+  expect(Number.isFinite(afterBottomDragFontSizePx)).toBe(true);
+  expect(afterBottomDragFontSizePx).toBeGreaterThan(beforeBottomDragFontSizePx + 2);
 });
 
 test("subtitle move starts only from border handles", async ({ page }) => {

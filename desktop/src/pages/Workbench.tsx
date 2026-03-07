@@ -827,6 +827,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const videoControlsBarRef = React.useRef<HTMLDivElement | null>(null);
   const videoWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const shouldResumePlaybackRef = React.useRef(false);
+  const resumePlaybackIfNeededRef = React.useRef<() => void>(() => {});
   const editHistoryRef = React.useRef<string[]>([]);
   const editHistoryIndexRef = React.useRef(0);
   const lastHistoryCommitAtRef = React.useRef(0);
@@ -3636,6 +3637,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const SUBTITLE_MOVE_HANDLE_THICKNESS_PX = 12;
   const SUBTITLE_MOVE_HANDLE_OUTSET_PX = 6;
 
+  const pauseVideoForDragIfPlaying = React.useCallback(() => {
+    const el = videoRef.current;
+    if (!el || el.paused || el.ended) return;
+    el.pause();
+    shouldResumePlaybackRef.current = true;
+  }, []);
+
   const handleSubtitleMoveHandleMouseDown = React.useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.button !== 0 || subtitleResizeDrag) {
@@ -3643,6 +3651,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       }
       e.preventDefault();
       e.stopPropagation();
+      pauseVideoForDragIfPlaying();
       setShowVideoControls(false);
       setSubtitlePositionDrag({
         startX: e.clientX,
@@ -3652,6 +3661,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       });
     },
     [
+      pauseVideoForDragIfPlaying,
       subtitleResizeDrag,
       subtitleOverlayVisiblePosition.x,
       subtitleOverlayVisiblePosition.y
@@ -3695,15 +3705,24 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const drag = subtitleResizeDrag;
     if (!drag) return;
     const onMouseMove = (e: MouseEvent) => {
+      if ((e.buttons & 1) !== 1) {
+        resumePlaybackIfNeededRef.current();
+        setSubtitleResizeDrag(null);
+        return;
+      }
       const dy = e.clientY - drag.startY;
-      const deltaSize = -dy * 0.25;
+      const verticalDirection = drag.corner === "nw" || drag.corner === "ne" ? -1 : 1;
+      const deltaSize = dy * verticalDirection * 0.25;
       const raw = drag.startFontSize + deltaSize;
       const newSize = Math.round(
         Math.max(SUBTITLE_FONT_SIZE_MIN, Math.min(SUBTITLE_FONT_SIZE_MAX, raw))
       );
       handleAppearanceChangeRef.current({ font_size: newSize });
     };
-    const onMouseUp = () => setSubtitleResizeDrag(null);
+    const onMouseUp = () => {
+      resumePlaybackIfNeededRef.current();
+      setSubtitleResizeDrag(null);
+    };
     document.addEventListener("mousemove", onMouseMove, true);
     document.addEventListener("mouseup", onMouseUp, true);
     return () => {
@@ -3718,6 +3737,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (!drag) return;
     const onMouseMove = (e: MouseEvent) => {
       if ((e.buttons & 1) !== 1) {
+        resumePlaybackIfNeededRef.current();
         setSubtitlePositionDrag(null);
         return;
       }
@@ -3742,6 +3762,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       handleAppearanceChangeRef.current({ position_x: clamped.x, position_y: clamped.y });
     };
     const onMouseUp = (e: MouseEvent) => {
+      resumePlaybackIfNeededRef.current();
       const layer = subtitleOverlayPositionLayerRef.current;
       if (layer) {
         const rect = layer.getBoundingClientRect();
@@ -3896,6 +3917,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       playPromise.catch(() => {});
     }
   }, []);
+  resumePlaybackIfNeededRef.current = resumePlaybackIfNeeded;
 
   const beginEditingCue = React.useCallback(
     (cue: SrtCue, resumePlaybackOnExit: boolean) => {
@@ -5168,7 +5190,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   tabIndex={-1}
                                   aria-label="Resize subtitle from top-left"
                                   className="group absolute left-0 top-0 z-20 flex min-h-7 min-w-7 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize! items-center justify-center"
-                                        >
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    pauseVideoForDragIfPlaying();
+                                    setSubtitleResizeDrag({
+                                      corner: "nw",
+                                      startX: e.clientX,
+                                      startY: e.clientY,
+                                      startFontSize: appearance.font_size
+                                    });
+                                  }}
+                                >
                                   <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
                                 </div>
                                 <div
@@ -5177,7 +5209,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   tabIndex={-1}
                                   aria-label="Resize subtitle from top-right"
                                   className="group absolute right-0 top-0 z-20 flex min-h-7 min-w-7 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize! items-center justify-center"
-                                        >
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    pauseVideoForDragIfPlaying();
+                                    setSubtitleResizeDrag({
+                                      corner: "ne",
+                                      startX: e.clientX,
+                                      startY: e.clientY,
+                                      startFontSize: appearance.font_size
+                                    });
+                                  }}
+                                >
                                   <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
                                 </div>
                                 <div
@@ -5186,7 +5228,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   tabIndex={-1}
                                   aria-label="Resize subtitle from bottom-right"
                                   className="group absolute bottom-0 right-0 z-20 flex min-h-7 min-w-7 translate-x-1/2 translate-y-1/2 cursor-nwse-resize! items-center justify-center"
-                                        >
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    pauseVideoForDragIfPlaying();
+                                    setSubtitleResizeDrag({
+                                      corner: "se",
+                                      startX: e.clientX,
+                                      startY: e.clientY,
+                                      startFontSize: appearance.font_size
+                                    });
+                                  }}
+                                >
                                   <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
                                 </div>
                                 <div
@@ -5195,7 +5247,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   tabIndex={-1}
                                   aria-label="Resize subtitle from bottom-left"
                                   className="group absolute bottom-0 left-0 z-20 flex min-h-7 min-w-7 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize! items-center justify-center"
-                                        >
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    pauseVideoForDragIfPlaying();
+                                    setSubtitleResizeDrag({
+                                      corner: "sw",
+                                      startX: e.clientX,
+                                      startY: e.clientY,
+                                      startFontSize: appearance.font_size
+                                    });
+                                  }}
+                                >
                                   <div className="h-4 w-4 rounded-full border-2 border-primary bg-background group-hover:bg-primary" />
                                 </div>
                               </>
@@ -5691,7 +5753,3 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 };
 
 export default Workbench;
-
-
-
-
