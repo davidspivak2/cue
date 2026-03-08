@@ -72,3 +72,36 @@ def test_delete_project(tmp_path: Path, monkeypatch) -> None:
         assert exc.detail == "project_not_found"
     else:
         raise AssertionError("Expected project_not_found after delete")
+
+
+def test_project_style_is_normalized_on_write_and_read(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+
+    project_store.update_project(
+        project_id,
+        style={
+            "subtitle_mode": "static",
+            "subtitle_style": {
+                "preset": "Default",
+                "appearance": {
+                    "font_style": "bold",
+                    "text_align": "left",
+                    "line_spacing": 1.5,
+                },
+            },
+        },
+    )
+
+    detail = project_store.get_project(project_id)
+    appearance = detail["style"]["subtitle_style"]["appearance"]
+
+    assert detail["style"]["subtitle_mode"] == "static"
+    assert appearance["font_weight"] == 700
+    assert appearance["text_align"] == "left"
+    assert appearance["line_spacing"] == 1.5

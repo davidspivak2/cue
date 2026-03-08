@@ -35,7 +35,7 @@ type ColorPopoverContentProps = {
   onChange: (hex: string) => void;
   opacity: number;
   onOpacityChange: (opacity: number) => void;
-  presets: string[];
+  presets: readonly string[];
   onClose?: () => void;
 };
 
@@ -351,8 +351,6 @@ export type ColorRowProps = {
   onOutlineAutoChange?: (auto: boolean) => void;
   className?: string;
 };
-
-const PANE_SWATCH_COUNT = 5;
 
 export function ColorRow({
   value,

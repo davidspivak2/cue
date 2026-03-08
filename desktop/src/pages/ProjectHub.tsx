@@ -38,15 +38,17 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   clearPersistedRunningJob,
-  getPersistedRunningJob
+  getPersistedRunningJob,
+  type PersistedRunningJob
 } from "@/lib/runningJobPersistence";
 import { normalizeLocalPath } from "@/lib/normalizeLocalPath";
 import { cn } from "@/lib/utils";
 import {
+  type ActiveTaskSummary,
   createProject,
   deleteProject,
   fetchProjects,
-  ProjectSummary,
+  type ProjectSummary,
   relinkProject
 } from "@/projectsClient";
 import { useWorkbenchTabs } from "@/workbenchTabs";
@@ -276,16 +278,25 @@ const resolveTaskHeading = (project: ProjectSummary) => {
   return "Creating subtitles";
 };
 
-const resolveTaskDetail = (project: ProjectSummary) => {
-  const checklist = Array.isArray(project.active_task?.checklist) ? project.active_task.checklist : [];
-  const activeRow =
-    checklist.find((row) => row.state === "active") ??
-    checklist.find((row) => row.id === project.active_task?.step_id);
-  if (activeRow?.detail && activeRow.detail.trim()) {
-    return activeRow.detail.trim();
+const withPersistedActiveTask = (
+  project: ProjectSummary,
+  persistedJob: PersistedRunningJob | null
+): ProjectSummary => {
+  if (project.active_task) {
+    return project;
   }
-  const message = project.active_task?.message;
-  return typeof message === "string" ? message.trim() : "";
+  if (persistedJob?.kind !== "create_subtitles" || project.status !== "needs_subtitles") {
+    return project;
+  }
+  const activeTask: ActiveTaskSummary = {
+    job_id: persistedJob.jobId,
+    kind: "create_subtitles",
+    status: "running",
+    pct: 0,
+    heading: "Creating subtitles",
+    message: null
+  };
+  return { ...project, active_task: activeTask };
 };
 
 const ProjectHub = () => {
@@ -299,7 +310,7 @@ const ProjectHub = () => {
   const [optimisticallyHiddenProjectIds, setOptimisticallyHiddenProjectIds] =
     React.useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isBackendStarting, setIsBackendStarting] = React.useState(true);
+  const [, setIsBackendStarting] = React.useState(true);
   const [banner, setBanner] = React.useState<Banner | null>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
@@ -1081,40 +1092,17 @@ const ProjectHub = () => {
           {visibleProjects.map((project) => {
             const thumbnailSrc = resolveThumbnailSrc(project.thumbnail_path, isTauriEnv);
             const durationLabel = formatDuration(project.duration_seconds);
-            const statusLabel = resolveStatusLabel(project);
             const isBusy =
               busyProjectId === project.project_id || deletingProjectId === project.project_id;
             const cardDisabled = isBusyOperation;
             const persistedJob = getPersistedRunningJob(project.project_id);
-            const hasPersistedCreate = persistedJob?.kind === "create_subtitles";
-            const usePersistedCreateFallback =
-              hasPersistedCreate && project.status === "needs_subtitles";
-            const effectiveActiveTask =
-              project.active_task ??
-              (usePersistedCreateFallback
-                ? {
-                    kind: "create_subtitles",
-                    status: "running",
-                    pct: 0,
-                    heading: "Creating subtitles",
-                    message: null
-                  }
-                : null);
+            const projectForCard = withPersistedActiveTask(project, persistedJob);
+            const statusLabel = resolveStatusLabel(projectForCard);
+            const effectiveActiveTask = projectForCard.active_task;
             const activeTaskPct =
               typeof effectiveActiveTask?.pct === "number"
                 ? Math.max(0, Math.min(100, effectiveActiveTask.pct))
                 : 0;
-            const activeTaskDetail = resolveTaskDetail({
-              ...project,
-              active_task: effectiveActiveTask
-            });
-            const activeTaskHeading = resolveTaskHeading({
-              ...project,
-              active_task: effectiveActiveTask
-            });
-            const hideProgressLabelCard =
-              effectiveActiveTask?.kind === "create_subtitles" ||
-              effectiveActiveTask?.kind === "create_video_with_subtitles";
             const taskNotice = project.task_notice;
             const shouldShowTaskNotice =
               !!taskNotice &&
@@ -1210,7 +1198,10 @@ const ProjectHub = () => {
                     <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                       {project.title || "Untitled video"}
                     </p>
-                    <Badge variant="outline" className={cn("shrink-0", resolveStatusBadgeClassName(project))}>
+                    <Badge
+                      variant="outline"
+                      className={cn("shrink-0", resolveStatusBadgeClassName(projectForCard))}
+                    >
                       {statusLabel}
                     </Badge>
                   </div>
@@ -1263,33 +1254,18 @@ const ProjectHub = () => {
               {visibleProjects.map((project) => {
                 const thumbnailSrc = resolveThumbnailSrc(project.thumbnail_path, isTauriEnv);
                 const durationLabel = formatDuration(project.duration_seconds);
-                const statusLabel = resolveStatusLabel(project);
                 const isBusy =
                   busyProjectId === project.project_id || deletingProjectId === project.project_id;
                 const cardDisabled = isBusyOperation;
                 const persistedJobList = getPersistedRunningJob(project.project_id);
-                const hasPersistedCreateList = persistedJobList?.kind === "create_subtitles";
-                const usePersistedCreateFallbackList =
-                  hasPersistedCreateList && project.status === "needs_subtitles";
-                const effectiveActiveTaskList =
-                  project.active_task ??
-                  (usePersistedCreateFallbackList
-                    ? {
-                        kind: "create_subtitles",
-                        status: "running",
-                        pct: 0,
-                        heading: "Creating subtitles",
-                        message: null
-                      }
-                    : null);
+                const projectForList = withPersistedActiveTask(project, persistedJobList);
+                const statusLabel = resolveStatusLabel(projectForList);
+                const effectiveActiveTaskList = projectForList.active_task;
                 const activeTaskPct =
                   typeof effectiveActiveTaskList?.pct === "number"
                     ? Math.max(0, Math.min(100, effectiveActiveTaskList.pct))
                     : 0;
-                const activeTaskHeading = resolveTaskHeading({
-                  ...project,
-                  active_task: effectiveActiveTaskList
-                });
+                const activeTaskHeading = resolveTaskHeading(projectForList);
                 const hideProgressLabelList =
                   effectiveActiveTaskList?.kind === "create_subtitles" ||
                   effectiveActiveTaskList?.kind === "create_video_with_subtitles";
@@ -1357,7 +1333,7 @@ const ProjectHub = () => {
                     <TableCell className="min-w-0 overflow-hidden pl-6 pr-2">
                       <Badge
                         variant="outline"
-                        className={cn("max-w-full truncate", resolveStatusBadgeClassName(project))}
+                        className={cn("max-w-full truncate", resolveStatusBadgeClassName(projectForList))}
                         title={statusLabel}
                       >
                         <span className="truncate">{statusLabel}</span>

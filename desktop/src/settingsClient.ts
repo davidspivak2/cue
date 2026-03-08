@@ -31,6 +31,9 @@ export type SubtitleStyleAppearance = {
   font_family: string;
   font_size: number;
   font_style: string;
+  font_weight: number;
+  text_align: "left" | "center" | "right";
+  line_spacing: number;
   text_color: string;
   text_opacity: number;
   letter_spacing: number;
@@ -71,6 +74,17 @@ export type SubtitleStyleAppearance = {
   highlight_color: string;
 };
 
+export type SubtitleFontMetadata = {
+  family: string;
+  weights: number[];
+  default_weight: number;
+  italic_supported: boolean;
+};
+
+export type SubtitleFontsResponse = {
+  fonts: SubtitleFontMetadata[];
+};
+
 export type SubtitleStyle = {
   preset: string;
   highlight_color: string;
@@ -79,10 +93,12 @@ export type SubtitleStyle = {
   appearance?: SubtitleStyleAppearance;
 };
 
+export type TranscriptionQuality = "speed" | "auto" | "quality" | "ultra";
+
 export type SettingsConfig = {
   save_policy: string;
   save_folder?: string;
-  transcription_quality: string;
+  transcription_quality: TranscriptionQuality;
   punctuation_rescue_fallback_enabled: boolean;
   apply_audio_filter: boolean;
   keep_extracted_audio: boolean;
@@ -145,6 +161,7 @@ export type PreviewOverlayResponse = {
 
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const SETTINGS_URL = `${BACKEND_BASE_URL}/settings`;
+const SUBTITLE_FONTS_URL = `${BACKEND_BASE_URL}/subtitle-fonts`;
 const DEVICE_URL = `${BACKEND_BASE_URL}/device`;
 const PREVIEW_STYLE_URL = `${BACKEND_BASE_URL}/preview-style`;
 const PREVIEW_OVERLAY_URL = `${BACKEND_BASE_URL}/preview-overlay`;
@@ -161,6 +178,12 @@ export const fetchSettings = async (): Promise<SettingsConfig> => {
   const response = await fetch(SETTINGS_URL);
   await ensureOk(response);
   return (await response.json()) as SettingsConfig;
+};
+
+export const fetchSubtitleFonts = async (): Promise<SubtitleFontsResponse> => {
+  const response = await fetch(SUBTITLE_FONTS_URL);
+  await ensureOk(response);
+  return (await response.json()) as SubtitleFontsResponse;
 };
 
 export const updateSettings = async (

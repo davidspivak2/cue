@@ -61,7 +61,13 @@ def test_projects_endpoints(tmp_path: Path, monkeypatch) -> None:
             json={"style": style_payload},
         )
         assert response.status_code == 200
-        assert response.json().get("style") == style_payload
+        saved_style = response.json().get("style")
+        assert saved_style["subtitle_mode"] == "static"
+        assert saved_style["subtitle_style"]["preset"] == "Default"
+        assert saved_style["subtitle_style"]["appearance"]["font_size"] == 32
+        assert saved_style["subtitle_style"]["appearance"]["font_weight"] == 400
+        assert saved_style["subtitle_style"]["appearance"]["text_align"] == "center"
+        assert saved_style["subtitle_style"]["appearance"]["line_spacing"] == 1.0
 
         new_video = tmp_path / "input2.mp4"
         new_video.write_text("video2", encoding="utf-8")

@@ -14,7 +14,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useCalibration } from "@/contexts/CalibrationContext";
 import { useDeviceInfo } from "@/contexts/DeviceInfoContext";
 import { useSettings } from "@/contexts/SettingsContext";
-import { fetchSettings, SettingsConfig, updateSettings } from "@/settingsClient";
+import {
+  fetchSettings,
+  SettingsConfig,
+  type TranscriptionQuality,
+  updateSettings
+} from "@/settingsClient";
 import {
   BACKEND_UNREACHABLE_MESSAGE,
   isBackendUnreachableError,
@@ -46,7 +51,7 @@ const mergeDeep = <T,>(base: T, update: DeepPartial<T>): T => {
 };
 
 const TRANSCRIPTION_QUALITY_OPTIONS: ReadonlyArray<{
-  value: "speed" | "auto" | "quality" | "ultra";
+  value: TranscriptionQuality;
 }> = [
   { value: "speed" },
   { value: "auto" },
@@ -54,12 +59,14 @@ const TRANSCRIPTION_QUALITY_OPTIONS: ReadonlyArray<{
   { value: "ultra" }
 ];
 
-function getDefaultTranscriptionQuality(gpuAvailable: boolean | null): "quality" | "auto" {
+function getDefaultTranscriptionQuality(
+  gpuAvailable: boolean | null
+): Extract<TranscriptionQuality, "quality" | "auto"> {
   return gpuAvailable === true ? "quality" : "auto";
 }
 
 function getQualityDisplayLabel(
-  value: "speed" | "auto" | "quality" | "ultra",
+  value: TranscriptionQuality,
   ultraAvailable: boolean,
   isDefault = false
 ): string {
@@ -83,12 +90,12 @@ function getQualityDisplayLabel(
   return isDefault ? `${label} (default)` : label;
 }
 
-function getQualityOption(value: "speed" | "auto" | "quality" | "ultra") {
+function getQualityOption(value: TranscriptionQuality) {
   return TRANSCRIPTION_QUALITY_OPTIONS.find((o) => o.value === value);
 }
 
 function getQualityNerdsLine(
-  value: "speed" | "auto" | "quality" | "ultra",
+  value: TranscriptionQuality,
   gpuAvailable: boolean | null,
   ultraDevice?: "gpu" | "cpu" | null
 ): string {
@@ -159,6 +166,9 @@ const DIAGNOSTICS_CATEGORIES = [
   { key: "commands_timings", label: "Include commands and run times" }
 ] as const;
 
+const isTranscriptionQuality = (value: string): value is TranscriptionQuality =>
+  TRANSCRIPTION_QUALITY_OPTIONS.some((option) => option.value === value);
+
 const Settings = () => {
   const { theme, setTheme } = useTheme();
   const { diagnosticsSectionVisible } = useSettings();
@@ -168,7 +178,7 @@ const Settings = () => {
   settingsRef.current = settings;
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isBackendStarting, setIsBackendStarting] = React.useState(true);
+  const [, setIsBackendStarting] = React.useState(true);
   const deviceInfo = useDeviceInfo();
   const { isCalibrating, calibrationPct } = useCalibration();
   const gpuAvailable = deviceInfo?.gpu_available ?? null;
@@ -191,7 +201,7 @@ const Settings = () => {
     storedQuality as (typeof steps)[number]
   )
     ? storedQuality
-    : (steps[steps.length - 1] as typeof storedQuality);
+    : steps[steps.length - 1];
   const sliderIndex = (() => {
     const i = steps.indexOf(
       effectiveQuality === "ultra" ? "ultra" : effectiveQuality
@@ -200,7 +210,7 @@ const Settings = () => {
   })();
   const downgradeUltraPersistedRef = React.useRef(false);
   const saveFolderInputRef = React.useRef<HTMLInputElement>(null);
-  const [saveFolderTruncated, setSaveFolderTruncated] = React.useState(false);
+  const [, setSaveFolderTruncated] = React.useState(false);
   const savePolicy = settings?.save_policy ?? "same_folder";
   const saveFolderValue = settings?.save_folder ?? "";
 
@@ -388,7 +398,11 @@ const Settings = () => {
                     type="single"
                     variant="outline"
                     value={selectedValue}
-                    onValueChange={(v) => v && persistSettings({ transcription_quality: v })}
+                    onValueChange={(v) => {
+                      if (isTranscriptionQuality(v)) {
+                        persistSettings({ transcription_quality: v });
+                      }
+                    }}
                     className="inline-flex"
                     data-testid="transcription-quality-slider"
                     aria-label="Transcription quality"

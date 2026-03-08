@@ -25,6 +25,7 @@ from .subtitle_style import (
     SubtitleStyle,
     resolve_outline_color,
 )
+from .subtitle_fonts import resolve_requested_subtitle_font_family
 
 _WORD_RE = re.compile(r"\S+")
 LAYOUT_CACHE_MAX_ENTRIES = 128
@@ -224,6 +225,9 @@ def build_preview_cache_key(
         "font_family": style.font_family,
         "font_size": style.font_size,
         "font_style": style.font_style,
+        "font_weight": style.font_weight,
+        "text_align": style.text_align,
+        "line_spacing": style.line_spacing,
         "text_color": style.text_color,
         "text_opacity": style.text_opacity,
         "letter_spacing": style.letter_spacing,
@@ -294,8 +298,7 @@ def render_graphics_preview(
 
     resolved_font_family, font_fallback_used = _resolve_qt_font_family(requested_font_family)
     font = QtGui.QFont(resolved_font_family, int(round(style.font_size)))
-    if style.font_style in ("bold", "bold_italic"):
-        font.setBold(True)
+    font.setWeight(QtGui.QFont.Weight(int(style.font_weight)))
     if style.font_style in ("italic", "bold_italic"):
         font.setItalic(True)
     if style.letter_spacing:
@@ -333,6 +336,8 @@ def render_graphics_preview(
             height=rendered.height(),
             position_x=style.position_x,
             position_y=style.position_y,
+            text_align=style.text_align,
+            line_spacing=style.line_spacing,
         )
         text_rect = _compute_text_rect_from_lines(lines)
         if text_rect.isEmpty() or text_rect.width() <= 0 or text_rect.height() <= 0:
@@ -481,6 +486,17 @@ def _resolve_qt_font_family(requested_font_family: str) -> tuple[str, bool]:
         family.casefold(): family for family in QtGui.QFontDatabase.families()
     }
 
+    curated_match = resolve_requested_subtitle_font_family(requested, available_lookup.values())
+    if curated_match is not None:
+        fallback_used = curated_match.casefold() != requested.casefold()
+        if fallback_used:
+            logger.debug(
+                "Resolved subtitle font alias '%s' to Qt family '%s'.",
+                requested,
+                curated_match,
+            )
+        return curated_match, fallback_used
+
     fallback_candidates = [
         requested,
         *(font for font in FONT_FALLBACK_CHAIN if font.casefold() != requested.casefold()),
@@ -540,10 +556,17 @@ def _build_text_layout(
     height: int,
     position_x: float,
     position_y: float,
+    text_align: str,
+    line_spacing: float,
 ) -> tuple[QtGui.QTextLayout, list[QtGui.QTextLine], float]:
     layout = QtGui.QTextLayout(text, font)
     option = QtGui.QTextOption()
-    option.setAlignment(QtCore.Qt.AlignLeft)
+    alignment = QtCore.Qt.AlignCenter
+    if text_align == "left":
+        alignment = QtCore.Qt.AlignLeft
+    elif text_align == "right":
+        alignment = QtCore.Qt.AlignRight
+    option.setAlignment(alignment)
     option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
     if _is_rtl(text):
         option.setTextDirection(QtCore.Qt.RightToLeft)
@@ -552,13 +575,14 @@ def _build_text_layout(
     lines: list[QtGui.QTextLine] = []
     y = 0.0
     line_width = float(width)
+    line_spacing_multiplier = max(0.01, line_spacing)
     while True:
         line = layout.createLine()
         if not line.isValid():
             break
         line.setLineWidth(line_width)
         line.setPosition(QtCore.QPointF(0.0, y))
-        y += line.height()
+        y += line.height() * line_spacing_multiplier
         lines.append(line)
     layout.endLayout()
     total_height = y
@@ -566,9 +590,18 @@ def _build_text_layout(
     center_y = float(height) * max(0.0, min(1.0, position_y))
     top_y = center_y - total_height / 2.0
     top_y = max(0.0, min(float(height) - total_height, top_y))
+    block_width = max((line.naturalTextWidth() for line in lines), default=0.0)
+    block_width = min(float(width), block_width)
+    block_left = center_x - block_width / 2.0
+    block_left = max(0.0, min(float(width) - block_width, block_left))
     for line in lines:
         line_w = line.naturalTextWidth()
-        line_x = center_x - line_w / 2.0
+        if text_align == "left":
+            line_x = block_left
+        elif text_align == "right":
+            line_x = block_left + max(0.0, block_width - line_w)
+        else:
+            line_x = block_left + max(0.0, (block_width - line_w) / 2.0)
         line_x = max(0.0, min(float(width) - line_w, line_x))
         line.setPosition(QtCore.QPointF(line_x, line.position().y() + top_y))
     return layout, lines, line_width
@@ -592,6 +625,9 @@ def _build_layout_cache_key(
         style.font_family,
         style.font_size,
         style.font_style,
+        style.font_weight,
+        style.text_align,
+        style.line_spacing,
         style.letter_spacing,
         style.position_x,
         style.position_y,

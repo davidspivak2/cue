@@ -1,4 +1,3 @@
-import * as React from "react";
 import { Suspense, lazy } from "react";
 import { useWorkbenchTabs, HOME_TAB_ID } from "@/workbenchTabs";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";

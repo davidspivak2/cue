@@ -15,6 +15,10 @@ def test_apply_config_defaults_adds_missing_keys() -> None:
     assert result["subtitle_mode"] == "word_highlight"
     assert result["subtitle_style"]["highlight_color"] == DEFAULT_HIGHLIGHT_COLOR
     assert result["subtitle_style"]["highlight_opacity"] == DEFAULT_HIGHLIGHT_OPACITY
+    appearance = result["subtitle_style"]["appearance"]
+    assert appearance["font_weight"] == 400
+    assert appearance["text_align"] == "center"
+    assert appearance["line_spacing"] == 1.0
 
 
 def test_apply_config_defaults_fills_partial_style() -> None:
@@ -23,6 +27,7 @@ def test_apply_config_defaults_fills_partial_style() -> None:
     style = result["subtitle_style"]
     assert style["highlight_color"] == DEFAULT_HIGHLIGHT_COLOR
     assert style["highlight_opacity"] == DEFAULT_HIGHLIGHT_OPACITY
+    assert style["appearance"]["font_weight"] == 400
 
 
 def test_apply_config_defaults_round_trip() -> None:

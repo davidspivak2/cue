@@ -86,6 +86,14 @@ const formatElapsed = (elapsedSeconds: number) => {
   ).padStart(2, "0")}`;
 };
 
+const asString = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
   items.map((item) => ({ ...item, state: "pending" }));
 
@@ -425,14 +433,16 @@ const Home = () => {
     if (event.type !== "checklist") {
       return undefined;
     }
-    if (event.reason_text) {
-      return event.reason_text;
+    const reasonText = asString(event.reason_text);
+    if (reasonText) {
+      return reasonText;
     }
-    if (event.step_id === checklistStepIds.fixMissingSubtitles && event.reason_code) {
-      return MISSING_SUBTITLES_REASON_TEXT[event.reason_code];
+    const reasonCode = asString(event.reason_code);
+    if (event.step_id === checklistStepIds.fixMissingSubtitles && reasonCode) {
+      return MISSING_SUBTITLES_REASON_TEXT[reasonCode];
     }
-    if (event.step_id === checklistStepIds.timingWordHighlights && event.reason_code) {
-      return WORD_HIGHLIGHT_REASON_TEXT[event.reason_code];
+    if (event.step_id === checklistStepIds.timingWordHighlights && reasonCode) {
+      return WORD_HIGHLIGHT_REASON_TEXT[reasonCode];
     }
     return undefined;
   };
@@ -441,8 +451,9 @@ const Home = () => {
     if (event.type === "started") {
       jobStartRef.current = Date.now();
       setElapsedText(formatElapsed(0));
+      const heading = asString(event.heading);
       setStatusHeading(
-        event.heading ??
+        heading ??
           (jobKindRef.current === "create_video_with_subtitles"
             ? legacyCopy.working.createVideoHeading
             : legacyCopy.working.createSubtitlesHeading)
@@ -465,15 +476,20 @@ const Home = () => {
           return;
         }
       }
-      updateChecklist(event.step_id, event.state, checklistReason);
+      const stepId = asString(event.step_id);
+      const stateValue = asString(event.state);
+      if (stepId && stateValue) {
+        updateChecklist(stepId, stateValue, checklistReason);
+      }
       return;
     }
     if (event.type === "progress") {
       if (typeof event.pct === "number") {
         setProgressPct(event.pct);
       }
-      if (event.message) {
-        setProgressMessage(event.message);
+      const message = asString(event.message);
+      if (message) {
+        setProgressMessage(message);
       }
       return;
     }
@@ -481,7 +497,10 @@ const Home = () => {
       return;
     }
     if (event.type === "result") {
-      const payload = event.payload ?? {};
+      const payload = asRecord(event.payload);
+      if (!payload) {
+        return;
+      }
       if (typeof payload.srt_path === "string") {
         setSrtPath(payload.srt_path);
         srtPathRef.current = payload.srt_path;
@@ -553,8 +572,9 @@ const Home = () => {
       setProgressMessage("");
       jobStartRef.current = null;
       setState(videoPath ? "VIDEO_SELECTED" : "EMPTY");
-      if (event.message) {
-        setError(event.message);
+      const message = asString(event.message);
+      if (message) {
+        setError(message);
       }
       return;
     }
@@ -565,7 +585,7 @@ const Home = () => {
       setProgressMessage("");
       jobStartRef.current = null;
       setState(videoPath ? "VIDEO_SELECTED" : "EMPTY");
-      setError(event.message ?? "Job failed.");
+      setError(asString(event.message) ?? "Job failed.");
     }
   };
 
