@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from .ffmpeg_utils import generate_thumbnail, get_media_duration
 from .paths import get_projects_dir
+from .subtitle_style import normalize_style_payload
 
 
 logger = logging.getLogger(__name__)
@@ -246,7 +247,9 @@ def _read_style_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if not style_path.exists():
         return {}
     style_data = _read_json_file(style_path)
-    return style_data if isinstance(style_data, dict) else {}
+    if not isinstance(style_data, dict) or not style_data:
+        return {}
+    return normalize_style_payload(style_data)
 
 
 def _compute_status(manifest: dict[str, Any], *, allow_exporting: bool = False) -> str:
@@ -482,7 +485,8 @@ def create_project(video_path: str, *, style: Optional[dict[str, Any]] = None) -
                 manifest["video"] = _build_video_info(video_path)
                 if style is not None:
                     style_path = _artifact_path(manifest, "style_path")
-                    _atomic_write_json(style_path, style)
+                    normalized_style = normalize_style_payload(style) if style else style
+                    _atomic_write_json(style_path, normalized_style if normalized_style else {})
                 _write_manifest(manifest)
                 _write_index(list_projects())
                 return _manifest_to_summary(manifest).model_dump()
@@ -494,7 +498,7 @@ def create_project(video_path: str, *, style: Optional[dict[str, Any]] = None) -
             created_at=now,
             updated_at=now,
             status=None,
-            style=style,
+            style=normalize_style_payload(style) if style else style,
             latest_export=None,
         )
         _atomic_write_json(_manifest_path(project_id), manifest)
@@ -530,7 +534,8 @@ def update_project(
             subtitle_path.write_text(subtitles_srt_text, encoding="utf-8")
         if style is not None:
             style_path = _artifact_path(manifest, "style_path")
-            _atomic_write_json(style_path, style)
+            normalized_style = normalize_style_payload(style) if style else style
+            _atomic_write_json(style_path, normalized_style if normalized_style else {})
         _write_manifest(manifest)
         _write_index(list_projects())
         response = dict(manifest)

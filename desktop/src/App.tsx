@@ -7,7 +7,6 @@ import { Loader2 } from "lucide-react";
 import AppLayout from "./components/AppLayout";
 import AppSplash from "./components/AppSplash";
 import { AppSplashProvider } from "./contexts/AppSplashContext";
-import TabHost from "./pages/TabHost";
 
 /** Syncs favicon with in-app theme; taskbar/window icon with system theme only. */
 function ThemeIconSync() {

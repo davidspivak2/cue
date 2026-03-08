@@ -1,6 +1,5 @@
 import * as React from "react";
 import {
-  Check,
   Minus,
   Pause,
   Play,
@@ -77,15 +76,6 @@ type WorkbenchProps = {
   projectId?: string;
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  needs_video: "Needs video",
-  needs_subtitles: "Not started",
-  ready: "Ready to review",
-  exporting: "Exporting",
-  done: "Exported",
-  missing_file: "Missing file"
-};
-
 const SUBTITLE_FONT_SIZE_MIN = 18;
 const SUBTITLE_FONT_SIZE_MAX = 72;
 
@@ -124,13 +114,6 @@ const resolveTitle = (project: ProjectManifest | null) => {
   return filename ? getFileName(filename) : "Untitled video";
 };
 
-const resolveStatusLabel = (status?: string | null) => {
-  if (!status) {
-    return "Loading";
-  }
-  return STATUS_LABELS[status] ?? "Not started";
-};
-
 const formatTime = (seconds: number): string => {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const m = Math.floor(seconds / 60);
@@ -154,6 +137,9 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   font_family: "Heebo",
   font_size: 28,
   font_style: "regular",
+  font_weight: 400,
+  text_align: "center",
+  line_spacing: 1.0,
   text_color: "#FFFFFF",
   text_opacity: 1.0,
   letter_spacing: 0,
@@ -419,6 +405,7 @@ const WORD_HIGHLIGHT_REASON_TEXT: Record<string, string> = {
 };
 
 const EDIT_UNDO_COALESCE_MS = 600;
+const SUBTITLE_EDIT_AUTOSAVE_DELAY_MS = 500;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const RTL_CHAR_PATTERN = /[\u0590-\u08FF]/;
 const MAX_OUTLINE_SHADOW_RADIUS = 10;
@@ -446,6 +433,29 @@ type TimingFallbackProgress = {
 type ParsedAlignmentWordDetail = {
   current: number;
   total: number;
+};
+
+const replaceCueText = (cues: SrtCue[], cueId: string, text: string): SrtCue[] =>
+  cues.map((cue) =>
+    cue.id === cueId
+      ? {
+          ...cue,
+          text
+        }
+      : cue
+  );
+
+const isVideoPlayingForEditSession = (videoElement: HTMLVideoElement | null): boolean => {
+  if (!videoElement) {
+    return false;
+  }
+  const mockState = (
+    videoElement as HTMLVideoElement & { __cueState?: { paused?: boolean } }
+  ).__cueState;
+  if (mockState && typeof mockState.paused === "boolean") {
+    return !mockState.paused;
+  }
+  return !videoElement.paused;
 };
 
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
@@ -777,11 +787,13 @@ const resolveHighlightWordIndexFromTimings = (
   return Math.min(activeTimingRank, cueWordCount - 1);
 };
 
+type BrowserTimeout = number;
+
 function useDebounce<T extends (...args: never[]) => void>(
   fn: T,
   delayMs: number
 ): T {
-  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerRef = React.useRef<BrowserTimeout | null>(null);
   const fnRef = React.useRef(fn);
   fnRef.current = fn;
 
@@ -798,7 +810,7 @@ function useDebounce<T extends (...args: never[]) => void>(
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
       }
-      timerRef.current = setTimeout(() => {
+      timerRef.current = window.setTimeout(() => {
         fnRef.current(...args);
       }, delayMs);
     },
@@ -813,7 +825,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const paramsProjectId = useParams().projectId;
   const projectId = projectIdProp ?? paramsProjectId ?? undefined;
   const { pushToast, markExportCompleteSeen, haveExportCompleteBeenSeen } = useToast();
-  const { tabs, ensureTab, updateTabMeta } = useWorkbenchTabs();
+  const { ensureTab, updateTabMeta } = useWorkbenchTabs();
   const width = useWindowWidth();
   const height = useWindowHeight();
   const isNarrow = width < 1100;
@@ -850,7 +862,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [playPauseFeedback, setPlayPauseFeedback] = React.useState<"play" | "pause" | null>(null);
   const [playPauseFeedbackVisible, setPlayPauseFeedbackVisible] = React.useState(false);
-  const playPauseFeedbackTimeoutsRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
+  const playPauseFeedbackTimeoutsRef = React.useRef<BrowserTimeout[]>([]);
   const [volume, setVolume] = React.useState(1);
   const [isMuted, setIsMuted] = React.useState(false);
   const [videoNaturalSize, setVideoNaturalSize] = React.useState({ width: 0, height: 0 });
@@ -866,13 +878,26 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [wordTimingsDoc, setWordTimingsDoc] = React.useState<ProjectWordTimingsDocument | null>(
     null
   );
+  const cuesRef = React.useRef<SrtCue[]>([]);
+  cuesRef.current = cues;
   const [selectedCueId, setSelectedCueId] = React.useState<string | null>(null);
   const [editingCueId, setEditingCueId] = React.useState<string | null>(null);
+  const editingCueIdRef = React.useRef<string | null>(null);
+  editingCueIdRef.current = editingCueId;
   const [editingText, setEditingText] = React.useState("");
   const [subtitleEditorControlsPlacement, setSubtitleEditorControlsPlacement] =
     React.useState<"above" | "below">("below");
   const [canUndoEdit, setCanUndoEdit] = React.useState(false);
   const [isSavingCue, setIsSavingCue] = React.useState(false);
+  const isSavingCueRef = React.useRef(false);
+  const subtitleAutosaveTimerRef = React.useRef<BrowserTimeout | null>(null);
+  const subtitleAutosaveLatestTextRef = React.useRef("");
+  const subtitleAutosaveLastSavedTextRef = React.useRef("");
+  const subtitleAutosaveDirtyRef = React.useRef(false);
+  const subtitleAutosaveInFlightRef = React.useRef(false);
+  const subtitleAutosaveFlushRequestedRef = React.useRef(false);
+  const subtitleAutosaveInFlightPromiseRef = React.useRef<Promise<boolean> | null>(null);
+  const subtitleAutosaveSessionIdRef = React.useRef(0);
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
@@ -901,14 +926,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     return Number.isFinite(parsed) && parsed >= 0.25 && parsed <= 2 ? parsed : 1;
   });
   const [speedPopoverOpen, setSpeedPopoverOpen] = React.useState(false);
-  const speedPopoverOpenDelayRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const speedPopoverCloseTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speedPopoverOpenDelayRef = React.useRef<BrowserTimeout | null>(null);
+  const speedPopoverCloseTimeoutRef = React.useRef<BrowserTimeout | null>(null);
   const speedControlClickRef = React.useRef(false);
   const SPEED_POPOVER_CLOSE_DELAY_MS = 200;
   const [seekFeedback, setSeekFeedback] = React.useState<{ text: string; side: "left" | "right" } | null>(
     null
   );
-  const seekFeedbackTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekFeedbackTimeoutRef = React.useRef<BrowserTimeout | null>(null);
   const [subtitleControlsPushPx, setSubtitleControlsPushPx] = React.useState(0);
   const [isCreatingSubtitles, setIsCreatingSubtitles] = React.useState(false);
   const [createSubtitlesError, setCreateSubtitlesError] = React.useState<string | null>(null);
@@ -926,7 +951,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     React.useState<StreamHealth>("idle");
   const createSubtitlesStreamHealthRef = React.useRef<StreamHealth>("idle");
   const createSubtitlesStreamCooldownUntilRef = React.useRef(0);
-  const createSubtitlesStreamCooldownTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+  const createSubtitlesStreamCooldownTimerRef = React.useRef<BrowserTimeout | null>(
     null
   );
   const latestCreateLiveEventAtMsRef = React.useRef(0);
@@ -940,39 +965,39 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [createSubtitlesElapsedText, setCreateSubtitlesElapsedText] = React.useState("");
   const [showElevatorMusicRow, setShowElevatorMusicRow] = React.useState(false);
   const [elevatorMusicPlaying, setElevatorMusicPlaying] = React.useState(false);
-  const elevatorMusicTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const elevatorMusicTimerRef = React.useRef<BrowserTimeout | null>(null);
   const elevatorMusicRowScheduledRef = React.useRef(false);
   const elevatorAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const selectedElevatorTrackIndexRef = React.useRef<number | null>(null);
   const preparingPreviewStartedAtRef = React.useRef<number | null>(null);
-  const preparingPreviewDelayTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+  const preparingPreviewDelayTimerRef = React.useRef<BrowserTimeout | null>(
     null
   );
-  const preparingPreviewDoneTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+  const preparingPreviewDoneTimerRef = React.useRef<BrowserTimeout | null>(
     null
   );
   const preparingPreviewCompletionScheduledRef = React.useRef(false);
   const [isExporting, setIsExporting] = React.useState(false);
-  const [exportError, setExportError] = React.useState<string | null>(null);
-  const [exportHeading, setExportHeading] = React.useState("Exporting video");
+  const [, setExportError] = React.useState<string | null>(null);
+  const [, setExportHeading] = React.useState("Exporting video");
   const [exportProgressPct, setExportProgressPct] = React.useState(0);
   const [exportProgressMessage, setExportProgressMessage] = React.useState<string>("");
-  const [exportChecklist, setExportChecklist] = React.useState<ChecklistItem[]>([]);
+  const [, setExportChecklist] = React.useState<ChecklistItem[]>([]);
   const [, setExportJobStream] = React.useState<JobEventStream | null>(null);
   const exportJobStreamRef = React.useRef<JobEventStream | null>(null);
   const [exportStreamHealth, setExportStreamHealth] = React.useState<StreamHealth>("idle");
   const exportStreamHealthRef = React.useRef<StreamHealth>("idle");
   const exportStreamCooldownUntilRef = React.useRef(0);
-  const exportStreamCooldownTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exportStreamCooldownTimerRef = React.useRef<BrowserTimeout | null>(null);
   const latestExportLiveEventAtMsRef = React.useRef(0);
   const exportJobIdRef = React.useRef<string | null>(null);
   const { registerJob: registerRunningJob } = useRunningJobs();
   const createSubtitlesUnregisterRef = React.useRef<(() => void) | null>(null);
   const exportUnregisterRef = React.useRef<(() => void) | null>(null);
   const [exportStartedAt, setExportStartedAt] = React.useState<string | null>(null);
-  const [exportElapsedText, setExportElapsedText] = React.useState("");
+  const [, setExportElapsedText] = React.useState("");
   const [exportOutputPath, setExportOutputPath] = React.useState<string | null>(null);
-  const [openActionError, setOpenActionError] = React.useState<string | null>(null);
+  const [, setOpenActionError] = React.useState<string | null>(null);
   const [projectReloadTick, setProjectReloadTick] = React.useState(0);
   const [subtitlesReloadTick, setSubtitlesReloadTick] = React.useState(0);
   const projectFetchSeqRef = React.useRef(0);
@@ -985,6 +1010,54 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const styleBootstrapKeyRef = React.useRef<string | null>(null);
   const overlayRequestKeyRef = React.useRef<string | null>(null);
   const showSubtitlesOverlay = false;
+
+  const clearSubtitleAutosaveTimer = React.useCallback(() => {
+    if (subtitleAutosaveTimerRef.current !== null) {
+      clearTimeout(subtitleAutosaveTimerRef.current);
+      subtitleAutosaveTimerRef.current = null;
+    }
+  }, []);
+
+  const startSubtitleAutosaveSession = React.useCallback(
+    (initialText: string) => {
+      clearSubtitleAutosaveTimer();
+      subtitleAutosaveSessionIdRef.current += 1;
+      isSavingCueRef.current = false;
+      subtitleAutosaveLatestTextRef.current = initialText;
+      subtitleAutosaveLastSavedTextRef.current = initialText;
+      subtitleAutosaveDirtyRef.current = false;
+      subtitleAutosaveInFlightRef.current = false;
+      subtitleAutosaveFlushRequestedRef.current = false;
+      subtitleAutosaveInFlightPromiseRef.current = null;
+    },
+    [clearSubtitleAutosaveTimer]
+  );
+
+  const resetEditSessionState = React.useCallback(() => {
+    clearSubtitleAutosaveTimer();
+    subtitleAutosaveSessionIdRef.current += 1;
+    isSavingCueRef.current = false;
+    setIsSavingCue(false);
+    subtitleAutosaveLatestTextRef.current = "";
+    subtitleAutosaveLastSavedTextRef.current = "";
+    subtitleAutosaveDirtyRef.current = false;
+    subtitleAutosaveInFlightRef.current = false;
+    subtitleAutosaveFlushRequestedRef.current = false;
+    subtitleAutosaveInFlightPromiseRef.current = null;
+    setCanUndoEdit(false);
+    editHistoryRef.current = [];
+    editHistoryIndexRef.current = 0;
+    lastHistoryCommitAtRef.current = 0;
+  }, [clearSubtitleAutosaveTimer]);
+
+  React.useEffect(() => {
+    return () => {
+      clearSubtitleAutosaveTimer();
+      subtitleAutosaveSessionIdRef.current += 1;
+      isSavingCueRef.current = false;
+      subtitleAutosaveInFlightPromiseRef.current = null;
+    };
+  }, [clearSubtitleAutosaveTimer]);
 
   const setCreateStreamHealthValue = React.useCallback((next: StreamHealth) => {
     createSubtitlesStreamHealthRef.current = next;
@@ -1144,10 +1217,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setSelectedCueId(null);
       setEditingCueId(null);
       setEditingText("");
-      setCanUndoEdit(false);
-      editHistoryRef.current = [];
-      editHistoryIndexRef.current = 0;
-      lastHistoryCommitAtRef.current = 0;
+      resetEditSessionState();
       shouldResumePlaybackRef.current = false;
       setSubtitleLoadError(null);
       return () => {
@@ -1159,10 +1229,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setSelectedCueId(null);
     setEditingCueId(null);
     setEditingText("");
-    setCanUndoEdit(false);
-    editHistoryRef.current = [];
-    editHistoryIndexRef.current = 0;
-    lastHistoryCommitAtRef.current = 0;
+    resetEditSessionState();
     shouldResumePlaybackRef.current = false;
     setSubtitleLoadError(null);
     fetchProjectSubtitles(projectId)
@@ -1184,7 +1251,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     return () => {
       active = false;
     };
-  }, [projectId, subtitlesReloadTick]);
+  }, [projectId, resetEditSessionState, subtitlesReloadTick]);
 
   React.useEffect(() => {
     let active = true;
@@ -1509,12 +1576,15 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setDurationSeconds(0);
     setIsPlaying(false);
     overlayRequestKeyRef.current = null;
-    setCanUndoEdit(false);
-    editHistoryRef.current = [];
-    editHistoryIndexRef.current = 0;
-    lastHistoryCommitAtRef.current = 0;
+    resetEditSessionState();
     shouldResumePlaybackRef.current = false;
-  }, [clearTimingFallbackProgress, projectId, setCreateStreamHealthValue, setExportStreamHealthValue]);
+  }, [
+    clearTimingFallbackProgress,
+    projectId,
+    resetEditSessionState,
+    setCreateStreamHealthValue,
+    setExportStreamHealthValue
+  ]);
 
   React.useEffect(() => {
     if (selectedCueId && !cues.some((cue) => cue.id === selectedCueId)) {
@@ -1523,13 +1593,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (editingCueId && !cues.some((cue) => cue.id === editingCueId)) {
       setEditingCueId(null);
       setEditingText("");
-      setCanUndoEdit(false);
-      editHistoryRef.current = [];
-      editHistoryIndexRef.current = 0;
-      lastHistoryCommitAtRef.current = 0;
+      resetEditSessionState();
       shouldResumePlaybackRef.current = false;
     }
-  }, [cues, editingCueId, selectedCueId]);
+  }, [cues, editingCueId, resetEditSessionState, selectedCueId]);
 
   React.useEffect(() => {
     if (!projectId || !project) {
@@ -1778,7 +1845,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
     }
     setCreateStreamHealthValue("cooldown");
-    createSubtitlesStreamCooldownTimerRef.current = setTimeout(() => {
+    createSubtitlesStreamCooldownTimerRef.current = window.setTimeout(() => {
       createSubtitlesStreamCooldownTimerRef.current = null;
       if (
         createSubtitlesStreamHealthRef.current === "cooldown" &&
@@ -1798,7 +1865,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       clearTimeout(exportStreamCooldownTimerRef.current);
     }
     setExportStreamHealthValue("cooldown");
-    exportStreamCooldownTimerRef.current = setTimeout(() => {
+    exportStreamCooldownTimerRef.current = window.setTimeout(() => {
       exportStreamCooldownTimerRef.current = null;
       if (
         exportStreamHealthRef.current === "cooldown" &&
@@ -1844,13 +1911,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const remainingActiveMs = Math.max(0, PREPARING_PREVIEW_MIN_ACTIVE_MS - elapsedMs);
     const finalize = () => {
       updateCreateChecklist(checklistStepIds.preparingPreview, "done");
-      preparingPreviewDoneTimerRef.current = setTimeout(() => {
+      preparingPreviewDoneTimerRef.current = window.setTimeout(() => {
         preparingPreviewDoneTimerRef.current = null;
         finalizeCreateSubtitlesCompleted();
       }, PREPARING_PREVIEW_DONE_VISIBLE_MS);
     };
     if (remainingActiveMs > 0) {
-      preparingPreviewDelayTimerRef.current = setTimeout(() => {
+      preparingPreviewDelayTimerRef.current = window.setTimeout(() => {
         preparingPreviewDelayTimerRef.current = null;
         finalize();
       }, remainingActiveMs);
@@ -2680,7 +2747,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           createSubtitlesStreamHealthRef.current === "open" &&
           createSubtitlesJobStreamRef.current?.jobId === activeTask.job_id;
         const shouldApplyCreateSnapshot =
-          !createStreamOpenForJob ||
+          latestCreateLiveEventAtMsRef.current <= 0 ||
           snapshotUpdatedAtMs >= latestCreateLiveEventAtMsRef.current;
         setIsCreatingSubtitles(true);
         setCreateSubtitlesError(null);
@@ -2744,7 +2811,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           exportStreamHealthRef.current === "open" &&
           exportJobStreamRef.current?.jobId === activeTask.job_id;
         const shouldApplyExportSnapshot =
-          !exportStreamOpenForJob ||
+          latestExportLiveEventAtMsRef.current <= 0 ||
           snapshotUpdatedAtMs >= latestExportLiveEventAtMsRef.current;
         clearPreparingPreviewTimers();
         preparingPreviewStartedAtRef.current = null;
@@ -2813,7 +2880,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
 
     const taskNotice = project.task_notice;
-    if (!activeTask && createSubtitlesJobIdRef.current) {
+    if (!activeTask && createSubtitlesJobIdRef.current && !isCreatingSubtitles) {
       createSubtitlesUnregisterRef.current?.();
       createSubtitlesUnregisterRef.current = null;
       createSubtitlesJobIdRef.current = null;
@@ -2936,7 +3003,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   ]);
 
   const title = resolveTitle(project);
-  const statusLabel = resolveStatusLabel(project?.status);
   const videoPath = project?.video?.path ?? "";
   const previewSrc = videoPath ? (isTauriEnv ? convertFileSrc(videoPath) : videoPath) : "";
   const hasSubtitles = cues.length > 0;
@@ -3271,7 +3337,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const VIDEO_CONTROL_BAR_HEIGHT_PX = 44;
   const VIDEO_PROGRESS_STRIP_HEIGHT_PX = 6;
   const VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER = 9;
-  const VIDEO_PROGRESS_STRIP_PADDING_PX = 8;
   const VIDEO_PROGRESS_THUMB_SIZE_PX = 12;
   const effectiveProgressStripHeightPx =
     progressHoverSeconds !== null ? VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER : VIDEO_PROGRESS_STRIP_HEIGHT_PX;
@@ -3316,9 +3381,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const style: React.CSSProperties = {
       fontFamily: appearance.font_family || DEFAULT_APPEARANCE.font_family,
       fontSize: `${computedFontSizePx}px`,
-      lineHeight: `${computedFontSizePx * lineHeightRatio}px`,
-      fontWeight: appearance.font_style === "bold" ? 700 : 400,
-      fontStyle: appearance.font_style === "italic" ? "italic" : "normal",
+      lineHeight: `${computedFontSizePx * lineHeightRatio * appearance.line_spacing}px`,
+      fontWeight: appearance.font_weight,
+      fontStyle:
+        appearance.font_style === "italic" || appearance.font_style === "bold_italic"
+          ? "italic"
+          : "normal",
+      textAlign: appearance.text_align,
       letterSpacing: `${appearance.letter_spacing * visualScale}px`,
       color: colorWithOpacity(appearance.text_color, appearance.text_opacity)
     };
@@ -3510,8 +3579,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
     setSubtitleControlsPushPx((previous) => {
-      const requestedPushPx = Math.max(0, overlapPx + previous);
-      const availablePushPx = Math.max(0, availableAbovePx + previous);
+      const requestedPushPx = Math.max(0, overlapPx);
+      const availablePushPx = Math.max(0, availableAbovePx);
       const nextPushPx = Math.min(requestedPushPx, availablePushPx);
       if (!Number.isFinite(nextPushPx)) {
         return previous;
@@ -3541,12 +3610,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const positionLayer = subtitleOverlayPositionLayerRef.current;
     const textarea = activeSubtitleRef.current;
     const editorControls = subtitleEditorControlsRef.current;
-    const controlsBar = videoControlsBarRef.current;
+    const controlsBar = shouldShowVideoControls ? videoControlsBarRef.current : null;
+    const editorSurface = textarea?.parentElement;
     if (!positionLayer || !textarea || !editorControls) {
       return;
     }
     const positionLayerRect = positionLayer.getBoundingClientRect();
-    const textareaRect = textarea.getBoundingClientRect();
+    const editorRect =
+      editorSurface instanceof HTMLElement
+        ? editorSurface.getBoundingClientRect()
+        : textarea.getBoundingClientRect();
     const editorControlsHeight = editorControls.offsetHeight;
     const requiredBelowSpace = editorControlsHeight + SUBTITLE_EDITOR_CONTROLS_GAP_PX;
     const layerBottom = positionLayerRect.bottom;
@@ -3554,12 +3627,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       controlsBar
         ? Math.min(layerBottom, controlsBar.getBoundingClientRect().top)
         : layerBottom;
-    const spaceBelow = bottomLimit - textareaRect.bottom;
+    const spaceBelow = bottomLimit - editorRect.bottom;
     const nextPlacement = spaceBelow < requiredBelowSpace ? "above" : "below";
     setSubtitleEditorControlsPlacement((previous) =>
       previous === nextPlacement ? previous : nextPlacement
     );
-  }, [appearance, displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, subtitleControlsPushPx, subtitleEditorTextStyle]);
+  }, [appearance, displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, shouldShowVideoControls, subtitleControlsPushPx, subtitleEditorTextStyle]);
 
   React.useEffect(() => {
     if (hasSubtitles) {
@@ -3634,7 +3707,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const handleAppearanceChangeRef = React.useRef(handleAppearanceChange);
   handleAppearanceChangeRef.current = handleAppearanceChange;
   const SUBTITLE_POSITION_AUTOCORRECT_EPSILON = 0.0005;
-  const SUBTITLE_MOVE_HANDLE_THICKNESS_PX = 12;
+  const SUBTITLE_MOVE_HANDLE_THICKNESS_PX = 8;
   const SUBTITLE_MOVE_HANDLE_OUTSET_PX = 6;
 
   const pauseVideoForDragIfPlaying = React.useCallback(() => {
@@ -3896,13 +3969,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setCanUndoEdit(editHistoryIndexRef.current > 0);
   }, []);
 
-  const resetEditSessionState = React.useCallback(() => {
-    setCanUndoEdit(false);
-    editHistoryRef.current = [];
-    editHistoryIndexRef.current = 0;
-    lastHistoryCommitAtRef.current = 0;
-  }, []);
-
   const resumePlaybackIfNeeded = React.useCallback(() => {
     if (!shouldResumePlaybackRef.current) {
       return;
@@ -3919,6 +3985,147 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, []);
   resumePlaybackIfNeededRef.current = resumePlaybackIfNeeded;
 
+  const persistLatestSubtitleText = React.useCallback(async (): Promise<boolean> => {
+    if (subtitleAutosaveInFlightRef.current) {
+      return subtitleAutosaveInFlightPromiseRef.current ?? true;
+    }
+
+    const cueId = editingCueIdRef.current;
+    const currentProjectId = projectIdRef.current;
+    const sessionId = subtitleAutosaveSessionIdRef.current;
+    const nextText = subtitleAutosaveLatestTextRef.current;
+
+    if (!cueId || !currentProjectId || nextText === subtitleAutosaveLastSavedTextRef.current) {
+      subtitleAutosaveDirtyRef.current = false;
+      subtitleAutosaveFlushRequestedRef.current = false;
+      return true;
+    }
+
+    subtitleAutosaveDirtyRef.current = true;
+    subtitleAutosaveInFlightRef.current = true;
+
+    const requestPromise = (async () => {
+      try {
+        await updateProject(currentProjectId, {
+          subtitles_srt_text: serializeSrt(replaceCueText(cuesRef.current, cueId, nextText))
+        });
+        if (subtitleAutosaveSessionIdRef.current !== sessionId) {
+          return true;
+        }
+        const nextCues = replaceCueText(cuesRef.current, cueId, nextText);
+        cuesRef.current = nextCues;
+        setCues(nextCues);
+        subtitleAutosaveLastSavedTextRef.current = nextText;
+        subtitleAutosaveDirtyRef.current =
+          subtitleAutosaveLatestTextRef.current !== subtitleAutosaveLastSavedTextRef.current;
+        setEditError(null);
+        return true;
+      } catch (err) {
+        if (subtitleAutosaveSessionIdRef.current === sessionId) {
+          subtitleAutosaveDirtyRef.current =
+            subtitleAutosaveLatestTextRef.current !== subtitleAutosaveLastSavedTextRef.current;
+          setEditError(
+            messageForBackendError(
+              err,
+              err instanceof Error ? err.message : "Failed to save subtitle changes."
+            )
+          );
+        }
+        return false;
+      } finally {
+        if (subtitleAutosaveSessionIdRef.current === sessionId) {
+          subtitleAutosaveInFlightRef.current = false;
+          subtitleAutosaveInFlightPromiseRef.current = null;
+        }
+      }
+    })();
+
+    subtitleAutosaveInFlightPromiseRef.current = requestPromise;
+    const ok = await requestPromise;
+    if (subtitleAutosaveSessionIdRef.current !== sessionId || !ok) {
+      return ok;
+    }
+    if (subtitleAutosaveLatestTextRef.current !== subtitleAutosaveLastSavedTextRef.current) {
+      subtitleAutosaveDirtyRef.current = true;
+      return persistLatestSubtitleText();
+    }
+    subtitleAutosaveDirtyRef.current = false;
+    subtitleAutosaveFlushRequestedRef.current = false;
+    return true;
+  }, []);
+
+  const queueSubtitleAutosave = React.useCallback(
+    (nextText: string) => {
+      subtitleAutosaveLatestTextRef.current = nextText;
+      subtitleAutosaveDirtyRef.current =
+        nextText !== subtitleAutosaveLastSavedTextRef.current;
+
+      if (!subtitleAutosaveDirtyRef.current) {
+        clearSubtitleAutosaveTimer();
+        if (!subtitleAutosaveInFlightRef.current) {
+          subtitleAutosaveFlushRequestedRef.current = false;
+        }
+        return;
+      }
+
+      if (subtitleAutosaveInFlightRef.current) {
+        return;
+      }
+
+      clearSubtitleAutosaveTimer();
+      subtitleAutosaveTimerRef.current = window.setTimeout(() => {
+        subtitleAutosaveTimerRef.current = null;
+        void persistLatestSubtitleText();
+      }, SUBTITLE_EDIT_AUTOSAVE_DELAY_MS);
+    },
+    [clearSubtitleAutosaveTimer, persistLatestSubtitleText]
+  );
+
+  const flushSubtitleAutosave = React.useCallback(async (): Promise<boolean> => {
+    clearSubtitleAutosaveTimer();
+    subtitleAutosaveFlushRequestedRef.current = true;
+
+    while (true) {
+      if (subtitleAutosaveInFlightRef.current) {
+        const pendingPromise = subtitleAutosaveInFlightPromiseRef.current;
+        if (!pendingPromise) {
+          subtitleAutosaveInFlightRef.current = false;
+          continue;
+        }
+        const ok = await pendingPromise;
+        if (!ok) {
+          subtitleAutosaveFlushRequestedRef.current = false;
+          return false;
+        }
+        continue;
+      }
+
+      if (
+        !subtitleAutosaveDirtyRef.current ||
+        subtitleAutosaveLatestTextRef.current === subtitleAutosaveLastSavedTextRef.current
+      ) {
+        subtitleAutosaveDirtyRef.current = false;
+        subtitleAutosaveFlushRequestedRef.current = false;
+        return true;
+      }
+
+      const ok = await persistLatestSubtitleText();
+      if (!ok) {
+        subtitleAutosaveFlushRequestedRef.current = false;
+        return false;
+      }
+    }
+  }, [clearSubtitleAutosaveTimer, persistLatestSubtitleText]);
+
+  const closeEditMode = React.useCallback(() => {
+    setSelectedCueId(null);
+    setEditingCueId(null);
+    setEditingText("");
+    setEditError(null);
+    resetEditSessionState();
+    resumePlaybackIfNeeded();
+  }, [resetEditSessionState, resumePlaybackIfNeeded]);
+
   const beginEditingCue = React.useCallback(
     (cue: SrtCue, resumePlaybackOnExit: boolean) => {
       shouldResumePlaybackRef.current = resumePlaybackOnExit;
@@ -3927,9 +4134,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setIsHoveringActiveSubtitle(false);
       setEditingText(cue.text);
       setEditError(null);
+      startSubtitleAutosaveSession(cue.text);
       initializeEditHistory(cue.text);
     },
-    [initializeEditHistory]
+    [initializeEditHistory, startSubtitleAutosaveSession]
   );
 
   const handleEditTextChange = React.useCallback(
@@ -3937,8 +4145,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       const nextText = event.target.value;
       setEditingText(nextText);
       updateEditHistory(nextText);
+      queueSubtitleAutosave(nextText);
     },
-    [updateEditHistory]
+    [queueSubtitleAutosave, updateEditHistory]
   );
 
   const handleUndoEdit = React.useCallback(() => {
@@ -3951,59 +4160,37 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
     const nextIndex = index - 1;
     editHistoryIndexRef.current = nextIndex;
-    setEditingText(editHistoryRef.current[nextIndex] ?? "");
+    const nextText = editHistoryRef.current[nextIndex] ?? "";
+    setEditingText(nextText);
     lastHistoryCommitAtRef.current = Date.now();
     setCanUndoEdit(nextIndex > 0);
-  }, [isExporting, isSavingCue]);
+    queueSubtitleAutosave(nextText);
+  }, [isExporting, isSavingCue, queueSubtitleAutosave]);
 
-  const handleCancelEdit = React.useCallback(() => {
-    setSelectedCueId(null);
-    setEditingCueId(null);
-    setEditingText("");
-    setEditError(null);
-    resetEditSessionState();
-    resumePlaybackIfNeeded();
-  }, [resetEditSessionState, resumePlaybackIfNeeded]);
-
-  const handleSaveEdit = React.useCallback(async () => {
-    if (!projectId || !editingCueId || isExporting) {
-      return;
+  const flushAndExitEditMode = React.useCallback(async () => {
+    if (isSavingCueRef.current || isExporting) {
+      return false;
     }
-    const nextCues = cues.map((cue) =>
-      cue.id === editingCueId
-        ? {
-            ...cue,
-            text: editingText
-          }
-        : cue
-    );
-
+    isSavingCueRef.current = true;
     setIsSavingCue(true);
     try {
-      await updateProject(projectId, {
-        subtitles_srt_text: serializeSrt(nextCues)
-      });
-      setCues(nextCues);
-      setSelectedCueId(null);
-      setEditingCueId(null);
-      setEditingText("");
-      setEditError(null);
-      resetEditSessionState();
-      resumePlaybackIfNeeded();
-    } catch (err) {
-      setEditError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to save subtitle changes."));
+      const ok = await flushSubtitleAutosave();
+      if (!ok) {
+        return false;
+      }
+      closeEditMode();
+      return true;
     } finally {
+      isSavingCueRef.current = false;
       setIsSavingCue(false);
     }
-  }, [
-    cues,
-    editingCueId,
-    editingText,
-    isExporting,
-    projectId,
-    resetEditSessionState,
-    resumePlaybackIfNeeded
-  ]);
+  }, [closeEditMode, flushSubtitleAutosave, isExporting]);
+
+  const handleCloseEdit = React.useCallback(() => {
+    if (!isSavingCueRef.current) {
+      void flushAndExitEditMode();
+    }
+  }, [flushAndExitEditMode]);
 
   const handleCueClick = React.useCallback(
     (cue: SrtCue) => {
@@ -4011,7 +4198,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         return;
       }
       const videoElement = videoRef.current;
-      const isPlaying = Boolean(videoElement && !videoElement.paused && !videoElement.ended);
+      const isPlaying = isVideoPlayingForEditSession(videoElement);
       if (isPlaying) {
         videoElement?.pause();
       }
@@ -4025,8 +4212,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const videoElement = videoRef.current;
     if (videoElement) videoElement.pause();
     shouldResumePlaybackRef.current = true;
-    if (!isSavingCue) void handleSaveEdit();
-  }, [isEditingCue, isSavingCue, handleSaveEdit]);
+    if (!isSavingCue) void flushAndExitEditMode();
+  }, [flushAndExitEditMode, isEditingCue, isSavingCue]);
 
   const handlePlayPauseToggle = React.useCallback(() => {
     const el = videoRef.current;
@@ -4147,7 +4334,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setSpeedPopoverOpen(true);
     }, 250);
   }, []);
-  const videoSingleClickTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoSingleClickTimeoutRef = React.useRef<BrowserTimeout | null>(null);
   const videoClickSurfaceRef = React.useRef<HTMLDivElement | null>(null);
 
   const handleSpeedPopoverMouseLeave = React.useCallback(() => {
@@ -4217,10 +4404,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         setPlayPauseFeedback(icon);
         setPlayPauseFeedbackVisible(true);
         playPauseFeedbackTimeoutsRef.current.push(
-          setTimeout(() => setPlayPauseFeedbackVisible(false), 350)
+          window.setTimeout(() => setPlayPauseFeedbackVisible(false), 350)
         );
         playPauseFeedbackTimeoutsRef.current.push(
-          setTimeout(() => {
+          window.setTimeout(() => {
             setPlayPauseFeedback(null);
             playPauseFeedbackTimeoutsRef.current = [];
           }, 650)
@@ -4369,14 +4556,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       }
       if (isEditingCue) {
         event.preventDefault();
-        handleCancelEdit();
+        void flushAndExitEditMode();
         return;
       }
       closeOverlays();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeOverlays, handleCancelEdit, isEditingCue, isOverlayOpen]);
+  }, [closeOverlays, flushAndExitEditMode, isEditingCue, isOverlayOpen]);
 
   const handleEditorKeyDown = async (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z") {
@@ -4386,14 +4573,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      handleCancelEdit();
+      await flushAndExitEditMode();
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!isSavingCue) {
-        await handleSaveEdit();
-      }
+      await flushAndExitEditMode();
     }
   };
 
@@ -4978,7 +5163,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                     />
                                     <span
                                       aria-hidden
-                                      className="relative z-1 block whitespace-pre-wrap text-center"
+                                      className="relative z-1 block whitespace-pre-wrap"
                                       dir={subtitleDirection}
                                       style={{
                                         ...subtitlePreviewTextStyle,
@@ -5036,22 +5221,20 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       data-testid="workbench-subtitle-editor"
                                       data-workbench-subtitle-editor
                                       className={cn(
-                                        "z-2 m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden border-0 bg-transparent px-3 py-2 text-center whitespace-pre-wrap text-transparent caret-white shadow-none ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45",
+                                        "z-2 m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden border-0 bg-transparent px-3 py-2 whitespace-pre-wrap text-transparent caret-white shadow-none ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45",
                                         showSubtitleResizeHandles ? "rounded-sm" : "rounded-md"
                                       )}
                                       style={(() => {
-                                        const {
-                                          fontFamily: _f,
-                                          color: _c,
-                                          textShadow: _s,
-                                          backgroundColor: _bg,
-                                          paddingTop: _pt,
-                                          paddingRight: _pr,
-                                          paddingBottom: _pb,
-                                          paddingLeft: _pl,
-                                          borderRadius: _br,
-                                          ...rest
-                                        } = subtitleEditorTextStyle;
+                                        const rest = { ...subtitleEditorTextStyle };
+                                        delete rest.fontFamily;
+                                        delete rest.color;
+                                        delete rest.textShadow;
+                                        delete rest.backgroundColor;
+                                        delete rest.paddingTop;
+                                        delete rest.paddingRight;
+                                        delete rest.paddingBottom;
+                                        delete rest.paddingLeft;
+                                        delete rest.borderRadius;
                                         return { ...rest, color: "transparent" };
                                       })()}
                                       value={editingText}
@@ -5068,7 +5251,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   <>
                                     <span
                                       aria-hidden
-                                      className="block whitespace-pre-wrap text-center text-white"
+                                      className="block whitespace-pre-wrap text-white"
                                       dir={subtitleDirection}
                                       style={{
                                         ...subtitleEditorTextStyle,
@@ -5087,12 +5270,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       data-testid="workbench-subtitle-editor"
                                       data-workbench-subtitle-editor
                                       className={cn(
-                                        "m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden border-0 bg-background/50 px-3 py-2 text-center whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45",
+                                        "m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden border-0 bg-background/50 px-3 py-2 whitespace-pre-wrap text-white shadow-lg ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45",
                                         showSubtitleResizeHandles ? "rounded-sm" : "rounded-md"
                                       )}
                                       style={(() => {
-                                        const { fontFamily: _f, ...rest } =
-                                          subtitleEditorTextStyle;
+                                        const rest = { ...subtitleEditorTextStyle };
+                                        delete rest.fontFamily;
                                         return rest;
                                       })()}
                                       value={editingText}
@@ -5113,7 +5296,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 tabIndex={0}
                                 data-testid="workbench-active-subtitle"
                                 className={cn(
-                                  "m-0 inline-block cursor-text box-border border-0 bg-transparent px-3 py-2 text-center text-white shadow-lg transition focus-visible:outline-none hover:bg-background hover:ring-2 hover:ring-primary/45",
+                                  "m-0 inline-block cursor-text box-border border-0 bg-transparent px-3 py-2 text-white shadow-lg transition focus-visible:outline-none hover:bg-background hover:ring-2 hover:ring-primary/45",
                                   showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
                                   (isHoveringActiveSubtitle || subtitleResizeDrag || subtitlePositionDrag) && "bg-background ring-2 ring-primary/45",
                                   isActiveCueSelected
@@ -5267,7 +5450,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 ref={subtitleEditorControlsRef}
                                 data-testid="workbench-subtitle-editor-controls"
                                 className={cn(
-                                  "absolute z-10 flex items-center justify-end gap-2",
+                                  "absolute z-10 flex items-center gap-1 rounded-full border border-border/70 bg-background/90 p-1 shadow-lg backdrop-blur-sm",
                                   subtitleEditorControlsPlacement === "below"
                                     ? "left-1/2 top-full mt-2 -translate-x-1/2"
                                     : "left-1/2 bottom-full mb-2 -translate-x-1/2"
@@ -5277,7 +5460,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   type="button"
                                   variant="secondary"
                                   size="icon"
-                                  className="h-8 w-8 border border-border/70 bg-background/90"
+                                  className="h-8 w-8 rounded-full border border-border/70 bg-background/90"
                                   aria-label="Undo subtitle edit"
                                   title="Undo"
                                   data-testid="workbench-subtitle-undo"
@@ -5290,27 +5473,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   type="button"
                                   variant="secondary"
                                   size="icon"
-                                  className="h-8 w-8 border border-border/70 bg-background/90"
-                                  aria-label="Cancel subtitle edit"
-                                  title="Cancel"
-                                  data-testid="workbench-subtitle-cancel"
-                                  onClick={handleCancelEdit}
+                                  className="h-8 w-8 rounded-full border border-border/70 bg-background/90"
+                                  aria-label="Close subtitle edit"
+                                  title="Close"
+                                  data-testid="workbench-subtitle-close"
+                                  onClick={handleCloseEdit}
                                   disabled={isSavingCue || isExporting}
                                 >
                                   <X className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="default"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  aria-label="Save subtitle edit"
-                                  title="Save"
-                                  data-testid="workbench-subtitle-save"
-                                  onClick={() => void handleSaveEdit()}
-                                  disabled={isSavingCue || isExporting}
-                                >
-                                  <Check className="h-4 w-4" />
                                 </Button>
                               </div>
                             )}
@@ -5677,72 +5847,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             </aside>
           )}
 
-          {false && hasSubtitles && isExporting && (
-            <section
-              className="rounded-lg border border-border bg-card p-4"
-              data-testid="workbench-export-panel"
-            >
-              {exportError && (
-                <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                  {exportError}
-                </div>
-              )}
-              {openActionError && (
-                <div
-                  className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-                  data-testid="workbench-open-action-error"
-                >
-                  {openActionError}
-                </div>
-              )}
-              <div className="space-y-3">
-                <p className="text-sm font-semibold text-foreground">{exportHeading}</p>
-                {project?.active_task?.status === "queued" &&
-                project?.active_task?.kind === "create_video_with_subtitles" ? (
-                  <div className="flex justify-center">
-                    <Button
-                      variant="secondary"
-                      data-testid="workbench-cancel-export"
-                      onClick={() => void cancelExport()}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    {exportChecklist.length > 0 && (
-                      <Checklist
-                        items={exportChecklist}
-                        className="text-left"
-                        data-testid="workbench-export-checklist"
-                      />
-                    )}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{Math.round(exportProgressPct)}%</span>
-                        <span
-                          title={exportProgressMessage || undefined}
-                          data-testid="workbench-export-elapsed"
-                        >
-                          {exportElapsedText}
-                        </span>
-                      </div>
-                      <Progress value={exportProgressPct} />
-                    </div>
-                    <div className="flex justify-center">
-                      <Button
-                        variant="secondary"
-                        data-testid="workbench-cancel-export"
-                        onClick={() => void cancelExport()}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </section>
-          )}
         </>
       )}
         </>

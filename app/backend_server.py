@@ -1894,6 +1894,22 @@ def get_settings() -> dict[str, Any]:
     return _read_settings_file()
 
 
+@app.get("/subtitle-fonts")
+def get_subtitle_fonts() -> dict[str, Any]:
+    from .graphics_preview_renderer import _ensure_application_fonts_loaded
+    from .subtitle_fonts import list_available_subtitle_fonts
+
+    _ensure_application_fonts_loaded()
+    try:
+        from PySide6 import QtGui as _QtGui
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"PySide6 not available: {exc}",
+        ) from exc
+    return {"fonts": list_available_subtitle_fonts(_QtGui.QFontDatabase.families())}
+
+
 @app.put("/settings")
 def update_settings(payload: SettingsUpdateRequest) -> dict[str, Any]:
     current = _read_settings_file()

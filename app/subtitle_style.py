@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import re
-from typing import Iterable
+from typing import Any, Iterable
 
 PRESET_DEFAULT = "Default"
 PRESET_LARGE_OUTLINE = "Large outline"
@@ -25,12 +26,16 @@ DEFAULT_LINE_BG_COLOR = "#000000"
 DEFAULT_WORD_BG_COLOR = "#000000"
 DEFAULT_SUBTITLE_MODE = "word_highlight"
 DEFAULT_HIGHLIGHT_COLOR = "#FFD400"
+DEFAULT_FONT_WEIGHT = 400
+DEFAULT_TEXT_ALIGN = "center"
+DEFAULT_LINE_SPACING = 1.0
 MIN_TEXT_OPACITY = 0.10
 
 VALID_FONT_STYLES = {"regular", "bold", "italic", "bold_italic"}
 VALID_BACKGROUND_MODES = {"none", "line", "word"}
 VALID_VERTICAL_ANCHORS = {"bottom", "middle", "top"}
 VALID_SUBTITLE_MODES = {"word_highlight", "static"}
+VALID_TEXT_ALIGNS = {"left", "center", "right"}
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -51,6 +56,9 @@ class SubtitleStyle:
     font_family: str
     font_size: int
     font_style: str
+    font_weight: int
+    text_align: str
+    line_spacing: float
     text_color: str
     text_opacity: float
     letter_spacing: float
@@ -113,6 +121,11 @@ def _coerce_enum(value: object, options: Iterable[str], default: str) -> str:
     return value if isinstance(value, str) and value in options else default
 
 
+def _coerce_positive_float(value: object, default: float) -> float:
+    result = _coerce_float(value, default)
+    return result if result > 0 else default
+
+
 def _coerce_color(value: object, default: str) -> str:
     return value if isinstance(value, str) and _HEX_COLOR_RE.match(value) else default
 
@@ -134,6 +147,32 @@ def resolve_outline_color(style: SubtitleStyle) -> str:
 
 def _coerce_str(value: object, default: str) -> str:
     return value if isinstance(value, str) and value.strip() else default
+
+
+def _legacy_font_weight_for_style(font_style: str) -> int:
+    return 700 if font_style in {"bold", "bold_italic"} else DEFAULT_FONT_WEIGHT
+
+
+def _coerce_font_weight(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return max(100, min(900, int(round(value))))
+    return default
+
+
+def shadow_offset_to_polar(offset_x: float, offset_y: float) -> tuple[float, float]:
+    distance = math.hypot(offset_x, offset_y)
+    angle_degrees = math.degrees(math.atan2(offset_y, offset_x))
+    if angle_degrees < 0:
+        angle_degrees += 360.0
+    return distance, angle_degrees
+
+
+def shadow_offset_from_polar(distance: float, angle_degrees: float) -> tuple[float, float]:
+    distance_value = max(0.0, float(distance))
+    radians = math.radians(float(angle_degrees))
+    return distance_value * math.cos(radians), distance_value * math.sin(radians)
 
 
 def preset_style_defaults(name: str) -> PresetStyle:
@@ -206,6 +245,9 @@ def style_model_from_preset(
         font_family=DEFAULT_FONT_NAME,
         font_size=preset.font_size,
         font_style="regular",
+        font_weight=DEFAULT_FONT_WEIGHT,
+        text_align=DEFAULT_TEXT_ALIGN,
+        line_spacing=DEFAULT_LINE_SPACING,
         text_color=DEFAULT_TEXT_COLOR,
         text_opacity=1.0,
         letter_spacing=0.0,
@@ -248,6 +290,9 @@ def style_model_from_preset(
             font_family=style.font_family,
             font_size=style.font_size,
             font_style=style.font_style,
+            font_weight=style.font_weight,
+            text_align=style.text_align,
+            line_spacing=style.line_spacing,
             text_color=style.text_color,
             text_opacity=style.text_opacity,
             letter_spacing=style.letter_spacing,
@@ -327,12 +372,22 @@ def preset_defaults(
 def normalize_style_model(raw: object, fallback: SubtitleStyle) -> SubtitleStyle:
     if not isinstance(raw, dict):
         return fallback
+    font_style = _coerce_enum(raw.get("font_style"), VALID_FONT_STYLES, fallback.font_style)
+    if raw.get("font_weight") is None:
+        font_weight = (
+            _legacy_font_weight_for_style(font_style)
+            if raw.get("font_style") is not None
+            else fallback.font_weight
+        )
+    else:
+        font_weight = _coerce_font_weight(raw.get("font_weight"), fallback.font_weight)
     return SubtitleStyle(
         font_family=_coerce_str(raw.get("font_family"), fallback.font_family),
         font_size=_coerce_int(raw.get("font_size"), fallback.font_size),
-        font_style=_coerce_enum(
-            raw.get("font_style"), VALID_FONT_STYLES, fallback.font_style
-        ),
+        font_style=font_style,
+        font_weight=font_weight,
+        text_align=_coerce_enum(raw.get("text_align"), VALID_TEXT_ALIGNS, fallback.text_align),
+        line_spacing=_coerce_positive_float(raw.get("line_spacing"), fallback.line_spacing),
         text_color=_coerce_color(raw.get("text_color"), fallback.text_color),
         text_opacity=max(
             MIN_TEXT_OPACITY,
@@ -400,6 +455,9 @@ def style_model_to_dict(style: SubtitleStyle) -> dict[str, object]:
         "font_family": style.font_family,
         "font_size": style.font_size,
         "font_style": style.font_style,
+        "font_weight": style.font_weight,
+        "text_align": style.text_align,
+        "line_spacing": style.line_spacing,
         "text_color": style.text_color,
         "text_opacity": style.text_opacity,
         "letter_spacing": style.letter_spacing,
@@ -463,6 +521,9 @@ def summarize_style_model(style: SubtitleStyle) -> str:
         "style_model "
         f"font={style.font_family} "
         f"size={style.font_size} "
+        f"weight={style.font_weight} "
+        f"align={style.text_align} "
+        f"line_spacing={style.line_spacing:.2f} "
         f"outline={preset.outline} "
         f"shadow={preset.shadow} "
         f"margin_v={preset.margin_v} "
@@ -487,3 +548,91 @@ def to_preview_params(style: SubtitleStyle) -> dict:
         "box_opacity": preset.box_opacity,
         "box_padding": preset.box_padding,
     }
+
+
+def _normalize_highlight_opacity(value: object, default: float = 1.0) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        opacity = float(value)
+        return max(0.0, min(opacity, 1.0))
+    return default
+
+
+def normalize_style_payload(
+    raw_style: object,
+    *,
+    default_preset: str = PRESET_DEFAULT,
+    default_subtitle_mode: str = DEFAULT_SUBTITLE_MODE,
+    default_highlight_color: str = DEFAULT_HIGHLIGHT_COLOR,
+) -> dict[str, Any]:
+    if not isinstance(raw_style, dict) or not raw_style:
+        return {}
+
+    root = raw_style
+    has_nested_style_payload = isinstance(raw_style.get("subtitle_style"), dict)
+    style_payload = raw_style.get("subtitle_style") if has_nested_style_payload else raw_style
+    if not isinstance(style_payload, dict):
+        style_payload = {}
+
+    preset_value = style_payload.get("preset")
+    preset = (
+        preset_value
+        if isinstance(preset_value, str) and preset_value in PRESET_NAMES
+        else default_preset
+    )
+
+    subtitle_mode = _coerce_enum(
+        root.get("subtitle_mode"), VALID_SUBTITLE_MODES, default_subtitle_mode
+    )
+    highlight_color = _coerce_color(
+        style_payload.get("highlight_color"),
+        _coerce_color(root.get("highlight_color"), default_highlight_color),
+    )
+    preset_defaults_style = preset_style_defaults(PRESET_DEFAULT)
+    preset_custom = preset_style_from_custom_dict(
+        style_payload.get("custom"),
+        preset_defaults_style,
+    )
+    preset_effective = (
+        preset_custom if preset == PRESET_CUSTOM else preset_style_defaults(preset)
+    )
+    fallback_style = style_model_from_preset(
+        preset_effective,
+        subtitle_mode=subtitle_mode,
+        highlight_color=highlight_color,
+        preset_name=preset,
+    )
+
+    appearance_raw = style_payload.get("appearance")
+    if not isinstance(appearance_raw, dict):
+        appearance_raw = style_payload
+    style_model = normalize_style_model(appearance_raw, fallback_style)
+
+    normalized_subtitle_style: dict[str, Any] = dict(style_payload) if has_nested_style_payload else {}
+    normalized_subtitle_style["preset"] = preset
+    normalized_subtitle_style["highlight_color"] = style_model.highlight_color
+    normalized_subtitle_style["highlight_opacity"] = _normalize_highlight_opacity(
+        style_payload.get("highlight_opacity")
+    )
+    if isinstance(style_payload.get("custom"), dict):
+        normalized_custom = preset_style_from_custom_dict(
+            style_payload.get("custom"),
+            preset_defaults_style,
+        )
+        normalized_subtitle_style["custom"] = {
+            "font_size": normalized_custom.font_size,
+            "outline": normalized_custom.outline,
+            "shadow": normalized_custom.shadow,
+            "margin_v": normalized_custom.margin_v,
+            "box_enabled": normalized_custom.box_enabled,
+            "box_opacity": normalized_custom.box_opacity,
+            "box_padding": normalized_custom.box_padding,
+        }
+    normalized_subtitle_style["appearance"] = style_model_to_dict(style_model)
+
+    normalized_root: dict[str, Any] = {
+        "subtitle_mode": style_model.subtitle_mode,
+        "subtitle_style": normalized_subtitle_style,
+    }
+    return normalized_root

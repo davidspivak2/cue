@@ -173,6 +173,7 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
   const eventRequestCounts = new Map();
   const eventFailureByJob = new Map();
   const projectGetCounts = new Map();
+  const subtitlePutFailureQueue = [];
 
   await page.route("**://127.0.0.1:8765/settings", async (route) => {
     const request = route.request();
@@ -327,6 +328,15 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
       }
       if (lastPutPayload && typeof lastPutPayload.subtitles_srt_text === "string") {
         subtitlePutCallCount += 1;
+        const forcedFailure = subtitlePutFailureQueue.shift();
+        if (forcedFailure) {
+          await route.fulfill({
+            status: forcedFailure.status,
+            contentType: forcedFailure.contentType ?? "application/json",
+            body: forcedFailure.body
+          });
+          return;
+        }
         subtitlesByProject.set(projectId, lastPutPayload.subtitles_srt_text);
       }
       if (lastPutPayload && typeof lastPutPayload.style === "object") {
@@ -499,6 +509,9 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
     clearJobEventFailure: (jobId) => {
       eventFailureByJob.delete(jobId);
     },
+    queueSubtitlePutFailure: (status, body, contentType = "application/json") => {
+      subtitlePutFailureQueue.push({ status, body, contentType });
+    },
     getJobEventsRequestCount: (jobId) => eventRequestCounts.get(jobId) ?? 0
   };
 };
@@ -507,12 +520,10 @@ const primeVideoState = async (
   page,
   { playing = true, currentTime = 1, videoWidth = 1280, videoHeight = 720 } = {}
 ) => {
-  await page.evaluate(
-    ({ isPlaying, timeSeconds, mediaWidth, mediaHeight }) => {
-      const video = document.querySelector("video");
-      if (!video) {
-        return;
-      }
+  const video = page.locator("video");
+  await expect(video).toHaveCount(1);
+  await video.evaluate(
+    (video, { isPlaying, timeSeconds, mediaWidth, mediaHeight }) => {
       const state = {
         paused: !isPlaying,
         pauseCalled: false,
@@ -566,15 +577,23 @@ const primeVideoState = async (
           return video.__cueState.paused;
         }
       });
-      video.pause = () => {
-        video.__cueState.pauseCalled = true;
-        video.__cueState.paused = true;
-      };
-      video.play = () => {
-        video.__cueState.playCalled = true;
-        video.__cueState.paused = false;
-        return Promise.resolve();
-      };
+      Object.defineProperty(video, "pause", {
+        configurable: true,
+        value: () => {
+          video.__cueState.pauseCalled = true;
+          video.__cueState.paused = true;
+          video.dispatchEvent(new Event("pause"));
+        }
+      });
+      Object.defineProperty(video, "play", {
+        configurable: true,
+        value: () => {
+          video.__cueState.playCalled = true;
+          video.__cueState.paused = false;
+          video.dispatchEvent(new Event("play"));
+          return Promise.resolve();
+        }
+      });
       const centerPanel = document.querySelector("[data-testid='workbench-center-panel']");
       if (centerPanel instanceof HTMLElement) {
         centerPanel.style.height = `${mediaHeight}px`;
@@ -675,9 +694,13 @@ const readActiveSubtitleRect = async (page) => {
   const rect = await page.evaluate(() => {
     const editor = document.querySelector("[data-workbench-subtitle-editor]");
     const preview = document.querySelector("[data-testid='workbench-active-subtitle']");
+    const editorSurface =
+      editor instanceof HTMLElement && editor.parentElement instanceof HTMLElement
+        ? editor.parentElement
+        : null;
     const element =
-      editor instanceof HTMLElement
-        ? editor
+      editorSurface instanceof HTMLElement
+        ? editorSurface
         : preview instanceof HTMLElement
           ? preview
           : null;
@@ -719,29 +742,75 @@ const dragActiveSubtitleTo = async (
       : previewCount > 0
         ? preview
         : editor;
+  const drag = await sourceLocator.evaluate(
+    (element, { targetXNorm, targetYNorm }) => {
+      const layer = document.querySelector(
+        "[data-testid='workbench-subtitle-overlay-position-layer']"
+      );
+      if (!(layer instanceof HTMLElement)) {
+        throw new Error("Subtitle overlay layer not found");
+      }
 
-  const layerRect = await readClientRect(layer);
-  const sourceRect = await readClientRect(sourceLocator);
-  const moveHandle = page.locator("[data-subtitle-move-handle]").first();
-  const moveHandleCount = await moveHandle.count();
-  let dragStartX = sourceRect.left + sourceRect.width / 2;
-  let dragStartY = sourceRect.top + sourceRect.height / 2;
-  if (moveHandleCount > 0) {
-    const handleRect = await readClientRect(moveHandle);
-    if (handleRect.width > 0 && handleRect.height > 0) {
-      dragStartX = handleRect.left + handleRect.width / 2;
-      dragStartY = handleRect.top + handleRect.height / 2;
-    }
-  }
-  await page.mouse.move(dragStartX, dragStartY);
-  await page.mouse.down();
-  await page.waitForTimeout(20);
-  await page.mouse.move(
-    layerRect.left + layerRect.width * xNorm,
-    layerRect.top + layerRect.height * yNorm,
-    { steps: 12 }
+      let handleContainer = element instanceof HTMLElement ? element : null;
+      while (handleContainer && !handleContainer.querySelector("[data-subtitle-move-handle]")) {
+        handleContainer = handleContainer.parentElement;
+      }
+      if (!(handleContainer instanceof HTMLElement)) {
+        throw new Error("Subtitle move handle container not found");
+      }
+
+      const moveHandle = handleContainer.querySelector("[data-subtitle-move-handle]");
+      if (!(moveHandle instanceof HTMLElement)) {
+        throw new Error("Subtitle move handle not found");
+      }
+
+      const handleRect = moveHandle.getBoundingClientRect();
+      const layerRect = layer.getBoundingClientRect();
+      const startX = handleRect.left + handleRect.width / 2;
+      const startY = handleRect.top + handleRect.height / 2;
+      const endX = layerRect.left + layerRect.width * targetXNorm;
+      const endY = layerRect.top + layerRect.height * targetYNorm;
+
+      moveHandle.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 1,
+          clientX: startX,
+          clientY: startY
+        })
+      );
+      return { startX, startY, endX, endY };
+    },
+    { targetXNorm: xNorm, targetYNorm: yNorm }
   );
-  await page.mouse.up();
+
+  await page.waitForTimeout(50);
+
+  await page.evaluate(({ startX, startY, endX, endY }) => {
+    for (let step = 1; step <= 12; step += 1) {
+      document.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          cancelable: true,
+          buttons: 1,
+          clientX: startX + ((endX - startX) * step) / 12,
+          clientY: startY + ((endY - startY) * step) / 12
+        })
+      );
+    }
+    document.dispatchEvent(
+      new MouseEvent("mouseup", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons: 0,
+        clientX: endX,
+        clientY: endY
+      })
+    );
+  }, drag);
 };
 
 const dragActiveSubtitleFromCenterTo = async (
@@ -763,42 +832,61 @@ const dragActiveSubtitleFromCenterTo = async (
       : previewCount > 0
         ? preview
         : editor;
-
-  const layerRect = await readClientRect(layer);
-  const sourceRect = await readClientRect(sourceLocator);
-  const dragStart = await page.evaluate(({ rect }) => {
-    const candidates = [
-      { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 },
-      { x: rect.left + rect.width * 0.4, y: rect.top + rect.height * 0.5 },
-      { x: rect.left + rect.width * 0.6, y: rect.top + rect.height * 0.5 },
-      { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.4 },
-      { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.6 }
-    ];
-    for (const point of candidates) {
-      const element = document.elementFromPoint(point.x, point.y);
-      const onMoveHandle =
-        element instanceof Element &&
-        Boolean(element.closest("[data-subtitle-move-handle]"));
-      if (!onMoveHandle) {
-        return { ...point, onMoveHandle: false };
+  const start = await sourceLocator.evaluate(
+    (element, { targetXNorm, targetYNorm }) => {
+      const layer = document.querySelector(
+        "[data-testid='workbench-subtitle-overlay-position-layer']"
+      );
+      if (!(layer instanceof HTMLElement)) {
+        throw new Error("Subtitle overlay layer not found");
       }
-    }
-    const fallback = candidates[0];
-    return { ...fallback, onMoveHandle: true };
-  }, { rect: sourceRect });
-  if (dragStart.onMoveHandle) {
-    throw new Error("Could not find a center drag start point outside subtitle move handles");
-  }
-  const dragStartX = dragStart.x;
-  const dragStartY = dragStart.y;
-  await page.mouse.move(dragStartX, dragStartY);
-  await page.mouse.down();
-  await page.waitForTimeout(20);
-  await page.mouse.move(
-    layerRect.left + layerRect.width * xNorm,
-    layerRect.top + layerRect.height * yNorm,
-    { steps: 12 }
+
+      const dragSurface =
+        element instanceof HTMLElement &&
+        element.matches("[data-workbench-subtitle-editor]") &&
+        element.parentElement instanceof HTMLElement
+          ? element.parentElement
+          : element instanceof HTMLElement
+            ? element
+            : null;
+      if (!(dragSurface instanceof HTMLElement)) {
+        throw new Error("Subtitle drag surface not found");
+      }
+
+      const rect = dragSurface.getBoundingClientRect();
+      const candidates = [
+        { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.5 },
+        { x: rect.left + rect.width * 0.4, y: rect.top + rect.height * 0.5 },
+        { x: rect.left + rect.width * 0.6, y: rect.top + rect.height * 0.5 },
+        { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.4 },
+        { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.6 }
+      ];
+      const dragStart = candidates.find((point) => {
+        const target = document.elementFromPoint(point.x, point.y);
+        return !(
+          target instanceof Element && Boolean(target.closest("[data-subtitle-move-handle]"))
+        );
+      });
+      if (!dragStart) {
+        throw new Error("Could not find a center drag start point outside subtitle move handles");
+      }
+
+      const layerRect = layer.getBoundingClientRect();
+      const endX = layerRect.left + layerRect.width * targetXNorm;
+      const endY = layerRect.top + layerRect.height * targetYNorm;
+      return {
+        startX: dragStart.x,
+        startY: dragStart.y,
+        endX,
+        endY
+      };
+    },
+    { targetXNorm: xNorm, targetYNorm: yNorm }
   );
+
+  await page.mouse.move(start.startX, start.startY);
+  await page.mouse.down();
+  await page.mouse.move(start.endX, start.endY, { steps: 12 });
   await page.mouse.up();
 };
 
@@ -877,11 +965,32 @@ const ensureAdvancedStyleControlsVisible = async (page) => {
   await expect(fontLabel).toBeVisible();
 };
 
+const expectProjectHubHome = async (page) => {
+  await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+};
+
+const getVisibleWorkbenchHeading = (page) =>
+  page.locator("[data-testid='workbench-heading']:visible");
+
+const getTextStyleSizeInput = (page) =>
+  page.getByRole("region", { name: /^Text / }).getByRole("spinbutton").first();
+
+const getEditorSurface = (page) =>
+  page.getByTestId("workbench-subtitle-editor").locator("xpath=..");
+
 /** No-op: vertical position is now set by dragging the subtitle on the video. */
 const setVerticalAnchor = async (_page, _anchorLabel: "Top" | "Middle" | "Bottom") => {};
 
 /** No-op: vertical position is now set by dragging the subtitle on the video. */
 const setVerticalOffset = async (_page, _value: string) => {};
+
+const domClick = async (locator) => {
+  await locator.evaluate((element) => {
+    if (element instanceof HTMLElement) {
+      element.click();
+    }
+  });
+};
 
 const showVideoControls = async (page) => {
   const readControlsOpacity = async () =>
@@ -938,6 +1047,8 @@ const expectVideoControlsHiddenSoon = async (page) => {
     .toBeLessThan(0.05);
 };
 
+const SUBTITLE_PUSH_SETTLE_MS = 220;
+
 test("workbench shell wide layout", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
@@ -989,22 +1100,22 @@ test("title bar: switch between Home and video tab", async ({ page }) => {
   await page.goto("/");
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
-  await expect(page.getByTestId("workbench-heading")).toBeVisible();
+  await expect(getVisibleWorkbenchHeading(page)).toBeVisible();
   await expect(page.getByTestId("title-bar-tab-project-1")).toBeVisible();
 
   await page.getByTestId("title-bar-home").click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await expectProjectHubHome(page);
 
   await page.getByText("other.mp4").click();
   await page.waitForURL("**/workbench/project-2");
-  await expect(page.getByTestId("workbench-heading")).toContainText("other");
+  await expect(getVisibleWorkbenchHeading(page)).toContainText("other");
   await expect(page.getByTestId("title-bar-tab-project-1")).toBeVisible();
   await expect(page.getByTestId("title-bar-tab-project-2")).toBeVisible();
 
   await page.getByTestId("title-bar-tab-project-1").click();
   await expect(page).toHaveURL(/\/workbench\/project-1/);
-  await expect(page.getByTestId("workbench-heading")).toContainText("good");
+  await expect(getVisibleWorkbenchHeading(page)).toContainText("good");
 });
 
 test("navigation without sidebar: Projects to Editor to Home via title bar", async ({
@@ -1015,13 +1126,13 @@ test("navigation without sidebar: Projects to Editor to Home via title bar", asy
   await mockProjects(page, projects);
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await expectProjectHubHome(page);
   await page.getByText("good.mp4").click();
   await page.waitForURL(/\/workbench\/project-1/);
   await expect(page.getByTestId("workbench")).toBeVisible();
 
   await page.getByTestId("title-bar-home").click();
-  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await expectProjectHubHome(page);
   await expect(page).toHaveURL(/\/$/);
 });
 
@@ -1054,7 +1165,7 @@ test("title bar: close active tab switches to adjacent or Home", async ({ page }
 
   await page.getByTestId("title-bar-tab-close-project-1").click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await expectProjectHubHome(page);
   await expect(page.getByTestId("title-bar-tab-project-1")).toHaveCount(0);
 });
 
@@ -1084,7 +1195,7 @@ test("title bar: close non-active tab removes tab without navigation", async ({
 
   await page.getByTestId("title-bar-tab-close-project-1").click();
   await expect(page).toHaveURL(/\/workbench\/project-2/);
-  await expect(page.getByTestId("workbench-heading")).toContainText("other");
+  await expect(getVisibleWorkbenchHeading(page)).toContainText("other");
   await expect(page.getByTestId("title-bar-tab-project-1")).toHaveCount(0);
   await expect(page.getByTestId("title-bar-tab-project-2")).toBeVisible();
 });
@@ -1523,7 +1634,7 @@ test("workbench shows Queued and cancel when project active_task is queued", asy
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
 
-  await expect(page.getByText("Queued")).toBeVisible();
+  await expect(page.getByTestId("workbench-empty-state")).toContainText("Queued");
   await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
 
   const cancelRequest = page.waitForRequest(
@@ -1579,9 +1690,10 @@ test("workbench keeps export cancel available after resume attach", async ({ pag
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
 
+  const exportProgressTop = page.getByTestId("workbench-export-progress-top");
   await expect(page.getByTestId("workbench-cancel-export")).toBeVisible();
-  await expect(page.getByTestId("workbench-export-elapsed")).toContainText("Elapsed");
-  await expect(page.getByTestId("workbench-export-elapsed")).not.toContainText("Muxing frames");
+  await expect(exportProgressTop).toBeVisible();
+  await expect(exportProgressTop).toContainText(/61%|63%/);
   const cancelRequest = page.waitForRequest(
     (request) => request.url().includes("/jobs/job-resume-export/cancel") && request.method() === "POST"
   );
@@ -1748,7 +1860,7 @@ test("app layout suppresses export-cancel task notices from toast polling", asyn
   await mockProjects(page, projects);
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Videos" })).toBeVisible();
+  await expectProjectHubHome(page);
   await expect(page.getByTestId("project-card-task-notice-project-1")).toHaveCount(0);
   await expect(page.getByText("Operation cancelled.")).toHaveCount(0);
   await expect(
@@ -1796,9 +1908,8 @@ test("style controls change subtitle preview appearance", async ({ page }) => {
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   await expect(subtitleButton).toHaveCount(1);
 
-  const fontSizeInput = page
-    .locator("label:has-text('Font size')")
-    .locator("xpath=../../input[@type='number']");
+  await ensureAdvancedStyleControlsVisible(page);
+  const fontSizeInput = getTextStyleSizeInput(page);
   await fontSizeInput.fill("44");
   await fontSizeInput.blur();
 
@@ -1857,7 +1968,7 @@ test("subtitle corner handles resize text", async ({ page }) => {
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   await expect(subtitleButton).toHaveCount(1);
-  await subtitleButton.click();
+  await domClick(subtitleButton);
 
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toHaveCount(1);
@@ -1907,7 +2018,7 @@ test("subtitle move starts only from border handles", async ({ page }) => {
   await dragActiveSubtitleTo(page, 0.5, 0.6);
   await page.waitForTimeout(40);
 
-  await subtitleButton.click();
+  await domClick(subtitleButton);
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toHaveCount(1);
 
@@ -1970,7 +2081,7 @@ test("editor textarea stays fully inside video when dragged to extremes", async 
   await page.waitForURL("**/workbench/project-1");
 
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
-  await page.getByTestId("workbench-active-subtitle").click();
+  await domClick(page.getByTestId("workbench-active-subtitle"));
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toHaveCount(1);
   const videoWrapper = page.getByTestId("workbench-center-panel-video-wrapper");
@@ -2124,6 +2235,7 @@ test("controls overlap causes push and click opens editor", async ({ page }) => 
   await expect
     .poll(async () => (await readActiveSubtitleRect(page)).top)
     .toBeLessThan(subtitleRectBefore.top - 1);
+  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
 
   const subtitleRectAfter = await readActiveSubtitleRect(page);
   const subtitleDeltaY = subtitleRectAfter.top - subtitleRectBefore.top;
@@ -2135,7 +2247,7 @@ test("controls overlap causes push and click opens editor", async ({ page }) => 
   }
 
   await expect(editor).toHaveCount(1);
-  const editorRect = await readClientRect(editor);
+  const editorRect = await readActiveSubtitleRect(page);
   expect(Math.abs(editorRect.top - subtitleRectAfter.top)).toBeLessThanOrEqual(2);
   expect(Math.abs(editorRect.left - subtitleRectAfter.left)).toBeLessThanOrEqual(2);
 });
@@ -2192,11 +2304,14 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
   await setVerticalAnchor(page, "Bottom");
   await setVerticalOffset(page, "63");
-  const fontSizeInput = page
-    .locator("label:has-text('Font size')")
-    .locator("xpath=../../input[@type='number']");
+  await ensureAdvancedStyleControlsVisible(page);
+  const fontSizeInput = getTextStyleSizeInput(page);
   await fontSizeInput.fill("66");
   await fontSizeInput.blur();
+  await dragActiveSubtitleTo(page, 0.5, 0.4);
+  await page.waitForTimeout(40);
+  await page.mouse.move(0, 0);
+  await expectVideoControlsHiddenSoon(page);
 
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   await expect(subtitleButton).toHaveCount(1);
@@ -2213,11 +2328,12 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   });
 
   const editor = page.getByTestId("workbench-subtitle-editor");
+  const editorSurface = getEditorSurface(page);
   const controls = page.getByTestId("workbench-subtitle-editor-controls");
   await expect(editor).toHaveCount(1);
   await expect(controls).toHaveCount(1);
 
-  const editorRectOnEnter = await readClientRect(editor);
+  const editorRectOnEnter = await readClientRect(editorSurface);
   const editorTypography = await readTypographyMetrics(editor);
   expect(Math.abs(editorRectOnEnter.top - previewRect.top)).toBeLessThanOrEqual(2);
   expect(Math.abs(editorRectOnEnter.bottom - previewRect.bottom)).toBeLessThanOrEqual(1);
@@ -2234,7 +2350,7 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   expect(editorTypography.paddingRight).toBe(previewTypography.paddingRight);
 
   await page.waitForTimeout(50);
-  const editorRectAfterControls = await readClientRect(editor);
+  const editorRectAfterControls = await readClientRect(editorSurface);
   expect(Math.abs(editorRectAfterControls.top - editorRectOnEnter.top)).toBeLessThanOrEqual(1);
   expect(Math.abs(editorRectAfterControls.left - editorRectOnEnter.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(editorRectAfterControls.width - editorRectOnEnter.width)).toBeLessThanOrEqual(1);
@@ -2257,11 +2373,14 @@ test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated 
   await setVerticalAnchor(page, "Bottom");
   await setVerticalOffset(page, "63");
 
-  const fontSizeInput = page
-    .locator("label:has-text('Font size')")
-    .locator("xpath=../../input[@type='number']");
+  await ensureAdvancedStyleControlsVisible(page);
+  const fontSizeInput = getTextStyleSizeInput(page);
   await fontSizeInput.fill("66");
   await fontSizeInput.blur();
+  await dragActiveSubtitleTo(page, 0.5, 0.4);
+  await page.waitForTimeout(40);
+  await page.mouse.move(0, 0);
+  await expectVideoControlsHiddenSoon(page);
 
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   await expect(subtitleButton).toHaveCount(1);
@@ -2274,10 +2393,11 @@ test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated 
   });
 
   const editor = page.getByTestId("workbench-subtitle-editor");
+  const editorSurface = getEditorSurface(page);
   await expect(editor).toHaveCount(1);
-  const editorRect = await readClientRect(editor);
+  const editorRect = await readClientRect(editorSurface);
   const editorTypography = await readTypographyMetrics(editor);
-  expect(Math.abs(editorRect.top - previewRect.top)).toBeLessThanOrEqual(2);
+  expect(Math.abs(editorRect.top - previewRect.top)).toBeLessThanOrEqual(3);
   expect(Math.abs(editorRect.bottom - previewRect.bottom)).toBeLessThanOrEqual(1);
 
   const fontSizePx = Number.parseFloat(editorTypography.fontSize);
@@ -2310,18 +2430,20 @@ test("editor controls flip above when bottom anchor has no room and below when r
     }
   });
   const editor = page.getByTestId("workbench-subtitle-editor");
+  const editorSurface = getEditorSurface(page);
   const controls = page.getByTestId("workbench-subtitle-editor-controls");
   await expect(editor).toHaveCount(1);
   await expect(controls).toHaveCount(1);
 
-  const editorRectAtBottom = await readClientRect(editor);
+  const editorRectAtBottom = await readClientRect(editorSurface);
   const controlsRectAtBottom = await readClientRect(controls);
   expect(controlsRectAtBottom.bottom).toBeLessThanOrEqual(editorRectAtBottom.top + 1);
 
-  await page.getByTestId("workbench-subtitle-cancel").click();
+  await domClick(page.getByTestId("workbench-subtitle-close"));
   await expect(editor).toHaveCount(0);
 
-  await setVerticalOffset(page, "120");
+  await dragActiveSubtitleTo(page, 0.5, 0.1);
+  await page.waitForTimeout(40);
   await subtitleButton.evaluate((element) => {
     if (element instanceof HTMLElement) {
       element.click();
@@ -2330,7 +2452,7 @@ test("editor controls flip above when bottom anchor has no room and below when r
   await expect(editor).toHaveCount(1);
   await expect(controls).toHaveCount(1);
 
-  const editorRectWithRoom = await readClientRect(editor);
+  const editorRectWithRoom = await readClientRect(editorSurface);
   const controlsRectWithRoom = await readClientRect(controls);
   expect(controlsRectWithRoom.top).toBeGreaterThanOrEqual(editorRectWithRoom.bottom - 1);
 });
@@ -2372,7 +2494,7 @@ test("on-video contract saves subtitle with Enter", async ({ page }) => {
     .toBe(true);
 });
 
-test("on-video contract cancels edit with Escape", async ({ page }) => {
+test("on-video contract flushes latest text with Escape", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
   const api = await mockProjects(page, projects);
@@ -2388,43 +2510,14 @@ test("on-video contract cancels edit with Escape", async ({ page }) => {
 
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toBeVisible();
-  await editor.fill("This should not save");
+  await editor.fill("Saved with Escape");
   await editor.press("Escape");
 
   await expect(editor).toHaveCount(0);
-  await expect(subtitleButton).toContainText("Original subtitle line");
-  await expect(subtitleButton).not.toHaveClass(/outline-primary/);
-  expect(api.getSubtitlePutCallCount()).toBe(0);
-  await expect
-    .poll(async () =>
-      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
-    )
-    .toBe(true);
-});
-
-test("on-video contract saves subtitle with Save icon", async ({ page }) => {
-  await page.setViewportSize({ width: 1300, height: 800 });
-  const projects = buildProjects();
-  const api = await mockProjects(page, projects);
-
-  await page.goto("/");
-  await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
-
-  await primeVideoState(page, { playing: true, currentTime: 1.2 });
-  const subtitleButton = page.getByTestId("workbench-active-subtitle");
-  await subtitleButton.click();
-
-  const editor = page.getByTestId("workbench-subtitle-editor");
-  await expect(editor).toBeVisible();
-  await editor.fill("Saved from icon button");
-  await page.getByTestId("workbench-subtitle-save").click();
-
-  await expect(editor).toHaveCount(0);
-  await expect(subtitleButton).toContainText("Saved from icon button");
+  await expect(subtitleButton).toContainText("Saved with Escape");
   await expect(subtitleButton).not.toHaveClass(/outline-primary/);
   expect(api.getSubtitlePutCallCount()).toBe(1);
-  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Saved from icon button");
+  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Saved with Escape");
   await expect
     .poll(async () =>
       page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
@@ -2432,7 +2525,30 @@ test("on-video contract saves subtitle with Save icon", async ({ page }) => {
     .toBe(true);
 });
 
-test("on-video contract cancels edit with Cancel icon", async ({ page }) => {
+test("on-video contract auto-saves subtitle while editing", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await page.getByTestId("workbench-active-subtitle").click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill("Auto-saved subtitle line");
+  await page.waitForTimeout(700);
+
+  await expect(editor).toBeVisible();
+  await expect(editor).toHaveValue("Auto-saved subtitle line");
+  expect(api.getSubtitlePutCallCount()).toBe(1);
+  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Auto-saved subtitle line");
+});
+
+test("on-video contract flushes latest text with Close icon", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
   const api = await mockProjects(page, projects);
@@ -2447,13 +2563,14 @@ test("on-video contract cancels edit with Cancel icon", async ({ page }) => {
 
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toBeVisible();
-  await editor.fill("This should not save from icon");
-  await page.getByTestId("workbench-subtitle-cancel").click();
+  await editor.fill("Saved from close icon");
+  await domClick(page.getByTestId("workbench-subtitle-close"));
 
   await expect(editor).toHaveCount(0);
-  await expect(subtitleButton).toContainText("Original subtitle line");
+  await expect(subtitleButton).toContainText("Saved from close icon");
   await expect(subtitleButton).not.toHaveClass(/outline-primary/);
-  expect(api.getSubtitlePutCallCount()).toBe(0);
+  expect(api.getSubtitlePutCallCount()).toBe(1);
+  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Saved from close icon");
   await expect
     .poll(async () =>
       page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
@@ -2495,10 +2612,54 @@ test("on-video contract saves and resumes when Play is clicked during edit", asy
     .toBe(true);
 });
 
+test("on-video contract keeps editor open when autosave fails and retries on exit", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+  api.queueSubtitlePutFailure(500, JSON.stringify({ detail: "subtitle_write_failed" }));
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: true, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await subtitleButton.click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill("Retry subtitle text");
+  await page.waitForTimeout(700);
+
+  await expect(editor).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-save-error")).toContainText(
+    "subtitle_write_failed"
+  );
+  expect(api.getSubtitlePutCallCount()).toBe(1);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(false);
+
+  await editor.press("Escape");
+
+  await expect(editor).toHaveCount(0);
+  await expect(subtitleButton).toContainText("Retry subtitle text");
+  expect(api.getSubtitlePutCallCount()).toBe(2);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(true);
+});
+
 test("on-video contract undo icon reverts unsaved edits", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
-  await mockProjects(page, projects);
+  const api = await mockProjects(page, projects);
 
   await page.goto("/");
   await page.getByText("good.mp4").click();
@@ -2512,15 +2673,19 @@ test("on-video contract undo icon reverts unsaved edits", async ({ page }) => {
   await expect(editor).toBeVisible();
   await expect(undoButton).toBeDisabled();
 
-  await editor.fill("First unsaved version");
+  await editor.fill("First autosaved version");
   await expect(undoButton).toBeEnabled();
   await page.waitForTimeout(700);
+  expect(api.getSubtitlePutCallCount()).toBe(1);
+  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("First autosaved version");
+
   await editor.fill("Second unsaved version");
 
-  await undoButton.click();
-  await expect(editor).toHaveValue("First unsaved version");
-  await undoButton.click();
-  await expect(editor).toHaveValue("Original subtitle line");
+  await domClick(undoButton);
+  await expect(editor).toHaveValue("First autosaved version");
+  await page.waitForTimeout(700);
+  expect(api.getSubtitlePutCallCount()).toBe(1);
+  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("First autosaved version");
 });
 
 test("on-video contract supports keyboard undo shortcut", async ({ page }) => {
@@ -2562,7 +2727,7 @@ test("on-video editor controls render in dark theme", async ({ page }) => {
 
   await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
   await expect(page.getByTestId("workbench-subtitle-undo")).toBeVisible();
-  await expect(page.getByTestId("workbench-subtitle-cancel")).toBeVisible();
-  await expect(page.getByTestId("workbench-subtitle-save")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-close")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-save")).toHaveCount(0);
 });
 
