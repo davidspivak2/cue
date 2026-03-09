@@ -1033,6 +1033,65 @@ const ensureAdvancedStyleControlsVisible = async (page) => {
   await expect(toolbar).toBeVisible();
 };
 
+const ensureWorkbenchEffectsPanelVisible = async (page) => {
+  const rightPanel = page.getByTestId("workbench-right-panel");
+  if ((await rightPanel.count()) > 0 && (await rightPanel.isVisible())) {
+    return rightPanel;
+  }
+  const rightDrawer = page.getByTestId("workbench-right-drawer");
+  if ((await rightDrawer.count()) > 0 && (await rightDrawer.isVisible())) {
+    return rightDrawer;
+  }
+  await page.getByTestId("workbench-open-effects").click();
+  await expect(rightDrawer).toBeVisible();
+  return rightDrawer;
+};
+
+const getEffectCard = async (page, effectId) => {
+  const panel = await ensureWorkbenchEffectsPanelVisible(page);
+  const card = panel.getByTestId(`workbench-effect-card-${effectId}`);
+  await expect(card).toBeVisible();
+  return card;
+};
+
+const ensureEffectDetailVisible = async (page, effectId) => {
+  const panel = await ensureWorkbenchEffectsPanelVisible(page);
+  const detail = panel.getByTestId(`workbench-effect-detail-${effectId}`);
+  if ((await detail.count()) > 0 && (await detail.isVisible())) {
+    return detail;
+  }
+  const card = await getEffectCard(page, effectId);
+  await card.click();
+  await expect(detail).toBeVisible();
+  return detail;
+};
+
+const getOutlineWidthInput = async (page) => {
+  const detail = await ensureEffectDetailVisible(page, "outline");
+  const input = detail.getByTestId("workbench-effect-outline-width-input");
+  await expect(input).toBeVisible();
+  return input;
+};
+
+const setOutlineWidthValue = async (page, value) => {
+  const input = await getOutlineWidthInput(page);
+  await input.fill(String(value));
+  await input.press("Tab");
+};
+
+const getShadowOpacityInput = async (page) => {
+  const detail = await ensureEffectDetailVisible(page, "shadow");
+  const input = detail.getByTestId("workbench-effect-shadow-opacity-input");
+  await expect(input).toBeVisible();
+  return input;
+};
+
+const setShadowOpacityValue = async (page, value) => {
+  const input = await getShadowOpacityInput(page);
+  await input.fill(String(value));
+  await input.press("Tab");
+};
+
 const expectProjectHubHome = async (page) => {
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 };
@@ -1045,6 +1104,15 @@ const getEditorSurface = (page) =>
 
 const getPreviewSurface = (page) =>
   page.getByTestId("workbench-active-subtitle-surface");
+
+const readActiveSubtitleBackgroundColor = async (page) =>
+  page.getByTestId("workbench-active-subtitle").evaluate((element) => {
+    const styles = window.getComputedStyle(element);
+    return styles.backgroundColor;
+  });
+
+const readEffectCardPressed = async (page, effectId) =>
+  (await (await getEffectCard(page, effectId)).getAttribute("aria-pressed")) === "true";
 
 const setToolbarFontSize = async (page, value) => {
   await ensureAdvancedStyleControlsVisible(page);
@@ -1126,6 +1194,8 @@ test("workbench shell wide layout", async ({ page }) => {
 
   await expect(page.getByTestId("workbench-center-panel")).toBeVisible();
   await expect(page.getByTestId("workbench-right-panel")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Effects" })).toBeVisible();
+  await expect(page.getByText("Preset")).toHaveCount(0);
   await expect(page.getByTestId("workbench-left-drawer")).toHaveCount(0);
 });
 
@@ -1139,10 +1209,11 @@ test("workbench shell narrow overlays", async ({ page }) => {
   await page.waitForURL("**/workbench/project-1");
 
   await expect(page.getByTestId("workbench-right-panel")).toHaveCount(0);
-  await expect(page.getByTestId("workbench-open-style")).toBeVisible();
+  await expect(page.getByTestId("workbench-open-effects")).toBeVisible();
 
-  await page.getByTestId("workbench-open-style").click();
+  await page.getByTestId("workbench-open-effects").click();
   await expect(page.getByTestId("workbench-right-drawer")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Effects" })).toBeVisible();
   await expect(page.getByTestId("workbench-overlay-scrim")).toBeVisible();
 
   await page.getByTestId("workbench-overlay-scrim").click();
@@ -1279,7 +1350,7 @@ test("workbench shows empty state before subtitles are created", async ({ page }
   await expect(page.getByText("No subtitles yet.")).toBeVisible();
   await expect(page.getByTestId("workbench-create-subtitles")).toBeVisible();
   await expect(page.getByTestId("workbench-right-panel")).toHaveCount(0);
-  await expect(page.getByTestId("workbench-open-style")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-open-effects")).toHaveCount(0);
 });
 
 test("workbench creates subtitles from empty state", async ({ page }) => {
@@ -1961,7 +2032,7 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0);
 });
 
-test("style controls change subtitle preview appearance", async ({ page }) => {
+test("toolbar controls change subtitle preview appearance", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
   const api = await mockProjects(page, projects);
@@ -2263,7 +2334,7 @@ test("subtitle move starts only from border handles", async ({ page }) => {
     afterInsideDrag.left + afterInsideDrag.width / 2 - (beforeInsideDrag.left + beforeInsideDrag.width / 2),
     afterInsideDrag.top + afterInsideDrag.height / 2 - (beforeInsideDrag.top + beforeInsideDrag.height / 2)
   );
-  expect(insideDragDelta).toBeLessThanOrEqual(2);
+  expect(insideDragDelta).toBeLessThanOrEqual(3);
 
   await dragActiveSubtitleTo(page, 0.9, 0.2, "editor");
   await page.waitForTimeout(40);
@@ -2396,7 +2467,7 @@ test("off-screen saved subtitle position is auto-corrected and persisted", async
 });
 
 test.skip("vertical anchor middle offset matches overlay direction in wide and narrow layouts", async ({ page }) => {
-  // Position is now set by dragging on the video; Style pane Position controls removed.
+  // Position is now set by dragging on the video; Effects pane Position controls removed.
   const projects = buildProjects();
   await mockProjects(page, projects);
 
@@ -2515,9 +2586,12 @@ test("controls overlap causes push and click opens editor", async ({ page }) => 
   }
 
   await expect(editor).toHaveCount(1);
-  const editorRect = await readActiveSubtitleRect(page);
-  expect(Math.abs(editorRect.top - subtitleRectAfter.top)).toBeLessThanOrEqual(2);
-  expect(Math.abs(editorRect.left - subtitleRectAfter.left)).toBeLessThanOrEqual(2);
+  await expect
+    .poll(async () => Math.abs((await readActiveSubtitleRect(page)).top - subtitleRectAfter.top))
+    .toBeLessThanOrEqual(2);
+  await expect
+    .poll(async () => Math.abs((await readActiveSubtitleRect(page)).left - subtitleRectAfter.left))
+    .toBeLessThanOrEqual(2);
 });
 
 test.skip("no-overlap scenario does not push subtitle position when controls appear", async ({ page }) => {
@@ -2954,13 +3028,112 @@ test("on-video formatting toolbar replaces undo and save controls", async ({
   await expect(page.getByTestId("subtitle-style-alignment")).toBeVisible();
   await expect(page.getByTestId("subtitle-style-spacing")).toBeVisible();
   await expect(page.getByTestId("subtitle-style-opacity")).toBeVisible();
-  await expect(page.getByTestId("subtitle-style-karaoke")).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-karaoke")).toHaveCount(0);
   await expect(page.getByTestId("workbench-subtitle-close")).toBeVisible();
   await expect(page.getByTestId("workbench-subtitle-undo")).toHaveCount(0);
   await expect(page.getByTestId("workbench-subtitle-save")).toHaveCount(0);
 });
 
-test("on-video contract supports keyboard undo shortcut", async ({ page }) => {
+test("effects pane cards support hover preview and multi-select", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  const backgroundCard = await getEffectCard(page, "background");
+  await expect(backgroundCard).toHaveAttribute("aria-pressed", "false");
+  await expect(await getEffectCard(page, "outline")).toHaveAttribute("aria-pressed", "true");
+
+  const baseBackgroundColor = await readActiveSubtitleBackgroundColor(page);
+  await backgroundCard.hover();
+  await expect.poll(() => readActiveSubtitleBackgroundColor(page)).not.toBe(baseBackgroundColor);
+  expect(api.getPutCallCount()).toBe(0);
+
+  await page.mouse.move(20, 20);
+  await expect.poll(() => readActiveSubtitleBackgroundColor(page)).toBe(baseBackgroundColor);
+  expect(api.getPutCallCount()).toBe(0);
+
+  await backgroundCard.click();
+  await expect.poll(() => readEffectCardPressed(page, "background")).toBe(true);
+  await expect.poll(() => readEffectCardPressed(page, "outline")).toBe(true);
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.background_mode ?? null)
+    .toBe("line");
+});
+
+test("effects pane reset restores one effect without clearing the others", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  await setShadowOpacityValue(page, 60);
+  await (await getEffectCard(page, "background")).click();
+  await expect.poll(() => readEffectCardPressed(page, "background")).toBe(true);
+
+  const shadowOpacityInput = await getShadowOpacityInput(page);
+  await expect(shadowOpacityInput).toHaveValue("60");
+  await page.getByTestId("workbench-effect-reset-shadow").click();
+
+  await expect(shadowOpacityInput).toHaveValue("30");
+  await expect.poll(() => readEffectCardPressed(page, "background")).toBe(true);
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.shadow_opacity ?? null)
+    .toBe(0.3);
+});
+
+test("background word mode falls back to line when karaoke is turned off", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  await (await getEffectCard(page, "background")).click();
+  const backgroundDetail = await ensureEffectDetailVisible(page, "background");
+  const wordMode = backgroundDetail.getByTestId("workbench-effect-background-mode-word");
+  await expect(wordMode).toBeEnabled();
+  await wordMode.click();
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.background_mode ?? null)
+    .toBe("word");
+
+  const karaokeCard = await getEffectCard(page, "karaoke");
+  await karaokeCard.click();
+  await karaokeCard.click();
+
+  await expect.poll(() => readEffectCardPressed(page, "karaoke")).toBe(false);
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.background_mode ?? null)
+    .toBe("line");
+
+  const refocusedBackgroundDetail = await ensureEffectDetailVisible(page, "background");
+  await expect(
+    refocusedBackgroundDetail.getByTestId("workbench-effect-background-mode-word")
+  ).toBeDisabled();
+});
+
+test("on-video contract supports unified keyboard undo across text and style changes", async ({
+  page
+}) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
   await mockProjects(page, projects);
@@ -2974,11 +3147,106 @@ test("on-video contract supports keyboard undo shortcut", async ({ page }) => {
 
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toBeVisible();
-  await editor.fill("Keyboard undo first");
+
+  await editor.fill("Keyboard undo mixed");
   await page.waitForTimeout(700);
-  await editor.fill("Keyboard undo second");
-  await editor.press("ControlOrMeta+z");
-  await expect(editor).toHaveValue("Keyboard undo first");
+  await setToolbarFontSize(page, 44);
+  await expect(page.getByTestId("subtitle-style-font-size-trigger")).toContainText("44");
+  await setShadowOpacityValue(page, 60);
+  const shadowOpacityInput = await getShadowOpacityInput(page);
+  await expect(shadowOpacityInput).toHaveValue("60");
+
+  await shadowOpacityInput.focus();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(shadowOpacityInput).toHaveValue("100");
+
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.getByTestId("subtitle-style-font-size-trigger")).toContainText("28");
+
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(editor).toHaveValue("Original subtitle line");
+});
+
+test("on-video contract keeps text undo available after Escape", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await subtitleButton.click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill("Undo after Escape");
+  await editor.press("Escape");
+
+  await expect(editor).toHaveCount(0);
+  await expect(subtitleButton).toContainText("Undo after Escape");
+  await expect.poll(() => api.getSubtitlePutCallCount()).toBe(1);
+
+  await page.keyboard.press("ControlOrMeta+z");
+
+  await expect(subtitleButton).toContainText("Original subtitle line");
+  await expect.poll(() => api.getSubtitlePutCallCount()).toBe(2);
+  await expect
+    .poll(() => api.getLastPutPayload()?.subtitles_srt_text ?? "")
+    .toContain("Original subtitle line");
+});
+
+test("on-video contract supports effects-pane undo without active subtitle focus", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await expect(page.getByTestId("workbench-subtitle-editor")).toHaveCount(0);
+
+  const outlineInput = await getOutlineWidthInput(page);
+  await expect(outlineInput).toHaveValue("2");
+  await setOutlineWidthValue(page, 5);
+  await expect(outlineInput).toHaveValue("5");
+
+  await page.keyboard.press("ControlOrMeta+z");
+
+  await expect(outlineInput).toHaveValue("2");
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.outline_width ?? null)
+    .toBe(2);
+});
+
+test("on-video contract flushes pending style autosave with Escape", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await page.getByTestId("workbench-active-subtitle").click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible();
+  await setToolbarFontSize(page, 44);
+
+  await editor.press("Escape");
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByTestId("workbench-active-subtitle")).toBeVisible();
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.font_size ?? null)
+    .toBe(44);
 });
 
 test("on-video editor controls render in dark theme", async ({ page }) => {

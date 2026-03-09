@@ -14,8 +14,10 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import Checklist, { ChecklistItem } from "@/components/Checklist";
+import WorkbenchEffectsPanel, {
+  type WorkbenchEffectId
+} from "@/components/SubtitleStyle/WorkbenchEffectsPanel";
 import { useToast } from "@/contexts/ToastContext";
-import StyleControls from "@/components/SubtitleStyle/StyleControls";
 import SubtitleTextControls from "@/components/SubtitleStyle/SubtitleTextControls";
 import { WorkbenchSkeleton } from "@/components/WorkbenchSkeleton";
 import { Button } from "@/components/ui/button";
@@ -182,6 +184,180 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   highlight_color: "#FFD400"
 };
 
+type WorkbenchEffectChange = {
+  appearance: Partial<SubtitleStyleAppearance>;
+  highlightOpacity?: number;
+};
+
+const DEFAULT_EFFECT_SHADOW: Partial<SubtitleStyleAppearance> = {
+  shadow_enabled: true,
+  shadow_strength: 2,
+  shadow_offset_x: 0,
+  shadow_offset_y: 2,
+  shadow_color: "#000000",
+  shadow_opacity: 0.3,
+  shadow_blur: 6
+};
+
+const DEFAULT_EFFECT_BACKGROUND: Partial<SubtitleStyleAppearance> = {
+  background_mode: "line",
+  line_bg_color: "#000000",
+  line_bg_opacity: 0.7,
+  line_bg_padding: 8,
+  line_bg_padding_top: 8,
+  line_bg_padding_right: 8,
+  line_bg_padding_bottom: 8,
+  line_bg_padding_left: 8,
+  line_bg_padding_linked: true,
+  line_bg_radius: 0
+};
+
+const DEFAULT_EFFECT_KARAOKE_HIGHLIGHT_OPACITY = 1;
+
+const isOutlineEffectActive = (appearance: SubtitleStyleAppearance) =>
+  appearance.outline_enabled && appearance.outline_width > 0;
+
+const isShadowEffectActive = (appearance: SubtitleStyleAppearance) =>
+  appearance.shadow_enabled && appearance.shadow_strength > 0;
+
+const isBackgroundEffectActive = (appearance: SubtitleStyleAppearance) =>
+  appearance.background_mode !== "none";
+
+const isKaraokeEffectActive = (appearance: SubtitleStyleAppearance) =>
+  appearance.subtitle_mode === "word_highlight";
+
+const isWorkbenchEffectActive = (
+  effectId: WorkbenchEffectId,
+  appearance: SubtitleStyleAppearance
+) => {
+  if (effectId === "outline") {
+    return isOutlineEffectActive(appearance);
+  }
+  if (effectId === "shadow") {
+    return isShadowEffectActive(appearance);
+  }
+  if (effectId === "background") {
+    return isBackgroundEffectActive(appearance);
+  }
+  return isKaraokeEffectActive(appearance);
+};
+
+const buildWorkbenchEffectToggleChange = (
+  effectId: WorkbenchEffectId,
+  appearance: SubtitleStyleAppearance
+): WorkbenchEffectChange => {
+  if (effectId === "outline") {
+    return isOutlineEffectActive(appearance)
+      ? { appearance: { outline_enabled: false } }
+      : {
+          appearance: {
+            outline_enabled: true,
+            outline_width:
+              appearance.outline_width > 0
+                ? appearance.outline_width
+                : DEFAULT_APPEARANCE.outline_width,
+            outline_color: appearance.outline_color
+          }
+        };
+  }
+
+  if (effectId === "shadow") {
+    return isShadowEffectActive(appearance)
+      ? { appearance: { shadow_enabled: false } }
+      : {
+          appearance: {
+            shadow_enabled: true,
+            shadow_strength:
+              appearance.shadow_strength > 0
+                ? appearance.shadow_strength
+                : (DEFAULT_EFFECT_SHADOW.shadow_strength as number),
+            shadow_offset_x:
+              appearance.shadow_strength > 0
+                ? appearance.shadow_offset_x
+                : (DEFAULT_EFFECT_SHADOW.shadow_offset_x as number),
+            shadow_offset_y:
+              appearance.shadow_strength > 0
+                ? appearance.shadow_offset_y
+                : (DEFAULT_EFFECT_SHADOW.shadow_offset_y as number),
+            shadow_color:
+              appearance.shadow_strength > 0
+                ? appearance.shadow_color
+                : (DEFAULT_EFFECT_SHADOW.shadow_color as string),
+            shadow_opacity:
+              appearance.shadow_strength > 0
+                ? appearance.shadow_opacity
+                : (DEFAULT_EFFECT_SHADOW.shadow_opacity as number),
+            shadow_blur:
+              appearance.shadow_strength > 0
+                ? appearance.shadow_blur
+                : (DEFAULT_EFFECT_SHADOW.shadow_blur as number)
+          }
+        };
+  }
+
+  if (effectId === "background") {
+    return isBackgroundEffectActive(appearance)
+      ? { appearance: { background_mode: "none" } }
+      : { appearance: { background_mode: "line" } };
+  }
+
+  return isKaraokeEffectActive(appearance)
+    ? {
+        appearance: {
+          subtitle_mode: "static",
+          background_mode:
+            appearance.background_mode === "word"
+              ? "line"
+              : appearance.background_mode
+        }
+      }
+    : { appearance: { subtitle_mode: "word_highlight" } };
+};
+
+const buildWorkbenchEffectResetChange = (
+  effectId: WorkbenchEffectId
+): WorkbenchEffectChange => {
+  if (effectId === "outline") {
+    return {
+      appearance: {
+        outline_enabled: true,
+        outline_width: DEFAULT_APPEARANCE.outline_width,
+        outline_color: DEFAULT_APPEARANCE.outline_color
+      }
+    };
+  }
+
+  if (effectId === "shadow") {
+    return {
+      appearance: {
+        shadow_enabled: true,
+        shadow_strength: DEFAULT_EFFECT_SHADOW.shadow_strength as number,
+        shadow_offset_x: DEFAULT_EFFECT_SHADOW.shadow_offset_x as number,
+        shadow_offset_y: DEFAULT_EFFECT_SHADOW.shadow_offset_y as number,
+        shadow_color: DEFAULT_EFFECT_SHADOW.shadow_color as string,
+        shadow_opacity: DEFAULT_EFFECT_SHADOW.shadow_opacity as number,
+        shadow_blur: DEFAULT_EFFECT_SHADOW.shadow_blur as number
+      }
+    };
+  }
+
+  if (effectId === "background") {
+    return {
+      appearance: {
+        ...DEFAULT_EFFECT_BACKGROUND
+      }
+    };
+  }
+
+  return {
+    appearance: {
+      subtitle_mode: "word_highlight",
+      highlight_color: DEFAULT_APPEARANCE.highlight_color
+    },
+    highlightOpacity: DEFAULT_EFFECT_KARAOKE_HIGHLIGHT_OPACITY
+  };
+};
+
 export const NAMED_PRESET_IDS = [
   "classic_static",
   "bold_outline_static",
@@ -192,165 +368,6 @@ export const NAMED_PRESET_IDS = [
 ] as const;
 
 export type NamedPresetId = (typeof NAMED_PRESET_IDS)[number];
-
-const PRESET_DEFINITIONS: Record<NamedPresetId, SubtitleStyleAppearance> = {
-  classic_static: {
-    ...DEFAULT_APPEARANCE,
-    subtitle_mode: "static",
-    font_family: "Heebo",
-    font_size: 45,
-    font_style: "regular",
-    text_color: "#FFFFFF",
-    text_opacity: 1,
-    letter_spacing: 0,
-    outline_enabled: true,
-    outline_width: 2.5,
-    outline_color: "#000000",
-    shadow_enabled: true,
-    shadow_strength: 2,
-    shadow_offset_x: 0,
-    shadow_offset_y: 2,
-    shadow_color: "#000000",
-    shadow_opacity: 0.3,
-    shadow_blur: 6,
-    background_mode: "none",
-    vertical_anchor: "bottom",
-    vertical_offset: 40
-  },
-  bold_outline_static: {
-    ...DEFAULT_APPEARANCE,
-    subtitle_mode: "static",
-    font_family: "Heebo",
-    font_size: 51,
-    font_style: "regular",
-    text_color: "#FFFFFF",
-    text_opacity: 1,
-    letter_spacing: 0,
-    outline_enabled: true,
-    outline_width: 5.5,
-    outline_color: "#000000",
-    shadow_enabled: false,
-    shadow_strength: 0,
-    shadow_offset_x: 0,
-    shadow_offset_y: 0,
-    shadow_color: "#000000",
-    shadow_opacity: 0,
-    shadow_blur: 0,
-    background_mode: "none",
-    vertical_anchor: "bottom",
-    vertical_offset: 40
-  },
-  boxed_static: {
-    ...DEFAULT_APPEARANCE,
-    subtitle_mode: "static",
-    font_family: "Heebo",
-    font_size: 45,
-    font_style: "regular",
-    text_color: "#FFFFFF",
-    text_opacity: 1,
-    letter_spacing: 0,
-    outline_enabled: true,
-    outline_width: 1.5,
-    outline_color: "#000000",
-    shadow_enabled: false,
-    shadow_strength: 0,
-    shadow_offset_x: 0,
-    shadow_offset_y: 0,
-    shadow_color: "#000000",
-    shadow_opacity: 0,
-    shadow_blur: 0,
-    background_mode: "line",
-    line_bg_color: "#000000",
-    line_bg_opacity: 0.5,
-    line_bg_padding: 10,
-    line_bg_padding_top: 10,
-    line_bg_padding_right: 10,
-    line_bg_padding_bottom: 10,
-    line_bg_padding_left: 10,
-    line_bg_radius: 10,
-    vertical_anchor: "bottom",
-    vertical_offset: 40
-  },
-  lift_static: {
-    ...DEFAULT_APPEARANCE,
-    subtitle_mode: "static",
-    font_family: "Heebo",
-    font_size: 45,
-    font_style: "regular",
-    text_color: "#FFFFFF",
-    text_opacity: 1,
-    letter_spacing: 0,
-    outline_enabled: true,
-    outline_width: 2.5,
-    outline_color: "#000000",
-    shadow_enabled: true,
-    shadow_strength: 2.5,
-    shadow_offset_x: 2,
-    shadow_offset_y: 2,
-    shadow_color: "#000000",
-    shadow_opacity: 0.85,
-    shadow_blur: 8,
-    background_mode: "none",
-    vertical_anchor: "bottom",
-    vertical_offset: 40
-  },
-  neon_karaoke: {
-    ...DEFAULT_APPEARANCE,
-    subtitle_mode: "word_highlight",
-    font_family: "Heebo",
-    font_size: 45,
-    font_style: "regular",
-    text_color: "#FFFFFF",
-    text_opacity: 1,
-    letter_spacing: 0,
-    outline_enabled: true,
-    outline_width: 3.5,
-    outline_color: "#000000",
-    shadow_enabled: true,
-    shadow_strength: 2.5,
-    shadow_offset_x: 0,
-    shadow_offset_y: 2,
-    shadow_color: "#000000",
-    shadow_opacity: 0.3,
-    shadow_blur: 8,
-    background_mode: "none",
-    highlight_color: "#00E5FF",
-    vertical_anchor: "bottom",
-    vertical_offset: 40
-  },
-  boxed_karaoke: {
-    ...DEFAULT_APPEARANCE,
-    subtitle_mode: "word_highlight",
-    font_family: "Heebo",
-    font_size: 45,
-    font_style: "regular",
-    text_color: "#FFFFFF",
-    text_opacity: 1,
-    letter_spacing: 0,
-    outline_enabled: true,
-    outline_width: 1.5,
-    outline_color: "#000000",
-    shadow_enabled: true,
-    shadow_strength: 1,
-    shadow_offset_x: 0,
-    shadow_offset_y: 0,
-    shadow_color: "#000000",
-    shadow_opacity: 0.2,
-    shadow_blur: 6,
-    background_mode: "word",
-    word_bg_color: "#000000",
-    word_bg_opacity: 0.48,
-    word_bg_padding: 10,
-    word_bg_padding_top: 10,
-    word_bg_padding_right: 10,
-    word_bg_padding_bottom: 10,
-    word_bg_padding_left: 10,
-    word_bg_radius: 10,
-    highlight_color: "#FFD400",
-    vertical_anchor: "bottom",
-    vertical_offset: 40
-  }
-};
 
 const isNamedPresetId = (value: string): value is NamedPresetId =>
   NAMED_PRESET_IDS.includes(value as NamedPresetId);
@@ -380,15 +397,6 @@ function migrateAppearancePadding(
     word_bg_padding_linked: a.word_bg_padding_linked ?? true
   };
 }
-
-const applyPresetAppearance = (
-  presetId: string
-): SubtitleStyleAppearance | null => {
-  if (presetId === "Custom" || !isNamedPresetId(presetId)) {
-    return null;
-  }
-  return { ...PRESET_DEFINITIONS[presetId] };
-};
 
 const MISSING_SUBTITLES_REASON_TEXT: Record<string, string> = {
   no_speech_in_gaps: "no speech in the missing part",
@@ -430,6 +438,111 @@ type TimingFallbackProgress = {
   current: number;
   total: number;
   updatedAtMs: number;
+};
+
+type UndoHistoryCommitOptions = {
+  kind: string;
+  canCoalesce: boolean;
+};
+
+type StylePersistenceArgs = {
+  appearance: SubtitleStyleAppearance;
+  preset: string;
+  highlightOpacity: number;
+  lastPresetId: string | null;
+};
+
+type TextUndoEntry = {
+  type: "text";
+  cueId: string;
+  previousText: string;
+  nextText: string;
+};
+
+type StyleUndoEntry = {
+  type: "style";
+  kind: string;
+  previous: StylePersistenceArgs;
+  next: StylePersistenceArgs;
+};
+
+type WorkbenchUndoEntry = TextUndoEntry | StyleUndoEntry;
+
+const cloneAppearance = (appearance: SubtitleStyleAppearance): SubtitleStyleAppearance => ({
+  ...appearance
+});
+
+const cloneStylePersistenceArgs = (
+  snapshot: StylePersistenceArgs
+): StylePersistenceArgs => ({
+  ...snapshot,
+  appearance: cloneAppearance(snapshot.appearance)
+});
+
+const areAppearanceStatesEqual = (
+  left: SubtitleStyleAppearance,
+  right: SubtitleStyleAppearance
+) => {
+  const leftKeys = Object.keys(left) as (keyof SubtitleStyleAppearance)[];
+  const rightKeys = Object.keys(right) as (keyof SubtitleStyleAppearance)[];
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+  return leftKeys.every((key) => left[key] === right[key]);
+};
+
+const areStyleStateValuesEqual = (
+  left: Pick<StylePersistenceArgs, "appearance" | "preset" | "lastPresetId" | "highlightOpacity">,
+  right: Pick<StylePersistenceArgs, "appearance" | "preset" | "lastPresetId" | "highlightOpacity">
+) =>
+  left.preset === right.preset &&
+  left.lastPresetId === right.lastPresetId &&
+  left.highlightOpacity === right.highlightOpacity &&
+  areAppearanceStatesEqual(left.appearance, right.appearance);
+
+const classifyAppearanceHistoryChange = (
+  changes: Partial<SubtitleStyleAppearance>
+): UndoHistoryCommitOptions => {
+  const keys = Object.keys(changes).sort();
+  if (keys.length === 0) {
+    return { kind: "appearance", canCoalesce: false };
+  }
+  if (keys.length === 1) {
+    const [key] = keys;
+    if (
+      key === "font_size" ||
+      key === "text_opacity" ||
+      key === "letter_spacing" ||
+      key === "line_spacing" ||
+      key === "shadow_opacity" ||
+      key === "shadow_offset_x" ||
+      key === "shadow_offset_y" ||
+      key === "shadow_blur" ||
+      key === "line_bg_opacity" ||
+      key === "line_bg_radius" ||
+      key === "word_bg_opacity" ||
+      key === "word_bg_radius"
+    ) {
+      return { kind: `appearance:${key}`, canCoalesce: true };
+    }
+    return { kind: `appearance:${key}`, canCoalesce: false };
+  }
+  if (keys.length === 2 && keys.includes("position_x") && keys.includes("position_y")) {
+    return { kind: "appearance:position", canCoalesce: true };
+  }
+  if (keys.every((key) => key === "outline_enabled" || key === "outline_width")) {
+    return { kind: "appearance:outline-width", canCoalesce: true };
+  }
+  if (keys.every((key) => key === "shadow_enabled" || key === "shadow_strength")) {
+    return { kind: "appearance:shadow-strength", canCoalesce: true };
+  }
+  if (keys.every((key) => key.startsWith("line_bg_padding"))) {
+    return { kind: "appearance:line-bg-padding", canCoalesce: true };
+  }
+  if (keys.every((key) => key.startsWith("word_bg_padding"))) {
+    return { kind: "appearance:word-bg-padding", canCoalesce: true };
+  }
+  return { kind: `appearance:${keys.join("|")}`, canCoalesce: false };
 };
 
 type ParsedAlignmentWordDetail = {
@@ -791,35 +904,6 @@ const resolveHighlightWordIndexFromTimings = (
 
 type BrowserTimeout = number;
 
-function useDebounce<T extends (...args: never[]) => void>(
-  fn: T,
-  delayMs: number
-): T {
-  const timerRef = React.useRef<BrowserTimeout | null>(null);
-  const fnRef = React.useRef(fn);
-  fnRef.current = fn;
-
-  React.useEffect(() => {
-    return () => {
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
-  return React.useCallback(
-    (...args: Parameters<T>) => {
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current);
-      }
-      timerRef.current = window.setTimeout(() => {
-        fnRef.current(...args);
-      }, delayMs);
-    },
-    [delayMs]
-  ) as T;
-}
-
 const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const location = useLocation();
   const incomingState = location.state as WorkbenchLocationState;
@@ -843,9 +927,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const videoWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const shouldResumePlaybackRef = React.useRef(false);
   const resumePlaybackIfNeededRef = React.useRef<() => void>(() => {});
-  const editHistoryRef = React.useRef<string[]>([]);
-  const editHistoryIndexRef = React.useRef(0);
+  const editHistoryRef = React.useRef<WorkbenchUndoEntry[]>([]);
+  const editHistoryIndexRef = React.useRef(-1);
   const lastHistoryCommitAtRef = React.useRef(0);
+  const lastHistoryCommitKindRef = React.useRef<string | null>(null);
   const [project, setProject] = React.useState<ProjectManifest | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [subtitleLoadError, setSubtitleLoadError] = React.useState<string | null>(null);
@@ -859,10 +944,20 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [subtitleFontsError, setSubtitleFontsError] = React.useState<string | null>(null);
   const [appearance, setAppearance] =
     React.useState<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
+  const appearanceRef = React.useRef(appearance);
+  appearanceRef.current = appearance;
   const customAppearanceRef = React.useRef<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
   const [preset, setPreset] = React.useState<string>("classic_static");
+  const presetRef = React.useRef(preset);
+  presetRef.current = preset;
   const [lastPresetId, setLastPresetId] = React.useState<string | null>(null);
+  const lastPresetIdRef = React.useRef<string | null>(lastPresetId);
+  lastPresetIdRef.current = lastPresetId;
   const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
+  const highlightOpacityRef = React.useRef(highlightOpacity);
+  highlightOpacityRef.current = highlightOpacity;
+  const [hoveredEffectPreview, setHoveredEffectPreview] =
+    React.useState<WorkbenchEffectId | null>(null);
   const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
   const [durationSeconds, setDurationSeconds] = React.useState(0);
   const [isPlaying, setIsPlaying] = React.useState(false);
@@ -891,6 +986,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const editingCueIdRef = React.useRef<string | null>(null);
   editingCueIdRef.current = editingCueId;
   const [editingText, setEditingText] = React.useState("");
+  const editingTextRef = React.useRef(editingText);
+  editingTextRef.current = editingText;
   const [subtitleEditorControlsPlacement, setSubtitleEditorControlsPlacement] =
     React.useState<"above" | "below">("below");
   const [isSavingCue, setIsSavingCue] = React.useState(false);
@@ -903,6 +1000,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const subtitleAutosaveFlushRequestedRef = React.useRef(false);
   const subtitleAutosaveInFlightPromiseRef = React.useRef<Promise<boolean> | null>(null);
   const subtitleAutosaveSessionIdRef = React.useRef(0);
+  const subtitleUndoPersistPromiseRef = React.useRef<Promise<boolean>>(Promise.resolve(true));
+  const stylePersistTimerRef = React.useRef<BrowserTimeout | null>(null);
+  const stylePersistPendingArgsRef = React.useRef<StylePersistenceArgs | null>(null);
   const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
@@ -1026,6 +1126,18 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
   }, []);
 
+  const clearStylePersistTimer = React.useCallback(() => {
+    if (stylePersistTimerRef.current !== null) {
+      clearTimeout(stylePersistTimerRef.current);
+      stylePersistTimerRef.current = null;
+    }
+  }, []);
+
+  const clearPendingStylePersist = React.useCallback(() => {
+    clearStylePersistTimer();
+    stylePersistPendingArgsRef.current = null;
+  }, [clearStylePersistTimer]);
+
   const clearPendingVideoControlsReveal = React.useCallback(() => {
     suppressVideoControlsUntilPointerMoveRef.current = false;
     suppressedVideoControlsPointerRef.current = null;
@@ -1106,6 +1218,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     [clearPendingVideoControlsReveal]
   );
 
+  const clearUndoHistory = React.useCallback(() => {
+    editHistoryRef.current = [];
+    editHistoryIndexRef.current = -1;
+    lastHistoryCommitAtRef.current = 0;
+    lastHistoryCommitKindRef.current = null;
+  }, []);
+
   const resetEditSessionState = React.useCallback(() => {
     clearSubtitleAutosaveTimer();
     subtitleAutosaveSessionIdRef.current += 1;
@@ -1117,19 +1236,23 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     subtitleAutosaveInFlightRef.current = false;
     subtitleAutosaveFlushRequestedRef.current = false;
     subtitleAutosaveInFlightPromiseRef.current = null;
-    editHistoryRef.current = [];
-    editHistoryIndexRef.current = 0;
     lastHistoryCommitAtRef.current = 0;
+    lastHistoryCommitKindRef.current = null;
   }, [clearSubtitleAutosaveTimer]);
 
   React.useEffect(() => {
     return () => {
       clearSubtitleAutosaveTimer();
+      clearPendingStylePersist();
       subtitleAutosaveSessionIdRef.current += 1;
       isSavingCueRef.current = false;
       subtitleAutosaveInFlightPromiseRef.current = null;
     };
-  }, [clearSubtitleAutosaveTimer]);
+  }, [clearPendingStylePersist, clearSubtitleAutosaveTimer]);
+
+  React.useEffect(() => {
+    clearPendingStylePersist();
+  }, [clearPendingStylePersist, projectId]);
 
   const setCreateStreamHealthValue = React.useCallback((next: StreamHealth) => {
     createSubtitlesStreamHealthRef.current = next;
@@ -1288,8 +1411,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setCues([]);
       setSelectedCueId(null);
       setEditingCueId(null);
+      editingTextRef.current = "";
       setEditingText("");
       resetEditSessionState();
+      clearUndoHistory();
       shouldResumePlaybackRef.current = false;
       setSubtitleLoadError(null);
       return () => {
@@ -1300,8 +1425,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setCues([]);
     setSelectedCueId(null);
     setEditingCueId(null);
+    editingTextRef.current = "";
     setEditingText("");
     resetEditSessionState();
+    clearUndoHistory();
     shouldResumePlaybackRef.current = false;
     setSubtitleLoadError(null);
     fetchProjectSubtitles(projectId)
@@ -1323,7 +1450,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     return () => {
       active = false;
     };
-  }, [projectId, resetEditSessionState, subtitlesReloadTick]);
+  }, [clearUndoHistory, projectId, resetEditSessionState, subtitlesReloadTick]);
 
   React.useEffect(() => {
     let active = true;
@@ -1676,8 +1803,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setIsPlaying(false);
     overlayRequestKeyRef.current = null;
     resetEditSessionState();
+    clearUndoHistory();
     shouldResumePlaybackRef.current = false;
   }, [
+    clearUndoHistory,
     clearTimingFallbackProgress,
     projectId,
     resetEditSessionState,
@@ -1691,11 +1820,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
     if (editingCueId && !cues.some((cue) => cue.id === editingCueId)) {
       setEditingCueId(null);
+      editingTextRef.current = "";
       setEditingText("");
       resetEditSessionState();
+      clearUndoHistory();
       shouldResumePlaybackRef.current = false;
     }
-  }, [cues, editingCueId, resetEditSessionState, selectedCueId]);
+  }, [clearUndoHistory, cues, editingCueId, resetEditSessionState, selectedCueId]);
 
   React.useEffect(() => {
     if (!projectId || !project) {
@@ -3119,11 +3250,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     persistedCreateJob?.kind === "create_subtitles";
   const hasVideoPreview = Boolean(previewSrc);
   const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
-  const isOverlayOpen =
-    (showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen;
   const showScrim =
     isNarrow &&
     (hasSubtitles && ((showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen));
+  React.useEffect(() => {
+    if ((!hasSubtitles || (isNarrow && !rightOverlayOpen)) && hoveredEffectPreview !== null) {
+      setHoveredEffectPreview(null);
+    }
+  }, [hasSubtitles, hoveredEffectPreview, isNarrow, rightOverlayOpen]);
   const activeCue = React.useMemo(() => {
     return (
       cues.find(
@@ -3154,6 +3288,33 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const isEditingCue = editingCueId !== null;
   const isActiveCueSelected = activeCue ? selectedCueId === activeCue.id : false;
   const isEditingActiveCue = activeCue ? editingCueId === activeCue.id : false;
+  const hoveredEffectPreviewState = React.useMemo(() => {
+    if (!hoveredEffectPreview) {
+      return null;
+    }
+    if (isWorkbenchEffectActive(hoveredEffectPreview, appearance)) {
+      return {
+        appearance,
+        highlightOpacity
+      };
+    }
+    const previewChange = buildWorkbenchEffectToggleChange(
+      hoveredEffectPreview,
+      appearance
+    );
+    return {
+      appearance: {
+        ...appearance,
+        ...previewChange.appearance
+      },
+      highlightOpacity:
+        previewChange.highlightOpacity ?? highlightOpacity
+    };
+  }, [appearance, highlightOpacity, hoveredEffectPreview]);
+  const effectiveAppearance =
+    hoveredEffectPreviewState?.appearance ?? appearance;
+  const effectiveHighlightOpacity =
+    hoveredEffectPreviewState?.highlightOpacity ?? highlightOpacity;
   const showSubtitleResizeHandles =
     (isEditingActiveCue || isActiveCueSelected || isHoveringActiveSubtitle || subtitleResizeDrag !== null || subtitlePositionDrag !== null) &&
     !isSavingCue &&
@@ -3180,7 +3341,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     [editingSegments]
   );
   const highlightedWordIndex = React.useMemo(() => {
-    if (!activeCue || appearance.subtitle_mode !== "word_highlight" || cueWordCount <= 0) {
+    if (
+      !activeCue ||
+      effectiveAppearance.subtitle_mode !== "word_highlight" ||
+      cueWordCount <= 0
+    ) {
       return null;
     }
     if (activeCueOrdinal === null) {
@@ -3191,20 +3356,34 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [
     activeCue,
     activeCueOrdinal,
-    appearance.subtitle_mode,
     cueWordCount,
     cueWordTimingsByIndex,
-    currentTimeSeconds
+    currentTimeSeconds,
+    effectiveAppearance.subtitle_mode
   ]);
-  const highlightWordColor = colorWithOpacity(appearance.highlight_color, highlightOpacity);
-  const defaultSubtitleTextColor = colorWithOpacity(appearance.text_color, appearance.text_opacity);
-  const hasWordBackground = appearance.background_mode === "word";
+  const highlightWordColor = colorWithOpacity(
+    effectiveAppearance.highlight_color,
+    effectiveHighlightOpacity
+  );
+  const defaultSubtitleTextColor = colorWithOpacity(
+    effectiveAppearance.text_color,
+    effectiveAppearance.text_opacity
+  );
+  const hasWordBackground = effectiveAppearance.background_mode === "word";
   const activeCueHasRtlChars = activeCue ? RTL_CHAR_PATTERN.test(activeCue.text) : false;
   const subtitleDirection: "rtl" | "auto" = activeCueHasRtlChars ? "rtl" : "auto";
-  const wordPadT = appearance.word_bg_padding_top ?? appearance.word_bg_padding ?? 8;
-  const wordPadR = appearance.word_bg_padding_right ?? appearance.word_bg_padding ?? 8;
-  const wordPadB = appearance.word_bg_padding_bottom ?? appearance.word_bg_padding ?? 8;
-  const wordPadL = appearance.word_bg_padding_left ?? appearance.word_bg_padding ?? 8;
+  const wordPadT =
+    effectiveAppearance.word_bg_padding_top ??
+    effectiveAppearance.word_bg_padding ?? 8;
+  const wordPadR =
+    effectiveAppearance.word_bg_padding_right ??
+    effectiveAppearance.word_bg_padding ?? 8;
+  const wordPadB =
+    effectiveAppearance.word_bg_padding_bottom ??
+    effectiveAppearance.word_bg_padding ?? 8;
+  const wordPadL =
+    effectiveAppearance.word_bg_padding_left ??
+    effectiveAppearance.word_bg_padding ?? 8;
   const activeWordStyle: React.CSSProperties = hasWordBackground
     ? {}
     : {};
@@ -3216,8 +3395,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           top: -Math.max(0, wordPadT),
           right: -Math.max(0, wordPadR),
           bottom: -Math.max(0, wordPadB),
-          backgroundColor: colorWithOpacity(appearance.word_bg_color, appearance.word_bg_opacity),
-          borderRadius: `${Math.max(0, appearance.word_bg_radius)}px`,
+          backgroundColor: colorWithOpacity(
+            effectiveAppearance.word_bg_color,
+            effectiveAppearance.word_bg_opacity
+          ),
+          borderRadius: `${Math.max(0, effectiveAppearance.word_bg_radius)}px`,
           zIndex: -1,
           pointerEvents: "none"
         }
@@ -3228,8 +3410,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
     const base = isTauriEnv ? convertFileSrc(subtitleOverlayPath) : subtitleOverlayPath;
     const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}v=${encodeURIComponent(appearance.font_family)}`;
-  }, [isTauriEnv, subtitleOverlayPath, appearance.font_family]);
+    return `${base}${sep}v=${encodeURIComponent(effectiveAppearance.font_family)}`;
+  }, [effectiveAppearance.font_family, isTauriEnv, subtitleOverlayPath]);
   const SHOW_SUBTITLE_OVERLAY_IN_APP = false;
   const shouldRenderOverlayImage = Boolean(subtitleOverlaySrc && activeCue && !isEditingActiveCue);
 
@@ -3255,10 +3437,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
 
     const resolvedAppearance = {
-      ...appearance,
+      ...effectiveAppearance,
       outline_color: resolveOutlineColor(
-        appearance.outline_color,
-        appearance.text_color
+        effectiveAppearance.outline_color,
+        effectiveAppearance.text_color
       )
     };
     const requestPayload = {
@@ -3267,9 +3449,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       subtitle_text: activeCue.text,
       highlight_word_index: highlightedWordIndex,
       subtitle_style: resolvedAppearance,
-      subtitle_mode: appearance.subtitle_mode,
-      highlight_color: appearance.highlight_color,
-      highlight_opacity: highlightOpacity
+      subtitle_mode: effectiveAppearance.subtitle_mode,
+      highlight_color: effectiveAppearance.highlight_color,
+      highlight_opacity: effectiveHighlightOpacity
     };
     const requestKey = JSON.stringify(requestPayload);
     if (overlayRequestKeyRef.current === requestKey) {
@@ -3301,8 +3483,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     };
   }, [
     activeCue,
-    appearance,
-    highlightOpacity,
+    effectiveAppearance,
+    effectiveHighlightOpacity,
     highlightedWordIndex,
     isEditingActiveCue,
     isTauriEnv,
@@ -3475,43 +3657,56 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const subtitlePreviewTextStyle = React.useMemo<React.CSSProperties>(() => {
     const visualScale = displayedVideoRect.scale;
     const fontScale = isTauriEnv ? visualScale * QT_POINT_TO_CSS_PX : visualScale;
-    const computedFontSizePx = Math.max(10 * fontScale, appearance.font_size * fontScale);
+    const computedFontSizePx = Math.max(
+      10 * fontScale,
+      effectiveAppearance.font_size * fontScale
+    );
     const lineHeightRatio = isTauriEnv
       ? QT_SUBTITLE_LINE_HEIGHT_RATIO
       : WEB_SUBTITLE_LINE_HEIGHT_RATIO;
     const style: React.CSSProperties = {
-      fontFamily: appearance.font_family || DEFAULT_APPEARANCE.font_family,
+      fontFamily: effectiveAppearance.font_family || DEFAULT_APPEARANCE.font_family,
       fontSize: `${computedFontSizePx}px`,
-      lineHeight: `${computedFontSizePx * lineHeightRatio * appearance.line_spacing}px`,
-      fontWeight: appearance.font_weight,
+      lineHeight: `${computedFontSizePx * lineHeightRatio * effectiveAppearance.line_spacing}px`,
+      fontWeight: effectiveAppearance.font_weight,
       fontStyle:
-        appearance.font_style === "italic" || appearance.font_style === "bold_italic"
+        effectiveAppearance.font_style === "italic" ||
+        effectiveAppearance.font_style === "bold_italic"
           ? "italic"
           : "normal",
-      textAlign: appearance.text_align,
-      letterSpacing: `${appearance.letter_spacing * visualScale}px`,
-      color: colorWithOpacity(appearance.text_color, appearance.text_opacity)
+      textAlign: effectiveAppearance.text_align,
+      letterSpacing: `${effectiveAppearance.letter_spacing * visualScale}px`,
+      color: colorWithOpacity(
+        effectiveAppearance.text_color,
+        effectiveAppearance.text_opacity
+      )
     };
 
     const shadows: string[] = [];
-    if (appearance.outline_enabled && appearance.outline_width > 0) {
+    if (effectiveAppearance.outline_enabled && effectiveAppearance.outline_width > 0) {
       const scaledOutlineWidth = Math.min(
         MAX_OUTLINE_SHADOW_RADIUS,
-        appearance.outline_width * visualScale
+        effectiveAppearance.outline_width * visualScale
       );
       shadows.push(
         ...buildOutlineShadows(
-          resolveOutlineColor(appearance.outline_color, appearance.text_color),
+          resolveOutlineColor(
+            effectiveAppearance.outline_color,
+            effectiveAppearance.text_color
+          ),
           scaledOutlineWidth
         )
       );
     }
-    if (appearance.shadow_enabled && appearance.shadow_strength > 0) {
-      const blurRadius = Math.max(0, Math.round((appearance.shadow_blur ?? 6) * visualScale));
+    if (effectiveAppearance.shadow_enabled && effectiveAppearance.shadow_strength > 0) {
+      const blurRadius = Math.max(
+        0,
+        Math.round((effectiveAppearance.shadow_blur ?? 6) * visualScale)
+      );
       shadows.push(
-        `${appearance.shadow_offset_x * visualScale}px ${appearance.shadow_offset_y * visualScale}px ${blurRadius}px ${colorWithOpacity(
-          appearance.shadow_color,
-          appearance.shadow_opacity
+        `${effectiveAppearance.shadow_offset_x * visualScale}px ${effectiveAppearance.shadow_offset_y * visualScale}px ${blurRadius}px ${colorWithOpacity(
+          effectiveAppearance.shadow_color,
+          effectiveAppearance.shadow_opacity
         )}`
       );
     }
@@ -3519,14 +3714,29 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       style.textShadow = shadows.join(", ");
     }
 
-    const useLineBackground = appearance.background_mode === "line";
+    const useLineBackground = effectiveAppearance.background_mode === "line";
     if (useLineBackground) {
-      const backgroundColor = colorWithOpacity(appearance.line_bg_color, appearance.line_bg_opacity);
-      const pt = (appearance.line_bg_padding_top ?? appearance.line_bg_padding ?? 8) * visualScale;
-      const pr = (appearance.line_bg_padding_right ?? appearance.line_bg_padding ?? 8) * visualScale;
-      const pb = (appearance.line_bg_padding_bottom ?? appearance.line_bg_padding ?? 8) * visualScale;
-      const pl = (appearance.line_bg_padding_left ?? appearance.line_bg_padding ?? 8) * visualScale;
-      const radius = appearance.line_bg_radius * visualScale;
+      const backgroundColor = colorWithOpacity(
+        effectiveAppearance.line_bg_color,
+        effectiveAppearance.line_bg_opacity
+      );
+      const pt =
+        (effectiveAppearance.line_bg_padding_top ??
+          effectiveAppearance.line_bg_padding ??
+          8) * visualScale;
+      const pr =
+        (effectiveAppearance.line_bg_padding_right ??
+          effectiveAppearance.line_bg_padding ??
+          8) * visualScale;
+      const pb =
+        (effectiveAppearance.line_bg_padding_bottom ??
+          effectiveAppearance.line_bg_padding ??
+          8) * visualScale;
+      const pl =
+        (effectiveAppearance.line_bg_padding_left ??
+          effectiveAppearance.line_bg_padding ??
+          8) * visualScale;
+      const radius = effectiveAppearance.line_bg_radius * visualScale;
       style.backgroundColor = backgroundColor;
       style.paddingTop = `${Math.max(0, pt)}px`;
       style.paddingRight = `${Math.max(0, pr)}px`;
@@ -3536,7 +3746,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
 
     return style;
-  }, [appearance, displayedVideoRect.scale, isTauriEnv]);
+  }, [displayedVideoRect.scale, effectiveAppearance, isTauriEnv]);
 
   const subtitleEditorTextStyle = React.useMemo<React.CSSProperties>(
     () => ({
@@ -3653,12 +3863,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
     const font =
-      appearance.font_family || DEFAULT_APPEARANCE.font_family;
+      effectiveAppearance.font_family || DEFAULT_APPEARANCE.font_family;
     textarea.style.setProperty("font-family", font, "important");
     return () => {
       textarea.style.removeProperty("font-family");
     };
-  }, [isEditingActiveCue, appearance.font_family]);
+  }, [effectiveAppearance.font_family, isEditingActiveCue]);
 
   React.useLayoutEffect(() => {
     if (!shouldShowVideoControls || !activeCue) {
@@ -3741,7 +3951,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setSubtitleEditorControlsPlacement((previous) =>
       previous === nextPlacement ? previous : nextPlacement
     );
-  }, [appearance, displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, shouldShowVideoControls, subtitleControlsPushPx, subtitleEditorTextStyle]);
+  }, [displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, effectiveAppearance, isEditingActiveCue, shouldShowVideoControls, subtitleControlsPushPx, subtitleEditorTextStyle]);
 
   React.useEffect(() => {
     if (hasSubtitles) {
@@ -3757,9 +3967,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       nextPreset: string,
       nextHighlightOpacity: number,
       lastPresetIdValue: string | null
-    ) => {
+    ): Promise<boolean> => {
       if (!projectId) {
-        return;
+        return true;
       }
       try {
         await updateProject(
@@ -3774,47 +3984,294 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           }
         );
         setStyleError(null);
+        return true;
       } catch (err) {
         setStyleError(err instanceof Error ? err.message : "Failed to save style settings.");
+        return false;
       }
     },
     [buildProjectStylePayload, projectId]
   );
 
-  const debouncedPersistStyle = useDebounce(
+  const queueStylePersistence = React.useCallback(
+    (args: StylePersistenceArgs) => {
+      stylePersistPendingArgsRef.current = {
+        ...args,
+        appearance: cloneAppearance(args.appearance)
+      };
+      clearStylePersistTimer();
+      stylePersistTimerRef.current = window.setTimeout(() => {
+        stylePersistTimerRef.current = null;
+        const pendingArgs = stylePersistPendingArgsRef.current;
+        stylePersistPendingArgsRef.current = null;
+        if (!pendingArgs) {
+          return;
+        }
+        void persistStyleSettings(
+          pendingArgs.appearance,
+          pendingArgs.preset,
+          pendingArgs.highlightOpacity,
+          pendingArgs.lastPresetId
+        );
+      }, SUBTITLE_EDIT_AUTOSAVE_DELAY_MS);
+    },
+    [clearStylePersistTimer, persistStyleSettings]
+  );
+
+  const flushPendingStylePersistence = React.useCallback(async (): Promise<boolean> => {
+    clearStylePersistTimer();
+    const pendingArgs = stylePersistPendingArgsRef.current;
+    stylePersistPendingArgsRef.current = null;
+    if (!pendingArgs) {
+      return true;
+    }
+    return persistStyleSettings(
+      pendingArgs.appearance,
+      pendingArgs.preset,
+      pendingArgs.highlightOpacity,
+      pendingArgs.lastPresetId
+    );
+  }, [clearStylePersistTimer, persistStyleSettings]);
+
+  const syncEditingTextState = React.useCallback((nextText: string) => {
+    editingTextRef.current = nextText;
+    setEditingText(nextText);
+  }, []);
+
+  const syncStyleState = React.useCallback(
     (
       nextAppearance: SubtitleStyleAppearance,
       nextPreset: string,
-      nextHighlightOpacity: number,
-      lastPresetIdValue: string | null
+      nextLastPresetId: string | null,
+      nextHighlightOpacity: number
     ) => {
-      void persistStyleSettings(
-        nextAppearance,
-        nextPreset,
-        nextHighlightOpacity,
-        lastPresetIdValue
-      );
+      const appearanceCopy = cloneAppearance(nextAppearance);
+      appearanceRef.current = appearanceCopy;
+      presetRef.current = nextPreset;
+      lastPresetIdRef.current = nextLastPresetId;
+      highlightOpacityRef.current = nextHighlightOpacity;
+      setAppearance(appearanceCopy);
+      setPreset(nextPreset);
+      setLastPresetId(nextLastPresetId);
+      setHighlightOpacity(nextHighlightOpacity);
+      if (nextPreset === "Custom") {
+        customAppearanceRef.current = appearanceCopy;
+      }
     },
-    500
+    []
   );
 
-  const handleAppearanceChange = (changes: Partial<SubtitleStyleAppearance>) => {
-    if (isExporting) {
-      return;
-    }
-    setAppearance((prev) => {
-      const next = { ...prev, ...changes };
-      customAppearanceRef.current = next;
-      const nextPreset = preset === "Custom" ? preset : "Custom";
-      debouncedPersistStyle(next, nextPreset, highlightOpacity, lastPresetId);
-      return next;
-    });
-    if (preset !== "Custom") {
-      setPreset("Custom");
-    }
-  };
-  const handleAppearanceChangeRef = React.useRef(handleAppearanceChange);
-  handleAppearanceChangeRef.current = handleAppearanceChange;
+  const buildStylePersistenceArgs = React.useCallback(
+    (
+      overrides: Partial<StylePersistenceArgs> & {
+        appearance?: SubtitleStyleAppearance;
+      } = {}
+    ): StylePersistenceArgs => {
+      const hasLastPresetId = Object.prototype.hasOwnProperty.call(overrides, "lastPresetId");
+      return {
+        appearance: cloneAppearance(overrides.appearance ?? appearanceRef.current),
+        preset: overrides.preset ?? presetRef.current,
+        lastPresetId: hasLastPresetId ? overrides.lastPresetId ?? null : lastPresetIdRef.current,
+        highlightOpacity: overrides.highlightOpacity ?? highlightOpacityRef.current
+      };
+    },
+    []
+  );
+
+  const commitTextUndoEntry = React.useCallback(
+    (
+      cueId: string,
+      previousText: string,
+      nextText: string,
+      { kind, canCoalesce }: UndoHistoryCommitOptions
+    ) => {
+      const now = Date.now();
+      const history = editHistoryRef.current;
+      const index = editHistoryIndexRef.current;
+      const truncatedHistory = history.slice(0, index + 1);
+      const previousEntry = truncatedHistory[truncatedHistory.length - 1];
+
+      if (previousText === nextText) {
+        editHistoryRef.current = truncatedHistory;
+        editHistoryIndexRef.current = truncatedHistory.length - 1;
+        return;
+      }
+
+      const isAtHistoryTail = index === truncatedHistory.length - 1;
+      const canCoalesceIntoPrevious =
+        canCoalesce &&
+        isAtHistoryTail &&
+        lastHistoryCommitKindRef.current === kind &&
+        now - lastHistoryCommitAtRef.current < EDIT_UNDO_COALESCE_MS &&
+        previousEntry?.type === "text" &&
+        previousEntry.cueId === cueId &&
+        Math.abs(nextText.length - previousEntry.nextText.length) <= 2;
+
+      if (canCoalesceIntoPrevious && truncatedHistory.length > 0 && previousEntry?.type === "text") {
+        truncatedHistory[truncatedHistory.length - 1] = {
+          type: "text",
+          cueId,
+          previousText: previousEntry.previousText,
+          nextText
+        };
+      } else {
+        truncatedHistory.push({
+          type: "text",
+          cueId,
+          previousText,
+          nextText
+        });
+      }
+
+      editHistoryRef.current = truncatedHistory;
+      editHistoryIndexRef.current = truncatedHistory.length - 1;
+      lastHistoryCommitAtRef.current = now;
+      lastHistoryCommitKindRef.current = kind;
+    },
+    []
+  );
+
+  const commitStyleUndoEntry = React.useCallback(
+    (
+      previousStyle: StylePersistenceArgs,
+      nextStyle: StylePersistenceArgs,
+      { kind, canCoalesce }: UndoHistoryCommitOptions
+    ) => {
+      const now = Date.now();
+      const history = editHistoryRef.current;
+      const index = editHistoryIndexRef.current;
+      const truncatedHistory = history.slice(0, index + 1);
+      const previousEntry = truncatedHistory[truncatedHistory.length - 1];
+
+      if (areStyleStateValuesEqual(previousStyle, nextStyle)) {
+        editHistoryRef.current = truncatedHistory;
+        editHistoryIndexRef.current = truncatedHistory.length - 1;
+        return;
+      }
+
+      const isAtHistoryTail = index === truncatedHistory.length - 1;
+      const canCoalesceIntoPrevious =
+        canCoalesce &&
+        isAtHistoryTail &&
+        lastHistoryCommitKindRef.current === kind &&
+        now - lastHistoryCommitAtRef.current < EDIT_UNDO_COALESCE_MS &&
+        previousEntry?.type === "style" &&
+        previousEntry.kind === kind &&
+        areStyleStateValuesEqual(previousEntry.next, previousStyle);
+
+      if (canCoalesceIntoPrevious && truncatedHistory.length > 0 && previousEntry?.type === "style") {
+        truncatedHistory[truncatedHistory.length - 1] = {
+          type: "style",
+          kind,
+          previous: cloneStylePersistenceArgs(previousEntry.previous),
+          next: cloneStylePersistenceArgs(nextStyle)
+        };
+      } else {
+        truncatedHistory.push({
+          type: "style",
+          kind,
+          previous: cloneStylePersistenceArgs(previousStyle),
+          next: cloneStylePersistenceArgs(nextStyle)
+        });
+      }
+
+      editHistoryRef.current = truncatedHistory;
+      editHistoryIndexRef.current = truncatedHistory.length - 1;
+      lastHistoryCommitAtRef.current = now;
+      lastHistoryCommitKindRef.current = kind;
+    },
+    []
+  );
+
+  const applyAppearanceChange = React.useCallback(
+    (
+      changes: Partial<SubtitleStyleAppearance>,
+      { trackUndo = true }: { trackUndo?: boolean } = {}
+    ) => {
+      if (isExporting) {
+        return;
+      }
+      const previousStyle = buildStylePersistenceArgs();
+      const nextAppearance = { ...previousStyle.appearance, ...changes };
+      if (areAppearanceStatesEqual(previousStyle.appearance, nextAppearance)) {
+        return;
+      }
+      const nextStyle = buildStylePersistenceArgs({
+        appearance: nextAppearance,
+        preset: "Custom"
+      });
+      syncStyleState(
+        nextAppearance,
+        nextStyle.preset,
+        nextStyle.lastPresetId,
+        nextStyle.highlightOpacity
+      );
+      queueStylePersistence(nextStyle);
+      if (trackUndo) {
+        commitStyleUndoEntry(previousStyle, nextStyle, classifyAppearanceHistoryChange(changes));
+      }
+    },
+    [
+      buildStylePersistenceArgs,
+      commitStyleUndoEntry,
+      isExporting,
+      queueStylePersistence,
+      syncStyleState
+    ]
+  );
+
+  const applyEffectStyleChange = React.useCallback(
+    (
+      change: WorkbenchEffectChange,
+      commitOptions: UndoHistoryCommitOptions,
+      { trackUndo = true }: { trackUndo?: boolean } = {}
+    ) => {
+      if (isExporting) {
+        return;
+      }
+      const previousStyle = buildStylePersistenceArgs();
+      const nextAppearance = {
+        ...previousStyle.appearance,
+        ...change.appearance
+      };
+      const nextHighlightOpacity =
+        change.highlightOpacity ?? previousStyle.highlightOpacity;
+      const nextStyle = buildStylePersistenceArgs({
+        appearance: nextAppearance,
+        highlightOpacity: nextHighlightOpacity,
+        preset: "Custom"
+      });
+      if (areStyleStateValuesEqual(previousStyle, nextStyle)) {
+        return;
+      }
+      syncStyleState(
+        nextAppearance,
+        nextStyle.preset,
+        nextStyle.lastPresetId,
+        nextStyle.highlightOpacity
+      );
+      queueStylePersistence(nextStyle);
+      if (trackUndo) {
+        commitStyleUndoEntry(previousStyle, nextStyle, commitOptions);
+      }
+    },
+    [
+      buildStylePersistenceArgs,
+      commitStyleUndoEntry,
+      isExporting,
+      queueStylePersistence,
+      syncStyleState
+    ]
+  );
+
+  const handleAppearanceChange = React.useCallback(
+    (changes: Partial<SubtitleStyleAppearance>) => {
+      applyAppearanceChange(changes);
+    },
+    [applyAppearanceChange]
+  );
+  const handleAppearanceChangeRef = React.useRef(applyAppearanceChange);
+  handleAppearanceChangeRef.current = applyAppearanceChange;
   const SUBTITLE_POSITION_AUTOCORRECT_EPSILON = 0.0005;
   const SUBTITLE_MOVE_HANDLE_THICKNESS_PX = 8;
   const SUBTITLE_MOVE_HANDLE_OUTSET_PX = 6;
@@ -3866,10 +4323,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (!needsCorrection) {
       return;
     }
-    handleAppearanceChangeRef.current({
-      position_x: nextPosition.x,
-      position_y: nextPosition.y
-    });
+    handleAppearanceChangeRef.current(
+      {
+        position_x: nextPosition.x,
+        position_y: nextPosition.y
+      },
+      { trackUndo: false }
+    );
   }, [
     activeCue?.id,
     appearance,
@@ -3981,95 +4441,75 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
   }, [isSavingCue, isExporting, subtitlePositionDrag]);
 
-  const handlePresetChange = (nextPreset: string) => {
-    if (isExporting) {
+  const handleHighlightOpacityChange = React.useCallback((nextHighlightOpacity: number) => {
+    if (highlightOpacityRef.current === nextHighlightOpacity) {
       return;
     }
-    if (nextPreset === "Custom" || !isNamedPresetId(nextPreset)) {
-      return;
-    }
-    if (preset === "Custom") {
-      customAppearanceRef.current = appearance;
-    }
-    const nextAppearance = applyPresetAppearance(nextPreset);
-    if (!nextAppearance) {
-      return;
-    }
-    setPreset(nextPreset);
-    setLastPresetId(nextPreset);
-    setAppearance(nextAppearance);
-    debouncedPersistStyle(nextAppearance, nextPreset, highlightOpacity, nextPreset);
-  };
-
-  const handleHighlightOpacityChange = (nextHighlightOpacity: number) => {
-    if (isExporting) {
-      return;
-    }
-    setHighlightOpacity(nextHighlightOpacity);
-    debouncedPersistStyle(
-      appearance,
-      preset,
-      nextHighlightOpacity,
-      lastPresetId
+    applyEffectStyleChange(
+      {
+        appearance: {},
+        highlightOpacity: nextHighlightOpacity
+      },
+      {
+        kind: "highlight-opacity",
+        canCoalesce: true
+      }
     );
-  };
+  }, [applyEffectStyleChange]);
 
-  const handleResetPreset = () => {
-    if (isExporting) {
-      return;
-    }
-    const targetPreset =
-      preset === "Custom" ? (lastPresetId ?? "classic_static") : preset;
-    const nextAppearance = isNamedPresetId(targetPreset)
-      ? applyPresetAppearance(targetPreset)
-      : null;
-    if (!nextAppearance) {
-      return;
-    }
-    setPreset(targetPreset);
-    setLastPresetId(targetPreset);
-    setAppearance(nextAppearance);
-    customAppearanceRef.current = nextAppearance;
-    void persistStyleSettings(
-      nextAppearance,
-      targetPreset,
-      highlightOpacity,
-      targetPreset
-    );
-  };
+  const handleToggleEffect = React.useCallback(
+    (effectId: WorkbenchEffectId) => {
+      setHoveredEffectPreview(null);
+      applyEffectStyleChange(
+        buildWorkbenchEffectToggleChange(effectId, appearanceRef.current),
+        {
+          kind: `effect:${effectId}:toggle`,
+          canCoalesce: false
+        }
+      );
+    },
+    [applyEffectStyleChange]
+  );
 
-  const initializeEditHistory = React.useCallback((initialText: string) => {
-    editHistoryRef.current = [initialText];
-    editHistoryIndexRef.current = 0;
-    lastHistoryCommitAtRef.current = Date.now();
-  }, []);
+  const handleResetEffect = React.useCallback(
+    (effectId: WorkbenchEffectId) => {
+      setHoveredEffectPreview(null);
+      applyEffectStyleChange(buildWorkbenchEffectResetChange(effectId), {
+        kind: `effect:${effectId}:reset`,
+        canCoalesce: false
+      });
+    },
+    [applyEffectStyleChange]
+  );
 
-  const updateEditHistory = React.useCallback((nextText: string) => {
-    const now = Date.now();
-    const history = editHistoryRef.current;
-    const index = editHistoryIndexRef.current;
-    const truncatedHistory = history.slice(0, index + 1);
-    const previousText = truncatedHistory[truncatedHistory.length - 1] ?? "";
-    if (previousText === nextText) {
-      editHistoryRef.current = truncatedHistory;
-      editHistoryIndexRef.current = truncatedHistory.length - 1;
-      return;
+  const handleEffectPreview = React.useCallback(
+    (effectId: WorkbenchEffectId | null) => {
+      setHoveredEffectPreview(effectId);
+    },
+    []
+  );
+
+  React.useEffect(() => {
+    if (
+      appearance.subtitle_mode !== "word_highlight" &&
+      appearance.background_mode === "word"
+    ) {
+      applyEffectStyleChange(
+        {
+          appearance: { background_mode: "line" }
+        },
+        {
+          kind: "appearance:background_mode",
+          canCoalesce: false
+        },
+        { trackUndo: false }
+      );
     }
-    const lengthDelta = Math.abs(nextText.length - previousText.length);
-    const canCoalesceTypingBurst =
-      truncatedHistory.length > 1 &&
-      index === truncatedHistory.length - 1 &&
-      now - lastHistoryCommitAtRef.current < EDIT_UNDO_COALESCE_MS &&
-      lengthDelta <= 2;
-    if (canCoalesceTypingBurst) {
-      truncatedHistory[truncatedHistory.length - 1] = nextText;
-    } else {
-      truncatedHistory.push(nextText);
-    }
-    editHistoryRef.current = truncatedHistory;
-    editHistoryIndexRef.current = truncatedHistory.length - 1;
-    lastHistoryCommitAtRef.current = now;
-  }, []);
+  }, [
+    appearance.background_mode,
+    appearance.subtitle_mode,
+    applyEffectStyleChange
+  ]);
 
   const resumePlaybackIfNeeded = React.useCallback(() => {
     if (!shouldResumePlaybackRef.current) {
@@ -4183,6 +4623,86 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     [clearSubtitleAutosaveTimer, persistLatestSubtitleText]
   );
 
+  const persistSubtitleUndoText = React.useCallback((cueId: string, nextText: string) => {
+    const currentProjectId = projectIdRef.current;
+    if (!currentProjectId || !cuesRef.current.some((cue) => cue.id === cueId)) {
+      return Promise.resolve(true);
+    }
+
+    const nextCues = replaceCueText(cuesRef.current, cueId, nextText);
+    cuesRef.current = nextCues;
+    setCues(nextCues);
+
+    const persistRequest = async () => {
+      try {
+        await updateProject(currentProjectId, {
+          subtitles_srt_text: serializeSrt(nextCues)
+        });
+        if (projectIdRef.current === currentProjectId) {
+          setEditError(null);
+        }
+        return true;
+      } catch (err) {
+        if (projectIdRef.current === currentProjectId) {
+          setEditError(
+            messageForBackendError(
+              err,
+              err instanceof Error ? err.message : "Failed to save subtitle changes."
+            )
+          );
+        }
+        return false;
+      }
+    };
+
+    const scheduledRequest = subtitleUndoPersistPromiseRef.current.then(
+      () => persistRequest(),
+      () => persistRequest()
+    );
+    subtitleUndoPersistPromiseRef.current = scheduledRequest.then(() => true, () => true);
+    return scheduledRequest;
+  }, []);
+
+  const restoreUndoEntry = React.useCallback(
+    (entry: WorkbenchUndoEntry) => {
+      if (entry.type === "text") {
+        if (editingCueIdRef.current === entry.cueId) {
+          const currentText = editingTextRef.current;
+          syncEditingTextState(entry.previousText);
+          if (currentText !== entry.previousText) {
+            queueSubtitleAutosave(entry.previousText);
+          }
+        } else {
+          const currentText = cuesRef.current.find((cue) => cue.id === entry.cueId)?.text;
+          if (currentText !== entry.previousText) {
+            void persistSubtitleUndoText(entry.cueId, entry.previousText);
+          }
+        }
+      } else {
+        const currentStyle = buildStylePersistenceArgs();
+        syncStyleState(
+          entry.previous.appearance,
+          entry.previous.preset,
+          entry.previous.lastPresetId,
+          entry.previous.highlightOpacity
+        );
+        if (!areStyleStateValuesEqual(currentStyle, entry.previous)) {
+          queueStylePersistence(entry.previous);
+        }
+      }
+      lastHistoryCommitAtRef.current = 0;
+      lastHistoryCommitKindRef.current = null;
+    },
+    [
+      buildStylePersistenceArgs,
+      persistSubtitleUndoText,
+      queueStylePersistence,
+      queueSubtitleAutosave,
+      syncEditingTextState,
+      syncStyleState
+    ]
+  );
+
   const flushSubtitleAutosave = React.useCallback(async (): Promise<boolean> => {
     clearSubtitleAutosaveTimer();
     subtitleAutosaveFlushRequestedRef.current = true;
@@ -4222,11 +4742,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const closeEditMode = React.useCallback(() => {
     setSelectedCueId(null);
     setEditingCueId(null);
-    setEditingText("");
+    syncEditingTextState("");
     setEditError(null);
     resetEditSessionState();
     resumePlaybackIfNeeded();
-  }, [resetEditSessionState, resumePlaybackIfNeeded]);
+  }, [resetEditSessionState, resumePlaybackIfNeeded, syncEditingTextState]);
 
   const beginEditingCue = React.useCallback(
     (cue: SrtCue, resumePlaybackOnExit: boolean) => {
@@ -4234,22 +4754,28 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setSelectedCueId(cue.id);
       setEditingCueId(cue.id);
       setIsHoveringActiveSubtitle(false);
-      setEditingText(cue.text);
+      syncEditingTextState(cue.text);
       setEditError(null);
       startSubtitleAutosaveSession(cue.text);
-      initializeEditHistory(cue.text);
     },
-    [initializeEditHistory, startSubtitleAutosaveSession]
+    [startSubtitleAutosaveSession, syncEditingTextState]
   );
 
   const handleEditTextChange = React.useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const cueId = editingCueIdRef.current;
       const nextText = event.target.value;
-      setEditingText(nextText);
-      updateEditHistory(nextText);
+      const previousText = editingTextRef.current;
+      syncEditingTextState(nextText);
+      if (cueId) {
+        commitTextUndoEntry(cueId, previousText, nextText, {
+          kind: "text",
+          canCoalesce: true
+        });
+      }
       queueSubtitleAutosave(nextText);
     },
-    [queueSubtitleAutosave, updateEditHistory]
+    [commitTextUndoEntry, queueSubtitleAutosave, syncEditingTextState]
   );
 
   const handleUndoEdit = React.useCallback(() => {
@@ -4257,16 +4783,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
     const index = editHistoryIndexRef.current;
-    if (index <= 0) {
+    if (index < 0) {
       return;
     }
-    const nextIndex = index - 1;
-    editHistoryIndexRef.current = nextIndex;
-    const nextText = editHistoryRef.current[nextIndex] ?? "";
-    setEditingText(nextText);
-    lastHistoryCommitAtRef.current = Date.now();
-    queueSubtitleAutosave(nextText);
-  }, [isExporting, isSavingCue, queueSubtitleAutosave]);
+    const nextEntry = editHistoryRef.current[index];
+    if (!nextEntry) {
+      return;
+    }
+    editHistoryIndexRef.current = index - 1;
+    restoreUndoEntry(nextEntry);
+  }, [isExporting, isSavingCue, restoreUndoEntry]);
 
   const flushAndExitEditMode = React.useCallback(async () => {
     if (isSavingCueRef.current || isExporting) {
@@ -4275,8 +4801,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     isSavingCueRef.current = true;
     setIsSavingCue(true);
     try {
-      const ok = await flushSubtitleAutosave();
-      if (!ok) {
+      const textOk = await flushSubtitleAutosave();
+      if (!textOk) {
+        return false;
+      }
+      const styleOk = await flushPendingStylePersistence();
+      if (!styleOk) {
         return false;
       }
       closeEditMode();
@@ -4285,7 +4815,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       isSavingCueRef.current = false;
       setIsSavingCue(false);
     }
-  }, [closeEditMode, flushSubtitleAutosave, isExporting]);
+  }, [closeEditMode, flushPendingStylePersistence, flushSubtitleAutosave, isExporting]);
 
   const handleCloseEdit = React.useCallback(() => {
     if (!isSavingCueRef.current) {
@@ -4648,10 +5178,20 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [leftPanelOpen, rightOverlayOpen, showSubtitlesOverlay]);
 
   React.useEffect(() => {
-    if (!isOverlayOpen && !isEditingCue) {
-      return;
-    }
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "z"
+      ) {
+        if (editHistoryIndexRef.current < 0) {
+          return;
+        }
+        event.preventDefault();
+        handleUndoEdit();
+        return;
+      }
       if (event.key !== "Escape") {
         return;
       }
@@ -4664,14 +5204,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeOverlays, flushAndExitEditMode, isEditingCue, isOverlayOpen]);
+  }, [closeOverlays, flushAndExitEditMode, handleUndoEdit, isEditingCue]);
 
   const handleEditorKeyDown = async (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z") {
-      event.preventDefault();
-      handleUndoEdit();
-      return;
-    }
     if (event.key === "Escape") {
       event.preventDefault();
       await flushAndExitEditMode();
@@ -4683,7 +5218,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
   };
 
-  const stylePanelContent = (
+  const effectsPanelContent = (
     <div
       className={cn(
         "px-4 pb-2 pl-5 pr-5",
@@ -4693,28 +5228,22 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       {styleError && (
         <div
           className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
-          data-testid="workbench-style-error"
+          data-testid="workbench-effects-error"
         >
           {styleError}
         </div>
       )}
       {isStyleLoading ? (
-        <p className="text-xs text-muted-foreground">Loading style controls...</p>
+        <p className="text-xs text-muted-foreground">Loading effects...</p>
       ) : (
-        <StyleControls
+        <WorkbenchEffectsPanel
           appearance={appearance}
-          fonts={subtitleFonts}
-          fontsLoading={areSubtitleFontsLoading}
-          fontsError={subtitleFontsError}
-          preset={preset}
           highlightOpacity={highlightOpacity}
-          showAnimationControl={false}
-          showHighlightSection={false}
-          showTextSection={false}
           onAppearanceChange={handleAppearanceChange}
-          onPresetChange={handlePresetChange}
           onHighlightOpacityChange={handleHighlightOpacityChange}
-          onResetPreset={handleResetPreset}
+          onToggleEffect={handleToggleEffect}
+          onResetEffect={handleResetEffect}
+          onPreviewEffect={handleEffectPreview}
         />
       )}
     </div>
@@ -4802,9 +5331,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             size="sm"
             onClick={openRightOverlay}
             disabled={isExporting}
-            data-testid="workbench-open-style"
+            data-testid="workbench-open-effects"
           >
-            Style
+            Effects
           </Button>
         )}
         {exportAreaTopBar}
@@ -5254,21 +5783,23 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   "relative inline-block min-w-16 max-w-full",
                                   showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
                                   !(
-                                    appearance.subtitle_mode === "word_highlight" &&
+                                    effectiveAppearance.subtitle_mode === "word_highlight" &&
                                     editingWordCount > 0 &&
-                                    appearance.background_mode === "line"
+                                    effectiveAppearance.background_mode === "line"
                                   ) && "px-3 py-2"
                                 )}
                                 style={
                                   {
                                     fontFamily:
-                                      appearance.font_family || DEFAULT_APPEARANCE.font_family,
+                                      effectiveAppearance.font_family ||
+                                      DEFAULT_APPEARANCE.font_family,
                                     ["--subtitle-editor-font"]:
-                                      appearance.font_family || DEFAULT_APPEARANCE.font_family
+                                      effectiveAppearance.font_family ||
+                                      DEFAULT_APPEARANCE.font_family
                                   } as React.CSSProperties
                                 }
                               >
-                                {appearance.subtitle_mode === "word_highlight" &&
+                                {effectiveAppearance.subtitle_mode === "word_highlight" &&
                                 editingWordCount > 0 ? (
                                   <>
                                     <div
@@ -5436,7 +5967,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   dir={subtitleDirection}
                                   style={{ unicodeBidi: "plaintext" }}
                                 >
-                                  {appearance.subtitle_mode === "word_highlight" && cueWordCount > 0
+                                  {effectiveAppearance.subtitle_mode === "word_highlight" &&
+                                  cueWordCount > 0
                                     ? (() => {
                                         let seenWordIndex = -1;
                                         return cueSegments.map((segment, idx) => {
@@ -5584,6 +6116,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   onHighlightOpacityChange={
                                     handleHighlightOpacityChange
                                   }
+                                  showKaraokeControl={false}
                                   trailingContent={
                                     <Button
                                       type="button"
@@ -5905,14 +6438,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                 data-testid="workbench-right-panel"
               >
                 <div className="border-b border-border px-4 py-2">
-                  <h2 className="text-sm font-semibold">Style</h2>
+                  <h2 className="text-sm font-semibold">Effects</h2>
                 </div>
                 <div
-                  data-testid="workbench-style-scroll-panel"
+                  data-testid="workbench-effects-scroll-panel"
                   className="min-h-0 flex-1 overflow-x-visible overflow-y-auto py-3"
                   style={{ scrollbarGutter: "stable" }}
                 >
-                  {stylePanelContent}
+                  {effectsPanelContent}
                 </div>
               </section>
             )}
@@ -5951,17 +6484,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               data-testid="workbench-right-drawer"
             >
               <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                <h2 className="text-sm font-semibold">Style</h2>
+                <h2 className="text-sm font-semibold">Effects</h2>
                 <Button variant="ghost" size="sm" onClick={() => setRightOverlayOpen(false)}>
                   Close
                 </Button>
               </div>
               <div
-                data-testid="workbench-style-scroll-drawer"
+                data-testid="workbench-effects-scroll-drawer"
                 className="min-h-0 flex-1 overflow-x-visible overflow-y-auto py-3"
                 style={{ scrollbarGutter: "stable" }}
               >
-                {stylePanelContent}
+                {effectsPanelContent}
               </div>
             </aside>
           )}
