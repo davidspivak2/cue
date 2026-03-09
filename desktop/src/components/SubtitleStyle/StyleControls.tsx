@@ -5,6 +5,7 @@ import { Link, Unlink } from "lucide-react";
 import { ColorRow } from "./ColorPopover";
 import SubtitleTextControls, {
   findFontMetadata,
+  getFontWeightLabel,
   isItalicFontStyle,
   normalizeFontWeight
 } from "./SubtitleTextControls";
@@ -302,7 +303,7 @@ const StyleControls = ({
     }
   }, [bgMode, isWordHighlight]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const textSummary = `${selectedFont.family}${isCurrentFontUnavailable ? " unavailable" : ""} | ${currentFontWeight} | ${italicActive ? "Italic" : "Regular"} | ${appearance.font_size} | ${Math.round(appearance.text_opacity * 100)}%`;
+  const textSummary = `${selectedFont.family}${isCurrentFontUnavailable ? " unavailable" : ""} | ${getFontWeightLabel(currentFontWeight)} | ${italicActive ? "Italic" : "Regular"} | ${appearance.font_size} | ${Math.round(appearance.text_opacity * 100)}%`;
   const outlineSummary =
     appearance.outline_width === 0
       ? "Off"
