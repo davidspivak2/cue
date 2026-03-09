@@ -10,7 +10,9 @@ import StyleControls from "@/components/SubtitleStyle/StyleControls";
 import { messageForBackendError } from "@/backendHealth";
 import {
   fetchSettings,
+  fetchSubtitleFonts,
   previewStyle,
+  SubtitleFontMetadata,
   updateSettings,
   SubtitleStyleAppearance
 } from "@/settingsClient";
@@ -250,6 +252,9 @@ const Review = () => {
   const [highlightOpacity, setHighlightOpacity] = React.useState(1.0);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [subtitleFonts, setSubtitleFonts] = React.useState<SubtitleFontMetadata[]>([]);
+  const [areSubtitleFontsLoading, setAreSubtitleFontsLoading] = React.useState(true);
+  const [subtitleFontsError, setSubtitleFontsError] = React.useState<string | null>(null);
 
   /* ── preview state ── */
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
@@ -292,6 +297,33 @@ const Review = () => {
       })
       .finally(() => {
         if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    setAreSubtitleFontsLoading(true);
+    fetchSubtitleFonts()
+      .then((response) => {
+        if (!active) return;
+        setSubtitleFonts(response.fonts);
+        setSubtitleFontsError(null);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSubtitleFontsError(
+          messageForBackendError(
+            err,
+            err instanceof Error ? err.message : "Failed to load bundled subtitle fonts."
+          )
+        );
+      })
+      .finally(() => {
+        if (!active) return;
+        setAreSubtitleFontsLoading(false);
       });
     return () => {
       active = false;
@@ -573,6 +605,9 @@ const Review = () => {
               <ScrollArea className="h-full pr-3">
                 <StyleControls
                   appearance={appearance}
+                  fonts={subtitleFonts}
+                  fontsLoading={areSubtitleFontsLoading}
+                  fontsError={subtitleFontsError}
                   preset={preset}
                   highlightOpacity={highlightOpacity}
                   onAppearanceChange={handleAppearanceChange}

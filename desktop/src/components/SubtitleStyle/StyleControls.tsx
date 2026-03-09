@@ -1,8 +1,23 @@
 import * as React from "react";
 
+import { Link, Unlink } from "lucide-react";
+
+import { ColorRow } from "./ColorPopover";
+import SubtitleTextControls, {
+  findFontMetadata,
+  isItalicFontStyle,
+  normalizeFontWeight
+} from "./SubtitleTextControls";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger
+} from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { OpacitySlider } from "@/components/ui/opacity-slider";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
@@ -12,25 +27,10 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger
-} from "@/components/ui/accordion";
-import { ChevronDown, Link, Unlink } from "lucide-react";
-import { ColorRow } from "./ColorPopover";
-import { OpacitySlider } from "@/components/ui/opacity-slider";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger
-} from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import type { SubtitleStyleAppearance } from "@/settingsClient";
-
-/* ---------- constants ---------- */
+import type {
+  SubtitleFontMetadata,
+  SubtitleStyleAppearance
+} from "@/settingsClient";
 
 const PRESET_OPTIONS: { value: string; label: string; disabled?: boolean }[] = [
   { value: "classic_static", label: "Classic (Static)" },
@@ -42,21 +42,9 @@ const PRESET_OPTIONS: { value: string; label: string; disabled?: boolean }[] = [
   { value: "Custom", label: "Custom", disabled: true }
 ];
 
-const CURATED_FONTS = [
-  "Heebo",
-  "Assistant",
-  "Rubik",
-  "IBM Plex Sans Hebrew",
-  "Noto Sans Hebrew",
-  "Alef",
-  "Arimo",
-  "Secular One",
-  "Suez One",
-  "Frank Ruhl Libre"
-] as const;
-
-
-/* ---------- helpers ---------- */
+const PADDING_MIN = 0;
+const PADDING_MAX = 40;
+const PADDING_STEP = 1;
 
 type SliderRowProps = {
   label: string;
@@ -98,9 +86,7 @@ const SliderRow = ({
         value={value}
         onChange={(e) => {
           const n = Number(e.target.value);
-          if (!Number.isNaN(n)) {
-            onChange(Math.min(max, Math.max(min, n)));
-          }
+          if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)));
         }}
       />
       {valueSuffix && (
@@ -146,19 +132,13 @@ const OpacityRow = ({
         value={Math.round(value)}
         onChange={(e) => {
           const n = Number(e.target.value);
-          if (!Number.isNaN(n)) {
-            onChange(Math.min(max, Math.max(min, n)));
-          }
+          if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)));
         }}
       />
       <span className="text-xs text-muted-foreground">%</span>
     </div>
   </div>
 );
-
-const PADDING_MIN = 0;
-const PADDING_MAX = 40;
-const PADDING_STEP = 1;
 
 type PaddingRowProps = {
   label: string;
@@ -263,38 +243,58 @@ const PaddingRow = ({
   );
 };
 
-/* ---------- props ---------- */
-
 export type StyleControlsProps = {
   appearance: SubtitleStyleAppearance;
+  fonts: SubtitleFontMetadata[];
+  fontsLoading: boolean;
+  fontsError: string | null;
   preset: string;
   highlightOpacity: number;
+  showAnimationControl?: boolean;
+  showHighlightSection?: boolean;
+  showTextSection?: boolean;
   onAppearanceChange: (changes: Partial<SubtitleStyleAppearance>) => void;
   onPresetChange: (preset: string) => void;
   onHighlightOpacityChange: (opacity: number) => void;
   onResetPreset: () => void;
 };
 
-/* ---------- component ---------- */
-
 const StyleControls = ({
   appearance,
+  fonts,
+  fontsLoading,
+  fontsError,
   preset,
   highlightOpacity,
+  showAnimationControl = true,
+  showHighlightSection = true,
+  showTextSection = true,
   onAppearanceChange,
   onPresetChange,
   onHighlightOpacityChange,
   onResetPreset
 }: StyleControlsProps) => {
-  const [fontSearchQuery, setFontSearchQuery] = React.useState("");
-  const [fontOpen, setFontOpen] = React.useState(false);
-
   const patch = (changes: Partial<SubtitleStyleAppearance>) => {
     onAppearanceChange(changes);
   };
 
   const isWordHighlight = appearance.subtitle_mode === "word_highlight";
   const bgMode = appearance.background_mode;
+  const currentFontWeight = React.useMemo(
+    () => normalizeFontWeight(appearance.font_weight),
+    [appearance.font_weight]
+  );
+  const italicActive = isItalicFontStyle(appearance.font_style);
+  const matchedFont = React.useMemo(
+    () => findFontMetadata(fonts, appearance.font_family),
+    [appearance.font_family, fonts]
+  );
+  const selectedFont =
+    matchedFont ?? {
+      family: appearance.font_family || "Unknown font"
+    };
+  const isCurrentFontUnavailable =
+    !fontsLoading && !fontsError && matchedFont === null;
 
   React.useEffect(() => {
     if (!isWordHighlight && bgMode === "word") {
@@ -302,25 +302,19 @@ const StyleControls = ({
     }
   }, [bgMode, isWordHighlight]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filteredFonts = React.useMemo(() => {
-    const q = fontSearchQuery.trim().toLowerCase();
-    if (!q) return [...CURATED_FONTS];
-    return CURATED_FONTS.filter((f) => f.toLowerCase().includes(q));
-  }, [fontSearchQuery]);
-
-  const textSummary = `${appearance.font_family} • ${appearance.font_size} • ${Math.round(appearance.text_opacity * 100)}% • Spacing ${appearance.letter_spacing}`;
+  const textSummary = `${selectedFont.family}${isCurrentFontUnavailable ? " unavailable" : ""} | ${currentFontWeight} | ${italicActive ? "Italic" : "Regular"} | ${appearance.font_size} | ${Math.round(appearance.text_opacity * 100)}%`;
   const outlineSummary =
     appearance.outline_width === 0
       ? "Off"
       : appearance.outline_color === "auto"
-        ? `${appearance.outline_width} • Auto`
-        : `${appearance.outline_width} • ${appearance.outline_color}`;
+        ? `${appearance.outline_width} | Auto`
+        : `${appearance.outline_width} | ${appearance.outline_color}`;
   const shadowBlur = appearance.shadow_blur ?? 6;
   const shadowSummary =
     appearance.shadow_strength === 0
       ? "Off"
-      : `Blur ${shadowBlur} • X${appearance.shadow_offset_x} Y${appearance.shadow_offset_y} • ${Math.round(appearance.shadow_opacity * 100)}%`;
-  const highlightSummary = `${appearance.highlight_color} • ${Math.round(highlightOpacity * 100)}%`;
+      : `Blur ${shadowBlur} | X${appearance.shadow_offset_x} Y${appearance.shadow_offset_y} | ${Math.round(appearance.shadow_opacity * 100)}%`;
+  const highlightSummary = `${appearance.highlight_color} | ${Math.round(highlightOpacity * 100)}%`;
   const backgroundOpacity =
     bgMode === "line"
       ? Math.round(appearance.line_bg_opacity * 100)
@@ -328,11 +322,12 @@ const StyleControls = ({
         ? Math.round(appearance.word_bg_opacity * 100)
         : 0;
   const backgroundSummary =
-    bgMode === "none" ? "None" : `${bgMode === "line" ? "Line" : "Word"} • ${backgroundOpacity}%`;
+    bgMode === "none"
+      ? "None"
+      : `${bgMode === "line" ? "Line" : "Word"} | ${backgroundOpacity}%`;
 
   return (
     <div className="space-y-4">
-      {/* ── Essentials (always visible) ── */}
       <section className="space-y-3">
         <div className="flex items-end gap-2">
           <div className="flex-1 space-y-1.5">
@@ -359,177 +354,59 @@ const StyleControls = ({
           </Button>
         </div>
 
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Animation</Label>
-          <RadioGroup
-            value={appearance.subtitle_mode}
-            onValueChange={(v) => patch({ subtitle_mode: v })}
-            className="flex gap-3"
-          >
-            <div className="flex items-center gap-1.5">
-              <RadioGroupItem id="mode-static" value="static" />
-              <Label htmlFor="mode-static" className="text-sm">
-                Static
-              </Label>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <RadioGroupItem id="mode-highlight" value="word_highlight" />
-              <Label htmlFor="mode-highlight" className="text-sm">
-                Karaoke
-              </Label>
-            </div>
-          </RadioGroup>
-        </div>
+        {showAnimationControl && (
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Animation</Label>
+            <RadioGroup
+              value={appearance.subtitle_mode}
+              onValueChange={(v) => patch({ subtitle_mode: v })}
+              className="flex gap-3"
+            >
+              <div className="flex items-center gap-1.5">
+                <RadioGroupItem id="mode-static" value="static" />
+                <Label htmlFor="mode-static" className="text-sm">
+                  Static
+                </Label>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <RadioGroupItem id="mode-highlight" value="word_highlight" />
+                <Label htmlFor="mode-highlight" className="text-sm">
+                  Karaoke
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
+        )}
       </section>
 
-      {/* ── Accordion groups ── */}
       <Accordion
         type="multiple"
-        defaultValue={["text"]}
+        defaultValue={showTextSection ? ["text"] : ["outline"]}
         className="rounded-md border border-border"
       >
-        <AccordionItem value="text">
-          <AccordionTrigger className="px-3 hover:no-underline">
-            <span className="flex flex-col items-start gap-0.5">
-              <span className="font-medium">Text</span>
-              <span className="text-xs font-normal text-muted-foreground">
-                {textSummary}
+        {showTextSection && (
+          <AccordionItem value="text">
+            <AccordionTrigger className="px-3 hover:no-underline">
+              <span className="flex flex-col items-start gap-0.5">
+                <span className="font-medium">Text</span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {textSummary}
+                </span>
               </span>
-            </span>
-          </AccordionTrigger>
-          <AccordionContent className="space-y-3 px-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Font</Label>
-              <Popover open={fontOpen} onOpenChange={(o) => { setFontOpen(o); if (!o) setFontSearchQuery(""); }}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="h-7 w-full justify-between text-xs font-normal"
-                  >
-                    <span className="truncate">{appearance.font_family}</span>
-                    <ChevronDown className="size-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                  <Input
-                    placeholder="Search fonts..."
-                    className="h-8 border-0 border-b rounded-none focus-visible:ring-0"
-                    value={fontSearchQuery}
-                    onChange={(e) => setFontSearchQuery(e.target.value)}
-                  />
-                  <ScrollArea className="h-[200px]">
-                    <div className="p-1">
-                      {filteredFonts.map((fontName) => (
-                        <button
-                          key={fontName}
-                          type="button"
-                          className="flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none"
-                          onClick={() => {
-                            patch({ font_family: fontName });
-                            setFontOpen(false);
-                            setFontSearchQuery("");
-                          }}
-                        >
-                          {fontName}
-                        </button>
-                      ))}
-                      {filteredFonts.length === 0 && (
-                        <div className="py-2 text-center text-xs text-muted-foreground">No matches</div>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </PopoverContent>
-              </Popover>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Style</Label>
-              <ToggleGroup
-                type="multiple"
-                value={
-                  appearance.font_style === "bold_italic"
-                    ? ["bold", "italic"]
-                    : appearance.font_style === "bold"
-                      ? ["bold"]
-                      : appearance.font_style === "italic"
-                        ? ["italic"]
-                        : []
-                }
-                onValueChange={(v) => {
-                  const style =
-                    v.includes("bold") && v.includes("italic")
-                      ? "bold_italic"
-                      : v.includes("bold")
-                        ? "bold"
-                        : v.includes("italic")
-                          ? "italic"
-                          : "regular";
-                  patch({ font_style: style });
-                }}
-                className="flex gap-1"
-              >
-                <ToggleGroupItem value="bold" aria-label="Bold" className="h-7 w-8 text-xs">
-                  B
-                </ToggleGroupItem>
-                <ToggleGroupItem value="italic" aria-label="Italic" className="h-7 w-8 text-xs">
-                  I
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-            <SliderRow
-              label="Size"
-              value={appearance.font_size}
-              min={18}
-              max={72}
-              onChange={(v) => patch({ font_size: v })}
-            />
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Letter spacing</Label>
-              <p className="text-[10px] text-muted-foreground">Adjust space between letters</p>
-              <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-                <Slider
-                  min={-5}
-                  max={20}
-                  step={0.5}
-                  value={[appearance.letter_spacing]}
-                  onValueChange={([v]) => patch({ letter_spacing: v })}
-                />
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    type="number"
-                    className="h-7 w-16 px-2 text-xs"
-                    min={-5}
-                    max={20}
-                    step={0.5}
-                    value={appearance.letter_spacing}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (!Number.isNaN(n)) {
-                        patch({ letter_spacing: Math.min(20, Math.max(-5, n)) });
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Text color</Label>
-              <ColorRow
-                kind="text"
-                value={appearance.text_color}
-                onChange={(c) => patch({ text_color: c })}
-                opacity={appearance.text_opacity}
-                onOpacityChange={(o) => patch({ text_opacity: o })}
+            </AccordionTrigger>
+            <AccordionContent className="px-3">
+              <SubtitleTextControls
+                appearance={appearance}
+                fonts={fonts}
+                fontsLoading={fontsLoading}
+                fontsError={fontsError}
+                highlightOpacity={highlightOpacity}
+                onAppearanceChange={onAppearanceChange}
+                onHighlightOpacityChange={onHighlightOpacityChange}
               />
-            </div>
-            <OpacityRow
-              label="Opacity"
-              value={Math.round(appearance.text_opacity * 100)}
-              min={10}
-              max={100}
-              onChange={(v) => patch({ text_opacity: v / 100 })}
-            />
-          </AccordionContent>
-        </AccordionItem>
+            </AccordionContent>
+          </AccordionItem>
+        )}
 
         <AccordionItem value="outline">
           <AccordionTrigger className="px-3 hover:no-underline">
@@ -640,8 +517,7 @@ const StyleControls = ({
             />
           </AccordionContent>
         </AccordionItem>
-
-        {isWordHighlight && (
+        {showHighlightSection && isWordHighlight && (
           <AccordionItem value="highlight">
             <AccordionTrigger className="px-3 hover:no-underline">
               <span className="flex flex-col items-start gap-0.5">
@@ -694,35 +570,27 @@ const StyleControls = ({
               >
                 <div className="flex items-center gap-1.5">
                   <RadioGroupItem id="bg-none" value="none" />
-                  <Label
-                    htmlFor="bg-none"
-                    className="whitespace-nowrap text-xs"
-                  >
+                  <Label htmlFor="bg-none" className="whitespace-nowrap text-xs">
                     None
                   </Label>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <RadioGroupItem id="bg-line" value="line" />
-                  <Label
-                    htmlFor="bg-line"
-                    className="whitespace-nowrap text-xs"
-                  >
+                  <Label htmlFor="bg-line" className="whitespace-nowrap text-xs">
                     Line
                   </Label>
                 </div>
                 {isWordHighlight && (
                   <div className="flex items-center gap-1.5">
                     <RadioGroupItem id="bg-word" value="word" />
-                    <Label
-                      htmlFor="bg-word"
-                      className="whitespace-nowrap text-xs"
-                    >
+                    <Label htmlFor="bg-word" className="whitespace-nowrap text-xs">
                       Word
                     </Label>
                   </div>
                 )}
               </RadioGroup>
             </div>
+
             {bgMode === "line" && (
               <div className="space-y-3">
                 <div className="space-y-1.5">
@@ -790,6 +658,7 @@ const StyleControls = ({
                 />
               </div>
             )}
+
             {bgMode === "word" && (
               <div className="space-y-3">
                 <div className="space-y-1.5">
