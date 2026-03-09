@@ -3,6 +3,13 @@ import * as React from "react";
 import { Link, Sparkles, Unlink } from "lucide-react";
 
 import { ColorRow } from "./ColorPopover";
+import {
+  clampShadowDistance,
+  clampShadowUiAngle,
+  DEFAULT_SHADOW_UI_ANGLE_DEGREES,
+  shadowOffsetsToUiPolar,
+  shadowUiPolarToOffsets
+} from "./shadowOffsetUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -536,6 +543,9 @@ const WorkbenchEffectsPanel = ({
   onPreviewEffect
 }: WorkbenchEffectsPanelProps) => {
   const [focusedEffect, setFocusedEffect] = React.useState<WorkbenchEffectId | null>(null);
+  const [draftShadowAngle, setDraftShadowAngle] = React.useState(
+    DEFAULT_SHADOW_UI_ANGLE_DEGREES
+  );
   const activeEffects = React.useMemo(
     () => effectOrder.filter((effectId) => isEffectActive(effectId, appearance)),
     [appearance]
@@ -544,6 +554,14 @@ const WorkbenchEffectsPanel = ({
     focusedEffect && isEffectActive(focusedEffect, appearance)
       ? focusedEffect
       : activeEffects[0] ?? null;
+  const shadowPolar = React.useMemo(
+    () => shadowOffsetsToUiPolar(appearance.shadow_offset_x, appearance.shadow_offset_y),
+    [appearance.shadow_offset_x, appearance.shadow_offset_y]
+  );
+  const displayedShadowAngle = shadowPolar.hasVisibleOffset
+    ? clampShadowUiAngle(shadowPolar.angle)
+    : draftShadowAngle;
+  const displayedShadowDistance = clampShadowDistance(shadowPolar.distance);
   const backgroundMode = appearance.background_mode;
   const karaokeActive = isKaraokeActive(appearance);
 
@@ -556,6 +574,12 @@ const WorkbenchEffectsPanel = ({
       setFocusedEffect(activeEffects[0] ?? null);
     }
   }, [activeEffects, appearance, focusedEffect]);
+
+  React.useEffect(() => {
+    if (shadowPolar.hasVisibleOffset) {
+      setDraftShadowAngle(clampShadowUiAngle(shadowPolar.angle));
+    }
+  }, [shadowPolar.angle, shadowPolar.hasVisibleOffset]);
 
   const patch = (changes: Partial<SubtitleStyleAppearance>) => {
     onAppearanceChange(changes);
@@ -579,6 +603,20 @@ const WorkbenchEffectsPanel = ({
       setFocusedEffect(effectId);
     }
     onToggleEffect(effectId);
+  };
+
+  const handleShadowAngleChange = (value: number) => {
+    const nextAngle = clampShadowUiAngle(value);
+    setDraftShadowAngle(nextAngle);
+    if (!shadowPolar.hasVisibleOffset) {
+      return;
+    }
+    patch(shadowUiPolarToOffsets(shadowPolar.distance, nextAngle));
+  };
+
+  const handleShadowDistanceChange = (value: number) => {
+    const nextDistance = clampShadowDistance(value);
+    patch(shadowUiPolarToOffsets(nextDistance, displayedShadowAngle));
   };
 
   const renderFocusedEffectDetail = () => {
@@ -660,7 +698,7 @@ const WorkbenchEffectsPanel = ({
             <div>
               <p className="text-sm font-semibold text-foreground">Shadow</p>
               <p className="text-xs text-muted-foreground">
-                Add lift with depth, softness, and offset.
+                Add lift with depth, softness, and direction.
               </p>
             </div>
             <Button
@@ -703,20 +741,22 @@ const WorkbenchEffectsPanel = ({
             onChange={(value) => patch({ shadow_opacity: value / 100 })}
           />
           <SliderRow
-            label="Shadow offset X"
-            value={appearance.shadow_offset_x}
-            min={-10}
-            max={10}
-            step={0.5}
-            onChange={(value) => patch({ shadow_offset_x: value })}
+            label="Shadow angle"
+            value={displayedShadowAngle}
+            min={0}
+            max={359}
+            step={1}
+            inputTestId="workbench-effect-shadow-angle-input"
+            onChange={handleShadowAngleChange}
           />
           <SliderRow
-            label="Shadow offset Y"
-            value={appearance.shadow_offset_y}
-            min={-10}
-            max={10}
-            step={0.5}
-            onChange={(value) => patch({ shadow_offset_y: value })}
+            label="Shadow distance"
+            value={displayedShadowDistance}
+            min={0}
+            max={15}
+            step={0.1}
+            inputTestId="workbench-effect-shadow-distance-input"
+            onChange={handleShadowDistanceChange}
           />
           <SliderRow
             label="Shadow blur"
