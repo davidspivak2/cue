@@ -49,10 +49,7 @@ export function WorkbenchSkeleton({
             <div className="border-b border-border px-4 py-2">
               <Skeleton className="h-4 w-12" />
             </div>
-            <div
-              className="min-h-0 flex-1 space-y-4 py-4 px-4"
-              style={{ scrollbarGutter: "stable" }}
-            >
+            <div className="min-h-0 flex-1 space-y-4 py-4 px-4">
               <Skeleton className="h-9 w-full" />
               <Skeleton className="h-9 w-full" />
               <Skeleton className="h-9 w-3/4" />

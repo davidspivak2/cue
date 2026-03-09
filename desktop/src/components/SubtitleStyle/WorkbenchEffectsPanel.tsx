@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { Link, Sparkles, Unlink } from "lucide-react";
+import { ChevronDown, ChevronUp, Link, Unlink } from "lucide-react";
 
 import { ColorRow } from "./ColorPopover";
 import {
@@ -11,6 +11,7 @@ import {
   shadowUiPolarToOffsets
 } from "./shadowOffsetUtils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { OpacitySlider } from "@/components/ui/opacity-slider";
@@ -24,6 +25,7 @@ export type WorkbenchEffectId = "outline" | "shadow" | "background" | "karaoke";
 type WorkbenchEffectsPanelProps = {
   appearance: SubtitleStyleAppearance;
   highlightOpacity: number;
+  isEffectAtDefault: (effectId: WorkbenchEffectId) => boolean;
   onAppearanceChange: (changes: Partial<SubtitleStyleAppearance>) => void;
   onHighlightOpacityChange: (opacity: number) => void;
   onToggleEffect: (effectId: WorkbenchEffectId) => void;
@@ -97,14 +99,7 @@ const effectLabels: Record<WorkbenchEffectId, string> = {
   outline: "Outline",
   shadow: "Shadow",
   background: "Background",
-  karaoke: "Karaoke"
-};
-
-const effectDescriptions: Record<WorkbenchEffectId, string> = {
-  outline: "Sharp text edge",
-  shadow: "Depth and lift",
-  background: "Line or word plate",
-  karaoke: "Word-by-word glow"
+  karaoke: "Karaoke (spoken word highlight)"
 };
 
 const clampPadding = (value: number) =>
@@ -501,7 +496,7 @@ const EffectCardPreview = ({
     return (
       <div className="flex min-h-[4.5rem] w-full items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.24),transparent_58%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))] px-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
         <div
-          className="flex items-center gap-1 text-sm font-semibold tracking-[0.01em]"
+          className="flex items-center gap-1.5 text-xl font-semibold tracking-[0.01em]"
           style={baseStyle}
         >
           <span>Cue</span>
@@ -526,7 +521,7 @@ const EffectCardPreview = ({
 
   return (
     <div className="flex min-h-[4.5rem] w-full items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.24),transparent_58%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))] px-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-      <span className="text-base font-semibold tracking-[0.01em]" style={baseStyle}>
+      <span className="text-xl font-semibold tracking-[0.01em]" style={baseStyle}>
         {CARD_SAMPLE_TEXT}
       </span>
     </div>
@@ -536,6 +531,7 @@ const EffectCardPreview = ({
 const WorkbenchEffectsPanel = ({
   appearance,
   highlightOpacity,
+  isEffectAtDefault,
   onAppearanceChange,
   onHighlightOpacityChange,
   onToggleEffect,
@@ -543,6 +539,54 @@ const WorkbenchEffectsPanel = ({
   onPreviewEffect
 }: WorkbenchEffectsPanelProps) => {
   const [focusedEffect, setFocusedEffect] = React.useState<WorkbenchEffectId | null>(null);
+  const [expandedEffects, setExpandedEffects] = React.useState<Set<WorkbenchEffectId>>(
+    () => new Set()
+  );
+  const [expandedVisibleEffects, setExpandedVisibleEffects] = React.useState<
+    Set<WorkbenchEffectId>
+  >(() => new Set());
+  const [collapsingEffects, setCollapsingEffects] = React.useState<
+    Set<WorkbenchEffectId>
+  >(() => new Set());
+
+  const COLLAPSE_DURATION_MS = 200;
+
+  React.useEffect(() => {
+    if (collapsingEffects.size === 0) return;
+    const id = window.setTimeout(() => {
+      setCollapsingEffects(() => new Set());
+    }, COLLAPSE_DURATION_MS);
+    return () => window.clearTimeout(id);
+  }, [collapsingEffects]);
+
+  React.useEffect(() => {
+    const toAdd = effectOrder.filter(
+      (id) => expandedEffects.has(id) && !expandedVisibleEffects.has(id)
+    );
+    if (toAdd.length === 0) return;
+    const id = requestAnimationFrame(() => {
+      setExpandedVisibleEffects((prev) => {
+        const next = new Set(prev);
+        toAdd.forEach((e) => next.add(e));
+        return next;
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [expandedEffects, expandedVisibleEffects]);
+
+  const removeExpanded = (effectId: WorkbenchEffectId) => {
+    setExpandedEffects((prev) => {
+      const next = new Set(prev);
+      next.delete(effectId);
+      return next;
+    });
+    setExpandedVisibleEffects((prev) => {
+      const next = new Set(prev);
+      next.delete(effectId);
+      return next;
+    });
+  };
+
   const [draftShadowAngle, setDraftShadowAngle] = React.useState(
     DEFAULT_SHADOW_UI_ANGLE_DEGREES
   );
@@ -553,7 +597,7 @@ const WorkbenchEffectsPanel = ({
   const resolvedFocusedEffect =
     focusedEffect && isEffectActive(focusedEffect, appearance)
       ? focusedEffect
-      : activeEffects[0] ?? null;
+      : null;
   const shadowPolar = React.useMemo(
     () => shadowOffsetsToUiPolar(appearance.shadow_offset_x, appearance.shadow_offset_y),
     [appearance.shadow_offset_x, appearance.shadow_offset_y]
@@ -566,10 +610,6 @@ const WorkbenchEffectsPanel = ({
   const karaokeActive = isKaraokeActive(appearance);
 
   React.useEffect(() => {
-    if (!focusedEffect && activeEffects.length > 0) {
-      setFocusedEffect(activeEffects[0]);
-      return;
-    }
     if (focusedEffect && !isEffectActive(focusedEffect, appearance)) {
       setFocusedEffect(activeEffects[0] ?? null);
     }
@@ -588,21 +628,76 @@ const WorkbenchEffectsPanel = ({
   const handleCardClick = (effectId: WorkbenchEffectId) => {
     const isActive = isEffectActive(effectId, appearance);
     if (isActive) {
-      if (resolvedFocusedEffect !== effectId) {
-        setFocusedEffect(effectId);
-        return;
+      if (resolvedFocusedEffect === effectId) {
+        const remaining = effectOrder.filter(
+          (candidate) =>
+            candidate !== effectId && isEffectActive(candidate, appearance)
+        );
+        setFocusedEffect(remaining[0] ?? null);
       }
-      const remaining = effectOrder.filter(
-        (candidate) =>
-          candidate !== effectId && isEffectActive(candidate, appearance)
-      );
-      setFocusedEffect((current) =>
-        current === effectId ? remaining[0] ?? null : current
-      );
+      setCollapsingEffects((prev) => new Set(prev).add(effectId));
+      setExpandedVisibleEffects((prev) => {
+        const next = new Set(prev);
+        next.delete(effectId);
+        return next;
+      });
+      setExpandedEffects((prev) => {
+        const next = new Set(prev);
+        next.delete(effectId);
+        return next;
+      });
     } else {
-      setFocusedEffect(effectId);
+      setExpandedEffects((prev) => new Set(prev).add(effectId));
     }
     onToggleEffect(effectId);
+  };
+
+  const handleCheckboxChange = (effectId: WorkbenchEffectId) => (
+    checked: boolean | "indeterminate"
+  ) => {
+    if (checked === "indeterminate") return;
+    if (checked) {
+      onToggleEffect(effectId);
+      setExpandedEffects((prev) => new Set(prev).add(effectId));
+    } else {
+      if (resolvedFocusedEffect === effectId) {
+        const remaining = effectOrder.filter(
+          (candidate) =>
+            candidate !== effectId && isEffectActive(candidate, appearance)
+        );
+        setFocusedEffect(remaining[0] ?? null);
+      }
+      setCollapsingEffects((prev) => new Set(prev).add(effectId));
+      setExpandedVisibleEffects((prev) => {
+        const next = new Set(prev);
+        next.delete(effectId);
+        return next;
+      });
+      setExpandedEffects((prev) => {
+        const next = new Set(prev);
+        next.delete(effectId);
+        return next;
+      });
+      onToggleEffect(effectId);
+    }
+  };
+
+  const toggleExpanded = (effectId: WorkbenchEffectId) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedEffects((prev) => {
+      const next = new Set(prev);
+      if (next.has(effectId)) {
+        next.delete(effectId);
+        setExpandedVisibleEffects((v) => {
+          const vNext = new Set(v);
+          vNext.delete(effectId);
+          return vNext;
+        });
+      } else {
+        next.add(effectId);
+      }
+      return next;
+    });
   };
 
   const handleShadowAngleChange = (value: number) => {
@@ -619,43 +714,12 @@ const WorkbenchEffectsPanel = ({
     patch(shadowUiPolarToOffsets(nextDistance, displayedShadowAngle));
   };
 
-  const renderFocusedEffectDetail = () => {
-    if (!resolvedFocusedEffect) {
+  const renderEffectControls = (effectId: WorkbenchEffectId) => {
+    if (effectId === "outline") {
       return (
-        <div className="rounded-3xl border border-dashed border-border/80 bg-muted/15 px-4 py-8 text-center">
-          <p className="text-sm font-medium text-foreground">No active effects</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Click a card to layer an effect onto the subtitle.
-          </p>
-        </div>
-      );
-    }
-
-    if (resolvedFocusedEffect === "outline") {
-      return (
-        <section
-          className="space-y-4 rounded-3xl border border-border/80 bg-card/95 p-4 shadow-sm"
-          data-testid="workbench-effect-detail-outline"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Outline</p>
-              <p className="text-xs text-muted-foreground">
-                Tune the edge weight and color for cleaner readability.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              data-testid="workbench-effect-reset-outline"
-              onClick={() => onResetEffect("outline")}
-            >
-              Reset
-            </Button>
-          </div>
+        <div className="space-y-4" data-testid="workbench-effect-detail-outline">
           <SliderRow
-            label="Outline width"
+            label="Width"
             value={appearance.outline_width}
             min={0}
             max={10}
@@ -667,7 +731,7 @@ const WorkbenchEffectsPanel = ({
             }
           />
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Outline color</Label>
+            <Label className="text-xs text-muted-foreground">Color</Label>
             <ColorRow
               kind="outline"
               value={appearance.outline_color}
@@ -684,35 +748,15 @@ const WorkbenchEffectsPanel = ({
               }
             />
           </div>
-        </section>
+        </div>
       );
     }
 
-    if (resolvedFocusedEffect === "shadow") {
+    if (effectId === "shadow") {
       return (
-        <section
-          className="space-y-4 rounded-3xl border border-border/80 bg-card/95 p-4 shadow-sm"
-          data-testid="workbench-effect-detail-shadow"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Shadow</p>
-              <p className="text-xs text-muted-foreground">
-                Add lift with depth, softness, and direction.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              data-testid="workbench-effect-reset-shadow"
-              onClick={() => onResetEffect("shadow")}
-            >
-              Reset
-            </Button>
-          </div>
+        <div className="space-y-4" data-testid="workbench-effect-detail-shadow">
           <SliderRow
-            label="Shadow strength"
+            label="Strength"
             value={appearance.shadow_strength}
             min={0}
             max={10}
@@ -723,7 +767,7 @@ const WorkbenchEffectsPanel = ({
             }
           />
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Shadow color</Label>
+            <Label className="text-xs text-muted-foreground">Color</Label>
             <ColorRow
               kind="shadow"
               value={appearance.shadow_color}
@@ -733,7 +777,7 @@ const WorkbenchEffectsPanel = ({
             />
           </div>
           <OpacityRow
-            label="Shadow opacity"
+            label="Opacity"
             value={Math.round(appearance.shadow_opacity * 100)}
             min={0}
             max={100}
@@ -741,7 +785,7 @@ const WorkbenchEffectsPanel = ({
             onChange={(value) => patch({ shadow_opacity: value / 100 })}
           />
           <SliderRow
-            label="Shadow angle"
+            label="Angle"
             value={displayedShadowAngle}
             min={0}
             max={359}
@@ -750,7 +794,7 @@ const WorkbenchEffectsPanel = ({
             onChange={handleShadowAngleChange}
           />
           <SliderRow
-            label="Shadow distance"
+            label="Distance"
             value={displayedShadowDistance}
             min={0}
             max={15}
@@ -759,18 +803,18 @@ const WorkbenchEffectsPanel = ({
             onChange={handleShadowDistanceChange}
           />
           <SliderRow
-            label="Shadow blur"
+            label="Blur"
             value={appearance.shadow_blur}
             min={0}
             max={20}
             step={1}
             onChange={(value) => patch({ shadow_blur: value })}
           />
-        </section>
+        </div>
       );
     }
 
-    if (resolvedFocusedEffect === "background") {
+    if (effectId === "background") {
       const linePaddingTop =
         appearance.line_bg_padding_top ?? appearance.line_bg_padding ?? 8;
       const linePaddingRight =
@@ -789,27 +833,7 @@ const WorkbenchEffectsPanel = ({
         appearance.word_bg_padding_left ?? appearance.word_bg_padding ?? 8;
 
       return (
-        <section
-          className="space-y-4 rounded-3xl border border-border/80 bg-card/95 p-4 shadow-sm"
-          data-testid="workbench-effect-detail-background"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Background</p>
-              <p className="text-xs text-muted-foreground">
-                Wrap the full line or each highlighted word in a plate.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              data-testid="workbench-effect-reset-background"
-              onClick={() => onResetEffect("background")}
-            >
-              Reset
-            </Button>
-          </div>
+        <div className="space-y-4" data-testid="workbench-effect-detail-background">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Mode</Label>
             <RadioGroup
@@ -863,7 +887,7 @@ const WorkbenchEffectsPanel = ({
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">
-                  Background color
+                  Color
                 </Label>
                 <ColorRow
                   kind="background"
@@ -874,7 +898,7 @@ const WorkbenchEffectsPanel = ({
                 />
               </div>
               <OpacityRow
-                label="Background opacity"
+                label="Opacity"
                 value={Math.round(appearance.line_bg_opacity * 100)}
                 min={0}
                 max={100}
@@ -931,7 +955,7 @@ const WorkbenchEffectsPanel = ({
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">
-                  Background color
+                  Color
                 </Label>
                 <ColorRow
                   kind="background"
@@ -942,7 +966,7 @@ const WorkbenchEffectsPanel = ({
                 />
               </div>
               <OpacityRow
-                label="Background opacity"
+                label="Opacity"
                 value={Math.round(appearance.word_bg_opacity * 100)}
                 min={0}
                 max={100}
@@ -994,34 +1018,14 @@ const WorkbenchEffectsPanel = ({
               />
             </div>
           )}
-        </section>
+        </div>
       );
     }
 
     return (
-      <section
-        className="space-y-4 rounded-3xl border border-border/80 bg-card/95 p-4 shadow-sm"
-        data-testid="workbench-effect-detail-karaoke"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-foreground">Karaoke</p>
-            <p className="text-xs text-muted-foreground">
-              Animate the current word with color and opacity.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            data-testid="workbench-effect-reset-karaoke"
-            onClick={() => onResetEffect("karaoke")}
-          >
-            Reset
-          </Button>
-        </div>
+      <div className="space-y-4" data-testid="workbench-effect-detail-karaoke">
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Highlight color</Label>
+          <Label className="text-xs text-muted-foreground">Color</Label>
           <ColorRow
             kind="highlight"
             value={appearance.highlight_color}
@@ -1031,14 +1035,14 @@ const WorkbenchEffectsPanel = ({
           />
         </div>
         <OpacityRow
-          label="Highlight opacity"
+          label="Opacity"
           value={Math.round(highlightOpacity * 100)}
           min={0}
           max={100}
           inputTestId="workbench-effect-karaoke-opacity-input"
           onChange={(value) => onHighlightOpacityChange(value / 100)}
         />
-      </section>
+      </div>
     );
   };
 
@@ -1052,84 +1056,109 @@ const WorkbenchEffectsPanel = ({
         } as React.CSSProperties
       }
     >
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-foreground">Effects</p>
-            <p className="text-xs text-muted-foreground">
-              Browse looks, hover to preview, click to layer them together.
-            </p>
-          </div>
-          <div className="rounded-full border border-border/70 bg-muted/30 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Canva-like
-          </div>
-        </div>
-
+      <section className="space-y-3 pt-4">
         <div
-          className="grid grid-cols-2 gap-3"
+          className="flex flex-col gap-5"
           data-testid="workbench-effects-grid"
         >
           {effectOrder.map((effectId) => {
             const active = isEffectActive(effectId, appearance);
             const focused = resolvedFocusedEffect === effectId;
+            const expanded = expandedEffects.has(effectId);
+            const expandedVisible = expandedVisibleEffects.has(effectId);
+            const isCollapsing = collapsingEffects.has(effectId);
+            const showExpandable = active || isCollapsing;
+            const showReset = active && !isEffectAtDefault(effectId);
             return (
-              <Button
+              <div
                 key={effectId}
-                type="button"
-                variant="ghost"
                 data-testid={`workbench-effect-card-${effectId}`}
-                aria-pressed={active}
                 onClick={() => handleCardClick(effectId)}
                 onMouseEnter={() => onPreviewEffect(effectId)}
                 onMouseLeave={() => onPreviewEffect(null)}
                 className={cn(
-                  "group relative flex h-auto min-h-[8.5rem] flex-col items-start gap-3 rounded-[1.4rem] border px-3 py-3 text-left transition-all",
-                  active
-                    ? "border-primary/80 bg-[linear-gradient(180deg,hsl(var(--primary)/0.16),hsl(var(--primary)/0.06))] shadow-[0_0_0_1px_hsl(var(--primary)/0.24),0_14px_28px_-20px_hsl(var(--primary)/0.65)]"
-                    : "border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(255,255,255,0.7))] shadow-[0_16px_30px_-26px_rgba(15,23,42,0.45)] hover:border-primary/45 hover:bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.88))]",
-                  focused && active && "ring-2 ring-primary/35"
+                  "group relative flex min-h-0 flex-col items-stretch gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left shadow-[var(--shadow-card)] transition-colors cursor-pointer",
+                  active && "border-primary/60 bg-primary/5",
+                  !active && "hover:bg-muted/30",
+                  focused && active && "ring-2 ring-primary/30 ring-offset-2 ring-offset-card"
                 )}
               >
-                <div className="flex w-full items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {effectId === "karaoke" && (
-                      <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    )}
-                    <span className="text-sm font-semibold text-foreground">
-                      {effectLabels[effectId]}
-                    </span>
+                <div className="flex w-full items-center gap-2">
+                  <div
+                    className="flex shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Checkbox
+                      checked={active}
+                      onCheckedChange={handleCheckboxChange(effectId)}
+                      aria-label={`Toggle ${effectLabels[effectId]}`}
+                      data-testid={`workbench-effect-card-${effectId}-checkbox`}
+                    />
                   </div>
-                  <span
+                  <span className="text-sm font-semibold text-foreground">
+                    {effectLabels[effectId]}
+                  </span>
+                  <div className="ml-auto flex shrink-0 items-center gap-1">
+                    {showReset && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        data-testid={`workbench-effect-reset-${effectId}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onResetEffect(effectId);
+                        }}
+                      >
+                        Reset
+                      </Button>
+                    )}
+                    {active && (
+                      <button
+                        type="button"
+                        aria-label={expanded ? "Collapse" : "Expand"}
+                        className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={toggleExpanded(effectId)}
+                      >
+                        {expanded ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="min-h-[4.5rem]">
+                  <EffectCardPreview
+                    effectId={effectId}
+                    appearance={appearance}
+                    highlightOpacity={highlightOpacity}
+                  />
+                </div>
+                {showExpandable && (
+                  <div
                     className={cn(
-                      "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                      active
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted/50 text-muted-foreground"
+                      "grid transition-[grid-template-rows] duration-200 ease-out",
+                      expandedVisible ? "grid-rows-[1fr]" : "grid-rows-[0fr] -mt-3"
                     )}
                   >
-                    {active ? "On" : "Off"}
-                  </span>
-                </div>
-                <EffectCardPreview
-                  effectId={effectId}
-                  appearance={appearance}
-                  highlightOpacity={highlightOpacity}
-                />
-                <div className="space-y-0.5">
-                  <p className="text-[11px] leading-4 text-muted-foreground">
-                    {effectDescriptions[effectId]}
-                  </p>
-                  <p className="text-[11px] font-medium text-primary/80 opacity-0 transition-opacity group-hover:opacity-100">
-                    Hover preview
-                  </p>
-                </div>
-              </Button>
+                    <div className="min-h-0 overflow-hidden">
+                      <div
+                        className="space-y-4 border-t border-border pt-3"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {renderEffectControls(effectId)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
       </section>
-
-      {renderFocusedEffectDetail()}
     </div>
   );
 };

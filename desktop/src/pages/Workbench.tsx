@@ -358,6 +358,52 @@ const buildWorkbenchEffectResetChange = (
   };
 };
 
+const isWorkbenchEffectAtDefault = (
+  effectId: WorkbenchEffectId,
+  appearance: SubtitleStyleAppearance,
+  highlightOpacity: number
+): boolean => {
+  if (effectId === "outline") {
+    return (
+      appearance.outline_enabled === true &&
+      appearance.outline_width === DEFAULT_APPEARANCE.outline_width &&
+      appearance.outline_color === DEFAULT_APPEARANCE.outline_color
+    );
+  }
+  if (effectId === "shadow") {
+    const d = DEFAULT_EFFECT_SHADOW;
+    return (
+      appearance.shadow_enabled === true &&
+      appearance.shadow_strength === (d.shadow_strength as number) &&
+      appearance.shadow_offset_x === (d.shadow_offset_x as number) &&
+      appearance.shadow_offset_y === (d.shadow_offset_y as number) &&
+      appearance.shadow_color === (d.shadow_color as string) &&
+      appearance.shadow_opacity === (d.shadow_opacity as number) &&
+      appearance.shadow_blur === (d.shadow_blur as number)
+    );
+  }
+  if (effectId === "background") {
+    const d = DEFAULT_EFFECT_BACKGROUND;
+    return (
+      appearance.background_mode === (d.background_mode as SubtitleStyleAppearance["background_mode"]) &&
+      appearance.line_bg_color === d.line_bg_color &&
+      appearance.line_bg_opacity === d.line_bg_opacity &&
+      (appearance.line_bg_padding ?? 8) === (d.line_bg_padding ?? 8) &&
+      (appearance.line_bg_padding_top ?? 8) === (d.line_bg_padding_top ?? 8) &&
+      (appearance.line_bg_padding_right ?? 8) === (d.line_bg_padding_right ?? 8) &&
+      (appearance.line_bg_padding_bottom ?? 8) === (d.line_bg_padding_bottom ?? 8) &&
+      (appearance.line_bg_padding_left ?? 8) === (d.line_bg_padding_left ?? 8) &&
+      (appearance.line_bg_padding_linked ?? true) === (d.line_bg_padding_linked ?? true) &&
+      appearance.line_bg_radius === (d.line_bg_radius ?? 0)
+    );
+  }
+  return (
+    appearance.subtitle_mode === "word_highlight" &&
+    appearance.highlight_color === DEFAULT_APPEARANCE.highlight_color &&
+    highlightOpacity === DEFAULT_EFFECT_KARAOKE_HIGHLIGHT_OPACITY
+  );
+};
+
 export const NAMED_PRESET_IDS = [
   "classic_static",
   "bold_outline_static",
@@ -5242,6 +5288,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         <WorkbenchEffectsPanel
           appearance={appearance}
           highlightOpacity={highlightOpacity}
+          isEffectAtDefault={(effectId) =>
+            isWorkbenchEffectAtDefault(effectId, appearance, highlightOpacity)
+          }
           onAppearanceChange={handleAppearanceChange}
           onHighlightOpacityChange={handleHighlightOpacityChange}
           onToggleEffect={handleToggleEffect}
@@ -6443,13 +6492,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                 <div className="border-b border-border px-4 py-2">
                   <h2 className="text-sm font-semibold">Effects</h2>
                 </div>
-                <div
+                <ScrollArea
+                  type="always"
+                  className="min-h-0 flex-1"
                   data-testid="workbench-effects-scroll-panel"
-                  className="min-h-0 flex-1 overflow-x-visible overflow-y-auto py-3"
-                  style={{ scrollbarGutter: "stable" }}
                 >
-                  {effectsPanelContent}
-                </div>
+                  <div className="py-3">{effectsPanelContent}</div>
+                </ScrollArea>
               </section>
             )}
           </div>
@@ -6492,13 +6541,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                   Close
                 </Button>
               </div>
-              <div
+              <ScrollArea
+                type="always"
+                className="min-h-0 flex-1"
                 data-testid="workbench-effects-scroll-drawer"
-                className="min-h-0 flex-1 overflow-x-visible overflow-y-auto py-3"
-                style={{ scrollbarGutter: "stable" }}
               >
-                {effectsPanelContent}
-              </div>
+                <div className="py-3">{effectsPanelContent}</div>
+              </ScrollArea>
             </aside>
           )}
 
