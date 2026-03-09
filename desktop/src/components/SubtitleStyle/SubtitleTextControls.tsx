@@ -4,11 +4,53 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  Check,
   ChevronDown,
-  Droplets,
-  SlidersHorizontal,
+  RotateCcw,
   Sparkles
 } from "lucide-react";
+
+function FormatLetterSpacingIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="currentColor"
+    >
+      <path d="M6.7 21.3q-.3.3-.7.3t-.7-.3l-2.6-2.6q-.3-.3-.3-.7t.3-.7l2.6-2.6q.3-.3.7-.3t.7.3t.3.713t-.3.712L5.825 17h12.35l-.875-.875q-.275-.3-.287-.712t.287-.713t.7-.3t.7.3l2.6 2.6q.3.3.3.7t-.3.7l-2.6 2.6q-.3.3-.7.3t-.7-.3t-.3-.712t.3-.713l.875-.875H5.825l.875.875q.275.3.287.713T6.7 21.3m.65-9.5l3.425-9.2q.1-.275.338-.438T11.65 2h.7q.3 0 .538.163t.337.437l3.425 9.225q.15.425-.1.8t-.7.375q-.275 0-.512-.162T15 12.4l-.75-2.2H9.8L9 12.425q-.1.275-.325.425t-.5.15q-.475 0-.737-.387T7.35 11.8m3-3.2h3.3l-1.6-4.55h-.1z" />
+    </svg>
+  );
+}
+
+function OpacityIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 32 32"
+      className={className}
+      fill="currentColor"
+    >
+      <path d="M6 6h4v4H6zm4 4h4v4h-4zm4-4h4v4h-4zm8 0h4v4h-4zM6 14h4v4H6zm8 0h4v4h-4zm8 0h4v4h-4zM6 22h4v4H6zm8 0h4v4h-4zm8 0h4v4h-4zm-4-12h4v4h-4zm-8 8h4v4h-4zm8 0h4v4h-4z" />
+    </svg>
+  );
+}
+
+function ItalicSerifIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M12 5v14M7 5h10M7 19h10" />
+    </svg>
+  );
+}
 
 import { ColorRow } from "./ColorPopover";
 import { Button } from "@/components/ui/button";
@@ -16,19 +58,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { OpacitySlider } from "@/components/ui/opacity-slider";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger
 } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type {
   SubtitleFontMetadata,
@@ -36,6 +85,27 @@ import type {
 } from "@/settingsClient";
 
 type FontOption = SubtitleFontMetadata & { unavailable?: boolean };
+
+const TEXT_APPEARANCE_KEYS: (keyof SubtitleStyleAppearance)[] = [
+  "font_family",
+  "font_size",
+  "font_style",
+  "font_weight",
+  "text_align",
+  "line_spacing",
+  "text_color",
+  "text_opacity",
+  "letter_spacing"
+];
+
+function textAppearanceDiffers(
+  current: SubtitleStyleAppearance,
+  defaultText: Partial<SubtitleStyleAppearance>
+): boolean {
+  return TEXT_APPEARANCE_KEYS.some(
+    (k) => defaultText[k] !== undefined && current[k] !== defaultText[k]
+  );
+}
 
 type SubtitleTextControlsProps = {
   appearance: SubtitleStyleAppearance;
@@ -49,6 +119,7 @@ type SubtitleTextControlsProps = {
   showKaraokeControl?: boolean;
   className?: string;
   trailingContent?: React.ReactNode;
+  defaultTextAppearance?: Partial<SubtitleStyleAppearance>;
 };
 
 type SliderFieldProps = {
@@ -70,7 +141,7 @@ const LINE_SPACING_MIN = 0.8;
 const LINE_SPACING_MAX = 2;
 const LINE_SPACING_STEP = 0.05;
 const FONT_SIZE_PRESETS = [18, 24, 28, 32, 36, 44, 56, 72];
-const BOLD_WEIGHT_MIN = 600;
+const BOLD_WEIGHT_MIN = 700;
 
 export const isItalicFontStyle = (fontStyle: string) =>
   fontStyle === "italic" || fontStyle === "bold_italic";
@@ -99,7 +170,6 @@ const clampNumber = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
 const getBoldFallbackWeight = (weights: number[]) =>
-  weights.find((weight) => weight >= 700) ??
   weights.find((weight) => weight >= BOLD_WEIGHT_MIN) ??
   weights[weights.length - 1] ??
   DEFAULT_FONT_WEIGHT;
@@ -122,6 +192,21 @@ const getRegularFallbackWeight = (
   const regularWeights = weights.filter((weight) => weight < BOLD_WEIGHT_MIN);
   return regularWeights[regularWeights.length - 1] ?? weights[0] ?? defaultWeight;
 };
+
+const FONT_WEIGHT_LABELS: Record<number, string> = {
+  100: "Thin",
+  200: "Extra Light",
+  300: "Light",
+  400: "Regular",
+  500: "Medium",
+  600: "Semi Bold",
+  700: "Bold",
+  800: "Extra Bold",
+  900: "Black"
+};
+
+export const getFontWeightLabel = (weight: number): string =>
+  FONT_WEIGHT_LABELS[weight] ?? (Number.isInteger(weight) ? `Weight ${weight}` : String(weight));
 
 const sliderInputValue = (value: number, step: number) => {
   if (step >= 1) {
@@ -190,9 +275,9 @@ const SubtitleTextControls = ({
   mode = "panel",
   showKaraokeControl = true,
   className,
-  trailingContent
+  trailingContent,
+  defaultTextAppearance
 }: SubtitleTextControlsProps) => {
-  const [fontSearchQuery, setFontSearchQuery] = React.useState("");
   const [fontOpen, setFontOpen] = React.useState(false);
   const [sizeOpen, setSizeOpen] = React.useState(false);
   const [sizeInputValue, setSizeInputValue] = React.useState(
@@ -200,6 +285,7 @@ const SubtitleTextControls = ({
   );
   const [karaokeOpen, setKaraokeOpen] = React.useState(false);
   const lastRegularWeightRef = React.useRef<number | null>(null);
+  const lastBoldWeightRef = React.useRef<number | null>(null);
 
   const currentFontWeight = React.useMemo(
     () => normalizeFontWeight(appearance.font_weight),
@@ -235,15 +321,6 @@ const SubtitleTextControls = ({
         ) === index
     );
   }, [fonts, isCurrentFontUnavailable, selectedFont]);
-  const filteredFonts = React.useMemo(() => {
-    const normalizedQuery = fontSearchQuery.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return fontOptions;
-    }
-    return fontOptions.filter((font) =>
-      font.family.toLowerCase().includes(normalizedQuery)
-    );
-  }, [fontOptions, fontSearchQuery]);
   const weightOptions = React.useMemo(() => {
     const nextWeights = selectedFont.weights.includes(currentFontWeight)
       ? [...selectedFont.weights]
@@ -252,8 +329,15 @@ const SubtitleTextControls = ({
   }, [currentFontWeight, selectedFont.weights]);
   const isCurrentWeightListed = selectedFont.weights.includes(currentFontWeight);
   const fontControlsDisabled = fontsLoading || Boolean(fontsError);
-  const weightControlDisabled =
-    fontControlsDisabled || isCurrentFontUnavailable || weightOptions.length <= 1;
+  const getWeightOptionsForFont = (font: FontOption) => {
+    const isSelected = font.family === selectedFont.family;
+    if (isSelected && !font.weights.includes(currentFontWeight)) {
+      return Array.from(
+        new Set([currentFontWeight, ...font.weights])
+      ).sort((a, b) => a - b);
+    }
+    return [...font.weights].sort((a, b) => a - b);
+  };
   const boldActive = currentFontWeight >= BOLD_WEIGHT_MIN;
   const hasSupportedBoldWeight =
     selectedFont.weights.some((weight) => weight >= BOLD_WEIGHT_MIN) &&
@@ -277,7 +361,7 @@ const SubtitleTextControls = ({
         ? null
         : italicActive
           ? "Italic is preserved from an older style. You can turn it off, but this font can't be re-enabled."
-          : "Italic isn't available for this font.";
+          : "Italic isn't available for this font";
   const AlignmentIcon = getAlignmentIcon(appearance.text_align);
   const isWordHighlight = appearance.subtitle_mode === "word_highlight";
   const helperTextClass =
@@ -290,6 +374,8 @@ const SubtitleTextControls = ({
   React.useEffect(() => {
     if (!boldActive) {
       lastRegularWeightRef.current = currentFontWeight;
+    } else {
+      lastBoldWeightRef.current = currentFontWeight;
     }
   }, [boldActive, currentFontWeight]);
 
@@ -316,28 +402,22 @@ const SubtitleTextControls = ({
     commitFontSize(String(appearance.font_size + delta));
   };
 
-  const handleFontSelect = (font: SubtitleFontMetadata) => {
-    const nextFontWeight = font.weights.includes(currentFontWeight)
-      ? currentFontWeight
-      : font.default_weight;
+  const handleFontAndWeightSelect = (
+    font: SubtitleFontMetadata,
+    weight: number
+  ) => {
     patch({
       font_family: font.family,
-      font_weight: nextFontWeight,
+      font_weight: weight,
       font_style:
         italicActive && font.italic_supported ? "italic" : "regular"
     });
-    if (nextFontWeight < BOLD_WEIGHT_MIN) {
-      lastRegularWeightRef.current = nextFontWeight;
+    if (weight < BOLD_WEIGHT_MIN) {
+      lastRegularWeightRef.current = weight;
+    } else {
+      lastBoldWeightRef.current = weight;
     }
     setFontOpen(false);
-    setFontSearchQuery("");
-  };
-
-  const handleWeightChange = (value: string) => {
-    const nextWeight = Number(value);
-    if (!Number.isNaN(nextWeight)) {
-      patch({ font_weight: nextWeight });
-    }
   };
 
   const handleBoldToggle = () => {
@@ -358,31 +438,40 @@ const SubtitleTextControls = ({
       return;
     }
     lastRegularWeightRef.current = currentFontWeight;
-    patch({ font_weight: getBoldFallbackWeight(selectedFont.weights) });
+    const nextBoldWeight =
+      lastBoldWeightRef.current != null &&
+      selectedFont.weights.includes(lastBoldWeightRef.current)
+        ? lastBoldWeightRef.current
+        : getBoldFallbackWeight(selectedFont.weights);
+    patch({ font_weight: nextBoldWeight });
   };
 
-  const toolbarShellClass =
-    mode === "toolbar"
-      ? "flex max-w-[min(90vw,48rem)] flex-wrap items-center justify-center gap-1 rounded-full border border-border/70 bg-background/90 p-1 shadow-lg backdrop-blur-sm"
-      : "flex flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 p-2";
+  const isToolbar = mode === "toolbar";
+  const hasTextChanges =
+    isToolbar &&
+    defaultTextAppearance != null &&
+    textAppearanceDiffers(appearance, defaultTextAppearance);
+  const toolbarShellClass = isToolbar
+    ? "flex max-w-[min(90vw,48rem)] flex-nowrap items-center justify-center gap-1.5 rounded-2xl border border-border bg-background/95 px-2 py-1.5 shadow-md backdrop-blur-sm"
+    : "flex flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 p-2";
+  const toolbarRound = isToolbar ? "rounded-lg" : "rounded-full";
 
   return (
     <div className={cn("space-y-1.5", className)}>
       <div className={toolbarShellClass}>
-        <Popover
+        <DropdownMenu
           open={fontOpen}
-          onOpenChange={(open) => {
-            setFontOpen(open);
-            if (!open) {
-              setFontSearchQuery("");
-            }
-          }}
+          onOpenChange={setFontOpen}
         >
-          <PopoverTrigger asChild>
+          <DropdownMenuTrigger asChild>
             <Button
               type="button"
               variant="outline"
-              className="h-8 min-w-[10rem] max-w-[14rem] justify-between gap-2 rounded-full px-3 text-xs font-normal"
+              className={cn(
+                "h-8 justify-between gap-2 px-3 text-xs font-normal",
+                toolbarRound,
+                isToolbar ? "min-w-0 max-w-40 shrink" : "min-w-40 max-w-56"
+              )}
               disabled={fontControlsDisabled}
               aria-label="Font family"
               data-testid="subtitle-style-font-trigger"
@@ -406,20 +495,14 @@ const SubtitleTextControls = ({
               </span>
               <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
             </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            className="w-[min(22rem,var(--radix-popover-trigger-width))] p-0"
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            className="min-w-[14rem] w-[min(22rem,var(--radix-dropdown-menu-trigger-width))] p-0"
             align="start"
+            onCloseAutoFocus={(e) => e.preventDefault()}
           >
-            <Input
-              placeholder="Search fonts..."
-              className="h-8 rounded-none border-0 border-b focus-visible:ring-0"
-              value={fontSearchQuery}
-              onChange={(event) => setFontSearchQuery(event.target.value)}
-            />
-            <ScrollArea className="h-[200px]">
-              <div className="p-1">
-                {filteredFonts.map((font) =>
+            <div className="max-h-[min(70vh,22rem)] overflow-y-auto p-1">
+              {fontOptions.map((font) =>
                   font.unavailable ? (
                     <div
                       key={font.family}
@@ -430,59 +513,91 @@ const SubtitleTextControls = ({
                         Unavailable
                       </span>
                     </div>
-                  ) : (
-                    <button
+                  ) : font.weights.length <= 1 ? (
+                    <DropdownMenuItem
                       key={font.family}
-                      type="button"
-                      data-interactive="true"
-                      className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none"
+                      onSelect={() =>
+                        handleFontAndWeightSelect(
+                          font,
+                          font.weights[0] ?? font.default_weight
+                        )
+                      }
+                      className="relative flex cursor-pointer items-center rounded-sm py-1.5 pl-8 pr-2 text-xs"
                       style={{ fontFamily: font.family }}
-                      onClick={() => handleFontSelect(font)}
                     >
-                      <span className="truncate">{font.family}</span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground">
-                        {font.default_weight}
+                      <span className="absolute left-2 flex size-4 items-center justify-center">
+                        {font.family === selectedFont.family && (
+                          <Check className="size-4" />
+                        )}
                       </span>
-                    </button>
+                      <span className="truncate">{font.family}</span>
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuSub key={font.family}>
+                      <DropdownMenuSubTrigger
+                        className="relative flex cursor-pointer items-center rounded-sm py-1.5 pl-8 pr-2 text-xs"
+                        style={{ fontFamily: font.family }}
+                      >
+                        <span className="absolute left-2 flex size-4 items-center justify-center">
+                          {font.family === selectedFont.family && (
+                            <Check className="size-4" />
+                          )}
+                        </span>
+                        <span
+                          className="min-w-0 flex-1 truncate"
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const regularWeight = getRegularFallbackWeight(
+                              font.weights,
+                              font.default_weight,
+                              lastRegularWeightRef.current
+                            );
+                            handleFontAndWeightSelect(font, regularWeight);
+                            setFontOpen(false);
+                          }}
+                        >
+                          {font.family}
+                        </span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="max-h-[20rem]">
+                        {getWeightOptionsForFont(font).map((weight) => {
+                          const isCurrent =
+                            font.family === selectedFont.family &&
+                            weight === currentFontWeight;
+                          const showCurrent =
+                            isCurrent && !font.weights.includes(currentFontWeight);
+                          return (
+                            <DropdownMenuItem
+                              key={weight}
+                              onSelect={() =>
+                                handleFontAndWeightSelect(font, weight)
+                              }
+                              className="relative flex cursor-pointer items-center rounded-sm py-1.5 pl-8 pr-2 text-xs"
+                            >
+                              <span className="absolute left-2 flex size-4 items-center justify-center">
+                                {(isCurrent || showCurrent) && (
+                                  <Check className="size-4" />
+                                )}
+                              </span>
+                              {getFontWeightLabel(weight)}
+                              {showCurrent ? " (Current)" : ""}
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   )
                 )}
-                {filteredFonts.length === 0 && (
-                  <div className="py-2 text-center text-xs text-muted-foreground">
-                    No matches
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-          </PopoverContent>
-        </Popover>
-
-        <Select
-          value={String(currentFontWeight)}
-          onValueChange={handleWeightChange}
-          disabled={weightControlDisabled}
-        >
-          <SelectTrigger
-            className="h-8 min-w-[4.75rem] rounded-full px-3 text-xs"
-            aria-label="Weight"
-            data-testid="subtitle-style-font-weight"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {weightOptions.map((weight) => (
-              <SelectItem key={weight} value={String(weight)}>
-                {weight === currentFontWeight && !isCurrentWeightListed
-                  ? `${weight} (Current)`
-                  : String(weight)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <Button
           type="button"
           variant={boldActive ? "secondary" : "outline"}
-          className="h-8 min-w-8 rounded-full px-2 text-xs font-semibold"
+          className={cn("h-8 min-w-8 px-2 text-xs font-semibold", toolbarRound)}
           aria-label="Bold"
           aria-pressed={boldActive}
           data-testid="subtitle-style-bold"
@@ -492,22 +607,53 @@ const SubtitleTextControls = ({
           B
         </Button>
 
-        <Button
-          type="button"
-          variant={italicActive ? "secondary" : "outline"}
-          className="h-8 min-w-8 rounded-full px-2 text-xs italic"
-          aria-label="Italic"
-          aria-pressed={italicActive}
-          data-testid="subtitle-style-italic"
-          disabled={italicControlDisabled}
-          onClick={() =>
-            patch({ font_style: italicActive ? "regular" : "italic" })
-          }
-        >
-          I
-        </Button>
+        {italicControlDisabled && italicHelperText ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    type="button"
+                    variant={italicActive ? "secondary" : "outline"}
+                    className={cn("h-8 min-w-8 px-2 text-xs", toolbarRound)}
+                    aria-label="Italic"
+                    aria-pressed={italicActive}
+                    data-testid="subtitle-style-italic"
+                    disabled={italicControlDisabled}
+                    onClick={() =>
+                      patch({ font_style: italicActive ? "regular" : "italic" })
+                    }
+                  >
+                    <ItalicSerifIcon className="h-4 w-4" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{italicHelperText}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <Button
+            type="button"
+            variant={italicActive ? "secondary" : "outline"}
+            className={cn("h-8 min-w-8 px-2 text-xs", toolbarRound)}
+            aria-label="Italic"
+            aria-pressed={italicActive}
+            data-testid="subtitle-style-italic"
+            disabled={italicControlDisabled}
+            onClick={() =>
+              patch({ font_style: italicActive ? "regular" : "italic" })
+            }
+          >
+            <ItalicSerifIcon className="h-4 w-4" />
+          </Button>
+        )}
 
-        <div className="flex items-center overflow-hidden rounded-full border border-input bg-background">
+        <div
+          className={cn(
+            "flex items-center overflow-hidden border border-input bg-background",
+            toolbarRound
+          )}
+        >
           <Button
             type="button"
             variant="ghost"
@@ -519,7 +665,7 @@ const SubtitleTextControls = ({
           >
             <span className="text-base leading-none">-</span>
           </Button>
-          <Popover
+          <DropdownMenu
             open={sizeOpen}
             onOpenChange={(open) => {
               setSizeOpen(open);
@@ -528,63 +674,47 @@ const SubtitleTextControls = ({
               }
             }}
           >
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                className="h-8 min-w-[3.5rem] rounded-none border-x px-3 text-xs"
+            <DropdownMenuTrigger asChild>
+              <Input
+                type="number"
+                min={FONT_SIZE_MIN}
+                max={FONT_SIZE_MAX}
+                value={sizeInputValue}
                 aria-label="Font size"
                 data-testid="subtitle-style-font-size-trigger"
-              >
-                {clampFontSize(appearance.font_size)}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-56 space-y-3" align="center">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Font size</Label>
-                <Input
-                  type="number"
-                  min={FONT_SIZE_MIN}
-                  max={FONT_SIZE_MAX}
-                  step={1}
-                  value={sizeInputValue}
-                  data-testid="subtitle-style-font-size-input"
-                  onChange={(event) => setSizeInputValue(event.target.value)}
-                  onBlur={() => commitFontSize(sizeInputValue)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      commitFontSize(sizeInputValue);
-                      setSizeOpen(false);
-                    }
+                className="h-8 min-w-14 max-w-16 rounded-none border-x border-input bg-background px-2 text-center text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                onChange={(e) => setSizeInputValue(e.target.value)}
+                onBlur={() => commitFontSize(sizeInputValue)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitFontSize(sizeInputValue);
+                    setSizeOpen(false);
+                  }
+                }}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              className="min-w-0 w-16 p-1"
+              align="center"
+              onCloseAutoFocus={(e) => e.preventDefault()}
+            >
+              {FONT_SIZE_PRESETS.map((preset) => (
+                <DropdownMenuItem
+                  key={preset}
+                  className={cn(
+                    "cursor-pointer justify-center text-xs",
+                    clampFontSize(appearance.font_size) === preset && "bg-accent"
+                  )}
+                  onSelect={() => {
+                    commitFontSize(String(preset));
+                    setSizeOpen(false);
                   }}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Presets</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {FONT_SIZE_PRESETS.map((preset) => (
-                    <Button
-                      key={preset}
-                      type="button"
-                      size="sm"
-                      variant={
-                        clampFontSize(appearance.font_size) === preset
-                          ? "secondary"
-                          : "outline"
-                      }
-                      className="h-7 rounded-full px-2 text-xs"
-                      onClick={() => {
-                        commitFontSize(String(preset));
-                        setSizeOpen(false);
-                      }}
-                    >
-                      {preset}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+                >
+                  {preset}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             type="button"
             variant="ghost"
@@ -604,12 +734,12 @@ const SubtitleTextControls = ({
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8 rounded-full"
+              className={cn("h-8 w-8", toolbarRound)}
               aria-label="Text color"
               data-testid="subtitle-style-text-color"
             >
               <span
-                className="h-4 w-4 rounded-full border border-border"
+                className={cn("h-4 w-4 border border-border", isToolbar ? "rounded-md" : "rounded-full")}
                 style={{
                   backgroundColor: appearance.text_color,
                   opacity: appearance.text_opacity
@@ -637,7 +767,7 @@ const SubtitleTextControls = ({
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8 rounded-full"
+              className={cn("h-8 w-8", toolbarRound)}
               aria-label="Text alignment"
               data-testid="subtitle-style-alignment"
             >
@@ -676,11 +806,11 @@ const SubtitleTextControls = ({
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8 rounded-full"
+              className={cn("h-8 w-8", toolbarRound)}
               aria-label="Spacing"
               data-testid="subtitle-style-spacing"
             >
-              <SlidersHorizontal className="h-4 w-4" />
+              <FormatLetterSpacingIcon className="h-4 w-4" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-72 space-y-3" align="center">
@@ -709,11 +839,11 @@ const SubtitleTextControls = ({
               type="button"
               variant="outline"
               size="icon"
-              className="h-8 w-8 rounded-full"
+              className={cn("h-8 w-8", toolbarRound)}
               aria-label="Opacity"
               data-testid="subtitle-style-opacity"
             >
-              <Droplets className="h-4 w-4" />
+              <OpacityIcon className="h-4 w-4" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-72 space-y-3" align="center">
@@ -762,7 +892,7 @@ const SubtitleTextControls = ({
                 type="button"
                 variant={isWordHighlight ? "secondary" : "outline"}
                 size="icon"
-                className="h-8 w-8 rounded-full"
+                className={cn("h-8 w-8", toolbarRound)}
                 aria-label="Karaoke"
                 aria-pressed={isWordHighlight}
                 data-testid="subtitle-style-karaoke"
@@ -798,9 +928,31 @@ const SubtitleTextControls = ({
         )}
 
         {trailingContent}
+        {hasTextChanges && defaultTextAppearance && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={cn("ml-auto h-8 gap-1.5 px-2 text-xs", toolbarRound)}
+            aria-label="Reset text to default"
+            data-testid="subtitle-style-reset-text"
+            onClick={() => {
+              const reset: Partial<SubtitleStyleAppearance> = {};
+              for (const k of TEXT_APPEARANCE_KEYS) {
+                if (defaultTextAppearance[k] !== undefined) {
+                  (reset as Record<string, unknown>)[k] = defaultTextAppearance[k];
+                }
+              }
+              onAppearanceChange(reset);
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset
+          </Button>
+        )}
       </div>
 
-      {italicHelperText && (
+      {italicHelperText && italicActive && (
         <p className={cn(helperTextClass, "text-muted-foreground")}>
           {italicHelperText}
         </p>

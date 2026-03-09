@@ -5,8 +5,7 @@ import {
   Play,
   Plus,
   Volume2,
-  VolumeX,
-  X
+  VolumeX
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -465,7 +464,6 @@ const SUBTITLE_EDIT_AUTOSAVE_DELAY_MS = 500;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const RTL_CHAR_PATTERN = /[\u0590-\u08FF]/;
 const MAX_OUTLINE_SHADOW_RADIUS = 10;
-const SUBTITLE_EDITOR_CONTROLS_GAP_PX = 8;
 const SUBTITLE_CONTROLS_COLLISION_GAP_PX = 8;
 const SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX = 0.5;
 const QT_POINT_TO_CSS_PX = 96 / 72;
@@ -973,7 +971,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const activeSubtitleSurfaceRef = React.useRef<HTMLDivElement | null>(null);
   const subtitleEditorControlsRef = React.useRef<HTMLDivElement | null>(null);
   const videoControlsBarRef = React.useRef<HTMLDivElement | null>(null);
+  const videoProgressRef = React.useRef<HTMLDivElement | null>(null);
   const videoWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const videoProgressInteractionRef = React.useRef(false);
   const shouldResumePlaybackRef = React.useRef(false);
   const resumePlaybackIfNeededRef = React.useRef<() => void>(() => {});
   const editHistoryRef = React.useRef<WorkbenchUndoEntry[]>([]);
@@ -1037,8 +1037,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [editingText, setEditingText] = React.useState("");
   const editingTextRef = React.useRef(editingText);
   editingTextRef.current = editingText;
-  const [subtitleEditorControlsPlacement, setSubtitleEditorControlsPlacement] =
-    React.useState<"above" | "below">("below");
   const [isSavingCue, setIsSavingCue] = React.useState(false);
   const isSavingCueRef = React.useRef(false);
   const subtitleAutosaveTimerRef = React.useRef<BrowserTimeout | null>(null);
@@ -3307,13 +3305,20 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setHoveredEffectPreview(null);
     }
   }, [hasSubtitles, hoveredEffectPreview, isNarrow, rightOverlayOpen]);
+  const editingCue = React.useMemo(
+    () => (editingCueId ? cues.find((cue) => cue.id === editingCueId) ?? null : null),
+    [cues, editingCueId]
+  );
   const activeCue = React.useMemo(() => {
+    if (editingCue) {
+      return editingCue;
+    }
     return (
       cues.find(
         (cue) => cue.startSeconds <= currentTimeSeconds && currentTimeSeconds <= cue.endSeconds
       ) ?? null
     );
-  }, [cues, currentTimeSeconds]);
+  }, [cues, currentTimeSeconds, editingCue]);
   const activeCueOrdinal = React.useMemo(() => {
     if (!activeCue) {
       return null;
@@ -3969,38 +3974,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     subtitleEditorTextStyle,
     subtitlePreviewTextStyle
   ]);
-
-  React.useLayoutEffect(() => {
-    if (!isEditingActiveCue) {
-      setSubtitleEditorControlsPlacement("below");
-      return;
-    }
-    const positionLayer = subtitleOverlayPositionLayerRef.current;
-    const textarea = activeSubtitleRef.current;
-    const editorControls = subtitleEditorControlsRef.current;
-    const controlsBar = shouldShowVideoControls ? videoControlsBarRef.current : null;
-    const editorSurface = textarea?.parentElement;
-    if (!positionLayer || !textarea || !editorControls) {
-      return;
-    }
-    const positionLayerRect = positionLayer.getBoundingClientRect();
-    const editorRect =
-      editorSurface instanceof HTMLElement
-        ? editorSurface.getBoundingClientRect()
-        : textarea.getBoundingClientRect();
-    const editorControlsHeight = editorControls.offsetHeight;
-    const requiredBelowSpace = editorControlsHeight + SUBTITLE_EDITOR_CONTROLS_GAP_PX;
-    const layerBottom = positionLayerRect.bottom;
-    const bottomLimit =
-      controlsBar
-        ? Math.min(layerBottom, controlsBar.getBoundingClientRect().top)
-        : layerBottom;
-    const spaceBelow = bottomLimit - editorRect.bottom;
-    const nextPlacement = spaceBelow < requiredBelowSpace ? "above" : "below";
-    setSubtitleEditorControlsPlacement((previous) =>
-      previous === nextPlacement ? previous : nextPlacement
-    );
-  }, [displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, effectiveAppearance, isEditingActiveCue, shouldShowVideoControls, subtitleControlsPushPx, subtitleEditorTextStyle]);
 
   React.useEffect(() => {
     if (hasSubtitles) {
@@ -4906,6 +4879,48 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, []);
 
   const progressBarTrackRef = React.useRef<HTMLDivElement | null>(null);
+  const clearVideoProgressInteraction = React.useCallback(() => {
+    videoProgressInteractionRef.current = false;
+  }, []);
+  const isPointWithinVideoProgress = React.useCallback((clientX: number, clientY: number) => {
+    const progressRoot = videoProgressRef.current;
+    if (!progressRoot) return false;
+    const rect = progressRoot.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }, []);
+  const isVideoProgressInteractionEvent = React.useCallback(
+    (event: MouseEvent) => {
+      if (isPointWithinVideoProgress(event.clientX, event.clientY)) {
+        return true;
+      }
+      const progressRoot = videoProgressRef.current;
+      if (!progressRoot) return false;
+      const target = event.target;
+      if (target instanceof Node && progressRoot.contains(target)) {
+        return true;
+      }
+      return typeof event.composedPath === "function" && event.composedPath().includes(progressRoot);
+    },
+    [isPointWithinVideoProgress]
+  );
+  React.useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isPointWithinVideoProgress(event.clientX, event.clientY)) {
+        videoProgressInteractionRef.current = true;
+        return;
+      }
+      if (videoProgressInteractionRef.current) {
+        clearVideoProgressInteraction();
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("blur", clearVideoProgressInteraction);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("blur", clearVideoProgressInteraction);
+      clearVideoProgressInteraction();
+    };
+  }, [clearVideoProgressInteraction, isPointWithinVideoProgress]);
   const handleProgressBarPointer = React.useCallback(
     (clientX: number) => {
       const el = videoRef.current;
@@ -4929,6 +4944,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const handleProgressBarMouseDown = React.useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       event.preventDefault();
+      videoProgressInteractionRef.current = true;
       handleProgressBarPointer(event.clientX);
       const onMove = (e: MouseEvent) => handleProgressBarPointer(e.clientX);
       const onUp = () => {
@@ -5254,6 +5270,35 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [closeOverlays, flushAndExitEditMode, handleUndoEdit, isEditingCue]);
+
+  React.useEffect(() => {
+    if (!isEditingActiveCue) return;
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (isVideoProgressInteractionEvent(event) || videoProgressInteractionRef.current) {
+        clearVideoProgressInteraction();
+        return;
+      }
+      const target = event.target as Node | null;
+      if (!target || !(target instanceof Element)) return;
+      if (target.closest('[data-testid^="workbench-effect-card-"]')) return;
+      if (subtitleEditorControlsRef.current?.contains(target)) return;
+      const editorSurface = document.querySelector('[data-testid="workbench-subtitle-editor-surface"]');
+      if (editorSurface?.contains(target)) return;
+      if (target.closest("[data-radix-popper-content-wrapper]")) return;
+      void flushAndExitEditMode();
+      if (videoWrapperRef.current?.contains(target)) {
+        const el = videoRef.current;
+        if (el?.paused) el.play().catch(() => {});
+      }
+    };
+    document.addEventListener("click", handleDocumentClick, true);
+    return () => document.removeEventListener("click", handleDocumentClick, true);
+  }, [
+    clearVideoProgressInteraction,
+    flushAndExitEditMode,
+    isEditingActiveCue,
+    isVideoProgressInteractionEvent
+  ]);
 
   const handleEditorKeyDown = async (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
@@ -5953,15 +5998,24 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       aria-hidden
                                       className="block max-w-full whitespace-pre-wrap text-white"
                                       dir={subtitleDirection}
-                                      style={{
-                                        ...subtitleEditorTextStyle,
-                                        fontFamily: "inherit",
-                                        visibility: "hidden",
-                                        margin: 0,
-                                        padding: 0,
-                                        border: "none",
-                                        boxSizing: "content-box"
-                                      }}
+                                      style={(() => {
+                                        const {
+                                          paddingTop: _pt,
+                                          paddingRight: _pr,
+                                          paddingBottom: _pb,
+                                          paddingLeft: _pl,
+                                          ...restStyle
+                                        } = subtitleEditorTextStyle;
+                                        return {
+                                          ...restStyle,
+                                          fontFamily: "inherit",
+                                          visibility: "hidden",
+                                          margin: 0,
+                                          padding: 0,
+                                          border: "none",
+                                          boxSizing: "content-box"
+                                        };
+                                      })()}
                                     >
                                       {editingText || "\u00A0"}
                                     </span>
@@ -6150,12 +6204,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                               <div
                                 ref={subtitleEditorControlsRef}
                                 data-testid="workbench-subtitle-editor-controls"
-                                className={cn(
-                                  "absolute z-10",
-                                  subtitleEditorControlsPlacement === "below"
-                                    ? "left-1/2 top-full mt-2 -translate-x-1/2"
-                                    : "left-1/2 bottom-full mb-2 -translate-x-1/2"
-                                )}
+                                className="absolute z-10 left-1/2 bottom-full mb-2 -translate-x-1/2"
                               >
                                 <SubtitleTextControls
                                   mode="toolbar"
@@ -6169,21 +6218,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                     handleHighlightOpacityChange
                                   }
                                   showKaraokeControl={false}
-                                  trailingContent={
-                                    <Button
-                                      type="button"
-                                      variant="secondary"
-                                      size="icon"
-                                      className="h-8 w-8 rounded-full border border-border/70 bg-background/90"
-                                      aria-label="Close subtitle edit"
-                                      title="Close"
-                                      data-testid="workbench-subtitle-close"
-                                      onClick={handleCloseEdit}
-                                      disabled={isSavingCue || isExporting}
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  }
+                                  defaultTextAppearance={{
+                                    font_family: DEFAULT_APPEARANCE.font_family,
+                                    font_size: DEFAULT_APPEARANCE.font_size,
+                                    font_style: DEFAULT_APPEARANCE.font_style,
+                                    font_weight: DEFAULT_APPEARANCE.font_weight,
+                                    text_align: DEFAULT_APPEARANCE.text_align,
+                                    line_spacing: DEFAULT_APPEARANCE.line_spacing,
+                                    text_color: DEFAULT_APPEARANCE.text_color,
+                                    text_opacity: DEFAULT_APPEARANCE.text_opacity,
+                                    letter_spacing: DEFAULT_APPEARANCE.letter_spacing
+                                  }}
                                 />
                               </div>
                             )}
@@ -6266,11 +6311,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                             </TooltipContent>
                           </Tooltip>
                           <div
+                            ref={videoProgressRef}
                             className="relative flex w-full cursor-pointer items-center justify-center py-4"
                             onClick={handleProgressBarClick}
                             onMouseDown={handleProgressBarMouseDown}
                             onMouseMove={handleProgressBarMouseMove}
                             onMouseLeave={handleProgressBarMouseLeave}
+                            data-testid="workbench-video-progress"
                           >
                             <div
                               ref={progressBarTrackRef}
@@ -6281,7 +6328,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                               aria-valuemin={0}
                               aria-valuemax={durationSeconds}
                               aria-label="Video progress"
-                              data-testid="workbench-video-progress"
                             >
                             {durationSeconds > 0 && progressHoverSeconds !== null && (
                               <div

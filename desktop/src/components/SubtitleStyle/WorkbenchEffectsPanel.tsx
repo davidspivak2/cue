@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { ChevronDown, ChevronUp, Link, Unlink } from "lucide-react";
+import { ChevronDown, Link, Unlink } from "lucide-react";
 
 import { ColorRow } from "./ColorPopover";
 import {
@@ -18,6 +18,7 @@ import { OpacitySlider } from "@/components/ui/opacity-slider";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
+import { useTheme } from "next-themes";
 import type { SubtitleStyleAppearance } from "@/settingsClient";
 
 export type WorkbenchEffectId = "outline" | "shadow" | "background" | "karaoke";
@@ -88,6 +89,64 @@ const SHADOW_DEFAULTS: Partial<SubtitleStyleAppearance> = {
   shadow_blur: 6
 };
 
+const STATIC_CARD_PREVIEW_HIGHLIGHT_OPACITY = 0.8;
+
+const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
+  font_family: "Heebo",
+  font_size: 28,
+  font_style: "regular",
+  font_weight: 400,
+  text_align: "center",
+  line_spacing: 1.0,
+  text_color: "#FFFFFF",
+  text_opacity: 1.0,
+  letter_spacing: 0,
+  outline_enabled: true,
+  outline_width: 2,
+  outline_color: "#000000",
+  shadow_enabled: true,
+  shadow_strength: 2,
+  shadow_offset_x: 0,
+  shadow_offset_y: 2,
+  shadow_color: "#000000",
+  shadow_opacity: 0.3,
+  shadow_blur: 6,
+  background_mode: "line",
+  line_bg_color: "#000000",
+  line_bg_opacity: 0.7,
+  line_bg_padding: 8,
+  line_bg_padding_top: 8,
+  line_bg_padding_right: 8,
+  line_bg_padding_bottom: 8,
+  line_bg_padding_left: 8,
+  line_bg_padding_linked: true,
+  line_bg_radius: 0,
+  word_bg_color: "#000000",
+  word_bg_opacity: 0.4,
+  word_bg_padding: 8,
+  word_bg_padding_top: 8,
+  word_bg_padding_right: 8,
+  word_bg_padding_bottom: 8,
+  word_bg_padding_left: 8,
+  word_bg_padding_linked: true,
+  word_bg_radius: 0,
+  vertical_anchor: "bottom",
+  vertical_offset: 28,
+  position_x: 0.5,
+  position_y: 0.92,
+  subtitle_mode: "word_highlight",
+  highlight_color: "#FFD400"
+};
+
+const buildStaticCardPreviewPayload = (
+  effectId: WorkbenchEffectId
+): CardPreviewPayload =>
+  buildCardPreviewPayload(
+    effectId,
+    STATIC_CARD_PREVIEW_APPEARANCE,
+    STATIC_CARD_PREVIEW_HIGHLIGHT_OPACITY
+  );
+
 const effectOrder: WorkbenchEffectId[] = [
   "outline",
   "shadow",
@@ -99,7 +158,7 @@ const effectLabels: Record<WorkbenchEffectId, string> = {
   outline: "Outline",
   shadow: "Shadow",
   background: "Background",
-  karaoke: "Karaoke (spoken word highlight)"
+  karaoke: "Karaoke"
 };
 
 const clampPadding = (value: number) =>
@@ -153,6 +212,20 @@ const colorWithOpacity = (hex: string, opacity: number) => {
   const b = Number.parseInt(sanitized.slice(5, 7), 16);
   return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(opacity, 1))})`;
 };
+
+const hexToLuminance = (hex: string) => {
+  const sanitized = /^#[0-9a-f]{6}$/i.test(hex) ? hex : "#000000";
+  const r = Number.parseInt(sanitized.slice(1, 3), 16) / 255;
+  const g = Number.parseInt(sanitized.slice(3, 5), 16) / 255;
+  const b = Number.parseInt(sanitized.slice(5, 7), 16) / 255;
+  const [rs, gs, bs] = [r, g, b].map((c) =>
+    c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  );
+  return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+};
+
+const textColorContrastWith = (fillHex: string) =>
+  hexToLuminance(fillHex) > 0.4 ? "#0f172a" : "#fafafa";
 
 const buildCardPreviewPayload = (
   effectId: WorkbenchEffectId,
@@ -412,16 +485,9 @@ const PaddingRow = ({
   </div>
 );
 
-const EffectCardPreview = ({
-  effectId,
-  appearance,
-  highlightOpacity
-}: {
-  effectId: WorkbenchEffectId;
-  appearance: SubtitleStyleAppearance;
-  highlightOpacity: number;
-}) => {
-  const preview = buildCardPreviewPayload(effectId, appearance, highlightOpacity);
+const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
+  const { resolvedTheme } = useTheme();
+  const preview = buildStaticCardPreviewPayload(effectId);
   const previewAppearance = preview.appearance;
   const linePaddingTop =
     previewAppearance.line_bg_padding_top ?? previewAppearance.line_bg_padding ?? 8;
@@ -432,27 +498,28 @@ const EffectCardPreview = ({
   const linePaddingLeft =
     previewAppearance.line_bg_padding_left ?? previewAppearance.line_bg_padding ?? 8;
 
+  const outlineColor =
+    previewAppearance.outline_color === "auto"
+      ? "#000000"
+      : previewAppearance.outline_color;
+  const previewTextColor =
+    effectId === "outline" && previewAppearance.outline_width > 0
+      ? textColorContrastWith(outlineColor)
+      : "var(--foreground)";
+
   const baseStyle: React.CSSProperties = {
-    fontFamily: previewAppearance.font_family || "Heebo",
-    fontWeight: previewAppearance.font_weight,
-    fontStyle:
-      previewAppearance.font_style === "italic" ||
-      previewAppearance.font_style === "bold_italic"
-        ? "italic"
-        : "normal",
-    letterSpacing: `${previewAppearance.letter_spacing * 0.5}px`,
-    color: colorWithOpacity(
-      previewAppearance.text_color,
-      previewAppearance.text_opacity
-    ),
+    fontFamily: "Heebo",
+    fontSize: "2.25rem",
+    fontWeight: 600,
+    fontStyle: "normal",
+    letterSpacing: "0.01em",
+    color: previewTextColor,
     textAlign: "center"
   };
 
   if (effectId === "outline" && previewAppearance.outline_width > 0) {
     baseStyle.textShadow = buildOutlineShadows(
-      previewAppearance.outline_color === "auto"
-        ? "#000000"
-        : previewAppearance.outline_color,
+      outlineColor,
       Math.max(1, previewAppearance.outline_width * 0.55)
     );
   }
@@ -492,14 +559,19 @@ const EffectCardPreview = ({
     )
   };
 
+  const previewContainerClassName =
+    resolvedTheme === "dark"
+      ? "flex min-h-[5.25rem] w-full items-center justify-center rounded-2xl border border-border/50 bg-muted/30 px-3 text-center"
+      : "flex min-h-[5.25rem] w-full items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.24),transparent_58%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))] px-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]";
+
   if (effectId === "karaoke") {
     return (
-      <div className="flex min-h-[4.5rem] w-full items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.24),transparent_58%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))] px-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+      <div className={previewContainerClassName}>
         <div
-          className="flex items-center gap-1.5 text-xl font-semibold tracking-[0.01em]"
-          style={baseStyle}
+          className="flex flex-wrap items-center justify-center gap-x-1.5 text-2xl font-semibold tracking-[0.01em]"
+          style={{ ...baseStyle, fontSize: "2.025rem" }}
         >
-          <span>Cue</span>
+          <span>This will </span>
           <span className="relative">
             {previewAppearance.background_mode === "word" && (
               <span
@@ -512,16 +584,17 @@ const EffectCardPreview = ({
                 }}
               />
             )}
-            <span style={wordHighlightStyle}>Flow</span>
+            <span style={wordHighlightStyle}>highlight</span>
           </span>
+          <span> spoken words</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-[4.5rem] w-full items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.24),transparent_58%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))] px-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-      <span className="text-xl font-semibold tracking-[0.01em]" style={baseStyle}>
+    <div className={previewContainerClassName}>
+      <span className="text-2xl font-semibold tracking-[0.01em]" style={baseStyle}>
         {CARD_SAMPLE_TEXT}
       </span>
     </div>
@@ -1080,7 +1153,8 @@ const WorkbenchEffectsPanel = ({
                   "group relative flex min-h-0 flex-col items-stretch gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left shadow-[var(--shadow-card)] transition-colors cursor-pointer",
                   active && "border-primary/60 bg-primary/5",
                   !active && "hover:bg-muted/30",
-                  focused && active && "ring-2 ring-primary/30 ring-offset-2 ring-offset-card"
+                  focused && active && "ring-2 ring-primary/30 ring-offset-2 ring-offset-card",
+                  !expanded && "pb-6"
                 )}
               >
                 <div className="flex w-full items-center gap-2">
@@ -1093,18 +1167,22 @@ const WorkbenchEffectsPanel = ({
                       onCheckedChange={handleCheckboxChange(effectId)}
                       aria-label={`Toggle ${effectLabels[effectId]}`}
                       data-testid={`workbench-effect-card-${effectId}-checkbox`}
+                      className="group-hover:bg-muted data-[state=checked]:group-hover:bg-primary/80"
                     />
                   </div>
                   <span className="text-sm font-semibold text-foreground">
                     {effectLabels[effectId]}
                   </span>
                   <div className="ml-auto flex shrink-0 items-center gap-1">
-                    {showReset && (
+                    {active && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-7 px-2 text-xs"
+                        className={cn(
+                          "h-7 px-2 text-xs",
+                          !showReset && "invisible pointer-events-none"
+                        )}
                         data-testid={`workbench-effect-reset-${effectId}`}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1118,24 +1196,24 @@ const WorkbenchEffectsPanel = ({
                       <button
                         type="button"
                         aria-label={expanded ? "Collapse" : "Expand"}
-                        className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                        onClick={toggleExpanded(effectId)}
+                        className="-m-2 flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpanded(effectId)(e);
+                        }}
                       >
-                        {expanded ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
+                        <ChevronDown
+                          className={cn(
+                            "h-4 w-4 transition-transform duration-200 ease-out",
+                            expanded && "rotate-180"
+                          )}
+                        />
                       </button>
                     )}
                   </div>
                 </div>
-                <div className="min-h-[4.5rem]">
-                  <EffectCardPreview
-                    effectId={effectId}
-                    appearance={appearance}
-                    highlightOpacity={highlightOpacity}
-                  />
+                <div className="min-h-[5.25rem]">
+                  <EffectCardPreview effectId={effectId} />
                 </div>
                 {showExpandable && (
                   <div
@@ -1146,7 +1224,7 @@ const WorkbenchEffectsPanel = ({
                   >
                     <div className="min-h-0 overflow-hidden">
                       <div
-                        className="space-y-4 border-t border-border pt-3"
+                        className="space-y-4 pt-3"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {renderEffectControls(effectId)}

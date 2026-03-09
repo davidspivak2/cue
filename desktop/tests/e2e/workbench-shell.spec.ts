@@ -568,16 +568,23 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
 
 const primeVideoState = async (
   page,
-  { playing = true, currentTime = 1, videoWidth = 1280, videoHeight = 720 } = {}
+  {
+    playing = true,
+    currentTime = 1,
+    durationSeconds = 0,
+    videoWidth = 1280,
+    videoHeight = 720
+  } = {}
 ) => {
   const video = page.locator("video");
   await expect(video).toHaveCount(1);
   await video.evaluate(
-    (video, { isPlaying, timeSeconds, mediaWidth, mediaHeight }) => {
+    (video, { isPlaying, timeSeconds, mediaDurationSeconds, mediaWidth, mediaHeight }) => {
       const state = {
         paused: !isPlaying,
         pauseCalled: false,
         playCalled: false,
+        durationSeconds: mediaDurationSeconds,
         videoWidth: mediaWidth,
         videoHeight: mediaHeight
       };
@@ -627,6 +634,12 @@ const primeVideoState = async (
           return video.__cueState.paused;
         }
       });
+      Object.defineProperty(video, "duration", {
+        configurable: true,
+        get() {
+          return video.__cueState.durationSeconds;
+        }
+      });
       Object.defineProperty(video, "pause", {
         configurable: true,
         value: () => {
@@ -664,7 +677,13 @@ const primeVideoState = async (
       video.dispatchEvent(new Event("loadeddata"));
       video.dispatchEvent(new Event("timeupdate"));
     },
-    { isPlaying: playing, timeSeconds: currentTime, mediaWidth: videoWidth, mediaHeight: videoHeight }
+    {
+      isPlaying: playing,
+      timeSeconds: currentTime,
+      mediaDurationSeconds: durationSeconds,
+      mediaWidth: videoWidth,
+      mediaHeight: videoHeight
+    }
   );
 };
 
@@ -781,17 +800,17 @@ const readActiveSubtitleRect = async (page) => {
 const getFontTrigger = (page) =>
   page.getByTestId("subtitle-style-font-trigger");
 
-const getFontWeightTrigger = (page) =>
-  page.getByTestId("subtitle-style-font-weight");
-
 const getItalicButton = (page) =>
   page.getByTestId("subtitle-style-italic");
 
-const selectToolbarFont = async (page, namePattern) => {
+const selectToolbarFont = async (page, namePattern, weightLabel) => {
   await ensureAdvancedStyleControlsVisible(page);
   await getFontTrigger(page).click();
-  await expect(page.getByRole("button", { name: namePattern })).toBeVisible();
-  await page.getByRole("button", { name: namePattern }).click();
+  await expect(page.getByRole("menuitem", { name: namePattern })).toBeVisible();
+  await page.getByRole("menuitem", { name: namePattern }).click();
+  if (weightLabel) {
+    await page.getByRole("menuitem", { name: weightLabel }).click();
+  }
 };
 
 const dragActiveSubtitleTo = async (
@@ -1148,8 +1167,8 @@ const readEffectCardPressed = async (page, effectId) =>
 
 const setToolbarFontSize = async (page, value) => {
   await ensureAdvancedStyleControlsVisible(page);
-  await page.getByTestId("subtitle-style-font-size-trigger").click();
-  const sizeInput = page.getByTestId("subtitle-style-font-size-input");
+  const sizeInput = page.getByTestId("subtitle-style-font-size-trigger");
+  await sizeInput.click();
   await expect(sizeInput).toBeVisible();
   await sizeInput.fill(String(value));
   await sizeInput.press("Enter");
@@ -1174,6 +1193,98 @@ const readVideoControlsOpacity = async (page) =>
     const opacity = Number.parseFloat(window.getComputedStyle(element).opacity);
     return Number.isFinite(opacity) ? opacity : 0;
   });
+
+const readVideoCurrentTimeSeconds = async (page) =>
+  page.evaluate(() => Number(document.querySelector("video")?.currentTime ?? Number.NaN));
+
+const dispatchVideoProgressInteraction = async (page, startFraction, endFraction = null) => {
+  await page.evaluate(
+    ({ from, to }) => {
+      const progress = document.querySelector("[data-testid='workbench-video-progress']");
+      if (!(progress instanceof HTMLElement)) {
+        throw new Error("Video progress element not found");
+      }
+      const rect = progress.getBoundingClientRect();
+      const clientY = rect.top + rect.height / 2;
+      const startX = rect.left + rect.width * from;
+      const endX = rect.left + rect.width * (typeof to === "number" ? to : from);
+
+      progress.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+          button: 0,
+          buttons: 1,
+          clientX: startX,
+          clientY
+        })
+      );
+      progress.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 1,
+          clientX: startX,
+          clientY
+        })
+      );
+
+      if (typeof to === "number") {
+        const steps = 8;
+        for (let step = 1; step <= steps; step += 1) {
+          window.dispatchEvent(
+            new MouseEvent("mousemove", {
+              bubbles: true,
+              cancelable: true,
+              buttons: 1,
+              clientX: startX + ((endX - startX) * step) / steps,
+              clientY
+            })
+          );
+        }
+      }
+
+      window.dispatchEvent(
+        new MouseEvent("mouseup", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 0,
+          clientX: endX,
+          clientY
+        })
+      );
+      progress.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+          button: 0,
+          buttons: 0,
+          clientX: endX,
+          clientY
+        })
+      );
+      progress.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 0,
+          clientX: endX,
+          clientY
+        })
+      );
+    },
+    { from: startFraction, to: endFraction }
+  );
+};
 
 const expectVideoControlsVisibleSoon = async (page, timeout = 1200) => {
   await expect.poll(() => readVideoControlsOpacity(page), { timeout }).toBeGreaterThan(0.95);
@@ -2146,17 +2257,16 @@ test("font metadata controls preserve legacy fonts and apply supported weights",
   await ensureAdvancedStyleControlsVisible(page);
 
   const fontTrigger = getFontTrigger(page);
-  const weightTrigger = getFontWeightTrigger(page);
   const italicButton = getItalicButton(page);
 
   await expect(fontTrigger).toContainText("Arial");
   await expect(fontTrigger).toContainText("Unavailable");
-  await expect(weightTrigger).toBeDisabled();
   await expect(italicButton).toBeDisabled();
 
   await fontTrigger.click();
-  await expect(page.getByRole("button", { name: /Assistant/ })).toBeVisible();
-  await page.getByRole("button", { name: /Assistant/ }).click();
+  await expect(page.getByRole("menuitem", { name: /Assistant/ })).toBeVisible();
+  await page.getByRole("menuitem", { name: /Assistant/ }).click();
+  await page.getByRole("menuitem", { name: "Bold", exact: true }).click();
 
   await expect
     .poll(() => {
@@ -2172,27 +2282,19 @@ test("font metadata controls preserve legacy fonts and apply supported weights",
     .toEqual({
       fontFamily: "Assistant",
       fontStyle: "regular",
-      fontWeight: 400
+      fontWeight: 700
     });
 
-  await expect(weightTrigger).toBeEnabled();
-  await weightTrigger.click();
-  await expect(page.getByRole("option", { name: "900" })).toHaveCount(0);
-  await page.getByRole("option", { name: "700" }).click();
-
-  await expect
-    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.font_weight ?? null)
-    .toBe(700);
-
   await expect(italicButton).toBeDisabled();
-  await expect(page.getByText("Italic isn't available for this font.")).toBeVisible();
+  await italicButton.hover({ force: true });
+  await expect(page.getByRole("tooltip", { name: "Italic isn't available for this font" })).toBeVisible();
 
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toHaveCount(1);
   const editorTypography = await readTypographyMetrics(editor);
   expect(editorTypography.fontWeight).toBe("700");
 
-  await domClick(page.getByTestId("workbench-subtitle-close"));
+  await page.keyboard.press("Escape");
 
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   await expect(subtitleButton).toHaveCount(1);
@@ -2678,14 +2780,14 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
   await setVerticalAnchor(page, "Bottom");
   await setVerticalOffset(page, "63");
-  await selectToolbarFont(page, /Assistant/);
+  await selectToolbarFont(page, /Assistant/, "Regular");
   await setToolbarFontSize(page, 66);
   await dragActiveSubtitleTo(page, 0.5, 0.4, "editor");
   await page.waitForTimeout(40);
   await page.mouse.move(0, 0);
   await expectVideoControlsHiddenSoon(page);
 
-  await domClick(page.getByTestId("workbench-subtitle-close"));
+  await page.keyboard.press("Escape");
 
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   const overlaySurface = getPreviewSurface(page);
@@ -2751,14 +2853,14 @@ test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated 
   await setVerticalAnchor(page, "Bottom");
   await setVerticalOffset(page, "63");
 
-  await selectToolbarFont(page, /Assistant/);
+  await selectToolbarFont(page, /Assistant/, "Regular");
   await setToolbarFontSize(page, 66);
   await dragActiveSubtitleTo(page, 0.5, 0.4, "editor");
   await page.waitForTimeout(40);
   await page.mouse.move(0, 0);
   await expectVideoControlsHiddenSoon(page);
 
-  await domClick(page.getByTestId("workbench-subtitle-close"));
+  await page.keyboard.press("Escape");
 
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   const overlaySurface = getPreviewSurface(page);
@@ -2818,7 +2920,7 @@ test("editor controls flip above when bottom anchor has no room and below when r
   const controlsRectAtBottom = await readClientRect(controls);
   expect(controlsRectAtBottom.bottom).toBeLessThanOrEqual(editorRectAtBottom.top + 1);
 
-  await domClick(page.getByTestId("workbench-subtitle-close"));
+  await page.keyboard.press("Escape");
   await expect(editor).toHaveCount(0);
 
   await dragActiveSubtitleTo(page, 0.5, 0.1);
@@ -2943,7 +3045,7 @@ test("on-video contract flushes latest text with Close icon", async ({ page }) =
   const editor = page.getByTestId("workbench-subtitle-editor");
   await expect(editor).toBeVisible();
   await editor.fill("Saved from close icon");
-  await domClick(page.getByTestId("workbench-subtitle-close"));
+  await page.keyboard.press("Escape");
 
   await expect(editor).toHaveCount(0);
   await expect(subtitleButton).toContainText("Saved from close icon");
@@ -2984,6 +3086,81 @@ test("on-video contract saves and resumes when Play is clicked during edit", asy
   await expect(subtitleButton).not.toHaveClass(/outline-primary/);
   expect(api.getSubtitlePutCallCount()).toBe(1);
   expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("Saved via Play button during edit");
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(true);
+});
+
+test("on-video contract keeps toolbar open while using seek bar and still closes on video click", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await expect(page.getByTestId("workbench-center-panel-video-wrapper")).toBeVisible();
+  await expect(page.locator("video")).toHaveCount(1);
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2, durationSeconds: 65 });
+  await page.evaluate((durationSeconds) => {
+    const video = document.querySelector("video");
+    if (!(video instanceof HTMLVideoElement)) {
+      throw new Error("Video element not found");
+    }
+    Object.defineProperty(video, "duration", {
+      configurable: true,
+      get() {
+        return durationSeconds;
+      }
+    });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    video.dispatchEvent(new Event("timeupdate"));
+  }, 65);
+  await page.getByTestId("workbench-active-subtitle").click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  const toolbar = page.getByTestId("workbench-subtitle-editor-controls");
+  await expect(editor).toBeVisible();
+  await expect(toolbar).toBeVisible();
+
+  await showVideoControls(page);
+  const progress = page.getByTestId("workbench-video-progress");
+  await expect(progress).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Video progress" })).toHaveAttribute(
+    "aria-valuemax",
+    "65"
+  );
+
+  await dispatchVideoProgressInteraction(page, 0.8);
+  await expect(editor).toBeVisible();
+  await expect(toolbar).toBeVisible();
+  await expect.poll(() => readVideoCurrentTimeSeconds(page)).toBeGreaterThan(45);
+
+  await dispatchVideoProgressInteraction(page, 0.2);
+  await expect(editor).toBeVisible();
+  await expect(toolbar).toBeVisible();
+  await expect.poll(() => readVideoCurrentTimeSeconds(page)).toBeLessThan(20);
+  expect(await readVideoCurrentTimeSeconds(page)).toBeGreaterThan(5);
+
+  await dispatchVideoProgressInteraction(page, 0.2, 0.65);
+  await expect(editor).toBeVisible();
+  await expect(toolbar).toBeVisible();
+  await expect.poll(() => readVideoCurrentTimeSeconds(page)).toBeGreaterThan(35);
+
+  const videoWrapper = page.getByTestId("workbench-center-panel-video-wrapper");
+  await videoWrapper.click({
+    position: {
+      x: 40,
+      y: 40
+    }
+  });
+  await expect(editor).toHaveCount(0);
+  await expect(toolbar).toHaveCount(0);
   await expect
     .poll(async () =>
       page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
@@ -3052,7 +3229,6 @@ test("on-video formatting toolbar replaces undo and save controls", async ({
   await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
   await expect(page.getByTestId("workbench-subtitle-editor-controls")).toBeVisible();
   await expect(getFontTrigger(page)).toBeVisible();
-  await expect(getFontWeightTrigger(page)).toBeVisible();
   await expect(page.getByTestId("subtitle-style-bold")).toBeVisible();
   await expect(getItalicButton(page)).toBeVisible();
   await expect(page.getByTestId("subtitle-style-font-size-trigger")).toBeVisible();
@@ -3061,7 +3237,7 @@ test("on-video formatting toolbar replaces undo and save controls", async ({
   await expect(page.getByTestId("subtitle-style-spacing")).toBeVisible();
   await expect(page.getByTestId("subtitle-style-opacity")).toBeVisible();
   await expect(page.getByTestId("subtitle-style-karaoke")).toHaveCount(0);
-  await expect(page.getByTestId("workbench-subtitle-close")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-editor-controls")).toBeVisible();
   await expect(page.getByTestId("workbench-subtitle-undo")).toHaveCount(0);
   await expect(page.getByTestId("workbench-subtitle-save")).toHaveCount(0);
 });
@@ -3441,7 +3617,6 @@ test("on-video editor controls render in dark theme", async ({ page }) => {
   await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
   await expect(page.getByTestId("workbench-subtitle-editor-controls")).toBeVisible();
   await expect(page.getByTestId("subtitle-style-font-trigger")).toBeVisible();
-  await expect(page.getByTestId("workbench-subtitle-close")).toBeVisible();
   await expect(page.getByTestId("workbench-subtitle-undo")).toHaveCount(0);
   await expect(page.getByTestId("workbench-subtitle-save")).toHaveCount(0);
 });
