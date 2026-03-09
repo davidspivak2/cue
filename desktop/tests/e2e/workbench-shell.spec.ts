@@ -42,6 +42,27 @@ const buildProjects = () => [
   }
 ];
 
+const DEFAULT_SUBTITLE_FONTS = [
+  {
+    family: "Heebo",
+    weights: [100, 200, 300, 400, 500, 600, 700, 800, 900],
+    default_weight: 400,
+    italic_supported: false
+  },
+  {
+    family: "Assistant",
+    weights: [200, 300, 400, 600, 700, 800],
+    default_weight: 400,
+    italic_supported: false
+  },
+  {
+    family: "Arimo",
+    weights: [400, 700],
+    default_weight: 400,
+    italic_supported: false
+  }
+];
+
 const DEFAULT_PROJECT_STYLE = {
   subtitle_mode: "word_highlight",
   subtitle_style: {
@@ -52,6 +73,7 @@ const DEFAULT_PROJECT_STYLE = {
       font_family: "Arial",
       font_size: 28,
       font_style: "regular",
+      font_weight: 400,
       text_color: "#FFFFFF",
       text_opacity: 1.0,
       letter_spacing: 0,
@@ -108,7 +130,7 @@ const buildManifest = (project) => ({
 const DEFAULT_SRT = "1\n00:00:00,000 --> 00:00:04,000\nOriginal subtitle line\n";
 const GENERATED_SRT = "1\n00:00:00,000 --> 00:00:03,000\nGenerated subtitle line\n";
 const LONG_HEBREW_SRT =
-  "1\n00:00:00,000 --> 00:00:04,000\nאז אני רוצה ברשותכם להתחיל בקטע קצר כדי להדגים את שבירת השורה ולוודא שהטקסט נעטף לפחות לשתי שורות\n";
+  "1\n00:00:00,000 --> 00:00:04,000\n?? ??? ???? ??????? ?????? ???? ??? ??? ?????? ?? ????? ????? ?????? ?????? ???? ????? ???? ?????\n";
 
 const getProjectIdFromUrl = (url) => url.split("/projects/")[1]?.split("/")[0] ?? "";
 const getJobIdFromEventsUrl = (url) => url.split("/jobs/")[1]?.split("/")[0] ?? "";
@@ -143,6 +165,8 @@ const buildSettings = () => ({
     appearance: {
       font_family: "Arial",
       font_size: 28,
+      font_style: "regular",
+      font_weight: 400,
       text_color: "#FFFFFF",
       outline_width: 2,
       shadow_strength: 1,
@@ -174,6 +198,19 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
   const eventFailureByJob = new Map();
   const projectGetCounts = new Map();
   const subtitlePutFailureQueue = [];
+
+  await page.route("**://127.0.0.1:8765/health", async (route) => {
+    const request = route.request();
+    if (request.method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "ok" })
+    });
+  });
 
   await page.route("**://127.0.0.1:8765/settings", async (route) => {
     const request = route.request();
@@ -212,6 +249,19 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
       return;
     }
     await route.continue();
+  });
+
+  await page.route("**://127.0.0.1:8765/subtitle-fonts", async (route) => {
+    const request = route.request();
+    if (request.method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ fonts: DEFAULT_SUBTITLE_FONTS })
+    });
   });
 
   await page.route("**://127.0.0.1:8765/preview-overlay", async (route) => {
@@ -637,6 +687,8 @@ const readTypographyMetrics = async (locator) =>
     return {
       fontFamily: style.fontFamily,
       fontSize: style.fontSize,
+      fontStyle: style.fontStyle,
+      fontWeight: style.fontWeight,
       lineHeight: style.lineHeight,
       letterSpacing: style.letterSpacing,
       direction: style.direction,
@@ -692,15 +744,18 @@ const ensureSubtitleLayerReady = async (page) => {
 
 const readActiveSubtitleRect = async (page) => {
   const rect = await page.evaluate(() => {
-    const editor = document.querySelector("[data-workbench-subtitle-editor]");
+    const editorSurface = document.querySelector(
+      "[data-testid='workbench-subtitle-editor-surface']"
+    );
+    const previewSurface = document.querySelector(
+      "[data-testid='workbench-active-subtitle-surface']"
+    );
     const preview = document.querySelector("[data-testid='workbench-active-subtitle']");
-    const editorSurface =
-      editor instanceof HTMLElement && editor.parentElement instanceof HTMLElement
-        ? editor.parentElement
-        : null;
     const element =
       editorSurface instanceof HTMLElement
         ? editorSurface
+        : previewSurface instanceof HTMLElement
+          ? previewSurface
         : preview instanceof HTMLElement
           ? preview
           : null;
@@ -721,6 +776,22 @@ const readActiveSubtitleRect = async (page) => {
     throw new Error("Active subtitle element not found");
   }
   return rect;
+};
+
+const getFontTrigger = (page) =>
+  page.getByTestId("subtitle-style-font-trigger");
+
+const getFontWeightTrigger = (page) =>
+  page.getByTestId("subtitle-style-font-weight");
+
+const getItalicButton = (page) =>
+  page.getByTestId("subtitle-style-italic");
+
+const selectToolbarFont = async (page, namePattern) => {
+  await ensureAdvancedStyleControlsVisible(page);
+  await getFontTrigger(page).click();
+  await expect(page.getByRole("button", { name: namePattern })).toBeVisible();
+  await page.getByRole("button", { name: namePattern }).click();
 };
 
 const dragActiveSubtitleTo = async (
@@ -811,6 +882,7 @@ const dragActiveSubtitleTo = async (
       })
     );
   }, drag);
+  return drag;
 };
 
 const dragActiveSubtitleFromCenterTo = async (
@@ -949,20 +1021,16 @@ const dragResizeHandleByDeltaY = async (
 
 
 const ensureAdvancedStyleControlsVisible = async (page) => {
-  const fontLabel = page.locator("label:has-text('Font')");
-  if ((await fontLabel.count()) > 0 && (await fontLabel.isVisible())) {
+  const toolbar = page.getByTestId("workbench-subtitle-editor-controls");
+  if ((await toolbar.count()) > 0 && (await toolbar.isVisible())) {
     return;
   }
-  const openStyleButton = page.getByTestId("workbench-open-style");
-  if ((await openStyleButton.count()) > 0 && (await openStyleButton.isVisible())) {
-    await openStyleButton.click();
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  if ((await subtitleButton.count()) === 0) {
+    throw new Error("Active subtitle not available to open the floating toolbar");
   }
-  const advancedButton = page.getByRole("button", { name: "Advanced" });
-  if ((await advancedButton.count()) === 0) {
-    return;
-  }
-  await advancedButton.click();
-  await expect(fontLabel).toBeVisible();
+  await subtitleButton.first().click();
+  await expect(toolbar).toBeVisible();
 };
 
 const expectProjectHubHome = async (page) => {
@@ -972,11 +1040,20 @@ const expectProjectHubHome = async (page) => {
 const getVisibleWorkbenchHeading = (page) =>
   page.locator("[data-testid='workbench-heading']:visible");
 
-const getTextStyleSizeInput = (page) =>
-  page.getByRole("region", { name: /^Text / }).getByRole("spinbutton").first();
-
 const getEditorSurface = (page) =>
-  page.getByTestId("workbench-subtitle-editor").locator("xpath=..");
+  page.getByTestId("workbench-subtitle-editor-surface");
+
+const getPreviewSurface = (page) =>
+  page.getByTestId("workbench-active-subtitle-surface");
+
+const setToolbarFontSize = async (page, value) => {
+  await ensureAdvancedStyleControlsVisible(page);
+  await page.getByTestId("subtitle-style-font-size-trigger").click();
+  const sizeInput = page.getByTestId("subtitle-style-font-size-input");
+  await expect(sizeInput).toBeVisible();
+  await sizeInput.fill(String(value));
+  await sizeInput.press("Enter");
+};
 
 /** No-op: vertical position is now set by dragging the subtitle on the video. */
 const setVerticalAnchor = async (_page, _anchorLabel: "Top" | "Middle" | "Bottom") => {};
@@ -992,17 +1069,17 @@ const domClick = async (locator) => {
   });
 };
 
+const readVideoControlsOpacity = async (page) =>
+  page.getByTestId("workbench-video-controls").evaluate((element) => {
+    const opacity = Number.parseFloat(window.getComputedStyle(element).opacity);
+    return Number.isFinite(opacity) ? opacity : 0;
+  });
+
+const expectVideoControlsVisibleSoon = async (page, timeout = 1200) => {
+  await expect.poll(() => readVideoControlsOpacity(page), { timeout }).toBeGreaterThan(0.95);
+};
+
 const showVideoControls = async (page) => {
-  const readControlsOpacity = async () =>
-    page.getByTestId("workbench-video-controls").evaluate((element) => {
-      const opacity = Number.parseFloat(window.getComputedStyle(element).opacity);
-      return Number.isFinite(opacity) ? opacity : 0;
-    });
-
-  const waitUntilVisible = async (timeout: number) => {
-    await expect.poll(readControlsOpacity, { timeout }).toBeGreaterThan(0.95);
-  };
-
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   if ((await subtitleButton.count()) > 0) {
     await subtitleButton.first().hover();
@@ -1012,14 +1089,12 @@ const showVideoControls = async (page) => {
       await editor.first().hover();
     }
   }
-
   try {
-    await waitUntilVisible(1200);
+    await expectVideoControlsVisibleSoon(page);
     return;
   } catch {
     // Fallback for mocked-video cases where hover does not trigger enter handlers reliably.
   }
-
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
   const layer = await ensureSubtitleLayerReady(page);
   const layerRect = await readClientRect(layer);
@@ -1030,21 +1105,12 @@ const showVideoControls = async (page) => {
     steps: 6
   });
   await page.mouse.up();
-
-  await waitUntilVisible(5000);
+  await page.mouse.move(layerRect.left + layerRect.width / 2 + 7, layerRect.top + layerRect.height / 2 + 7);
+  await expectVideoControlsVisibleSoon(page, 5000);
 };
 
 const expectVideoControlsHiddenSoon = async (page) => {
-  await expect
-    .poll(
-      async () =>
-        page.getByTestId("workbench-video-controls").evaluate((element) => {
-          const opacity = Number.parseFloat(window.getComputedStyle(element).opacity);
-          return Number.isFinite(opacity) ? opacity : 1;
-        }),
-      { timeout: 1200 }
-    )
-    .toBeLessThan(0.05);
+  await expect.poll(() => readVideoControlsOpacity(page), { timeout: 1200 }).toBeLessThan(0.05);
 };
 
 const SUBTITLE_PUSH_SETTLE_MS = 220;
@@ -1908,10 +1974,7 @@ test("style controls change subtitle preview appearance", async ({ page }) => {
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
   await expect(subtitleButton).toHaveCount(1);
 
-  await ensureAdvancedStyleControlsVisible(page);
-  const fontSizeInput = getTextStyleSizeInput(page);
-  await fontSizeInput.fill("44");
-  await fontSizeInput.blur();
+  await setToolbarFontSize(page, 44);
 
   await expect
     .poll(() => {
@@ -1920,6 +1983,176 @@ test("style controls change subtitle preview appearance", async ({ page }) => {
       return style?.font_size ?? null;
     })
     .toBe(44);
+});
+
+test("floating toolbar font size input clamps to supported range", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  await setToolbarFontSize(page, 99);
+  await expect
+    .poll(
+      () => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.font_size ?? null
+    )
+    .toBe(72);
+
+  await setToolbarFontSize(page, 4);
+  await expect
+    .poll(
+      () => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.font_size ?? null
+    )
+    .toBe(18);
+});
+
+test("font metadata controls preserve legacy fonts and apply supported weights", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0] = {
+    ...projects[0],
+    style: {
+      subtitle_mode: "word_highlight",
+      subtitle_style: {
+        ...DEFAULT_PROJECT_STYLE.subtitle_style,
+        appearance: {
+          ...DEFAULT_PROJECT_STYLE.subtitle_style.appearance,
+          font_family: "Arial",
+          font_style: "regular",
+          font_weight: 550
+        }
+      }
+    }
+  };
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await ensureAdvancedStyleControlsVisible(page);
+
+  const fontTrigger = getFontTrigger(page);
+  const weightTrigger = getFontWeightTrigger(page);
+  const italicButton = getItalicButton(page);
+
+  await expect(fontTrigger).toContainText("Arial");
+  await expect(fontTrigger).toContainText("Unavailable");
+  await expect(weightTrigger).toBeDisabled();
+  await expect(italicButton).toBeDisabled();
+
+  await fontTrigger.click();
+  await expect(page.getByRole("button", { name: /Assistant/ })).toBeVisible();
+  await page.getByRole("button", { name: /Assistant/ }).click();
+
+  await expect
+    .poll(() => {
+      const style = api.getLastPutPayload()?.style?.subtitle_style?.appearance;
+      return style
+        ? {
+            fontFamily: style.font_family,
+            fontStyle: style.font_style,
+            fontWeight: style.font_weight
+          }
+        : null;
+    })
+    .toEqual({
+      fontFamily: "Assistant",
+      fontStyle: "regular",
+      fontWeight: 400
+    });
+
+  await expect(weightTrigger).toBeEnabled();
+  await weightTrigger.click();
+  await expect(page.getByRole("option", { name: "900" })).toHaveCount(0);
+  await page.getByRole("option", { name: "700" }).click();
+
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.font_weight ?? null)
+    .toBe(700);
+
+  await expect(italicButton).toBeDisabled();
+  await expect(page.getByText("Italic isn't available for this font.")).toBeVisible();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toHaveCount(1);
+  const editorTypography = await readTypographyMetrics(editor);
+  expect(editorTypography.fontWeight).toBe("700");
+
+  await domClick(page.getByTestId("workbench-subtitle-close"));
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  const previewTypography = await readTypographyMetrics(subtitleButton);
+  expect(previewTypography.fontFamily).toBe(editorTypography.fontFamily);
+  expect(previewTypography.fontWeight).toBe(editorTypography.fontWeight);
+  expect(previewTypography.fontStyle).toBe(editorTypography.fontStyle);
+});
+
+test("legacy italic stays clearable on unsupported fonts", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0] = {
+    ...projects[0],
+    style: {
+      subtitle_mode: "word_highlight",
+      subtitle_style: {
+        ...DEFAULT_PROJECT_STYLE.subtitle_style,
+        appearance: {
+          ...DEFAULT_PROJECT_STYLE.subtitle_style.appearance,
+          font_family: "Arial",
+          font_style: "bold_italic",
+          font_weight: 700
+        }
+      }
+    }
+  };
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await ensureAdvancedStyleControlsVisible(page);
+
+  const italicButton = getItalicButton(page);
+  await expect(italicButton).toBeEnabled();
+  await expect(italicButton).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByText(
+      "Italic is preserved from an older style. You can turn it off, but this font can't be re-enabled."
+    )
+  ).toBeVisible();
+
+  await italicButton.click();
+
+  await expect
+    .poll(() => {
+      const style = api.getLastPutPayload()?.style?.subtitle_style?.appearance;
+      return style
+        ? {
+            fontStyle: style.font_style,
+            fontWeight: style.font_weight
+          }
+        : null;
+    })
+    .toEqual({
+      fontStyle: "regular",
+      fontWeight: 700
+    });
+
+  await expect(italicButton).toBeDisabled();
 });
 
 test("subtitle width stays stable when dragging horizontally", async ({ page }) => {
@@ -2210,6 +2443,41 @@ test.skip("vertical anchor middle offset matches overlay direction in wide and n
   }
 });
 
+test("subtitle drag release keeps controls hidden until the pointer moves again", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  const layer = await ensureSubtitleLayerReady(page);
+  const drag = await dragActiveSubtitleTo(page, 0.5, 0.98);
+  await expectVideoControlsHiddenSoon(page);
+  await page.evaluate(({ clientX, clientY }) => {
+    document.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        cancelable: true,
+        clientX,
+        clientY,
+        buttons: 0
+      })
+    );
+  }, { clientX: drag.endX, clientY: drag.endY });
+  await expectVideoControlsHiddenSoon(page);
+  const subtitleRectBefore = await readActiveSubtitleRect(page);
+  const layerRect = await readClientRect(layer);
+  await page.mouse.move(layerRect.left + layerRect.width / 2 + 6, layerRect.top + layerRect.height / 2 + 6);
+  await expectVideoControlsVisibleSoon(page);
+  await expect
+    .poll(async () => (await readActiveSubtitleRect(page)).top)
+    .toBeLessThan(subtitleRectBefore.top - 1);
+});
+
 test("controls overlap causes push and click opens editor", async ({ page }) => {
   await page.addInitScript(initTauriRuntimeMock);
   await page.setViewportSize({ width: 1300, height: 800 });
@@ -2304,18 +2572,21 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
   await setVerticalAnchor(page, "Bottom");
   await setVerticalOffset(page, "63");
-  await ensureAdvancedStyleControlsVisible(page);
-  const fontSizeInput = getTextStyleSizeInput(page);
-  await fontSizeInput.fill("66");
-  await fontSizeInput.blur();
-  await dragActiveSubtitleTo(page, 0.5, 0.4);
+  await selectToolbarFont(page, /Assistant/);
+  await setToolbarFontSize(page, 66);
+  await dragActiveSubtitleTo(page, 0.5, 0.4, "editor");
   await page.waitForTimeout(40);
   await page.mouse.move(0, 0);
   await expectVideoControlsHiddenSoon(page);
 
+  await domClick(page.getByTestId("workbench-subtitle-close"));
+
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  const overlaySurface = getPreviewSurface(page);
+  const overlayLayer = page.getByTestId("workbench-subtitle-overlay-position-layer");
   await expect(subtitleButton).toHaveCount(1);
-  const previewRect = await readClientRect(subtitleButton);
+  const previewRect = await readClientRect(overlaySurface);
+  const previewLayerRect = await readClientRect(overlayLayer);
   const previewTypography = await readTypographyMetrics(subtitleButton);
   const previewLineHeight = Number.parseFloat(previewTypography.lineHeight);
   expect(Number.isFinite(previewLineHeight)).toBe(true);
@@ -2333,7 +2604,8 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   await expect(editor).toHaveCount(1);
   await expect(controls).toHaveCount(1);
 
-  const editorRectOnEnter = await readClientRect(editorSurface);
+  const editorRectOnEnter = await readClientRect(overlaySurface);
+  const editorLayerRect = await readClientRect(overlayLayer);
   const editorTypography = await readTypographyMetrics(editor);
   expect(Math.abs(editorRectOnEnter.top - previewRect.top)).toBeLessThanOrEqual(2);
   expect(Math.abs(editorRectOnEnter.bottom - previewRect.bottom)).toBeLessThanOrEqual(1);
@@ -2350,7 +2622,7 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   expect(editorTypography.paddingRight).toBe(previewTypography.paddingRight);
 
   await page.waitForTimeout(50);
-  const editorRectAfterControls = await readClientRect(editorSurface);
+  const editorRectAfterControls = await readClientRect(overlaySurface);
   expect(Math.abs(editorRectAfterControls.top - editorRectOnEnter.top)).toBeLessThanOrEqual(1);
   expect(Math.abs(editorRectAfterControls.left - editorRectOnEnter.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(editorRectAfterControls.width - editorRectOnEnter.width)).toBeLessThanOrEqual(1);
@@ -2373,18 +2645,19 @@ test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated 
   await setVerticalAnchor(page, "Bottom");
   await setVerticalOffset(page, "63");
 
-  await ensureAdvancedStyleControlsVisible(page);
-  const fontSizeInput = getTextStyleSizeInput(page);
-  await fontSizeInput.fill("66");
-  await fontSizeInput.blur();
-  await dragActiveSubtitleTo(page, 0.5, 0.4);
+  await selectToolbarFont(page, /Assistant/);
+  await setToolbarFontSize(page, 66);
+  await dragActiveSubtitleTo(page, 0.5, 0.4, "editor");
   await page.waitForTimeout(40);
   await page.mouse.move(0, 0);
   await expectVideoControlsHiddenSoon(page);
 
+  await domClick(page.getByTestId("workbench-subtitle-close"));
+
   const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  const overlaySurface = getPreviewSurface(page);
   await expect(subtitleButton).toHaveCount(1);
-  const previewRect = await readClientRect(subtitleButton);
+  const previewRect = await readClientRect(overlaySurface);
 
   await subtitleButton.evaluate((element) => {
     if (element instanceof HTMLElement) {
@@ -2395,7 +2668,7 @@ test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated 
   const editor = page.getByTestId("workbench-subtitle-editor");
   const editorSurface = getEditorSurface(page);
   await expect(editor).toHaveCount(1);
-  const editorRect = await readClientRect(editorSurface);
+  const editorRect = await readClientRect(overlaySurface);
   const editorTypography = await readTypographyMetrics(editor);
   expect(Math.abs(editorRect.top - previewRect.top)).toBeLessThanOrEqual(3);
   expect(Math.abs(editorRect.bottom - previewRect.bottom)).toBeLessThanOrEqual(1);
@@ -2656,10 +2929,12 @@ test("on-video contract keeps editor open when autosave fails and retries on exi
     .toBe(true);
 });
 
-test("on-video contract undo icon reverts unsaved edits", async ({ page }) => {
+test("on-video formatting toolbar replaces undo and save controls", async ({
+  page
+}) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
-  const api = await mockProjects(page, projects);
+  await mockProjects(page, projects);
 
   await page.goto("/");
   await page.getByText("good.mp4").click();
@@ -2668,24 +2943,21 @@ test("on-video contract undo icon reverts unsaved edits", async ({ page }) => {
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
   await page.getByTestId("workbench-active-subtitle").click();
 
-  const editor = page.getByTestId("workbench-subtitle-editor");
-  const undoButton = page.getByTestId("workbench-subtitle-undo");
-  await expect(editor).toBeVisible();
-  await expect(undoButton).toBeDisabled();
-
-  await editor.fill("First autosaved version");
-  await expect(undoButton).toBeEnabled();
-  await page.waitForTimeout(700);
-  expect(api.getSubtitlePutCallCount()).toBe(1);
-  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("First autosaved version");
-
-  await editor.fill("Second unsaved version");
-
-  await domClick(undoButton);
-  await expect(editor).toHaveValue("First autosaved version");
-  await page.waitForTimeout(700);
-  expect(api.getSubtitlePutCallCount()).toBe(1);
-  expect(api.getLastPutPayload()?.subtitles_srt_text ?? "").toContain("First autosaved version");
+  await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-editor-controls")).toBeVisible();
+  await expect(getFontTrigger(page)).toBeVisible();
+  await expect(getFontWeightTrigger(page)).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-bold")).toBeVisible();
+  await expect(getItalicButton(page)).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-font-size-trigger")).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-text-color")).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-alignment")).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-spacing")).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-opacity")).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-karaoke")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-close")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-undo")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-subtitle-save")).toHaveCount(0);
 });
 
 test("on-video contract supports keyboard undo shortcut", async ({ page }) => {
@@ -2726,8 +2998,9 @@ test("on-video editor controls render in dark theme", async ({ page }) => {
   await page.getByTestId("workbench-active-subtitle").click();
 
   await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
-  await expect(page.getByTestId("workbench-subtitle-undo")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-editor-controls")).toBeVisible();
+  await expect(page.getByTestId("subtitle-style-font-trigger")).toBeVisible();
   await expect(page.getByTestId("workbench-subtitle-close")).toBeVisible();
+  await expect(page.getByTestId("workbench-subtitle-undo")).toHaveCount(0);
   await expect(page.getByTestId("workbench-subtitle-save")).toHaveCount(0);
 });
-

@@ -4,7 +4,6 @@ import {
   Pause,
   Play,
   Plus,
-  RotateCcw,
   Volume2,
   VolumeX,
   X
@@ -17,6 +16,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import Checklist, { ChecklistItem } from "@/components/Checklist";
 import { useToast } from "@/contexts/ToastContext";
 import StyleControls from "@/components/SubtitleStyle/StyleControls";
+import SubtitleTextControls from "@/components/SubtitleStyle/SubtitleTextControls";
 import { WorkbenchSkeleton } from "@/components/WorkbenchSkeleton";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -60,8 +60,10 @@ import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
 import { messageForBackendError } from "@/backendHealth";
 import {
   fetchSettings,
+  fetchSubtitleFonts,
   previewOverlay,
   SettingsConfig,
+  SubtitleFontMetadata,
   SubtitleStyleAppearance
 } from "@/settingsClient";
 
@@ -835,6 +837,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const activeSubtitleRef = React.useRef<HTMLTextAreaElement | null>(null);
   const subtitleOverlayPositionLayerRef = React.useRef<HTMLDivElement | null>(null);
   const activeSubtitleWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const activeSubtitleSurfaceRef = React.useRef<HTMLDivElement | null>(null);
   const subtitleEditorControlsRef = React.useRef<HTMLDivElement | null>(null);
   const videoControlsBarRef = React.useRef<HTMLDivElement | null>(null);
   const videoWrapperRef = React.useRef<HTMLDivElement | null>(null);
@@ -851,6 +854,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [isStyleLoading, setIsStyleLoading] = React.useState(true);
   const [styleError, setStyleError] = React.useState<string | null>(null);
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
+  const [subtitleFonts, setSubtitleFonts] = React.useState<SubtitleFontMetadata[]>([]);
+  const [areSubtitleFontsLoading, setAreSubtitleFontsLoading] = React.useState(true);
+  const [subtitleFontsError, setSubtitleFontsError] = React.useState<string | null>(null);
   const [appearance, setAppearance] =
     React.useState<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
   const customAppearanceRef = React.useRef<SubtitleStyleAppearance>(DEFAULT_APPEARANCE);
@@ -887,7 +893,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [editingText, setEditingText] = React.useState("");
   const [subtitleEditorControlsPlacement, setSubtitleEditorControlsPlacement] =
     React.useState<"above" | "below">("below");
-  const [canUndoEdit, setCanUndoEdit] = React.useState(false);
   const [isSavingCue, setIsSavingCue] = React.useState(false);
   const isSavingCueRef = React.useRef(false);
   const subtitleAutosaveTimerRef = React.useRef<BrowserTimeout | null>(null);
@@ -902,6 +907,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
   const [isHoveringActiveSubtitle, setIsHoveringActiveSubtitle] = React.useState(false);
+  const suppressVideoControlsUntilPointerMoveRef = React.useRef(false);
+  const suppressedVideoControlsPointerRef = React.useRef<{ x: number; y: number } | null>(null);
+  const pendingVideoControlsRevealCleanupRef = React.useRef<(() => void) | null>(null);
   type SubtitleResizeHandleCorner = "nw" | "ne" | "se" | "sw";
   const [subtitleResizeDrag, setSubtitleResizeDrag] = React.useState<{
     corner: SubtitleResizeHandleCorner;
@@ -1018,6 +1026,64 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
   }, []);
 
+  const clearPendingVideoControlsReveal = React.useCallback(() => {
+    suppressVideoControlsUntilPointerMoveRef.current = false;
+    suppressedVideoControlsPointerRef.current = null;
+    const cleanup = pendingVideoControlsRevealCleanupRef.current;
+    pendingVideoControlsRevealCleanupRef.current = null;
+    cleanup?.();
+  }, []);
+
+  const isPointerInsideVideoInteractionArea = React.useCallback(
+    (clientX?: number, clientY?: number) => {
+      const interactionSurface =
+        subtitleOverlayPositionLayerRef.current ?? videoClickSurfaceRef.current;
+      if (!interactionSurface) {
+        return false;
+      }
+      const rect = interactionSurface.getBoundingClientRect();
+      const isInsideByCoords =
+        typeof clientX === "number" &&
+        typeof clientY === "number" &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom;
+      const isInsideByHover =
+        interactionSurface.matches(":hover") ||
+        activeSubtitleWrapperRef.current?.matches(":hover") ||
+        activeSubtitleSurfaceRef.current?.matches(":hover") ||
+        subtitleEditorControlsRef.current?.matches(":hover") ||
+        videoClickSurfaceRef.current?.matches(":hover");
+      return Boolean(isInsideByCoords || isInsideByHover);
+    },
+    []
+  );
+
+  const armVideoControlsRevealOnNextPointerMove = React.useCallback((clientX: number, clientY: number) => {
+    clearPendingVideoControlsReveal();
+    suppressVideoControlsUntilPointerMoveRef.current = true;
+    suppressedVideoControlsPointerRef.current = { x: clientX, y: clientY };
+    const handleNextMouseMove = (event: MouseEvent) => {
+      const suppressedPointer = suppressedVideoControlsPointerRef.current;
+      if (
+        suppressedPointer &&
+        Math.abs(event.clientX - suppressedPointer.x) < 1 &&
+        Math.abs(event.clientY - suppressedPointer.y) < 1
+      ) {
+        return;
+      }
+      clearPendingVideoControlsReveal();
+      setShowVideoControls(isPointerInsideVideoInteractionArea(event.clientX, event.clientY));
+    };
+    pendingVideoControlsRevealCleanupRef.current = () => {
+      document.removeEventListener("mousemove", handleNextMouseMove, true);
+    };
+    document.addEventListener("mousemove", handleNextMouseMove, true);
+  }, [clearPendingVideoControlsReveal, isPointerInsideVideoInteractionArea]);
+
   const startSubtitleAutosaveSession = React.useCallback(
     (initialText: string) => {
       clearSubtitleAutosaveTimer();
@@ -1033,6 +1099,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     [clearSubtitleAutosaveTimer]
   );
 
+  React.useEffect(
+    () => () => {
+      clearPendingVideoControlsReveal();
+    },
+    [clearPendingVideoControlsReveal]
+  );
+
   const resetEditSessionState = React.useCallback(() => {
     clearSubtitleAutosaveTimer();
     subtitleAutosaveSessionIdRef.current += 1;
@@ -1044,7 +1117,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     subtitleAutosaveInFlightRef.current = false;
     subtitleAutosaveFlushRequestedRef.current = false;
     subtitleAutosaveInFlightPromiseRef.current = null;
-    setCanUndoEdit(false);
     editHistoryRef.current = [];
     editHistoryIndexRef.current = 0;
     lastHistoryCommitAtRef.current = 0;
@@ -1445,6 +1517,33 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       active = false;
     };
   }, [projectId]);
+
+  React.useEffect(() => {
+    let active = true;
+    setAreSubtitleFontsLoading(true);
+    fetchSubtitleFonts()
+      .then((response) => {
+        if (!active) return;
+        setSubtitleFonts(response.fonts);
+        setSubtitleFontsError(null);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSubtitleFontsError(
+          messageForBackendError(
+            err,
+            err instanceof Error ? err.message : "Failed to load bundled subtitle fonts."
+          )
+        );
+      })
+      .finally(() => {
+        if (!active) return;
+        setAreSubtitleFontsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!projectId || !project || !settings) {
@@ -2162,7 +2261,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (initialChecklist.length > 0) {
       initialChecklist[0] = { ...initialChecklist[0], state: "active" };
     }
-    setCreateSubtitlesProgressMessage(initialChecklist[0]?.label ?? "Preparing…");
+    setCreateSubtitlesProgressMessage(initialChecklist[0]?.label ?? "Preparing...");
     setCreateSubtitlesChecklist(initialChecklist);
     clearPreparingPreviewTimers();
     preparingPreviewStartedAtRef.current = null;
@@ -3060,7 +3159,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     !isSavingCue &&
     !isExporting;
   const shouldShowVideoControls =
-    subtitlePositionDrag === null && (showVideoControls || subtitleResizeDrag !== null);
+    subtitlePositionDrag === null &&
+    !suppressVideoControlsUntilPointerMoveRef.current &&
+    (showVideoControls || subtitleResizeDrag !== null);
   const cueSegments = React.useMemo(
     () => (activeCue ? activeCue.text.split(/(\s+)/) : []),
     [activeCue]
@@ -3301,8 +3402,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
   const clampOverlayPositionToVisibleBounds = React.useCallback((x: number, y: number) => {
     const layer = subtitleOverlayPositionLayerRef.current;
-    const wrapper = activeSubtitleWrapperRef.current;
-    if (!layer || !wrapper) {
+    const subtitleSurface = activeSubtitleSurfaceRef.current;
+    if (!layer || !subtitleSurface) {
       return { x: clamp01(x), y: clamp01(y) };
     }
     const layerRect = layer.getBoundingClientRect();
@@ -3314,8 +3415,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       y,
       layerRect.width,
       layerRect.height,
-      wrapper.offsetWidth,
-      wrapper.offsetHeight
+      subtitleSurface.offsetWidth,
+      subtitleSurface.offsetHeight
     );
   }, []);
 
@@ -3449,6 +3550,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
   React.useEffect(() => {
     const videoElement = videoRef.current;
+    const videoWrapper = videoWrapperRef.current;
     if (!videoElement) {
       return;
     }
@@ -3456,8 +3558,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const updateGeometry = () => {
       const sourceWidth = Math.max(0, Math.round(videoElement.videoWidth || videoNaturalSize.width || 0));
       const sourceHeight = Math.max(0, Math.round(videoElement.videoHeight || videoNaturalSize.height || 0));
-      const clientWidth = Math.max(0, videoElement.clientWidth || 0);
-      const clientHeight = Math.max(0, videoElement.clientHeight || 0);
+      const clientWidth = Math.max(
+        0,
+        videoWrapper?.clientWidth || videoElement.clientWidth || 0
+      );
+      const clientHeight = Math.max(
+        0,
+        videoWrapper?.clientHeight || videoElement.clientHeight || 0
+      );
 
       if (sourceWidth <= 0 || sourceHeight <= 0 || clientWidth <= 0 || clientHeight <= 0) {
         setDisplayedVideoRect((previous) =>
@@ -3499,6 +3607,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     updateGeometry();
 
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateGeometry) : null;
+    observer?.observe(videoWrapper ?? videoElement);
     observer?.observe(videoElement);
     window.addEventListener("resize", updateGeometry);
     videoElement.addEventListener("loadeddata", updateGeometry);
@@ -3559,7 +3668,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
     const controlsBar = videoControlsBarRef.current;
-    const subtitleWrapper = activeSubtitleWrapperRef.current;
+    const subtitleWrapper = activeSubtitleSurfaceRef.current;
     const positionLayer = subtitleOverlayPositionLayerRef.current;
     if (!controlsBar || !subtitleWrapper || !positionLayer) {
       return;
@@ -3725,6 +3834,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       e.preventDefault();
       e.stopPropagation();
       pauseVideoForDragIfPlaying();
+      clearPendingVideoControlsReveal();
       setShowVideoControls(false);
       setSubtitlePositionDrag({
         startX: e.clientX,
@@ -3734,6 +3844,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       });
     },
     [
+      clearPendingVideoControlsReveal,
       pauseVideoForDragIfPlaying,
       subtitleResizeDrag,
       subtitleOverlayVisiblePosition.x,
@@ -3823,7 +3934,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       let px = drag.startPositionX + deltaX;
       let py = drag.startPositionY + deltaY;
       if (Math.abs(px - 0.5) < SUBTITLE_POSITION_SNAP_THRESHOLD) px = 0.5;
-      const wrapper = activeSubtitleWrapperRef.current;
+      const wrapper = activeSubtitleSurfaceRef.current;
       const clamped = clampSubtitleCenterToVisibleBounds(
         px,
         py,
@@ -3836,24 +3947,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     };
     const onMouseUp = (e: MouseEvent) => {
       resumePlaybackIfNeededRef.current();
-      const layer = subtitleOverlayPositionLayerRef.current;
-      if (layer) {
-        const rect = layer.getBoundingClientRect();
-        const isInsideByCoords =
-          rect.width > 0 &&
-          rect.height > 0 &&
-          e.clientX >= rect.left &&
-          e.clientX <= rect.right &&
-          e.clientY >= rect.top &&
-          e.clientY <= rect.bottom;
-        const isInsideByHover =
-          layer.matches(":hover") ||
-          activeSubtitleWrapperRef.current?.matches(":hover") ||
-          videoClickSurfaceRef.current?.matches(":hover");
-        setShowVideoControls(Boolean(isInsideByCoords || isInsideByHover));
+      const shouldDelayControlsReveal = isPointerInsideVideoInteractionArea(e.clientX, e.clientY);
+      if (shouldDelayControlsReveal) {
+        armVideoControlsRevealOnNextPointerMove(e.clientX, e.clientY);
       } else {
-        setShowVideoControls(false);
+        clearPendingVideoControlsReveal();
       }
+      setShowVideoControls(false);
       setSubtitlePositionDrag(null);
     };
     document.addEventListener("mousemove", onMouseMove, true);
@@ -3862,7 +3962,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       document.removeEventListener("mousemove", onMouseMove, true);
       document.removeEventListener("mouseup", onMouseUp, true);
     };
-  }, [subtitlePositionDrag]);
+  }, [
+    armVideoControlsRevealOnNextPointerMove,
+    clearPendingVideoControlsReveal,
+    isPointerInsideVideoInteractionArea,
+    subtitlePositionDrag
+  ]);
 
   React.useEffect(() => {
     if ((isSavingCue || isExporting) && subtitleResizeDrag) {
@@ -3937,7 +4042,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     editHistoryRef.current = [initialText];
     editHistoryIndexRef.current = 0;
     lastHistoryCommitAtRef.current = Date.now();
-    setCanUndoEdit(false);
   }, []);
 
   const updateEditHistory = React.useCallback((nextText: string) => {
@@ -3949,7 +4053,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (previousText === nextText) {
       editHistoryRef.current = truncatedHistory;
       editHistoryIndexRef.current = truncatedHistory.length - 1;
-      setCanUndoEdit(editHistoryIndexRef.current > 0);
       return;
     }
     const lengthDelta = Math.abs(nextText.length - previousText.length);
@@ -3966,7 +4069,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     editHistoryRef.current = truncatedHistory;
     editHistoryIndexRef.current = truncatedHistory.length - 1;
     lastHistoryCommitAtRef.current = now;
-    setCanUndoEdit(editHistoryIndexRef.current > 0);
   }, []);
 
   const resumePlaybackIfNeeded = React.useCallback(() => {
@@ -4163,7 +4265,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const nextText = editHistoryRef.current[nextIndex] ?? "";
     setEditingText(nextText);
     lastHistoryCommitAtRef.current = Date.now();
-    setCanUndoEdit(nextIndex > 0);
     queueSubtitleAutosave(nextText);
   }, [isExporting, isSavingCue, queueSubtitleAutosave]);
 
@@ -4431,7 +4532,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         const newTime = Math.max(0, el.currentTime - 5);
         el.currentTime = newTime;
         setCurrentTimeSeconds(newTime);
-        showSeekFeedback("−5 s", "left");
+        showSeekFeedback("-5 s", "left");
       } else if (frac > 0.75) {
         const newTime = Math.min(el.duration, el.currentTime + 5);
         el.currentTime = newTime;
@@ -4472,7 +4573,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             const t = Math.max(0, el.currentTime - 5);
             el.currentTime = t;
             setCurrentTimeSeconds(t);
-            showSeekFeedback("−5 s", "left");
+            showSeekFeedback("-5 s", "left");
           }
           break;
         case "ArrowRight":
@@ -4490,7 +4591,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             const t = Math.max(0, el.currentTime - 10);
             el.currentTime = t;
             setCurrentTimeSeconds(t);
-            showSeekFeedback("−10 s", "left");
+            showSeekFeedback("-10 s", "left");
           }
           break;
         case "l":
@@ -4602,8 +4703,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       ) : (
         <StyleControls
           appearance={appearance}
+          fonts={subtitleFonts}
+          fontsLoading={areSubtitleFontsLoading}
+          fontsError={subtitleFontsError}
           preset={preset}
           highlightOpacity={highlightOpacity}
+          showAnimationControl={false}
+          showHighlightSection={false}
+          showTextSection={false}
           onAppearanceChange={handleAppearanceChange}
           onPresetChange={handlePresetChange}
           onHighlightOpacityChange={handleHighlightOpacityChange}
@@ -4925,7 +5032,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
           <div className={cn("flex min-h-0 flex-1 gap-4", isNarrow ? "flex-col" : "flex-row")}>
             <section
-              className="flex min-h-[220px] flex-1 items-center justify-center"
+              className="flex min-h-[220px] min-w-0 flex-1 items-center justify-center overflow-hidden"
               data-testid="workbench-center-panel"
             >
               {hasVideoPreview ? (
@@ -4975,7 +5082,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     onClick={handleVideoSurfaceClick}
                     onDoubleClick={handleVideoSurfaceDoubleClick}
                     onMouseEnter={() => {
-                      if (subtitlePositionDrag !== null) return;
+                      if (subtitlePositionDrag !== null || suppressVideoControlsUntilPointerMoveRef.current) return;
                       setShowVideoControls(true);
                     }}
                     onMouseLeave={(e) => {
@@ -4983,7 +5090,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                       if (to instanceof Node && (
                         videoControlsBarRef.current?.contains(to) ||
                         subtitleOverlayPositionLayerRef.current?.contains(to) ||
-                        activeSubtitleWrapperRef.current?.contains(to)
+                        activeSubtitleWrapperRef.current?.contains(to) ||
+                        subtitleEditorControlsRef.current?.contains(to)
                       ))
                         return;
                       setShowVideoControls(false);
@@ -5028,7 +5136,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                         data-testid="workbench-subtitle-overlay-position-layer"
                         className="absolute inset-0"
                         onMouseEnter={() => {
-                      if (subtitlePositionDrag !== null) return;
+                      if (subtitlePositionDrag !== null || suppressVideoControlsUntilPointerMoveRef.current) return;
                       setShowVideoControls(true);
                     }}
                         onMouseLeave={(e) => {
@@ -5036,7 +5144,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                           if (to instanceof Node && (
                             videoControlsBarRef.current?.contains(to) ||
                             videoClickSurfaceRef.current?.contains(to) ||
-                            activeSubtitleWrapperRef.current?.contains(to)
+                            activeSubtitleWrapperRef.current?.contains(to) ||
+                            subtitleEditorControlsRef.current?.contains(to)
                           ))
                             return;
                           setShowVideoControls(false);
@@ -5059,7 +5168,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                               : "translate(-50%, -50%)"
                           }}
                           onMouseEnter={() => {
-                            if (subtitlePositionDrag === null) {
+                            if (
+                              subtitlePositionDrag === null &&
+                              !suppressVideoControlsUntilPointerMoveRef.current
+                            ) {
                               setShowVideoControls(true);
                             }
                             setIsHoveringActiveSubtitle(true);
@@ -5076,7 +5188,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                             setShowVideoControls(false);
                           }}
                         >
-                          <div className="relative w-max max-w-full">
+                          <div
+                            ref={activeSubtitleSurfaceRef}
+                            data-testid="workbench-active-subtitle-surface"
+                            className="relative w-max max-w-full"
+                          >
                             <div
                               className="pointer-events-none absolute inset-0"
                               style={{ zIndex: 15 }}
@@ -5133,8 +5249,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                             </div>
                             {isEditingActiveCue ? (
                               <div
+                                data-testid="workbench-subtitle-editor-surface"
                                 className={cn(
-                                  "relative inline-block min-w-16",
+                                  "relative inline-block min-w-16 max-w-full",
                                   showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
                                   !(
                                     appearance.subtitle_mode === "word_highlight" &&
@@ -5163,7 +5280,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                     />
                                     <span
                                       aria-hidden
-                                      className="relative z-1 block whitespace-pre-wrap"
+                                      className="relative z-1 block max-w-full whitespace-pre-wrap"
                                       dir={subtitleDirection}
                                       style={{
                                         ...subtitlePreviewTextStyle,
@@ -5251,7 +5368,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   <>
                                     <span
                                       aria-hidden
-                                      className="block whitespace-pre-wrap text-white"
+                                      className="block max-w-full whitespace-pre-wrap text-white"
                                       dir={subtitleDirection}
                                       style={{
                                         ...subtitleEditorTextStyle,
@@ -5296,7 +5413,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 tabIndex={0}
                                 data-testid="workbench-active-subtitle"
                                 className={cn(
-                                  "m-0 inline-block cursor-text box-border border-0 bg-transparent px-3 py-2 text-white shadow-lg transition focus-visible:outline-none hover:bg-background hover:ring-2 hover:ring-primary/45",
+                                  "m-0 inline-block min-w-16 max-w-full cursor-text box-border border-0 bg-transparent px-3 py-2 text-white shadow-lg transition focus-visible:outline-none hover:bg-background hover:ring-2 hover:ring-primary/45",
                                   showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
                                   (isHoveringActiveSubtitle || subtitleResizeDrag || subtitlePositionDrag) && "bg-background ring-2 ring-primary/45",
                                   isActiveCueSelected
@@ -5315,7 +5432,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 dir={subtitleDirection}
                               >
                                 <span
-                                  className="whitespace-pre-wrap"
+                                  className="block max-w-full whitespace-pre-wrap"
                                   dir={subtitleDirection}
                                   style={{ unicodeBidi: "plaintext" }}
                                 >
@@ -5450,38 +5567,39 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 ref={subtitleEditorControlsRef}
                                 data-testid="workbench-subtitle-editor-controls"
                                 className={cn(
-                                  "absolute z-10 flex items-center gap-1 rounded-full border border-border/70 bg-background/90 p-1 shadow-lg backdrop-blur-sm",
+                                  "absolute z-10",
                                   subtitleEditorControlsPlacement === "below"
                                     ? "left-1/2 top-full mt-2 -translate-x-1/2"
                                     : "left-1/2 bottom-full mb-2 -translate-x-1/2"
                                 )}
                               >
-                                <Button
-                                  type="button"
-                                  variant="secondary"
-                                  size="icon"
-                                  className="h-8 w-8 rounded-full border border-border/70 bg-background/90"
-                                  aria-label="Undo subtitle edit"
-                                  title="Undo"
-                                  data-testid="workbench-subtitle-undo"
-                                  onClick={handleUndoEdit}
-                                  disabled={isSavingCue || isExporting || !canUndoEdit}
-                                >
-                                  <RotateCcw className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="secondary"
-                                  size="icon"
-                                  className="h-8 w-8 rounded-full border border-border/70 bg-background/90"
-                                  aria-label="Close subtitle edit"
-                                  title="Close"
-                                  data-testid="workbench-subtitle-close"
-                                  onClick={handleCloseEdit}
-                                  disabled={isSavingCue || isExporting}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
+                                <SubtitleTextControls
+                                  mode="toolbar"
+                                  appearance={appearance}
+                                  fonts={subtitleFonts}
+                                  fontsLoading={areSubtitleFontsLoading}
+                                  fontsError={subtitleFontsError}
+                                  highlightOpacity={highlightOpacity}
+                                  onAppearanceChange={handleAppearanceChange}
+                                  onHighlightOpacityChange={
+                                    handleHighlightOpacityChange
+                                  }
+                                  trailingContent={
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="icon"
+                                      className="h-8 w-8 rounded-full border border-border/70 bg-background/90"
+                                      aria-label="Close subtitle edit"
+                                      title="Close"
+                                      data-testid="workbench-subtitle-close"
+                                      onClick={handleCloseEdit}
+                                      disabled={isSavingCue || isExporting}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  }
+                                />
                               </div>
                             )}
                             </div>
@@ -5519,7 +5637,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     }}
                     data-testid="workbench-video-controls"
                     onMouseEnter={() => {
-                      if (subtitlePositionDrag !== null) return;
+                      if (subtitlePositionDrag !== null || suppressVideoControlsUntilPointerMoveRef.current) return;
                       setShowVideoControls(true);
                     }}
                     onMouseLeave={(e) => {
@@ -5527,6 +5645,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                       if (to instanceof Node && (
                         videoClickSurfaceRef.current?.contains(to) ||
                         activeSubtitleWrapperRef.current?.contains(to) ||
+                        subtitleEditorControlsRef.current?.contains(to) ||
                         subtitleOverlayPositionLayerRef.current?.contains(to)
                       ))
                         return;
@@ -5820,7 +5939,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               </div>
               <ScrollArea className="min-h-0 flex-1 px-4 py-3">
                 <p className="text-xs text-muted-foreground">
-                  Placeholder — subtitles list will live here.
+                  Placeholder - subtitles list will live here.
                 </p>
               </ScrollArea>
             </aside>
