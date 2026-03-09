@@ -46,6 +46,7 @@ type SubtitleTextControlsProps = {
   onAppearanceChange: (changes: Partial<SubtitleStyleAppearance>) => void;
   onHighlightOpacityChange: (opacity: number) => void;
   mode?: "panel" | "toolbar";
+  showKaraokeControl?: boolean;
   className?: string;
   trailingContent?: React.ReactNode;
 };
@@ -187,6 +188,7 @@ const SubtitleTextControls = ({
   onAppearanceChange,
   onHighlightOpacityChange,
   mode = "panel",
+  showKaraokeControl = true,
   className,
   trailingContent
 }: SubtitleTextControlsProps) => {
@@ -750,48 +752,50 @@ const SubtitleTextControls = ({
           </PopoverContent>
         </Popover>
 
-        <Popover
-          open={isWordHighlight && karaokeOpen}
-          onOpenChange={(open) => setKaraokeOpen(open)}
-        >
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant={isWordHighlight ? "secondary" : "outline"}
-              size="icon"
-              className="h-8 w-8 rounded-full"
-              aria-label="Karaoke"
-              aria-pressed={isWordHighlight}
-              data-testid="subtitle-style-karaoke"
-              onClick={(event) => {
-                event.preventDefault();
-                if (isWordHighlight) {
-                  patch({ subtitle_mode: "static" });
-                  setKaraokeOpen(false);
-                  return;
-                }
-                patch({ subtitle_mode: "word_highlight" });
-                setKaraokeOpen(true);
-              }}
-            >
-              <Sparkles className="h-4 w-4" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-80 space-y-3" align="center">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">
-                Highlight
-              </Label>
-              <ColorRow
-                kind="highlight"
-                value={appearance.highlight_color}
-                onChange={(color) => patch({ highlight_color: color })}
-                opacity={highlightOpacity}
-                onOpacityChange={onHighlightOpacityChange}
-              />
-            </div>
-          </PopoverContent>
-        </Popover>
+        {showKaraokeControl && (
+          <Popover
+            open={isWordHighlight && karaokeOpen}
+            onOpenChange={(open) => setKaraokeOpen(open)}
+          >
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant={isWordHighlight ? "secondary" : "outline"}
+                size="icon"
+                className="h-8 w-8 rounded-full"
+                aria-label="Karaoke"
+                aria-pressed={isWordHighlight}
+                data-testid="subtitle-style-karaoke"
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (isWordHighlight) {
+                    patch({ subtitle_mode: "static" });
+                    setKaraokeOpen(false);
+                    return;
+                  }
+                  patch({ subtitle_mode: "word_highlight" });
+                  setKaraokeOpen(true);
+                }}
+              >
+                <Sparkles className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 space-y-3" align="center">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">
+                  Highlight
+                </Label>
+                <ColorRow
+                  kind="highlight"
+                  value={appearance.highlight_color}
+                  onChange={(color) => patch({ highlight_color: color })}
+                  opacity={highlightOpacity}
+                  onOpacityChange={onHighlightOpacityChange}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
 
         {trailingContent}
       </div>
