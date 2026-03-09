@@ -286,6 +286,7 @@ const SubtitleTextControls = ({
   const [karaokeOpen, setKaraokeOpen] = React.useState(false);
   const lastRegularWeightRef = React.useRef<number | null>(null);
   const lastBoldWeightRef = React.useRef<number | null>(null);
+  const sizeInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const currentFontWeight = React.useMemo(
     () => normalizeFontWeight(appearance.font_weight),
@@ -321,12 +322,6 @@ const SubtitleTextControls = ({
         ) === index
     );
   }, [fonts, isCurrentFontUnavailable, selectedFont]);
-  const weightOptions = React.useMemo(() => {
-    const nextWeights = selectedFont.weights.includes(currentFontWeight)
-      ? [...selectedFont.weights]
-      : [currentFontWeight, ...selectedFont.weights];
-    return Array.from(new Set(nextWeights)).sort((left, right) => left - right);
-  }, [currentFontWeight, selectedFont.weights]);
   const isCurrentWeightListed = selectedFont.weights.includes(currentFontWeight);
   const fontControlsDisabled = fontsLoading || Boolean(fontsError);
   const getWeightOptionsForFont = (font: FontOption) => {
@@ -402,6 +397,15 @@ const SubtitleTextControls = ({
     commitFontSize(String(appearance.font_size + delta));
   };
 
+  const focusSizeInput = React.useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        sizeInputRef.current?.focus({ preventScroll: true });
+        sizeInputRef.current?.select();
+      });
+    });
+  }, []);
+
   const handleFontAndWeightSelect = (
     font: SubtitleFontMetadata,
     weight: number
@@ -452,17 +456,20 @@ const SubtitleTextControls = ({
     defaultTextAppearance != null &&
     textAppearanceDiffers(appearance, defaultTextAppearance);
   const toolbarShellClass = isToolbar
-    ? "flex max-w-[min(90vw,48rem)] flex-nowrap items-center justify-center gap-1.5 rounded-2xl border border-border bg-background/95 px-2 py-1.5 shadow-md backdrop-blur-sm"
+    ? "flex max-w-[min(90vw,48rem)] flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-border bg-background/95 px-2 py-1.5 shadow-md backdrop-blur-sm"
     : "flex flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 p-2";
   const toolbarRound = isToolbar ? "rounded-lg" : "rounded-full";
 
   return (
     <div className={cn("space-y-1.5", className)}>
       <div className={toolbarShellClass}>
+        <TooltipProvider>
         <DropdownMenu
           open={fontOpen}
           onOpenChange={setFontOpen}
         >
+          <Tooltip>
+            <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -496,6 +503,9 @@ const SubtitleTextControls = ({
               <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Font</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent
             className="min-w-[14rem] w-[min(22rem,var(--radix-dropdown-menu-trigger-width))] p-0"
             align="start"
@@ -575,6 +585,10 @@ const SubtitleTextControls = ({
                                 handleFontAndWeightSelect(font, weight)
                               }
                               className="relative flex cursor-pointer items-center rounded-sm py-1.5 pl-8 pr-2 text-xs"
+                              style={{
+                                fontFamily: font.family,
+                                fontWeight: weight
+                              }}
                             >
                               <span className="absolute left-2 flex size-4 items-center justify-center">
                                 {(isCurrent || showCurrent) && (
@@ -594,6 +608,8 @@ const SubtitleTextControls = ({
           </DropdownMenuContent>
         </DropdownMenu>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
         <Button
           type="button"
           variant={boldActive ? "secondary" : "outline"}
@@ -606,47 +622,33 @@ const SubtitleTextControls = ({
         >
           B
         </Button>
+          </TooltipTrigger>
+          <TooltipContent>Bold</TooltipContent>
+        </Tooltip>
 
-        {italicControlDisabled && italicHelperText ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
-                  <Button
-                    type="button"
-                    variant={italicActive ? "secondary" : "outline"}
-                    className={cn("h-8 min-w-8 px-2 text-xs", toolbarRound)}
-                    aria-label="Italic"
-                    aria-pressed={italicActive}
-                    data-testid="subtitle-style-italic"
-                    disabled={italicControlDisabled}
-                    onClick={() =>
-                      patch({ font_style: italicActive ? "regular" : "italic" })
-                    }
-                  >
-                    <ItalicSerifIcon className="h-4 w-4" />
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{italicHelperText}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : (
-          <Button
-            type="button"
-            variant={italicActive ? "secondary" : "outline"}
-            className={cn("h-8 min-w-8 px-2 text-xs", toolbarRound)}
-            aria-label="Italic"
-            aria-pressed={italicActive}
-            data-testid="subtitle-style-italic"
-            disabled={italicControlDisabled}
-            onClick={() =>
-              patch({ font_style: italicActive ? "regular" : "italic" })
-            }
-          >
-            <ItalicSerifIcon className="h-4 w-4" />
-          </Button>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button
+                type="button"
+                variant={italicActive ? "secondary" : "outline"}
+                className={cn("h-8 min-w-8 px-2 text-xs", toolbarRound)}
+                aria-label="Italic"
+                aria-pressed={italicActive}
+                data-testid="subtitle-style-italic"
+                disabled={italicControlDisabled}
+                onClick={() =>
+                  patch({ font_style: italicActive ? "regular" : "italic" })
+                }
+              >
+                <ItalicSerifIcon className="h-4 w-4" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {italicControlDisabled && italicHelperText ? italicHelperText : "Italic"}
+          </TooltipContent>
+        </Tooltip>
 
         <div
           className={cn(
@@ -654,6 +656,8 @@ const SubtitleTextControls = ({
             toolbarRound
           )}
         >
+          <Tooltip>
+            <TooltipTrigger asChild>
           <Button
             type="button"
             variant="ghost"
@@ -665,17 +669,24 @@ const SubtitleTextControls = ({
           >
             <span className="text-base leading-none">-</span>
           </Button>
+            </TooltipTrigger>
+            <TooltipContent>Decrease font size</TooltipContent>
+          </Tooltip>
           <DropdownMenu
             open={sizeOpen}
             onOpenChange={(open) => {
               setSizeOpen(open);
               if (open) {
                 setSizeInputValue(String(clampFontSize(appearance.font_size)));
+                focusSizeInput();
               }
             }}
           >
+            <Tooltip>
+              <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
               <Input
+                ref={sizeInputRef}
                 type="number"
                 min={FONT_SIZE_MIN}
                 max={FONT_SIZE_MAX}
@@ -693,6 +704,9 @@ const SubtitleTextControls = ({
                 }}
               />
             </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>Font size</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent
               className="min-w-0 w-16 p-1"
               align="center"
@@ -715,6 +729,8 @@ const SubtitleTextControls = ({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
           <Button
             type="button"
             variant="ghost"
@@ -726,27 +742,35 @@ const SubtitleTextControls = ({
           >
             <span className="text-base leading-none">+</span>
           </Button>
+            </TooltipTrigger>
+            <TooltipContent>Increase font size</TooltipContent>
+          </Tooltip>
         </div>
 
         <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className={cn("h-8 w-8", toolbarRound)}
-              aria-label="Text color"
-              data-testid="subtitle-style-text-color"
-            >
-              <span
-                className={cn("h-4 w-4 border border-border", isToolbar ? "rounded-md" : "rounded-full")}
-                style={{
-                  backgroundColor: appearance.text_color,
-                  opacity: appearance.text_opacity
-                }}
-              />
-            </Button>
-          </PopoverTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className={cn("h-8 w-8", toolbarRound)}
+                  aria-label="Text color"
+                  data-testid="subtitle-style-text-color"
+                >
+                  <span
+                    className={cn("h-4 w-4 border border-border", isToolbar ? "rounded-md" : "rounded-full")}
+                    style={{
+                      backgroundColor: appearance.text_color,
+                      opacity: appearance.text_opacity
+                    }}
+                  />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Text color</TooltipContent>
+          </Tooltip>
           <PopoverContent className="w-80 space-y-3" align="center">
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Text color</Label>
@@ -762,57 +786,70 @@ const SubtitleTextControls = ({
         </Popover>
 
         <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className={cn("h-8 w-8", toolbarRound)}
-              aria-label="Text alignment"
-              data-testid="subtitle-style-alignment"
-            >
-              <AlignmentIcon className="h-4 w-4" />
-            </Button>
-          </PopoverTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className={cn("h-8 w-8", toolbarRound)}
+                  aria-label="Text alignment"
+                  data-testid="subtitle-style-alignment"
+                >
+                  <AlignmentIcon className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Alignment</TooltipContent>
+          </Tooltip>
           <PopoverContent className="w-44" align="center">
             <div className="grid grid-cols-3 gap-2">
               {[
-                { value: "left", label: "Left", Icon: AlignLeft },
-                { value: "center", label: "Center", Icon: AlignCenter },
-                { value: "right", label: "Right", Icon: AlignRight }
-              ].map(({ value, label, Icon }) => (
-                <Button
-                  key={value}
-                  type="button"
-                  variant={appearance.text_align === value ? "secondary" : "outline"}
-                  className="h-auto flex-col gap-1 rounded-xl px-2 py-2 text-xs"
-                  onClick={() =>
-                    patch({
-                      text_align: value as SubtitleStyleAppearance["text_align"]
-                    })
-                  }
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </Button>
+                { value: "left", tooltip: "Left align", Icon: AlignLeft },
+                { value: "center", tooltip: "Center align", Icon: AlignCenter },
+                { value: "right", tooltip: "Right align", Icon: AlignRight }
+              ].map(({ value, tooltip: alignTooltip, Icon }) => (
+                <Tooltip key={value}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant={appearance.text_align === value ? "secondary" : "outline"}
+                      className="h-auto flex-col gap-1 rounded-xl px-2 py-2 text-xs"
+                      onClick={() =>
+                        patch({
+                          text_align: value as SubtitleStyleAppearance["text_align"]
+                        })
+                      }
+                    >
+                      <Icon className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{alignTooltip}</TooltipContent>
+                </Tooltip>
               ))}
             </div>
           </PopoverContent>
         </Popover>
 
         <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className={cn("h-8 w-8", toolbarRound)}
-              aria-label="Spacing"
-              data-testid="subtitle-style-spacing"
-            >
-              <FormatLetterSpacingIcon className="h-4 w-4" />
-            </Button>
-          </PopoverTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className={cn("h-8 w-8", toolbarRound)}
+                  aria-label="Spacing"
+                  data-testid="subtitle-style-spacing"
+                >
+                  <FormatLetterSpacingIcon className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Letter & line spacing</TooltipContent>
+          </Tooltip>
           <PopoverContent className="w-72 space-y-3" align="center">
             <SliderField
               label="Letter spacing"
@@ -834,18 +871,23 @@ const SubtitleTextControls = ({
         </Popover>
 
         <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className={cn("h-8 w-8", toolbarRound)}
-              aria-label="Opacity"
-              data-testid="subtitle-style-opacity"
-            >
-              <OpacityIcon className="h-4 w-4" />
-            </Button>
-          </PopoverTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className={cn("h-8 w-8", toolbarRound)}
+                  aria-label="Opacity"
+                  data-testid="subtitle-style-opacity"
+                >
+                  <OpacityIcon className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Text opacity</TooltipContent>
+          </Tooltip>
           <PopoverContent className="w-72 space-y-3" align="center">
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">
@@ -928,6 +970,7 @@ const SubtitleTextControls = ({
         )}
 
         {trailingContent}
+        </TooltipProvider>
         {hasTextChanges && defaultTextAppearance && (
           <Button
             type="button"
