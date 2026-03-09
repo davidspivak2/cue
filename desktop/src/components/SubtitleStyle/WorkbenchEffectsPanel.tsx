@@ -647,19 +647,6 @@ const WorkbenchEffectsPanel = ({
     return () => cancelAnimationFrame(id);
   }, [expandedEffects, expandedVisibleEffects]);
 
-  const removeExpanded = (effectId: WorkbenchEffectId) => {
-    setExpandedEffects((prev) => {
-      const next = new Set(prev);
-      next.delete(effectId);
-      return next;
-    });
-    setExpandedVisibleEffects((prev) => {
-      const next = new Set(prev);
-      next.delete(effectId);
-      return next;
-    });
-  };
-
   const [draftShadowAngle, setDraftShadowAngle] = React.useState(
     DEFAULT_SHADOW_UI_ANGLE_DEGREES
   );

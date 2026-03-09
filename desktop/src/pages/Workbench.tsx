@@ -10,6 +10,7 @@ import {
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import Checklist, { ChecklistItem } from "@/components/Checklist";
@@ -466,6 +467,9 @@ const RTL_CHAR_PATTERN = /[\u0590-\u08FF]/;
 const MAX_OUTLINE_SHADOW_RADIUS = 10;
 const SUBTITLE_CONTROLS_COLLISION_GAP_PX = 8;
 const SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX = 0.5;
+const SUBTITLE_EDITOR_TOOLBAR_GAP_PX = 8;
+const SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX = 12;
+const SUBTITLE_EDITOR_TOOLBAR_POSITION_TOLERANCE_PX = 0.5;
 const QT_POINT_TO_CSS_PX = 96 / 72;
 const WEB_SUBTITLE_LINE_HEIGHT_RATIO = 1.375;
 const QT_SUBTITLE_LINE_HEIGHT_RATIO = 1.125;
@@ -715,6 +719,8 @@ const formatElapsedSince = (startedAt: string | null): string => {
 
 const clampOpacity = (value: number) => Math.max(0, Math.min(1, value));
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const clampNumber = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, value));
 
 const clampSubtitleCenterToVisibleBounds = (
   x: number,
@@ -951,6 +957,18 @@ const resolveHighlightWordIndexFromTimings = (
 
 type BrowserTimeout = number;
 
+type FloatingSubtitleToolbarPosition = {
+  left: number;
+  top: number;
+  visible: boolean;
+};
+
+const HIDDEN_FLOATING_SUBTITLE_TOOLBAR_POSITION: FloatingSubtitleToolbarPosition = {
+  left: 0,
+  top: 0,
+  visible: false
+};
+
 const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const location = useLocation();
   const incomingState = location.state as WorkbenchLocationState;
@@ -987,6 +1005,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isStyleLoading, setIsStyleLoading] = React.useState(true);
   const [styleError, setStyleError] = React.useState<string | null>(null);
+  const [subtitleEditorControlsElement, setSubtitleEditorControlsElement] =
+    React.useState<HTMLDivElement | null>(null);
+  const [subtitleEditorToolbarPosition, setSubtitleEditorToolbarPosition] =
+    React.useState<FloatingSubtitleToolbarPosition>(
+      HIDDEN_FLOATING_SUBTITLE_TOOLBAR_POSITION
+    );
+  const [subtitleEditorToolbarLayoutTick, setSubtitleEditorToolbarLayoutTick] =
+    React.useState(0);
   const [settings, setSettings] = React.useState<SettingsConfig | null>(null);
   const [subtitleFonts, setSubtitleFonts] = React.useState<SubtitleFontMetadata[]>([]);
   const [areSubtitleFontsLoading, setAreSubtitleFontsLoading] = React.useState(true);
@@ -1090,6 +1116,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   );
   const seekFeedbackTimeoutRef = React.useRef<BrowserTimeout | null>(null);
   const [subtitleControlsPushPx, setSubtitleControlsPushPx] = React.useState(0);
+  const setSubtitleEditorControlsNode = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      subtitleEditorControlsRef.current = node;
+      setSubtitleEditorControlsElement(node);
+    },
+    []
+  );
   const [isCreatingSubtitles, setIsCreatingSubtitles] = React.useState(false);
   const [createSubtitlesError, setCreateSubtitlesError] = React.useState<string | null>(null);
   const [createSubtitlesHeading, setCreateSubtitlesHeading] =
@@ -3925,6 +3958,130 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [effectiveAppearance.font_family, isEditingActiveCue]);
 
   React.useLayoutEffect(() => {
+    if (!isEditingActiveCue) {
+      setSubtitleEditorToolbarPosition((previous) =>
+        previous.visible ? HIDDEN_FLOATING_SUBTITLE_TOOLBAR_POSITION : previous
+      );
+      return;
+    }
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const subtitleSurface = activeSubtitleSurfaceRef.current;
+    const toolbar = subtitleEditorControlsElement;
+    if (!subtitleSurface || !toolbar) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      setSubtitleEditorToolbarLayoutTick((previous) => previous + 1);
+    });
+    observer.observe(subtitleSurface);
+    observer.observe(toolbar);
+    return () => observer.disconnect();
+  }, [isEditingActiveCue, subtitleEditorControlsElement]);
+
+  React.useLayoutEffect(() => {
+    if (!isEditingActiveCue) {
+      setSubtitleEditorToolbarPosition((previous) =>
+        previous.visible ? HIDDEN_FLOATING_SUBTITLE_TOOLBAR_POSITION : previous
+      );
+      return;
+    }
+    if (typeof window === "undefined") {
+      return;
+    }
+    const subtitleSurface = activeSubtitleSurfaceRef.current;
+    const toolbar = subtitleEditorControlsElement;
+    if (!subtitleSurface || !toolbar) {
+      setSubtitleEditorToolbarPosition((previous) =>
+        previous.visible ? HIDDEN_FLOATING_SUBTITLE_TOOLBAR_POSITION : previous
+      );
+      return;
+    }
+
+    const subtitleRect = subtitleSurface.getBoundingClientRect();
+    const toolbarRect = toolbar.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    if (
+      viewportWidth <= 0 ||
+      viewportHeight <= 0 ||
+      subtitleRect.width <= 0 ||
+      subtitleRect.height <= 0 ||
+      toolbarRect.width <= 0 ||
+      toolbarRect.height <= 0
+    ) {
+      setSubtitleEditorToolbarPosition((previous) =>
+        previous.visible ? HIDDEN_FLOATING_SUBTITLE_TOOLBAR_POSITION : previous
+      );
+      return;
+    }
+
+    const titleBar = document.querySelector("[data-cue-title-bar]");
+    const titleBarBottom =
+      titleBar instanceof HTMLElement ? titleBar.getBoundingClientRect().bottom : 0;
+    const topPaddingPx = Math.max(
+      SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX,
+      titleBarBottom + SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX
+    );
+    const maxLeft = Math.max(
+      SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX,
+      viewportWidth -
+        SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX -
+        toolbarRect.width
+    );
+    const left = clampNumber(
+      subtitleRect.left + subtitleRect.width / 2 - toolbarRect.width / 2,
+      SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX,
+      maxLeft
+    );
+    const preferredTop =
+      subtitleRect.top - SUBTITLE_EDITOR_TOOLBAR_GAP_PX - toolbarRect.height;
+    const maxTop = Math.max(
+      topPaddingPx,
+      viewportHeight -
+        SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX -
+        toolbarRect.height
+    );
+    const top = clampNumber(preferredTop, topPaddingPx, maxTop);
+
+    setSubtitleEditorToolbarPosition((previous) => {
+      if (
+        previous.visible &&
+        Math.abs(previous.left - left) <=
+          SUBTITLE_EDITOR_TOOLBAR_POSITION_TOLERANCE_PX &&
+        Math.abs(previous.top - top) <=
+          SUBTITLE_EDITOR_TOOLBAR_POSITION_TOLERANCE_PX
+      ) {
+        return previous;
+      }
+      return {
+        left,
+        top,
+        visible: true
+      };
+    });
+  }, [
+    activeCue?.id,
+    appearance,
+    areSubtitleFontsLoading,
+    displayedVideoRect.height,
+    displayedVideoRect.offsetX,
+    displayedVideoRect.offsetY,
+    displayedVideoRect.scale,
+    displayedVideoRect.width,
+    editingText,
+    height,
+    isEditingActiveCue,
+    subtitleControlsPushPx,
+    subtitleEditorControlsElement,
+    subtitleEditorToolbarLayoutTick,
+    subtitleFonts,
+    subtitleFontsError,
+    width
+  ]);
+
+  React.useLayoutEffect(() => {
     if (!shouldShowVideoControls || !activeCue) {
       setSubtitleControlsPushPx((prev) =>
         Math.abs(prev) <= SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX ? prev : 0
@@ -4839,12 +4996,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
   }, [closeEditMode, flushPendingStylePersistence, flushSubtitleAutosave, isExporting]);
 
-  const handleCloseEdit = React.useCallback(() => {
-    if (!isSavingCueRef.current) {
-      void flushAndExitEditMode();
-    }
-  }, [flushAndExitEditMode]);
-
   const handleCueClick = React.useCallback(
     (cue: SrtCue) => {
       if (isSavingCue || isExporting) {
@@ -5403,6 +5554,58 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     </div>
   );
 
+  const subtitleEditorToolbarMaxWidthPx = Math.max(
+    0,
+    width - SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX * 2
+  );
+  const subtitleEditorToolbarContent = (
+    <SubtitleTextControls
+      mode="toolbar"
+      appearance={appearance}
+      fonts={subtitleFonts}
+      fontsLoading={areSubtitleFontsLoading}
+      fontsError={subtitleFontsError}
+      highlightOpacity={highlightOpacity}
+      onAppearanceChange={handleAppearanceChange}
+      onHighlightOpacityChange={handleHighlightOpacityChange}
+      showKaraokeControl={false}
+      defaultTextAppearance={{
+        font_family: DEFAULT_APPEARANCE.font_family,
+        font_size: DEFAULT_APPEARANCE.font_size,
+        font_style: DEFAULT_APPEARANCE.font_style,
+        font_weight: DEFAULT_APPEARANCE.font_weight,
+        text_align: DEFAULT_APPEARANCE.text_align,
+        line_spacing: DEFAULT_APPEARANCE.line_spacing,
+        text_color: DEFAULT_APPEARANCE.text_color,
+        text_opacity: DEFAULT_APPEARANCE.text_opacity,
+        letter_spacing: DEFAULT_APPEARANCE.letter_spacing
+      }}
+    />
+  );
+  const subtitleEditorToolbarPortal =
+    isEditingActiveCue && typeof document !== "undefined"
+      ? createPortal(
+          <div className="pointer-events-none fixed inset-0 z-30">
+            <div
+              ref={setSubtitleEditorControlsNode}
+              data-testid="workbench-subtitle-editor-controls"
+              className="pointer-events-auto fixed min-w-0"
+              style={{
+                left: `${subtitleEditorToolbarPosition.left}px`,
+                top: `${subtitleEditorToolbarPosition.top}px`,
+                maxWidth: `${subtitleEditorToolbarMaxWidthPx}px`,
+                visibility: subtitleEditorToolbarPosition.visible
+                  ? "visible"
+                  : "hidden"
+              }}
+            >
+              {subtitleEditorToolbarContent}
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   if (isLoading) {
     return <WorkbenchSkeleton isNarrow={isNarrow} />;
   }
@@ -5668,7 +5871,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                   data-testid="workbench-center-panel-video-wrapper"
                   onMouseLeave={(e) => {
                     const to = e.relatedTarget;
-                    if (to instanceof Node && videoWrapperRef.current?.contains(to)) return;
+                    if (to instanceof Node && (
+                      videoWrapperRef.current?.contains(to) ||
+                      subtitleEditorControlsRef.current?.contains(to)
+                    ))
+                      return;
                     setShowVideoControls(false);
                   }}
                 >
@@ -5808,7 +6015,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                             if (to instanceof Node && (
                               videoControlsBarRef.current?.contains(to) ||
                               videoClickSurfaceRef.current?.contains(to) ||
-                              subtitleOverlayPositionLayerRef.current?.contains(to)
+                              subtitleOverlayPositionLayerRef.current?.contains(to) ||
+                              subtitleEditorControlsRef.current?.contains(to)
                             ))
                               return;
                             setShowVideoControls(false);
@@ -6200,38 +6408,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 </div>
                               </>
                             )}
-                            {isEditingActiveCue && (
-                              <div
-                                ref={subtitleEditorControlsRef}
-                                data-testid="workbench-subtitle-editor-controls"
-                                className="absolute z-10 left-1/2 bottom-full mb-2 -translate-x-1/2"
-                              >
-                                <SubtitleTextControls
-                                  mode="toolbar"
-                                  appearance={appearance}
-                                  fonts={subtitleFonts}
-                                  fontsLoading={areSubtitleFontsLoading}
-                                  fontsError={subtitleFontsError}
-                                  highlightOpacity={highlightOpacity}
-                                  onAppearanceChange={handleAppearanceChange}
-                                  onHighlightOpacityChange={
-                                    handleHighlightOpacityChange
-                                  }
-                                  showKaraokeControl={false}
-                                  defaultTextAppearance={{
-                                    font_family: DEFAULT_APPEARANCE.font_family,
-                                    font_size: DEFAULT_APPEARANCE.font_size,
-                                    font_style: DEFAULT_APPEARANCE.font_style,
-                                    font_weight: DEFAULT_APPEARANCE.font_weight,
-                                    text_align: DEFAULT_APPEARANCE.text_align,
-                                    line_spacing: DEFAULT_APPEARANCE.line_spacing,
-                                    text_color: DEFAULT_APPEARANCE.text_color,
-                                    text_opacity: DEFAULT_APPEARANCE.text_opacity,
-                                    letter_spacing: DEFAULT_APPEARANCE.letter_spacing
-                                  }}
-                                />
-                              </div>
-                            )}
                             </div>
                           </div>
                         </div>
@@ -6556,6 +6732,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               data-testid="workbench-overlay-scrim"
             />
           )}
+
+          {subtitleEditorToolbarPortal}
 
           {hasSubtitles && showSubtitlesOverlay && leftPanelOpen && (
             <aside
