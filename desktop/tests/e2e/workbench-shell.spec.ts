@@ -1092,6 +1092,32 @@ const setShadowOpacityValue = async (page, value) => {
   await input.press("Tab");
 };
 
+const getShadowAngleInput = async (page) => {
+  const detail = await ensureEffectDetailVisible(page, "shadow");
+  const input = detail.getByTestId("workbench-effect-shadow-angle-input");
+  await expect(input).toBeVisible();
+  return input;
+};
+
+const setShadowAngleValue = async (page, value) => {
+  const input = await getShadowAngleInput(page);
+  await input.fill(String(value));
+  await input.press("Tab");
+};
+
+const getShadowDistanceInput = async (page) => {
+  const detail = await ensureEffectDetailVisible(page, "shadow");
+  const input = detail.getByTestId("workbench-effect-shadow-distance-input");
+  await expect(input).toBeVisible();
+  return input;
+};
+
+const setShadowDistanceValue = async (page, value) => {
+  const input = await getShadowDistanceInput(page);
+  await input.fill(String(value));
+  await input.press("Tab");
+};
+
 const expectProjectHubHome = async (page) => {
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 };
@@ -1109,6 +1135,12 @@ const readActiveSubtitleBackgroundColor = async (page) =>
   page.getByTestId("workbench-active-subtitle").evaluate((element) => {
     const styles = window.getComputedStyle(element);
     return styles.backgroundColor;
+  });
+
+const readActiveSubtitleTextShadow = async (page) =>
+  page.getByTestId("workbench-active-subtitle").evaluate((element) => {
+    const styles = window.getComputedStyle(element);
+    return styles.textShadow;
   });
 
 const readEffectCardPressed = async (page, effectId) =>
@@ -3066,6 +3098,104 @@ test("effects pane cards support hover preview and multi-select", async ({ page 
     .toBe("line");
 });
 
+test("effects pane derives shadow angle and distance from legacy offsets", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0] = {
+    ...projects[0],
+    style: {
+      ...DEFAULT_PROJECT_STYLE,
+      subtitle_style: {
+        ...DEFAULT_PROJECT_STYLE.subtitle_style,
+        appearance: {
+          ...DEFAULT_PROJECT_STYLE.subtitle_style.appearance,
+          shadow_enabled: true,
+          shadow_strength: 2,
+          shadow_offset_x: 4,
+          shadow_offset_y: 0
+        }
+      }
+    }
+  };
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  await expect(await getShadowAngleInput(page)).toHaveValue("90");
+  await expect(await getShadowDistanceInput(page)).toHaveValue("4");
+});
+
+test("effects pane shadow hover preview is visual only", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0] = {
+    ...projects[0],
+    style: {
+      ...DEFAULT_PROJECT_STYLE,
+      subtitle_style: {
+        ...DEFAULT_PROJECT_STYLE.subtitle_style,
+        appearance: {
+          ...DEFAULT_PROJECT_STYLE.subtitle_style.appearance,
+          shadow_enabled: false,
+          shadow_strength: 0,
+          shadow_offset_x: 0,
+          shadow_offset_y: 0
+        }
+      }
+    }
+  };
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  const shadowCard = await getEffectCard(page, "shadow");
+  await expect(shadowCard).toHaveAttribute("aria-pressed", "false");
+
+  const baseTextShadow = await readActiveSubtitleTextShadow(page);
+  await shadowCard.hover();
+  await expect.poll(() => readActiveSubtitleTextShadow(page)).not.toBe(baseTextShadow);
+  expect(api.getPutCallCount()).toBe(0);
+
+  await page.mouse.move(20, 20);
+  await expect.poll(() => readActiveSubtitleTextShadow(page)).toBe(baseTextShadow);
+  expect(api.getPutCallCount()).toBe(0);
+});
+
+test("effects pane persists shadow angle and distance as legacy offsets only", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  await setShadowAngleValue(page, 90);
+  await expect(await getShadowAngleInput(page)).toHaveValue("90");
+  expect(api.getPutCallCount()).toBe(0);
+  await setShadowDistanceValue(page, 4);
+
+  const payloadAppearance = () => api.getLastPutPayload()?.style?.subtitle_style?.appearance ?? null;
+  await expect.poll(() => payloadAppearance()?.shadow_offset_x ?? null).toBe(4);
+  await expect.poll(() => payloadAppearance()?.shadow_offset_y ?? null).toBe(0);
+  expect(payloadAppearance()?.shadow_angle).toBeUndefined();
+  expect(payloadAppearance()?.shadow_distance).toBeUndefined();
+});
+
 test("effects pane reset restores one effect without clearing the others", async ({
   page
 }) => {
@@ -3088,6 +3218,8 @@ test("effects pane reset restores one effect without clearing the others", async
   await page.getByTestId("workbench-effect-reset-shadow").click();
 
   await expect(shadowOpacityInput).toHaveValue("30");
+  await expect(await getShadowAngleInput(page)).toHaveValue("180");
+  await expect(await getShadowDistanceInput(page)).toHaveValue("2");
   await expect.poll(() => readEffectCardPressed(page, "background")).toBe(true);
   await expect
     .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.shadow_opacity ?? null)
@@ -3129,6 +3261,47 @@ test("background word mode falls back to line when karaoke is turned off", async
   await expect(
     refocusedBackgroundDetail.getByTestId("workbench-effect-background-mode-word")
   ).toBeDisabled();
+});
+
+test("effects pane shadow angle edits undo back to the previous direction", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  await ensureEffectDetailVisible(page, "shadow");
+  await page.getByTestId("workbench-effect-reset-shadow").click();
+  await expect(await getShadowAngleInput(page)).toHaveValue("180");
+  await expect(await getShadowDistanceInput(page)).toHaveValue("2");
+
+  await setShadowAngleValue(page, 90);
+  await expect(await getShadowAngleInput(page)).toHaveValue("90");
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.shadow_offset_x ?? null)
+    .toBe(2);
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.shadow_offset_y ?? null)
+    .toBe(0);
+
+  const shadowAngleInput = await getShadowAngleInput(page);
+  await shadowAngleInput.focus();
+  await page.keyboard.press("ControlOrMeta+z");
+
+  await expect(await getShadowAngleInput(page)).toHaveValue("180");
+  await expect(await getShadowDistanceInput(page)).toHaveValue("2");
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.shadow_offset_x ?? null)
+    .toBe(0);
+  await expect
+    .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.shadow_offset_y ?? null)
+    .toBe(2);
 });
 
 test("on-video contract supports unified keyboard undo across text and style changes", async ({

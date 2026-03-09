@@ -536,6 +536,9 @@ const classifyAppearanceHistoryChange = (
   if (keys.every((key) => key === "shadow_enabled" || key === "shadow_strength")) {
     return { kind: "appearance:shadow-strength", canCoalesce: true };
   }
+  if (keys.every((key) => key === "shadow_offset_x" || key === "shadow_offset_y")) {
+    return { kind: "appearance:shadow-offset", canCoalesce: true };
+  }
   if (keys.every((key) => key.startsWith("line_bg_padding"))) {
     return { kind: "appearance:line-bg-padding", canCoalesce: true };
   }
