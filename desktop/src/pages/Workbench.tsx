@@ -147,11 +147,11 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   text_color: "#FFFFFF",
   text_opacity: 1.0,
   letter_spacing: 0,
-  outline_enabled: true,
-  outline_width: 2,
+  outline_enabled: false,
+  outline_width: 0,
   outline_color: "#000000",
-  shadow_enabled: true,
-  shadow_strength: 1,
+  shadow_enabled: false,
+  shadow_strength: 0,
   shadow_offset_x: 0,
   shadow_offset_y: 0,
   shadow_color: "#000000",
@@ -180,7 +180,7 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   vertical_offset: 28,
   position_x: 0.5,
   position_y: 0.92,
-  subtitle_mode: "word_highlight",
+  subtitle_mode: "static",
   highlight_color: "#FFD400"
 };
 
@@ -189,9 +189,14 @@ type WorkbenchEffectChange = {
   highlightOpacity?: number;
 };
 
+const DEFAULT_EFFECT_OUTLINE: Partial<SubtitleStyleAppearance> = {
+  outline_enabled: true,
+  outline_width: 2,
+  outline_color: "#000000"
+};
+
 const DEFAULT_EFFECT_SHADOW: Partial<SubtitleStyleAppearance> = {
   shadow_enabled: true,
-  shadow_strength: 2,
   shadow_offset_x: 0,
   shadow_offset_y: 2,
   shadow_color: "#000000",
@@ -212,13 +217,21 @@ const DEFAULT_EFFECT_BACKGROUND: Partial<SubtitleStyleAppearance> = {
   line_bg_radius: 0
 };
 
+const DEFAULT_EFFECT_KARAOKE: Partial<SubtitleStyleAppearance> = {
+  subtitle_mode: "word_highlight",
+  highlight_color: "#FFD400"
+};
+
 const DEFAULT_EFFECT_KARAOKE_HIGHLIGHT_OPACITY = 1;
 
 const isOutlineEffectActive = (appearance: SubtitleStyleAppearance) =>
   appearance.outline_enabled && appearance.outline_width > 0;
 
 const isShadowEffectActive = (appearance: SubtitleStyleAppearance) =>
-  appearance.shadow_enabled && appearance.shadow_strength > 0;
+  appearance.shadow_enabled &&
+  (Math.abs(appearance.shadow_offset_x) > 0.1 ||
+    Math.abs(appearance.shadow_offset_y) > 0.1 ||
+    (appearance.shadow_opacity ?? 0) > 0);
 
 const isBackgroundEffectActive = (appearance: SubtitleStyleAppearance) =>
   appearance.background_mode !== "none";
@@ -255,7 +268,7 @@ const buildWorkbenchEffectToggleChange = (
             outline_width:
               appearance.outline_width > 0
                 ? appearance.outline_width
-                : DEFAULT_APPEARANCE.outline_width,
+                : (DEFAULT_EFFECT_OUTLINE.outline_width as number),
             outline_color: appearance.outline_color
           }
         };
@@ -267,30 +280,21 @@ const buildWorkbenchEffectToggleChange = (
       : {
           appearance: {
             shadow_enabled: true,
-            shadow_strength:
-              appearance.shadow_strength > 0
-                ? appearance.shadow_strength
-                : (DEFAULT_EFFECT_SHADOW.shadow_strength as number),
-            shadow_offset_x:
-              appearance.shadow_strength > 0
-                ? appearance.shadow_offset_x
-                : (DEFAULT_EFFECT_SHADOW.shadow_offset_x as number),
-            shadow_offset_y:
-              appearance.shadow_strength > 0
-                ? appearance.shadow_offset_y
-                : (DEFAULT_EFFECT_SHADOW.shadow_offset_y as number),
-            shadow_color:
-              appearance.shadow_strength > 0
-                ? appearance.shadow_color
-                : (DEFAULT_EFFECT_SHADOW.shadow_color as string),
-            shadow_opacity:
-              appearance.shadow_strength > 0
-                ? appearance.shadow_opacity
-                : (DEFAULT_EFFECT_SHADOW.shadow_opacity as number),
-            shadow_blur:
-              appearance.shadow_strength > 0
-                ? appearance.shadow_blur
-                : (DEFAULT_EFFECT_SHADOW.shadow_blur as number)
+            shadow_offset_x: isShadowEffectActive(appearance)
+              ? appearance.shadow_offset_x
+              : (DEFAULT_EFFECT_SHADOW.shadow_offset_x as number),
+            shadow_offset_y: isShadowEffectActive(appearance)
+              ? appearance.shadow_offset_y
+              : (DEFAULT_EFFECT_SHADOW.shadow_offset_y as number),
+            shadow_color: isShadowEffectActive(appearance)
+              ? appearance.shadow_color
+              : (DEFAULT_EFFECT_SHADOW.shadow_color as string),
+            shadow_opacity: isShadowEffectActive(appearance)
+              ? appearance.shadow_opacity
+              : (DEFAULT_EFFECT_SHADOW.shadow_opacity as number),
+            shadow_blur: isShadowEffectActive(appearance)
+              ? appearance.shadow_blur
+              : (DEFAULT_EFFECT_SHADOW.shadow_blur as number)
           }
         };
   }
@@ -320,9 +324,7 @@ const buildWorkbenchEffectResetChange = (
   if (effectId === "outline") {
     return {
       appearance: {
-        outline_enabled: true,
-        outline_width: DEFAULT_APPEARANCE.outline_width,
-        outline_color: DEFAULT_APPEARANCE.outline_color
+        ...DEFAULT_EFFECT_OUTLINE
       }
     };
   }
@@ -331,7 +333,6 @@ const buildWorkbenchEffectResetChange = (
     return {
       appearance: {
         shadow_enabled: true,
-        shadow_strength: DEFAULT_EFFECT_SHADOW.shadow_strength as number,
         shadow_offset_x: DEFAULT_EFFECT_SHADOW.shadow_offset_x as number,
         shadow_offset_y: DEFAULT_EFFECT_SHADOW.shadow_offset_y as number,
         shadow_color: DEFAULT_EFFECT_SHADOW.shadow_color as string,
@@ -351,8 +352,7 @@ const buildWorkbenchEffectResetChange = (
 
   return {
     appearance: {
-      subtitle_mode: "word_highlight",
-      highlight_color: DEFAULT_APPEARANCE.highlight_color
+      ...DEFAULT_EFFECT_KARAOKE
     },
     highlightOpacity: DEFAULT_EFFECT_KARAOKE_HIGHLIGHT_OPACITY
   };
@@ -364,17 +364,17 @@ const isWorkbenchEffectAtDefault = (
   highlightOpacity: number
 ): boolean => {
   if (effectId === "outline") {
+    const d = DEFAULT_EFFECT_OUTLINE;
     return (
       appearance.outline_enabled === true &&
-      appearance.outline_width === DEFAULT_APPEARANCE.outline_width &&
-      appearance.outline_color === DEFAULT_APPEARANCE.outline_color
+      appearance.outline_width === (d.outline_width as number) &&
+      appearance.outline_color === (d.outline_color as string)
     );
   }
   if (effectId === "shadow") {
     const d = DEFAULT_EFFECT_SHADOW;
     return (
       appearance.shadow_enabled === true &&
-      appearance.shadow_strength === (d.shadow_strength as number) &&
       appearance.shadow_offset_x === (d.shadow_offset_x as number) &&
       appearance.shadow_offset_y === (d.shadow_offset_y as number) &&
       appearance.shadow_color === (d.shadow_color as string) &&
@@ -399,7 +399,7 @@ const isWorkbenchEffectAtDefault = (
   }
   return (
     appearance.subtitle_mode === "word_highlight" &&
-    appearance.highlight_color === DEFAULT_APPEARANCE.highlight_color &&
+    appearance.highlight_color === (DEFAULT_EFFECT_KARAOKE.highlight_color as string) &&
     highlightOpacity === DEFAULT_EFFECT_KARAOKE_HIGHLIGHT_OPACITY
   );
 };
@@ -581,8 +581,8 @@ const classifyAppearanceHistoryChange = (
   if (keys.every((key) => key === "outline_enabled" || key === "outline_width")) {
     return { kind: "appearance:outline-width", canCoalesce: true };
   }
-  if (keys.every((key) => key === "shadow_enabled" || key === "shadow_strength")) {
-    return { kind: "appearance:shadow-strength", canCoalesce: true };
+  if (keys.every((key) => key === "shadow_enabled")) {
+    return { kind: "appearance:shadow-enabled", canCoalesce: true };
   }
   if (keys.every((key) => key === "shadow_offset_x" || key === "shadow_offset_y")) {
     return { kind: "appearance:shadow-offset", canCoalesce: true };
@@ -1197,6 +1197,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const handledAutoStartKeyRef = React.useRef<string | null>(null);
   const styleBootstrapKeyRef = React.useRef<string | null>(null);
   const overlayRequestKeyRef = React.useRef<string | null>(null);
+  const autoEnterEditOnNextCueLoadRef = React.useRef(false);
+  const pendingEditorSelectionRef = React.useRef<{
+    start: number;
+    end: number;
+  } | null>(null);
   const showSubtitlesOverlay = false;
 
   const clearSubtitleAutosaveTimer = React.useCallback(() => {
@@ -1493,6 +1498,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setEditingCueId(null);
       editingTextRef.current = "";
       setEditingText("");
+      autoEnterEditOnNextCueLoadRef.current = false;
+      pendingEditorSelectionRef.current = null;
       resetEditSessionState();
       clearUndoHistory();
       shouldResumePlaybackRef.current = false;
@@ -1507,6 +1514,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setEditingCueId(null);
     editingTextRef.current = "";
     setEditingText("");
+    pendingEditorSelectionRef.current = null;
     resetEditSessionState();
     clearUndoHistory();
     shouldResumePlaybackRef.current = false;
@@ -1881,6 +1889,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setVideoNaturalSize({ width: 0, height: 0 });
     setDurationSeconds(0);
     setIsPlaying(false);
+    autoEnterEditOnNextCueLoadRef.current = false;
+    pendingEditorSelectionRef.current = null;
     overlayRequestKeyRef.current = null;
     resetEditSessionState();
     clearUndoHistory();
@@ -1995,6 +2005,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
     handledAutoStartKeyRef.current = location.key;
+    autoEnterEditOnNextCueLoadRef.current = true;
     setPendingAutoStartSubtitles(true);
     window.history.replaceState({}, "");
   }, [incomingState, location.key]);
@@ -2464,6 +2475,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
 
+    if (cuesRef.current.length === 0) {
+      autoEnterEditOnNextCueLoadRef.current = true;
+    }
     setCreateSubtitlesError(null);
     setCreateSubtitlesHeading("Creating subtitles");
     setCreateSubtitlesProgressPct(0);
@@ -3785,7 +3799,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         )
       );
     }
-    if (effectiveAppearance.shadow_enabled && effectiveAppearance.shadow_strength > 0) {
+    if (
+      effectiveAppearance.shadow_enabled &&
+      (Math.abs(effectiveAppearance.shadow_offset_x) > 0.1 ||
+        Math.abs(effectiveAppearance.shadow_offset_y) > 0.1 ||
+        (effectiveAppearance.shadow_opacity ?? 0) > 0)
+    ) {
       const blurRadius = Math.max(
         0,
         Math.round((effectiveAppearance.shadow_blur ?? 6) * visualScale)
@@ -3928,6 +3947,23 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       textarea.focus();
     }
   }, [activeCue, isEditingActiveCue]);
+
+  React.useLayoutEffect(() => {
+    if (!isEditingActiveCue) {
+      pendingEditorSelectionRef.current = null;
+      return;
+    }
+    const selection = pendingEditorSelectionRef.current;
+    const textarea = activeSubtitleRef.current;
+    if (!selection || !textarea) {
+      return;
+    }
+    const start = Math.max(0, Math.min(selection.start, textarea.value.length));
+    const end = Math.max(start, Math.min(selection.end, textarea.value.length));
+    textarea.focus();
+    textarea.setSelectionRange(start, end);
+    pendingEditorSelectionRef.current = null;
+  }, [editingText, isEditingActiveCue]);
 
   React.useLayoutEffect(() => {
     if (!isEditingActiveCue) {
@@ -4921,6 +4957,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const closeEditMode = React.useCallback(() => {
     setSelectedCueId(null);
     setEditingCueId(null);
+    pendingEditorSelectionRef.current = null;
     syncEditingTextState("");
     setEditError(null);
     resetEditSessionState();
@@ -4928,8 +4965,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [resetEditSessionState, resumePlaybackIfNeeded, syncEditingTextState]);
 
   const beginEditingCue = React.useCallback(
-    (cue: SrtCue, resumePlaybackOnExit: boolean) => {
+    (
+      cue: SrtCue,
+      resumePlaybackOnExit: boolean,
+      selection?: { start: number; end: number }
+    ) => {
+      autoEnterEditOnNextCueLoadRef.current = false;
       shouldResumePlaybackRef.current = resumePlaybackOnExit;
+      pendingEditorSelectionRef.current = selection ?? null;
       setSelectedCueId(cue.id);
       setEditingCueId(cue.id);
       setIsHoveringActiveSubtitle(false);
@@ -4939,6 +4982,33 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     },
     [startSubtitleAutosaveSession, syncEditingTextState]
   );
+
+  React.useEffect(() => {
+    if (!autoEnterEditOnNextCueLoadRef.current) {
+      return;
+    }
+    if (
+      isLoading ||
+      isCreatingSubtitles ||
+      isExporting ||
+      isSavingCue ||
+      editingCueId !== null ||
+      selectedCueId !== null ||
+      cues.length === 0
+    ) {
+      return;
+    }
+    beginEditingCue(cues[0], false, { start: 0, end: 0 });
+  }, [
+    beginEditingCue,
+    cues,
+    editingCueId,
+    isCreatingSubtitles,
+    isExporting,
+    isLoading,
+    isSavingCue,
+    selectedCueId
+  ]);
 
   const handleEditTextChange = React.useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -6221,13 +6291,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       className="block max-w-full whitespace-pre-wrap text-white"
                                       dir={subtitleDirection}
                                       style={(() => {
-                                        const {
-                                          paddingTop: _pt,
-                                          paddingRight: _pr,
-                                          paddingBottom: _pb,
-                                          paddingLeft: _pl,
-                                          ...restStyle
-                                        } = subtitleEditorTextStyle;
+                                        const restStyle = { ...subtitleEditorTextStyle };
+                                        delete restStyle.paddingTop;
+                                        delete restStyle.paddingRight;
+                                        delete restStyle.paddingBottom;
+                                        delete restStyle.paddingLeft;
                                         return {
                                           ...restStyle,
                                           fontFamily: "inherit",

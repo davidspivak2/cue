@@ -264,7 +264,7 @@ class PreviewStyleRequest(BaseModel):
     srt_path: str
     timestamp: Optional[float] = None
     subtitle_style: dict[str, Any] = Field(default_factory=dict)
-    subtitle_mode: str = "word_highlight"
+    subtitle_mode: str = "static"
     highlight_color: str = "#FFD400"
     highlight_opacity: float = 1.0
 
@@ -275,7 +275,7 @@ class PreviewOverlayRequest(BaseModel):
     subtitle_text: str = ""
     highlight_word_index: Optional[int] = None
     subtitle_style: dict[str, Any] = Field(default_factory=dict)
-    subtitle_mode: str = "word_highlight"
+    subtitle_mode: str = "static"
     highlight_color: str = "#FFD400"
     highlight_opacity: float = 1.0
 

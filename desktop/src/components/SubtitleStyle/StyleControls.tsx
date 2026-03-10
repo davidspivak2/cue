@@ -311,10 +311,9 @@ const StyleControls = ({
         ? `${appearance.outline_width} | Auto`
         : `${appearance.outline_width} | ${appearance.outline_color}`;
   const shadowBlur = appearance.shadow_blur ?? 6;
-  const shadowSummary =
-    appearance.shadow_strength === 0
-      ? "Off"
-      : `Blur ${shadowBlur} | X${appearance.shadow_offset_x} Y${appearance.shadow_offset_y} | ${Math.round(appearance.shadow_opacity * 100)}%`;
+  const shadowSummary = !appearance.shadow_enabled
+    ? "Off"
+    : `Blur ${shadowBlur} | X${appearance.shadow_offset_x} Y${appearance.shadow_offset_y} | ${Math.round(appearance.shadow_opacity * 100)}%`;
   const highlightSummary = `${appearance.highlight_color} | ${Math.round(highlightOpacity * 100)}%`;
   const backgroundOpacity =
     bgMode === "line"
@@ -422,7 +421,7 @@ const StyleControls = ({
             <SliderRow
               label="Outline width"
               value={appearance.outline_width}
-              min={0}
+              min={1}
               max={10}
               step={0.5}
               onChange={(v) =>
@@ -463,16 +462,6 @@ const StyleControls = ({
             </span>
           </AccordionTrigger>
           <AccordionContent className="space-y-3 px-3">
-            <SliderRow
-              label="Shadow strength"
-              value={appearance.shadow_strength}
-              min={0}
-              max={10}
-              onChange={(v) =>
-                patch({ shadow_strength: v, shadow_enabled: v > 0 })
-              }
-              valueSuffix={appearance.shadow_strength === 0 ? "Off" : undefined}
-            />
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">
                 Shadow color

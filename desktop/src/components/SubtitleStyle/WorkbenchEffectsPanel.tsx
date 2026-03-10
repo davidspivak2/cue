@@ -81,7 +81,6 @@ const CARD_SAMPLE_TEXT = "Cue";
 
 const SHADOW_DEFAULTS: Partial<SubtitleStyleAppearance> = {
   shadow_enabled: true,
-  shadow_strength: 2,
   shadow_offset_x: 0,
   shadow_offset_y: 2,
   shadow_color: "#000000",
@@ -105,7 +104,6 @@ const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
   outline_width: 2,
   outline_color: "#000000",
   shadow_enabled: true,
-  shadow_strength: 2,
   shadow_offset_x: 0,
   shadow_offset_y: 2,
   shadow_color: "#000000",
@@ -168,7 +166,10 @@ const isOutlineActive = (appearance: SubtitleStyleAppearance) =>
   appearance.outline_enabled && appearance.outline_width > 0;
 
 const isShadowActive = (appearance: SubtitleStyleAppearance) =>
-  appearance.shadow_enabled && appearance.shadow_strength > 0;
+  appearance.shadow_enabled &&
+  (Math.abs(appearance.shadow_offset_x) > 0.1 ||
+    Math.abs(appearance.shadow_offset_y) > 0.1 ||
+    (appearance.shadow_opacity ?? 0) > 0);
 
 const isBackgroundActive = (appearance: SubtitleStyleAppearance) =>
   appearance.background_mode !== "none";
@@ -258,9 +259,6 @@ const buildCardPreviewPayload = (
       appearance: {
         ...baseAppearance,
         shadow_enabled: true,
-        shadow_strength: isShadowActive(appearance)
-          ? appearance.shadow_strength
-          : (SHADOW_DEFAULTS.shadow_strength as number),
         shadow_offset_x: isShadowActive(appearance)
           ? appearance.shadow_offset_x
           : (SHADOW_DEFAULTS.shadow_offset_x as number),
@@ -524,7 +522,7 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
     );
   }
 
-  if (effectId === "shadow" && previewAppearance.shadow_strength > 0) {
+  if (effectId === "shadow" && isShadowActive(previewAppearance)) {
     baseStyle.textShadow = `${previewAppearance.shadow_offset_x}px ${previewAppearance.shadow_offset_y}px ${Math.max(
       1,
       previewAppearance.shadow_blur * 0.5
@@ -781,7 +779,7 @@ const WorkbenchEffectsPanel = ({
           <SliderRow
             label="Width"
             value={appearance.outline_width}
-            min={0}
+            min={1}
             max={10}
             step={0.5}
             valueSuffix={appearance.outline_width === 0 ? "Off" : undefined}
@@ -815,17 +813,6 @@ const WorkbenchEffectsPanel = ({
     if (effectId === "shadow") {
       return (
         <div className="space-y-4" data-testid="workbench-effect-detail-shadow">
-          <SliderRow
-            label="Strength"
-            value={appearance.shadow_strength}
-            min={0}
-            max={10}
-            step={0.5}
-            valueSuffix={appearance.shadow_strength === 0 ? "Off" : undefined}
-            onChange={(value) =>
-              patch({ shadow_strength: value, shadow_enabled: value > 0 })
-            }
-          />
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Color</Label>
             <ColorRow

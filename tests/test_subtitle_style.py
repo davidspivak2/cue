@@ -20,6 +20,24 @@ def test_normalize_style_model_derives_font_weight_from_legacy_bold_style() -> N
     assert style.line_spacing == 1.0
 
 
+def test_default_preset_starts_static_with_effects_off() -> None:
+    style = preset_defaults(PRESET_DEFAULT)
+
+    assert style.font_family == "Heebo"
+    assert style.font_size == 28
+    assert style.font_style == "regular"
+    assert style.text_color == "#FFFFFF"
+    assert style.text_align == "center"
+    assert style.line_spacing == 1.0
+    assert style.text_opacity == 1.0
+    assert style.letter_spacing == 0.0
+    assert style.outline_enabled is False
+    assert style.outline_width == 0
+    assert style.shadow_enabled is False
+    assert style.shadow_strength == 0.0
+    assert style.subtitle_mode == "static"
+
+
 def test_normalize_style_model_preserves_explicit_font_weight() -> None:
     fallback = preset_defaults(PRESET_DEFAULT)
 

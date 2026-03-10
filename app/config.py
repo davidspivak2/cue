@@ -13,7 +13,7 @@ from app.subtitle_style import (
     style_model_to_dict,
 )
 
-DEFAULT_SUBTITLE_MODE = "word_highlight"
+DEFAULT_SUBTITLE_MODE = "static"
 DEFAULT_HIGHLIGHT_COLOR = "#FFD400"
 DEFAULT_HIGHLIGHT_OPACITY = 1.0
 VALID_SUBTITLE_MODES = {"word_highlight", "static"}

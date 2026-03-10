@@ -28,13 +28,13 @@ const initTauriRuntimeMock = () => {
 };
 
 const DEFAULT_PROJECT_STYLE = {
-  subtitle_mode: "word_highlight",
+  subtitle_mode: "static",
   subtitle_style: {
     preset: "Default",
     highlight_color: "#FFD400",
     highlight_opacity: 1,
     appearance: {
-      subtitle_mode: "word_highlight",
+      subtitle_mode: "static",
       highlight_color: "#FFD400"
     }
   }
@@ -411,13 +411,13 @@ test("project hub shows active task cards, inline notices, and background toasts
     punctuation_rescue_fallback_enabled: true,
     apply_audio_filter: false,
     keep_extracted_audio: false,
-    subtitle_mode: "word_highlight",
+    subtitle_mode: "static",
     subtitle_style: {
       preset: "Default",
       highlight_color: "#FFD400",
       highlight_opacity: 1,
       appearance: {
-        subtitle_mode: "word_highlight",
+        subtitle_mode: "static",
         highlight_color: "#FFD400"
       }
     }
