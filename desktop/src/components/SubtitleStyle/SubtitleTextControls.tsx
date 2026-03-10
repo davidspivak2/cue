@@ -459,6 +459,9 @@ const SubtitleTextControls = ({
     ? "flex max-w-[min(90vw,48rem)] flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-border bg-background/95 px-2 py-1.5 shadow-md backdrop-blur-sm"
     : "flex flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 p-2";
   const toolbarRound = isToolbar ? "rounded-lg" : "rounded-full";
+  const floatingToolbarPopoverProps = isToolbar
+    ? ({ "data-cue-floating-toolbar-popover": "true" } as const)
+    : {};
 
   return (
     <div className={cn("space-y-1.5", className)}>
@@ -510,6 +513,7 @@ const SubtitleTextControls = ({
             className="min-w-[14rem] w-[min(22rem,var(--radix-dropdown-menu-trigger-width))] p-0"
             align="start"
             onCloseAutoFocus={(e) => e.preventDefault()}
+            {...floatingToolbarPopoverProps}
           >
             <div className="max-h-[min(70vh,22rem)] overflow-y-auto p-1">
               {fontOptions.map((font) =>
@@ -571,7 +575,10 @@ const SubtitleTextControls = ({
                           {font.family}
                         </span>
                       </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent className="max-h-[20rem]">
+                      <DropdownMenuSubContent
+                        className="max-h-[20rem]"
+                        {...floatingToolbarPopoverProps}
+                      >
                         {getWeightOptionsForFont(font).map((weight) => {
                           const isCurrent =
                             font.family === selectedFont.family &&
@@ -711,6 +718,7 @@ const SubtitleTextControls = ({
               className="min-w-0 w-16 p-1"
               align="center"
               onCloseAutoFocus={(e) => e.preventDefault()}
+              {...floatingToolbarPopoverProps}
             >
               {FONT_SIZE_PRESETS.map((preset) => (
                 <DropdownMenuItem
@@ -771,7 +779,11 @@ const SubtitleTextControls = ({
             </TooltipTrigger>
             <TooltipContent>Text color</TooltipContent>
           </Tooltip>
-          <PopoverContent className="w-80 space-y-3" align="center">
+          <PopoverContent
+            className="w-80 space-y-3"
+            align="center"
+            {...floatingToolbarPopoverProps}
+          >
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Text color</Label>
               <ColorRow
@@ -803,30 +815,32 @@ const SubtitleTextControls = ({
             </TooltipTrigger>
             <TooltipContent>Alignment</TooltipContent>
           </Tooltip>
-          <PopoverContent className="w-44" align="center">
+          <PopoverContent
+            className="w-44"
+            align="center"
+            {...floatingToolbarPopoverProps}
+          >
             <div className="grid grid-cols-3 gap-2">
               {[
-                { value: "left", tooltip: "Left align", Icon: AlignLeft },
-                { value: "center", tooltip: "Center align", Icon: AlignCenter },
-                { value: "right", tooltip: "Right align", Icon: AlignRight }
-              ].map(({ value, tooltip: alignTooltip, Icon }) => (
-                <Tooltip key={value}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant={appearance.text_align === value ? "secondary" : "outline"}
-                      className="h-auto flex-col gap-1 rounded-xl px-2 py-2 text-xs"
-                      onClick={() =>
-                        patch({
-                          text_align: value as SubtitleStyleAppearance["text_align"]
-                        })
-                      }
-                    >
-                      <Icon className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{alignTooltip}</TooltipContent>
-                </Tooltip>
+                { value: "left", label: "Left align", Icon: AlignLeft },
+                { value: "center", label: "Center align", Icon: AlignCenter },
+                { value: "right", label: "Right align", Icon: AlignRight }
+              ].map(({ value, label, Icon }) => (
+                <Button
+                  key={value}
+                  type="button"
+                  variant={appearance.text_align === value ? "secondary" : "outline"}
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label={label}
+                  onClick={() =>
+                    patch({
+                      text_align: value as SubtitleStyleAppearance["text_align"]
+                    })
+                  }
+                >
+                  <Icon className="h-4 w-4" />
+                </Button>
               ))}
             </div>
           </PopoverContent>
@@ -850,7 +864,11 @@ const SubtitleTextControls = ({
             </TooltipTrigger>
             <TooltipContent>Letter & line spacing</TooltipContent>
           </Tooltip>
-          <PopoverContent className="w-72 space-y-3" align="center">
+          <PopoverContent
+            className="w-72 space-y-3"
+            align="center"
+            {...floatingToolbarPopoverProps}
+          >
             <SliderField
               label="Letter spacing"
               value={appearance.letter_spacing}
@@ -888,7 +906,11 @@ const SubtitleTextControls = ({
             </TooltipTrigger>
             <TooltipContent>Text opacity</TooltipContent>
           </Tooltip>
-          <PopoverContent className="w-72 space-y-3" align="center">
+          <PopoverContent
+            className="w-72 space-y-3"
+            align="center"
+            {...floatingToolbarPopoverProps}
+          >
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">
                 Text opacity
@@ -952,7 +974,11 @@ const SubtitleTextControls = ({
                 <Sparkles className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-80 space-y-3" align="center">
+            <PopoverContent
+              className="w-80 space-y-3"
+              align="center"
+              {...floatingToolbarPopoverProps}
+            >
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">
                   Highlight
