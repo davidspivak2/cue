@@ -2998,6 +2998,61 @@ test("floating toolbar stays anchored while controls hide and reappear during bo
   expect(Math.abs(rePushed.gap - pushed.gap)).toBeLessThanOrEqual(2);
 });
 
+test("floating toolbar dropdown portal keeps controls visible", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  await ensureSubtitleLayerReady(page);
+  await dragActiveSubtitleTo(page, 0.5, 0.98);
+  await page.mouse.move(0, 0);
+  await expectVideoControlsHiddenSoon(page);
+
+  await showVideoControls(page);
+  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await subtitleButton.first().click();
+  await expect(page.getByTestId("workbench-subtitle-editor")).toHaveCount(1);
+
+  const fontSizeTrigger = page.getByTestId("subtitle-style-font-size-trigger");
+  await fontSizeTrigger.click();
+
+  const menuItem = page.locator("[data-cue-floating-toolbar-popover] [role='menuitem']").first();
+  await expect(menuItem).toBeVisible();
+
+  const subtitleRectBefore = await readActiveSubtitleRect(page);
+  await expectVideoControlsVisibleSoon(page);
+
+  await page.evaluate(() => {
+    const wrapper = document.querySelector("[data-testid='workbench-center-panel-video-wrapper']");
+    const menuItem = document.querySelector(
+      "[data-cue-floating-toolbar-popover] [role='menuitem']"
+    );
+    if (!(wrapper instanceof HTMLElement) || !(menuItem instanceof HTMLElement)) {
+      throw new Error("Wrapper or floating toolbar dropdown item not found");
+    }
+    wrapper.dispatchEvent(
+      new MouseEvent("mouseout", {
+        bubbles: true,
+        relatedTarget: menuItem
+      })
+    );
+  });
+
+  await expectVideoControlsVisibleSoon(page);
+  await expect
+    .poll(async () => Math.abs((await readActiveSubtitleRect(page)).top - subtitleRectBefore.top))
+    .toBeLessThanOrEqual(2);
+});
+
 test.skip("no-overlap scenario does not push subtitle position when controls appear", async ({ page }) => {
   // Position is now set by dragging; test required Top/24 from removed Position UI.
   await page.setViewportSize({ width: 1300, height: 800 });

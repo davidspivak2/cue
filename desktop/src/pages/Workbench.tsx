@@ -1255,11 +1255,19 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         activeSubtitleWrapperRef.current?.matches(":hover") ||
         activeSubtitleSurfaceRef.current?.matches(":hover") ||
         subtitleEditorControlsRef.current?.matches(":hover") ||
-        videoClickSurfaceRef.current?.matches(":hover");
+        videoClickSurfaceRef.current?.matches(":hover") ||
+        Boolean(document.querySelector("[data-cue-floating-toolbar-popover]:hover"));
       return Boolean(isInsideByCoords || isInsideByHover);
     },
     []
   );
+
+  const isFloatingToolbarPopoverTarget = React.useCallback((target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    return Boolean(target.closest("[data-cue-floating-toolbar-popover]"));
+  }, []);
 
   const armVideoControlsRevealOnNextPointerMove = React.useCallback((clientX: number, clientY: number) => {
     clearPendingVideoControlsReveal();
@@ -5960,6 +5968,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                       subtitleEditorControlsRef.current?.contains(to)
                     ))
                       return;
+                    if (isFloatingToolbarPopoverTarget(to))
+                      return;
                     setShowVideoControls(false);
                   }}
                 >
@@ -6010,6 +6020,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                         activeSubtitleWrapperRef.current?.contains(to) ||
                         subtitleEditorControlsRef.current?.contains(to)
                       ))
+                        return;
+                      if (isFloatingToolbarPopoverTarget(to))
                         return;
                       setShowVideoControls(false);
                     }}
@@ -6065,6 +6077,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                             subtitleEditorControlsRef.current?.contains(to)
                           ))
                             return;
+                          if (isFloatingToolbarPopoverTarget(to))
+                            return;
                           setShowVideoControls(false);
                         }}
                       >
@@ -6102,6 +6116,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                               subtitleOverlayPositionLayerRef.current?.contains(to) ||
                               subtitleEditorControlsRef.current?.contains(to)
                             ))
+                              return;
+                            if (isFloatingToolbarPopoverTarget(to))
                               return;
                             setShowVideoControls(false);
                           }}
@@ -6536,6 +6552,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                         subtitleEditorControlsRef.current?.contains(to) ||
                         subtitleOverlayPositionLayerRef.current?.contains(to)
                       ))
+                        return;
+                      if (isFloatingToolbarPopoverTarget(to))
                         return;
                       setShowVideoControls(false);
                     }}
