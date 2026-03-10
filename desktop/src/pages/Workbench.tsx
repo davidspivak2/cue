@@ -5438,8 +5438,21 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       if (target.closest("[data-radix-popper-content-wrapper]")) return;
       void flushAndExitEditMode();
       if (videoWrapperRef.current?.contains(target)) {
-        const el = videoRef.current;
-        if (el?.paused) el.play().catch(() => {});
+        const wrapperRect = videoWrapperRef.current.getBoundingClientRect();
+        const localX = event.clientX - wrapperRect.left;
+        const localY = event.clientY - wrapperRect.top;
+        const { offsetX, offsetY, width, height } = displayedVideoRect;
+        const hasValidRect = width > 0 && height > 0;
+        const isWithinDisplayedVideo =
+          hasValidRect &&
+          localX >= offsetX &&
+          localX <= offsetX + width &&
+          localY >= offsetY &&
+          localY <= offsetY + height;
+        if (isWithinDisplayedVideo) {
+          const el = videoRef.current;
+          if (el?.paused) el.play().catch(() => {});
+        }
       }
     };
     document.addEventListener("click", handleDocumentClick, true);
@@ -5448,7 +5461,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     clearVideoProgressInteraction,
     flushAndExitEditMode,
     isEditingActiveCue,
-    isVideoProgressInteractionEvent
+    isVideoProgressInteractionEvent,
+    displayedVideoRect
   ]);
 
   const handleEditorKeyDown = async (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
