@@ -819,33 +819,40 @@ const SubtitleTextControls = ({
             <TooltipContent>Alignment</TooltipContent>
           </Tooltip>
           <PopoverContent
-            className="w-44"
+            className="w-auto p-2"
             align="center"
+            onOpenAutoFocus={(e) => e.preventDefault()}
             {...floatingToolbarPopoverProps}
           >
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: "left", label: "Left align", Icon: AlignLeft },
-                { value: "center", label: "Center align", Icon: AlignCenter },
-                { value: "right", label: "Right align", Icon: AlignRight }
-              ].map(({ value, label, Icon }) => (
-                <Button
-                  key={value}
-                  type="button"
-                  variant={appearance.text_align === value ? "secondary" : "outline"}
-                  size="icon"
-                  className="h-8 w-8"
-                  aria-label={label}
-                  onClick={() =>
-                    patch({
-                      text_align: value as SubtitleStyleAppearance["text_align"]
-                    })
-                  }
-                >
-                  <Icon className="h-4 w-4" />
-                </Button>
-              ))}
-            </div>
+            <TooltipProvider delayDuration={400}>
+              <div className="flex gap-1">
+                {[
+                  { value: "left", tooltip: "Left align", Icon: AlignLeft },
+                  { value: "center", tooltip: "Center align", Icon: AlignCenter },
+                  { value: "right", tooltip: "Right align", Icon: AlignRight }
+                ].map(({ value, tooltip: alignTooltip, Icon }) => (
+                  <Tooltip key={value}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant={appearance.text_align === value ? "secondary" : "outline"}
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label={alignTooltip}
+                        onClick={() =>
+                          patch({
+                            text_align: value as SubtitleStyleAppearance["text_align"]
+                          })
+                        }
+                      >
+                        <Icon className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{alignTooltip}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+            </TooltipProvider>
           </PopoverContent>
         </Popover>
 
