@@ -1592,34 +1592,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const resolvePresetFromStored = (stored: string | undefined): string =>
     LEGACY_PRESET_MAP[stored ?? ""] ?? stored ?? "classic_static";
 
-  const applyStyleFromSettings = React.useCallback((data: SettingsConfig) => {
-    const style = data.subtitle_style;
-    const app = (style.appearance as SubtitleStyleAppearance | undefined) ?? DEFAULT_APPEARANCE;
+  const applyDefaultProjectStyle = React.useCallback(() => {
     const resolvedAppearance = migrateAppearancePadding({
-      ...DEFAULT_APPEARANCE,
-      ...app,
-      subtitle_mode: data.subtitle_mode ?? app.subtitle_mode,
-      highlight_color: style.highlight_color ?? app.highlight_color
+      ...DEFAULT_APPEARANCE
     });
-    const storedPreset = style.preset ?? "Default";
-    const resolvedPreset = resolvePresetFromStored(storedPreset);
-    const storedLastPresetId =
-      typeof (style as Record<string, unknown>).last_preset_id === "string"
-        ? (style as Record<string, unknown>).last_preset_id as string
-        : undefined;
     setAppearance(resolvedAppearance);
-    setPreset(resolvedPreset);
-    setLastPresetId(
-      isNamedPresetId(resolvedPreset)
-        ? resolvedPreset
-        : storedLastPresetId && isNamedPresetId(storedLastPresetId)
-          ? storedLastPresetId
-          : null
-    );
-    if (resolvedPreset === "Custom") {
-      customAppearanceRef.current = resolvedAppearance;
-    }
-    setHighlightOpacity(style.highlight_opacity ?? 1.0);
+    setPreset("classic_static");
+    setLastPresetId("classic_static");
+    customAppearanceRef.current = resolvedAppearance;
+    setHighlightOpacity(1.0);
+    return resolvedAppearance;
   }, []);
 
   const applyStyleFromProject = React.useCallback((rawStyle: unknown): boolean => {
@@ -1777,25 +1759,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
 
-    applyStyleFromSettings(settings);
-    const storedPreset = settings.subtitle_style?.preset ?? "Default";
-    const resolvedPreset = resolvePresetFromStored(storedPreset);
-    const storedLast =
-      typeof (settings.subtitle_style as Record<string, unknown> | undefined)
-        ?.last_preset_id === "string"
-        ? (settings.subtitle_style as Record<string, unknown>).last_preset_id as string
-        : null;
+    const defaultAppearance = applyDefaultProjectStyle();
     const fallbackPayload = buildProjectStylePayload(
-      {
-        ...DEFAULT_APPEARANCE,
-        ...(settings.subtitle_style?.appearance as SubtitleStyleAppearance | undefined),
-        subtitle_mode: settings.subtitle_mode ?? DEFAULT_APPEARANCE.subtitle_mode,
-        highlight_color:
-          settings.subtitle_style?.highlight_color ?? DEFAULT_APPEARANCE.highlight_color
-      },
-      resolvedPreset,
-      settings.subtitle_style?.highlight_opacity ?? 1.0,
-      storedLast
+      defaultAppearance,
+      "classic_static",
+      1.0,
+      "classic_static"
     );
     void updateProject(projectId, { style: fallbackPayload })
       .then(() => {
@@ -1811,8 +1780,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         setIsStyleLoading(false);
       });
   }, [
+    applyDefaultProjectStyle,
     applyStyleFromProject,
-    applyStyleFromSettings,
     buildProjectStylePayload,
     project,
     projectId,
