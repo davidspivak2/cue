@@ -188,13 +188,19 @@ const buildSettings = () => ({
   }
 });
 
-const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
+const mockProjects = async (
+  page,
+  projects,
+  initialSrtText = DEFAULT_SRT,
+  initialSettings = buildSettings()
+) => {
   let putCallCount = 0;
   let subtitlePutCallCount = 0;
   let lastPutPayload = null;
+  let lastStylePutPayload = null;
   let lastJobPayload = null;
   let createdProjectCount = 0;
-  let settings = buildSettings();
+  let settings = JSON.parse(JSON.stringify(initialSettings));
   const subtitlesByProject = new Map();
   if (typeof initialSrtText === "string") {
     projects.forEach((project) => {
@@ -330,7 +336,8 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
         created_at: now,
         updated_at: now,
         duration_seconds: 65,
-        thumbnail_path: ""
+        thumbnail_path: "",
+        style: {}
       };
       projects = [createdProject, ...projects];
       await route.fulfill({
@@ -399,6 +406,7 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
         subtitlesByProject.set(projectId, lastPutPayload.subtitles_srt_text);
       }
       if (lastPutPayload && typeof lastPutPayload.style === "object") {
+        lastStylePutPayload = lastPutPayload;
         projects = projects.map((entry) =>
           entry.project_id === projectId
             ? { ...entry, style: lastPutPayload.style, updated_at: "2026-02-09T00:05:00Z" }
@@ -549,6 +557,7 @@ const mockProjects = async (page, projects, initialSrtText = DEFAULT_SRT) => {
     getPutCallCount: () => putCallCount,
     getSubtitlePutCallCount: () => subtitlePutCallCount,
     getLastPutPayload: () => lastPutPayload,
+    getLastStylePutPayload: () => lastStylePutPayload,
     getLastJobPayload: () => lastJobPayload,
     getProjectFetchCount: (projectId) => projectGetCounts.get(projectId) ?? 0,
     setProjectFields: (projectId, patch) => {
@@ -2205,7 +2214,39 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   await page.addInitScript(initMocks);
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
-  await mockProjects(page, projects, null);
+  const defaultSettings = buildSettings();
+  const api = await mockProjects(page, projects, null, {
+    ...defaultSettings,
+    subtitle_mode: "word_highlight",
+    subtitle_style: {
+      ...defaultSettings.subtitle_style,
+      preset: "Large outline",
+      highlight_color: "#00FF99",
+      highlight_opacity: 0.35,
+      appearance: {
+        ...defaultSettings.subtitle_style.appearance,
+        font_family: "Assistant",
+        font_size: 61,
+        text_align: "left",
+        line_spacing: 1.7,
+        text_color: "#00FF99",
+        text_opacity: 0.55,
+        letter_spacing: 2.5,
+        outline_enabled: true,
+        outline_width: 5,
+        outline_color: "#111111",
+        shadow_enabled: true,
+        shadow_strength: 8,
+        shadow_offset_x: 3,
+        shadow_offset_y: 4,
+        shadow_color: "#222222",
+        shadow_opacity: 0.8,
+        background_mode: "word",
+        subtitle_mode: "word_highlight",
+        highlight_color: "#00FF99"
+      }
+    }
+  });
 
   await page.goto("/");
   const createJobRequest = page.waitForRequest(
@@ -2227,6 +2268,62 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   expect(createPayload.kind).toBe("create_subtitles");
   expect(createPayload.project_id).toBe("project-new-1");
   expect(createPayload.options?.subtitle_mode).toBe("static");
+  await expect
+    .poll(() => {
+      const payload = api.getLastStylePutPayload()?.style;
+      const appearance = payload?.subtitle_style?.appearance;
+      if (!payload || !appearance) {
+        return null;
+      }
+      return {
+        subtitle_mode: payload.subtitle_mode,
+        preset: payload.subtitle_style?.preset ?? null,
+        last_preset_id: payload.subtitle_style?.last_preset_id ?? null,
+        highlight_opacity: payload.subtitle_style?.highlight_opacity ?? null,
+        appearance: {
+          font_family: appearance.font_family,
+          font_size: appearance.font_size,
+          font_style: appearance.font_style,
+          font_weight: appearance.font_weight,
+          text_align: appearance.text_align,
+          line_spacing: appearance.line_spacing,
+          text_color: appearance.text_color,
+          text_opacity: appearance.text_opacity,
+          letter_spacing: appearance.letter_spacing,
+          outline_enabled: appearance.outline_enabled,
+          outline_width: appearance.outline_width,
+          shadow_enabled: appearance.shadow_enabled,
+          shadow_strength: appearance.shadow_strength,
+          background_mode: appearance.background_mode,
+          subtitle_mode: appearance.subtitle_mode,
+          highlight_color: appearance.highlight_color
+        }
+      };
+    })
+    .toEqual({
+      subtitle_mode: "static",
+      preset: "Default",
+      last_preset_id: "classic_static",
+      highlight_opacity: 1,
+      appearance: {
+        font_family: "Heebo",
+        font_size: 28,
+        font_style: "regular",
+        font_weight: 400,
+        text_align: "center",
+        line_spacing: 1,
+        text_color: "#FFFFFF",
+        text_opacity: 1,
+        letter_spacing: 0,
+        outline_enabled: false,
+        outline_width: 0,
+        shadow_enabled: false,
+        shadow_strength: 0,
+        background_mode: "none",
+        subtitle_mode: "static",
+        highlight_color: "#FFD400"
+      }
+    });
   await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0);
   await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
   await expect
