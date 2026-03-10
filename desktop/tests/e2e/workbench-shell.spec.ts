@@ -2416,12 +2416,11 @@ test("floating toolbar font size input opens presets and stays focused after one
 
   await sizeInput.click();
 
-  await expect(page.getByRole("menuitem", { name: "18", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "18", exact: true })).toBeVisible();
   await expect(sizeInput).toBeFocused();
 
-  await page.keyboard.press("Control+A");
-  await page.keyboard.type("44");
-  await page.keyboard.press("Enter");
+  await sizeInput.fill("44");
+  await sizeInput.blur();
 
   await expect
     .poll(
@@ -2998,7 +2997,7 @@ test("floating toolbar stays anchored while controls hide and reappear during bo
   expect(Math.abs(rePushed.gap - pushed.gap)).toBeLessThanOrEqual(2);
 });
 
-test("floating toolbar dropdown portal keeps controls visible", async ({ page }) => {
+test("font size dropdown popper wrapper keeps controls visible", async ({ page }) => {
   await page.addInitScript(initTauriRuntimeMock);
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
@@ -3025,24 +3024,29 @@ test("floating toolbar dropdown portal keeps controls visible", async ({ page })
   const fontSizeTrigger = page.getByTestId("subtitle-style-font-size-trigger");
   await fontSizeTrigger.click();
 
-  const menuItem = page.locator("[data-cue-floating-toolbar-popover] [role='menuitem']").first();
-  await expect(menuItem).toBeVisible();
+  const popperWrapper = page
+    .locator("[data-radix-popper-content-wrapper]")
+    .filter({ has: page.locator("[data-cue-floating-toolbar-popover]") })
+    .first();
+  await expect(popperWrapper).toBeVisible();
 
   const subtitleRectBefore = await readActiveSubtitleRect(page);
   await expectVideoControlsVisibleSoon(page);
 
   await page.evaluate(() => {
     const wrapper = document.querySelector("[data-testid='workbench-center-panel-video-wrapper']");
-    const menuItem = document.querySelector(
-      "[data-cue-floating-toolbar-popover] [role='menuitem']"
+    const popperWrapper = Array.from(
+      document.querySelectorAll("[data-radix-popper-content-wrapper]")
+    ).find((candidate) =>
+      candidate.querySelector("[data-cue-floating-toolbar-popover]")
     );
-    if (!(wrapper instanceof HTMLElement) || !(menuItem instanceof HTMLElement)) {
-      throw new Error("Wrapper or floating toolbar dropdown item not found");
+    if (!(wrapper instanceof HTMLElement) || !(popperWrapper instanceof HTMLElement)) {
+      throw new Error("Video wrapper or floating toolbar dropdown wrapper not found");
     }
     wrapper.dispatchEvent(
       new MouseEvent("mouseout", {
         bubbles: true,
-        relatedTarget: menuItem
+        relatedTarget: popperWrapper
       })
     );
   });
@@ -3051,6 +3055,103 @@ test("floating toolbar dropdown portal keeps controls visible", async ({ page })
   await expect
     .poll(async () => Math.abs((await readActiveSubtitleRect(page)).top - subtitleRectBefore.top))
     .toBeLessThanOrEqual(2);
+});
+
+test("font size dropdown keeps controls visible when leaving subtitle into video", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  await ensureSubtitleLayerReady(page);
+  await dragActiveSubtitleTo(page, 0.5, 0.98);
+  await page.mouse.move(0, 0);
+  await expectVideoControlsHiddenSoon(page);
+
+  await showVideoControls(page);
+  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await subtitleButton.first().click();
+  await expect(page.getByTestId("workbench-subtitle-editor")).toHaveCount(1);
+
+  const fontSizeTrigger = page.getByTestId("subtitle-style-font-size-trigger");
+  await fontSizeTrigger.click();
+
+  const popperWrapper = page
+    .locator("[data-radix-popper-content-wrapper]")
+    .filter({ has: page.locator("[data-cue-floating-toolbar-popover]") })
+    .first();
+  if ((await popperWrapper.count()) === 0) {
+    await fontSizeTrigger.click();
+  }
+  await expect(popperWrapper).toBeVisible();
+
+  const subtitleRectBefore = await readActiveSubtitleRect(page);
+  const popperBox = await popperWrapper.boundingBox();
+  const editorBox = await page.getByTestId("workbench-subtitle-editor").boundingBox();
+  const videoBox = await page.getByTestId("workbench-center-panel-video-wrapper").boundingBox();
+
+  if (!popperBox || !editorBox || !videoBox) {
+    throw new Error("Missing geometry for font-size dropdown reproduction");
+  }
+
+  await page.mouse.move(
+    popperBox.x + popperBox.width / 2,
+    popperBox.y + Math.min(popperBox.height - 8, 16),
+    { steps: 16 }
+  );
+  await page.mouse.move(
+    editorBox.x + editorBox.width - 8,
+    editorBox.y + editorBox.height / 2,
+    { steps: 22 }
+  );
+  await page.mouse.move(
+    Math.min(videoBox.x + videoBox.width - 12, editorBox.x + editorBox.width + 28),
+    editorBox.y + editorBox.height / 2,
+    { steps: 10 }
+  );
+
+  await expectVideoControlsVisibleSoon(page);
+  await expect
+    .poll(async () => Math.abs((await readActiveSubtitleRect(page)).top - subtitleRectBefore.top))
+    .toBeLessThanOrEqual(2);
+});
+
+test("floating toolbar font size input opens presets on first click", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await ensureSubtitleLayerReady(page);
+  await dragActiveSubtitleTo(page, 0.5, 0.98);
+  await showVideoControls(page);
+  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+
+  await page.getByTestId("workbench-active-subtitle").click();
+  await expect(page.getByTestId("workbench-subtitle-editor")).toHaveCount(1);
+
+  const fontSizeTrigger = page.getByTestId("subtitle-style-font-size-trigger");
+  await fontSizeTrigger.click();
+
+  const popperWrapper = page
+    .locator("[data-radix-popper-content-wrapper]")
+    .filter({ has: page.locator("[data-cue-floating-toolbar-popover]") })
+    .first();
+  await expect(popperWrapper).toBeVisible();
+  await expect(fontSizeTrigger).toBeFocused();
 });
 
 test.skip("no-overlap scenario does not push subtitle position when controls appear", async ({ page }) => {

@@ -68,6 +68,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger
 } from "@/components/ui/popover";
@@ -397,14 +398,11 @@ const SubtitleTextControls = ({
     commitFontSize(String(appearance.font_size + delta));
   };
 
-  const focusSizeInput = React.useCallback(() => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        sizeInputRef.current?.focus({ preventScroll: true });
-        sizeInputRef.current?.select();
-      });
-    });
-  }, []);
+  const handleFontSizeTriggerClick = React.useCallback(() => {
+    if (!sizeOpen) {
+      setSizeOpen(true);
+    }
+  }, [sizeOpen]);
 
   const handleFontAndWeightSelect = (
     font: SubtitleFontMetadata,
@@ -679,19 +677,18 @@ const SubtitleTextControls = ({
             </TooltipTrigger>
             <TooltipContent>Decrease font size</TooltipContent>
           </Tooltip>
-          <DropdownMenu
+          <Popover
             open={sizeOpen}
             onOpenChange={(open) => {
               setSizeOpen(open);
               if (open) {
                 setSizeInputValue(String(clampFontSize(appearance.font_size)));
-                focusSizeInput();
               }
             }}
           >
             <Tooltip>
               <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
+            <PopoverAnchor asChild>
               <Input
                 ref={sizeInputRef}
                 type="number"
@@ -701,6 +698,7 @@ const SubtitleTextControls = ({
                 aria-label="Font size"
                 data-testid="subtitle-style-font-size-trigger"
                 className="h-8 min-w-14 max-w-16 rounded-none border-x border-input bg-background px-2 text-center text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                onClick={handleFontSizeTriggerClick}
                 onChange={(e) => setSizeInputValue(e.target.value)}
                 onBlur={() => commitFontSize(sizeInputValue)}
                 onKeyDown={(e) => {
@@ -710,33 +708,38 @@ const SubtitleTextControls = ({
                   }
                 }}
               />
-            </DropdownMenuTrigger>
+            </PopoverAnchor>
               </TooltipTrigger>
               <TooltipContent>Font size</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent
+            <PopoverContent
               className="min-w-0 w-16 p-1"
               align="center"
+              onOpenAutoFocus={(event) => event.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
               {...floatingToolbarPopoverProps}
             >
-              {FONT_SIZE_PRESETS.map((preset) => (
-                <DropdownMenuItem
-                  key={preset}
-                  className={cn(
-                    "cursor-pointer justify-center text-xs",
-                    clampFontSize(appearance.font_size) === preset && "bg-accent"
-                  )}
-                  onSelect={() => {
-                    commitFontSize(String(preset));
-                    setSizeOpen(false);
-                  }}
-                >
-                  {preset}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <div className="flex flex-col gap-0.5">
+                {FONT_SIZE_PRESETS.map((preset) => (
+                  <Button
+                    key={preset}
+                    type="button"
+                    variant="ghost"
+                    className={cn(
+                      "h-8 justify-center rounded-sm px-2 text-xs",
+                      clampFontSize(appearance.font_size) === preset && "bg-accent"
+                    )}
+                    onClick={() => {
+                      commitFontSize(String(preset));
+                      setSizeOpen(false);
+                    }}
+                  >
+                    {preset}
+                  </Button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
           <Tooltip>
             <TooltipTrigger asChild>
           <Button
