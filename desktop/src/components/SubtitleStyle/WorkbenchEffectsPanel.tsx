@@ -1125,9 +1125,9 @@ const WorkbenchEffectsPanel = ({
                 onMouseLeave={() => onPreviewEffect(null)}
                 className={cn(
                   "group relative flex min-h-0 flex-col items-stretch gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left shadow-[var(--shadow-card)] transition-colors cursor-pointer",
-                  active && "border-primary/60 bg-primary/5",
+                  active && "border-primary/50 bg-muted/30",
                   !active && "hover:bg-muted/30",
-                  focused && active && "ring-2 ring-primary/30 ring-offset-2 ring-offset-card",
+                  focused && active && "ring-2 ring-primary/20 ring-offset-2 ring-offset-card",
                   !expanded && "pb-6"
                 )}
               >

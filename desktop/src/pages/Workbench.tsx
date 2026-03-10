@@ -1116,6 +1116,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   );
   const seekFeedbackTimeoutRef = React.useRef<BrowserTimeout | null>(null);
   const [subtitleControlsPushPx, setSubtitleControlsPushPx] = React.useState(0);
+  const subtitleControlsPushPxRef = React.useRef(subtitleControlsPushPx);
+  subtitleControlsPushPxRef.current = subtitleControlsPushPx;
   const setSubtitleEditorControlsNode = React.useCallback(
     (node: HTMLDivElement | null) => {
       subtitleEditorControlsRef.current = node;
@@ -3919,6 +3921,20 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
   React.useLayoutEffect(() => {
     if (!isEditingActiveCue) {
+      return;
+    }
+    clearPendingVideoControlsReveal();
+    if (isPointerInsideVideoInteractionArea()) {
+      setShowVideoControls(true);
+    }
+  }, [
+    clearPendingVideoControlsReveal,
+    isEditingActiveCue,
+    isPointerInsideVideoInteractionArea
+  ]);
+
+  React.useLayoutEffect(() => {
+    if (!isEditingActiveCue) {
       pendingEditorSelectionRef.current = null;
       return;
     }
@@ -4006,6 +4022,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
     const subtitleRect = subtitleSurface.getBoundingClientRect();
     const toolbarRect = toolbar.getBoundingClientRect();
+    const currentPushPx = subtitleControlsPushPxRef.current;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     if (
@@ -4040,8 +4057,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX,
       maxLeft
     );
+    const baseSubtitleTop = subtitleRect.top + currentPushPx;
     const preferredTop =
-      subtitleRect.top - SUBTITLE_EDITOR_TOOLBAR_GAP_PX - toolbarRect.height;
+      baseSubtitleTop - SUBTITLE_EDITOR_TOOLBAR_GAP_PX - toolbarRect.height;
     const maxTop = Math.max(
       topPaddingPx,
       viewportHeight -
@@ -4078,7 +4096,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     editingText,
     height,
     isEditingActiveCue,
-    subtitleControlsPushPx,
     subtitleEditorControlsElement,
     subtitleEditorToolbarLayoutTick,
     subtitleFonts,
@@ -4107,9 +4124,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
 
+    const currentPushPx = subtitleControlsPushPxRef.current;
+    const baseSubtitleTop = subtitleRect.top + currentPushPx;
+    const baseSubtitleBottom = subtitleRect.bottom + currentPushPx;
     const overlapPx =
-      subtitleRect.bottom + SUBTITLE_CONTROLS_COLLISION_GAP_PX - controlsRect.top;
-    const availableAbovePx = Math.max(0, subtitleRect.top - positionLayerRect.top);
+      baseSubtitleBottom + SUBTITLE_CONTROLS_COLLISION_GAP_PX - controlsRect.top;
+    const availableAbovePx = Math.max(0, baseSubtitleTop - positionLayerRect.top);
     if (!Number.isFinite(overlapPx) || !Number.isFinite(availableAbovePx)) {
       return;
     }
@@ -5040,6 +5060,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       if (isSavingCue || isExporting) {
         return;
       }
+      clearPendingVideoControlsReveal();
+      if (isPointerInsideVideoInteractionArea()) {
+        setShowVideoControls(true);
+      }
       const videoElement = videoRef.current;
       const isPlaying = isVideoPlayingForEditSession(videoElement);
       if (isPlaying) {
@@ -5047,7 +5071,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       }
       beginEditingCue(cue, isPlaying);
     },
-    [beginEditingCue, isExporting, isSavingCue]
+    [
+      beginEditingCue,
+      clearPendingVideoControlsReveal,
+      isExporting,
+      isPointerInsideVideoInteractionArea,
+      isSavingCue
+    ]
   );
 
   const handleVideoPlay = React.useCallback(() => {
@@ -5642,11 +5672,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             <div
               ref={setSubtitleEditorControlsNode}
               data-testid="workbench-subtitle-editor-controls"
-              className="pointer-events-auto fixed min-w-0"
+              className="pointer-events-auto fixed min-w-0 transition-transform duration-200"
               style={{
                 left: `${subtitleEditorToolbarPosition.left}px`,
                 top: `${subtitleEditorToolbarPosition.top}px`,
                 maxWidth: `${subtitleEditorToolbarMaxWidthPx}px`,
+                transform: subtitleControlsPushStyle.transform,
                 visibility: subtitleEditorToolbarPosition.visible
                   ? "visible"
                   : "hidden"

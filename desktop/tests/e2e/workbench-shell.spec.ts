@@ -2931,6 +2931,73 @@ test("controls overlap causes push and click opens editor", async ({ page }) => 
     .toBeLessThanOrEqual(2);
 });
 
+test("floating toolbar stays anchored while controls hide and reappear during bottom editing", async ({
+  page
+}) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  await ensureSubtitleLayerReady(page);
+  await dragActiveSubtitleTo(page, 0.5, 0.98);
+  await page.mouse.move(0, 0);
+  await expectVideoControlsHiddenSoon(page);
+
+  await showVideoControls(page);
+  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await subtitleButton.first().click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  const toolbar = page.getByTestId("workbench-subtitle-editor-controls");
+  await expect(editor).toHaveCount(1);
+  await expect(toolbar).toBeVisible();
+
+  const readToolbarGap = async () => {
+    const subtitleRect = await readActiveSubtitleRect(page);
+    const toolbarRect = await readClientRect(toolbar);
+    return {
+      subtitleRect,
+      toolbarRect,
+      gap: subtitleRect.top - toolbarRect.bottom
+    };
+  };
+
+  const pushed = await readToolbarGap();
+  expect(pushed.toolbarRect.bottom).toBeLessThanOrEqual(pushed.subtitleRect.top + 1);
+
+  await page.mouse.move(0, 0);
+  await expectVideoControlsHiddenSoon(page);
+  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+
+  const dropped = await readToolbarGap();
+  expect(dropped.toolbarRect.bottom).toBeLessThanOrEqual(dropped.subtitleRect.top + 1);
+  expect(
+    Math.abs(
+      (dropped.subtitleRect.top - pushed.subtitleRect.top) -
+        (dropped.toolbarRect.top - pushed.toolbarRect.top)
+    )
+  ).toBeLessThanOrEqual(2);
+
+  await showVideoControls(page);
+  await expectVideoControlsVisibleSoon(page);
+  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+
+  const rePushed = await readToolbarGap();
+  expect(rePushed.toolbarRect.bottom).toBeLessThanOrEqual(rePushed.subtitleRect.top + 1);
+  expect(Math.abs(rePushed.subtitleRect.top - pushed.subtitleRect.top)).toBeLessThanOrEqual(2);
+  expect(Math.abs(rePushed.toolbarRect.top - pushed.toolbarRect.top)).toBeLessThanOrEqual(2);
+  expect(Math.abs(rePushed.gap - pushed.gap)).toBeLessThanOrEqual(2);
+});
+
 test.skip("no-overlap scenario does not push subtitle position when controls appear", async ({ page }) => {
   // Position is now set by dragging; test required Top/24 from removed Position UI.
   await page.setViewportSize({ width: 1300, height: 800 });
