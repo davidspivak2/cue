@@ -24,7 +24,7 @@ DEFAULT_OUTLINE_COLOR = "#000000"
 DEFAULT_SHADOW_COLOR = "#000000"
 DEFAULT_LINE_BG_COLOR = "#000000"
 DEFAULT_WORD_BG_COLOR = "#000000"
-DEFAULT_SUBTITLE_MODE = "word_highlight"
+DEFAULT_SUBTITLE_MODE = "static"
 DEFAULT_HIGHLIGHT_COLOR = "#FFD400"
 DEFAULT_FONT_WEIGHT = 400
 DEFAULT_TEXT_ALIGN = "center"
@@ -208,8 +208,8 @@ def preset_style_defaults(name: str) -> PresetStyle:
         )
     return PresetStyle(
         font_size=28,
-        outline=2,
-        shadow=1,
+        outline=0,
+        shadow=0,
         margin_v=28,
         box_enabled=False,
         box_opacity=70,

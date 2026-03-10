@@ -64,28 +64,31 @@ const DEFAULT_SUBTITLE_FONTS = [
 ];
 
 const DEFAULT_PROJECT_STYLE = {
-  subtitle_mode: "word_highlight",
+  subtitle_mode: "static",
   subtitle_style: {
     preset: "Default",
     highlight_color: "#FFD400",
     highlight_opacity: 1.0,
     appearance: {
-      font_family: "Arial",
+      font_family: "Heebo",
       font_size: 28,
       font_style: "regular",
       font_weight: 400,
+      text_align: "center",
+      line_spacing: 1.0,
       text_color: "#FFFFFF",
       text_opacity: 1.0,
       letter_spacing: 0,
-      outline_enabled: true,
-      outline_width: 2,
+      outline_enabled: false,
+      outline_width: 0,
       outline_color: "#000000",
-      shadow_enabled: true,
-      shadow_strength: 1,
+      shadow_enabled: false,
+      shadow_strength: 0,
       shadow_offset_x: 0,
       shadow_offset_y: 0,
       shadow_color: "#000000",
       shadow_opacity: 1.0,
+      shadow_blur: 6,
       background_mode: "none",
       line_bg_color: "#000000",
       line_bg_opacity: 0.7,
@@ -99,7 +102,7 @@ const DEFAULT_PROJECT_STYLE = {
       vertical_offset: 28,
       position_x: 0.5,
       position_y: 0.92,
-      subtitle_mode: "word_highlight",
+      subtitle_mode: "static",
       highlight_color: "#FFD400"
     }
   }
@@ -157,23 +160,29 @@ const buildSettings = () => ({
       commands_timings: true
     }
   },
-  subtitle_mode: "word_highlight",
+  subtitle_mode: "static",
   subtitle_style: {
     preset: "Default",
     highlight_color: "#FFD400",
     highlight_opacity: 1.0,
     appearance: {
-      font_family: "Arial",
+      font_family: "Heebo",
       font_size: 28,
       font_style: "regular",
       font_weight: 400,
+      text_align: "center",
+      line_spacing: 1.0,
+      text_opacity: 1.0,
+      letter_spacing: 0,
+      outline_enabled: false,
+      outline_width: 0,
+      shadow_enabled: false,
+      shadow_strength: 0,
       text_color: "#FFFFFF",
-      outline_width: 2,
-      shadow_strength: 1,
       vertical_offset: 28,
       position_x: 0.5,
       position_y: 0.92,
-      subtitle_mode: "word_highlight",
+      subtitle_mode: "static",
       highlight_color: "#FFD400"
     }
   }
@@ -2209,11 +2218,35 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   });
   await page.waitForURL("**/workbench/project-new-1");
   const createRequest = await createJobRequest;
-  const createPayload = createRequest.postDataJSON() as { kind?: string; project_id?: string };
+  const createPayload = createRequest.postDataJSON() as {
+    kind?: string;
+    project_id?: string;
+    options?: { subtitle_mode?: string };
+  };
 
   expect(createPayload.kind).toBe("create_subtitles");
   expect(createPayload.project_id).toBe("project-new-1");
+  expect(createPayload.options?.subtitle_mode).toBe("static");
   await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
+  await expect
+    .poll(async () =>
+      page.getByTestId("workbench-subtitle-editor").evaluate((element) => {
+        const editor = element as HTMLTextAreaElement;
+        return {
+          value: editor.value,
+          selectionStart: editor.selectionStart,
+          selectionEnd: editor.selectionEnd,
+          focused: document.activeElement === editor
+        };
+      })
+    )
+    .toEqual({
+      value: "Generated subtitle line",
+      selectionStart: 0,
+      selectionEnd: 0,
+      focused: true
+    });
 });
 
 test("toolbar controls change subtitle preview appearance", async ({ page }) => {

@@ -38,11 +38,11 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   text_color: "#FFFFFF",
   text_opacity: 1.0,
   letter_spacing: 0,
-  outline_enabled: true,
-  outline_width: 2,
+  outline_enabled: false,
+  outline_width: 0,
   outline_color: "#000000",
-  shadow_enabled: true,
-  shadow_strength: 1,
+  shadow_enabled: false,
+  shadow_strength: 0,
   shadow_offset_x: 0,
   shadow_offset_y: 0,
   shadow_color: "#000000",
@@ -69,7 +69,7 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   vertical_offset: 28,
   position_x: 0.5,
   position_y: 0.92,
-  subtitle_mode: "word_highlight",
+  subtitle_mode: "static",
   highlight_color: "#FFD400"
 };
 
@@ -140,7 +140,6 @@ const applyPresetAppearance = (
     outline_width: defaults.outline,
     outline_color: DEFAULT_APPEARANCE.outline_color,
     shadow_enabled: defaults.shadow > 0,
-    shadow_strength: defaults.shadow,
     shadow_offset_x: 0,
     shadow_offset_y: 0,
     shadow_color: DEFAULT_APPEARANCE.shadow_color,
@@ -172,7 +171,6 @@ const applyPresetAppearance = (
     return {
       ...base,
       shadow_enabled: true,
-      shadow_strength: 2.5,
       shadow_offset_x: 2,
       shadow_offset_y: 2,
       shadow_blur: 8,

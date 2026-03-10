@@ -20,35 +20,37 @@ const buildSettings = () => ({
       commands_timings: true
     }
   },
-  subtitle_mode: "word_highlight",
+  subtitle_mode: "static",
   subtitle_style: {
     preset: "Default",
     highlight_color: "#FFD400",
     highlight_opacity: 1.0,
     custom: {
-      font_family: "Arial",
+      font_family: "Heebo",
       font_size: 28,
       text_color: "#FFFFFF",
-      outline: 2,
-      shadow: 1,
+      outline: 0,
+      shadow: 0,
       margin_v: 28,
       box_enabled: false,
       box_opacity: 70,
       box_padding: 8
     },
     appearance: {
-      font_family: "Arial",
+      font_family: "Heebo",
       font_size: 28,
+      text_align: "center",
+      line_spacing: 1.0,
       text_color: "#FFFFFF",
-      outline_width: 2,
-      shadow_strength: 1,
+      outline_width: 0,
+      shadow_strength: 0,
       vertical_offset: 28,
       position_x: 0.5,
       position_y: 0.92,
       background_mode: "none",
       line_bg_opacity: 0.7,
       line_bg_padding: 8,
-      subtitle_mode: "word_highlight",
+      subtitle_mode: "static",
       highlight_color: "#FFD400"
     }
   }
