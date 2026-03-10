@@ -82,6 +82,8 @@ type WorkbenchProps = {
 
 const SUBTITLE_FONT_SIZE_MIN = 18;
 const SUBTITLE_FONT_SIZE_MAX = 72;
+const FLOATING_TOOLBAR_POPOVER_SELECTOR = "[data-cue-floating-toolbar-popover]";
+const FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR = "[data-radix-popper-content-wrapper]";
 
 const CREATE_SUBTITLES_FILE_NOT_FOUND_MESSAGE =
   "The video file wasn't found. If you renamed or moved it, relink the video from the project hub and try again.";
@@ -1233,6 +1235,19 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     cleanup?.();
   }, []);
 
+  const isFloatingToolbarPopoverWrapper = React.useCallback((element: Element | null) => {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+    if (element.matches(FLOATING_TOOLBAR_POPOVER_SELECTOR)) {
+      return true;
+    }
+    const wrapper = element.matches(FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR)
+      ? element
+      : element.closest(FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR);
+    return Boolean(wrapper?.querySelector(FLOATING_TOOLBAR_POPOVER_SELECTOR));
+  }, []);
+
   const isPointerInsideVideoInteractionArea = React.useCallback(
     (clientX?: number, clientY?: number) => {
       const interactionSurface =
@@ -1256,18 +1271,42 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         activeSubtitleSurfaceRef.current?.matches(":hover") ||
         subtitleEditorControlsRef.current?.matches(":hover") ||
         videoClickSurfaceRef.current?.matches(":hover") ||
-        Boolean(document.querySelector("[data-cue-floating-toolbar-popover]:hover"));
+        Boolean(document.querySelector(`${FLOATING_TOOLBAR_POPOVER_SELECTOR}:hover`)) ||
+        Array.from(document.querySelectorAll(`${FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR}:hover`)).some(
+          (wrapper) => isFloatingToolbarPopoverWrapper(wrapper)
+        );
       return Boolean(isInsideByCoords || isInsideByHover);
     },
-    []
+    [isFloatingToolbarPopoverWrapper]
   );
 
   const isFloatingToolbarPopoverTarget = React.useCallback((target: EventTarget | null) => {
     if (!(target instanceof Element)) {
       return false;
     }
-    return Boolean(target.closest("[data-cue-floating-toolbar-popover]"));
-  }, []);
+    return isFloatingToolbarPopoverWrapper(target);
+  }, [isFloatingToolbarPopoverWrapper]);
+
+  const shouldKeepVideoControlsOnMouseLeave = React.useCallback(
+    (
+      target: EventTarget | null,
+      clientX: number,
+      clientY: number,
+      preserveTargets: Array<Node | null | undefined>
+    ) => {
+      if (
+        target instanceof Node &&
+        preserveTargets.some((candidate) => candidate?.contains(target))
+      ) {
+        return true;
+      }
+      if (isFloatingToolbarPopoverTarget(target)) {
+        return true;
+      }
+      return isPointerInsideVideoInteractionArea(clientX, clientY);
+    },
+    [isFloatingToolbarPopoverTarget, isPointerInsideVideoInteractionArea]
+  );
 
   const armVideoControlsRevealOnNextPointerMove = React.useCallback((clientX: number, clientY: number) => {
     clearPendingVideoControlsReveal();
@@ -5512,7 +5551,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       if (subtitleEditorControlsRef.current?.contains(target)) return;
       const editorSurface = document.querySelector('[data-testid="workbench-subtitle-editor-surface"]');
       if (editorSurface?.contains(target)) return;
-      if (target.closest("[data-radix-popper-content-wrapper]")) return;
+      if (target.closest(FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR)) return;
       void flushAndExitEditMode();
       if (videoWrapperRef.current?.contains(target)) {
         const wrapperRect = videoWrapperRef.current.getBoundingClientRect();
@@ -5963,13 +6002,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                   data-testid="workbench-center-panel-video-wrapper"
                   onMouseLeave={(e) => {
                     const to = e.relatedTarget;
-                    if (to instanceof Node && (
-                      videoWrapperRef.current?.contains(to) ||
-                      subtitleEditorControlsRef.current?.contains(to)
-                    ))
+                    if (
+                      shouldKeepVideoControlsOnMouseLeave(to, e.clientX, e.clientY, [
+                        videoWrapperRef.current,
+                        subtitleEditorControlsRef.current
+                      ])
+                    ) {
                       return;
-                    if (isFloatingToolbarPopoverTarget(to))
-                      return;
+                    }
                     setShowVideoControls(false);
                   }}
                 >
@@ -6014,15 +6054,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     }}
                     onMouseLeave={(e) => {
                       const to = e.relatedTarget;
-                      if (to instanceof Node && (
-                        videoControlsBarRef.current?.contains(to) ||
-                        subtitleOverlayPositionLayerRef.current?.contains(to) ||
-                        activeSubtitleWrapperRef.current?.contains(to) ||
-                        subtitleEditorControlsRef.current?.contains(to)
-                      ))
+                      if (
+                        shouldKeepVideoControlsOnMouseLeave(to, e.clientX, e.clientY, [
+                          videoControlsBarRef.current,
+                          subtitleOverlayPositionLayerRef.current,
+                          activeSubtitleWrapperRef.current,
+                          subtitleEditorControlsRef.current
+                        ])
+                      ) {
                         return;
-                      if (isFloatingToolbarPopoverTarget(to))
-                        return;
+                      }
                       setShowVideoControls(false);
                     }}
                     aria-hidden
@@ -6070,15 +6111,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     }}
                         onMouseLeave={(e) => {
                           const to = e.relatedTarget;
-                          if (to instanceof Node && (
-                            videoControlsBarRef.current?.contains(to) ||
-                            videoClickSurfaceRef.current?.contains(to) ||
-                            activeSubtitleWrapperRef.current?.contains(to) ||
-                            subtitleEditorControlsRef.current?.contains(to)
-                          ))
+                          if (
+                            shouldKeepVideoControlsOnMouseLeave(to, e.clientX, e.clientY, [
+                              videoControlsBarRef.current,
+                              videoClickSurfaceRef.current,
+                              activeSubtitleWrapperRef.current,
+                              subtitleEditorControlsRef.current
+                            ])
+                          ) {
                             return;
-                          if (isFloatingToolbarPopoverTarget(to))
-                            return;
+                          }
                           setShowVideoControls(false);
                         }}
                       >
@@ -6110,15 +6152,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                           onMouseLeave={(e) => {
                             const to = e.relatedTarget;
                             setIsHoveringActiveSubtitle(false);
-                            if (to instanceof Node && (
-                              videoControlsBarRef.current?.contains(to) ||
-                              videoClickSurfaceRef.current?.contains(to) ||
-                              subtitleOverlayPositionLayerRef.current?.contains(to) ||
-                              subtitleEditorControlsRef.current?.contains(to)
-                            ))
+                            if (
+                              shouldKeepVideoControlsOnMouseLeave(to, e.clientX, e.clientY, [
+                                videoControlsBarRef.current,
+                                videoClickSurfaceRef.current,
+                                subtitleOverlayPositionLayerRef.current,
+                                subtitleEditorControlsRef.current
+                              ])
+                            ) {
                               return;
-                            if (isFloatingToolbarPopoverTarget(to))
-                              return;
+                            }
                             setShowVideoControls(false);
                           }}
                         >
@@ -6546,15 +6589,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     }}
                     onMouseLeave={(e) => {
                       const to = e.relatedTarget;
-                      if (to instanceof Node && (
-                        videoClickSurfaceRef.current?.contains(to) ||
-                        activeSubtitleWrapperRef.current?.contains(to) ||
-                        subtitleEditorControlsRef.current?.contains(to) ||
-                        subtitleOverlayPositionLayerRef.current?.contains(to)
-                      ))
+                      if (
+                        shouldKeepVideoControlsOnMouseLeave(to, e.clientX, e.clientY, [
+                          videoClickSurfaceRef.current,
+                          activeSubtitleWrapperRef.current,
+                          subtitleEditorControlsRef.current,
+                          subtitleOverlayPositionLayerRef.current
+                        ])
+                      ) {
                         return;
-                      if (isFloatingToolbarPopoverTarget(to))
-                        return;
+                      }
                       setShowVideoControls(false);
                     }}
                   >
