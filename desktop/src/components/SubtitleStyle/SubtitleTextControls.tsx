@@ -52,7 +52,8 @@ function ItalicSerifIcon({ className }: { className?: string }) {
   );
 }
 
-import { ColorRow } from "./ColorPopover";
+import { ColorPopoverContent, ColorRow } from "./ColorPopover";
+import { SWATCH_SETS } from "./colorUtils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -73,6 +74,7 @@ import {
   PopoverTrigger
 } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
+import { StepperInput } from "@/components/ui/stepper-input";
 import {
   Tooltip,
   TooltipContent,
@@ -144,6 +146,8 @@ const LINE_SPACING_STEP = 0.05;
 const FONT_SIZE_PRESETS = [18, 24, 28, 32, 36, 44, 56, 72];
 const BOLD_WEIGHT_MIN = 700;
 
+const TEXT_COLOR_PRESETS = SWATCH_SETS.text.full;
+
 export const isItalicFontStyle = (fontStyle: string) =>
   fontStyle === "italic" || fontStyle === "bold_italic";
 
@@ -209,15 +213,8 @@ const FONT_WEIGHT_LABELS: Record<number, string> = {
 export const getFontWeightLabel = (weight: number): string =>
   FONT_WEIGHT_LABELS[weight] ?? (Number.isInteger(weight) ? `Weight ${weight}` : String(weight));
 
-const sliderInputValue = (value: number, step: number) => {
-  if (step >= 1) {
-    return String(Math.round(value));
-  }
-  if (step >= 0.1) {
-    return value.toFixed(1);
-  }
-  return value.toFixed(2);
-};
+const STEPPER_HOLD_DELAY_MS = 325;
+const STEPPER_HOLD_INTERVAL_MS = 75;
 
 const SliderField = ({
   label,
@@ -228,7 +225,7 @@ const SliderField = ({
   onChange
 }: SliderFieldProps) => (
   <div className="space-y-1.5">
-    <Label className="text-xs text-muted-foreground">{label}</Label>
+    <Label className="text-xs text-foreground">{label}</Label>
     <div className="grid grid-cols-[1fr_auto] items-center gap-3">
       <Slider
         min={min}
@@ -237,19 +234,13 @@ const SliderField = ({
         value={[value]}
         onValueChange={([nextValue]) => onChange(nextValue)}
       />
-      <Input
-        type="number"
-        className="h-8 w-20 px-2 text-xs"
+      <StepperInput
+        value={value}
         min={min}
         max={max}
         step={step}
-        value={sliderInputValue(value, step)}
-        onChange={(event) => {
-          const nextValue = Number(event.target.value);
-          if (!Number.isNaN(nextValue)) {
-            onChange(clampNumber(nextValue, min, max));
-          }
-        }}
+        aria-label={label}
+        onChange={onChange}
       />
     </div>
   </div>
@@ -381,22 +372,31 @@ const SubtitleTextControls = ({
     }
   }, [isWordHighlight]);
 
-  const patch = (changes: Partial<SubtitleStyleAppearance>) => {
-    onAppearanceChange(changes);
-  };
+  const patch = React.useCallback(
+    (changes: Partial<SubtitleStyleAppearance>) => {
+      onAppearanceChange(changes);
+    },
+    [onAppearanceChange]
+  );
 
-  const commitFontSize = (rawValue: string) => {
-    const parsed = Number(rawValue);
-    const nextValue = clampFontSize(
-      Number.isNaN(parsed) ? appearance.font_size : parsed
-    );
-    patch({ font_size: nextValue });
-    setSizeInputValue(String(nextValue));
-  };
+  const commitFontSize = React.useCallback(
+    (rawValue: string) => {
+      const parsed = Number(rawValue);
+      const nextValue = clampFontSize(
+        Number.isNaN(parsed) ? appearance.font_size : parsed
+      );
+      patch({ font_size: nextValue });
+      setSizeInputValue(String(nextValue));
+    },
+    [appearance.font_size, patch]
+  );
 
-  const handleFontSizeStep = (delta: number) => {
-    commitFontSize(String(appearance.font_size + delta));
-  };
+  const handleFontSizeStep = React.useCallback(
+    (delta: number) => {
+      commitFontSize(String(appearance.font_size + delta));
+    },
+    [appearance.font_size, commitFontSize]
+  );
 
   const handleFontSizeTriggerClick = React.useCallback(() => {
     if (!sizeOpen) {
@@ -453,6 +453,108 @@ const SubtitleTextControls = ({
     isToolbar &&
     defaultTextAppearance != null &&
     textAppearanceDiffers(appearance, defaultTextAppearance);
+  const clampedFontSize = clampFontSize(appearance.font_size);
+  const canDecreaseFontSize = clampedFontSize > FONT_SIZE_MIN;
+  const canIncreaseFontSize = clampedFontSize < FONT_SIZE_MAX;
+  const fontSizeStepRef = React.useRef(handleFontSizeStep);
+  const fontSizeCanStepRef = React.useRef((delta: number) =>
+    delta < 0 ? canDecreaseFontSize : canIncreaseFontSize
+  );
+  const fontSizeHoldTimeoutRef = React.useRef<number | null>(null);
+  const fontSizeHoldIntervalRef = React.useRef<number | null>(null);
+  const ignoreFontSizeClickRef = React.useRef(false);
+
+  React.useEffect(() => {
+    fontSizeStepRef.current = handleFontSizeStep;
+  }, [handleFontSizeStep]);
+
+  React.useEffect(() => {
+    fontSizeCanStepRef.current = (delta: number) =>
+      delta < 0 ? canDecreaseFontSize : canIncreaseFontSize;
+  }, [canDecreaseFontSize, canIncreaseFontSize]);
+
+  const stopFontSizeRepeat = React.useCallback(() => {
+    if (fontSizeHoldTimeoutRef.current !== null) {
+      window.clearTimeout(fontSizeHoldTimeoutRef.current);
+      fontSizeHoldTimeoutRef.current = null;
+    }
+    if (fontSizeHoldIntervalRef.current !== null) {
+      window.clearInterval(fontSizeHoldIntervalRef.current);
+      fontSizeHoldIntervalRef.current = null;
+    }
+  }, []);
+
+  React.useEffect(() => stopFontSizeRepeat, [stopFontSizeRepeat]);
+
+  const startFontSizeRepeat = React.useCallback(
+    (delta: number) => {
+      stopFontSizeRepeat();
+      if (!fontSizeCanStepRef.current(delta)) {
+        return;
+      }
+      fontSizeStepRef.current(delta);
+      fontSizeHoldTimeoutRef.current = window.setTimeout(() => {
+        fontSizeHoldIntervalRef.current = window.setInterval(() => {
+          if (!fontSizeCanStepRef.current(delta)) {
+            stopFontSizeRepeat();
+            return;
+          }
+          fontSizeStepRef.current(delta);
+        }, STEPPER_HOLD_INTERVAL_MS);
+      }, STEPPER_HOLD_DELAY_MS);
+    },
+    [stopFontSizeRepeat]
+  );
+
+  const getFontSizeButtonHandlers = React.useCallback(
+    (delta: number) => ({
+      onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+        if (ignoreFontSizeClickRef.current) {
+          ignoreFontSizeClickRef.current = false;
+          event.preventDefault();
+          return;
+        }
+        handleFontSizeStep(delta);
+      },
+      onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (
+          event.pointerType !== "touch" &&
+          event.pointerType !== "pen" &&
+          event.button !== 0
+        ) {
+          return;
+        }
+        ignoreFontSizeClickRef.current = true;
+        startFontSizeRepeat(delta);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      },
+      onPointerUp: stopFontSizeRepeat,
+      onPointerCancel: stopFontSizeRepeat,
+      onLostPointerCapture: stopFontSizeRepeat,
+      onBlur: stopFontSizeRepeat,
+      onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key !== " " && event.key !== "Enter") {
+          return;
+        }
+        if (event.repeat) {
+          event.preventDefault();
+          return;
+        }
+        event.preventDefault();
+        ignoreFontSizeClickRef.current = true;
+        startFontSizeRepeat(delta);
+      },
+      onKeyUp: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key === " " || event.key === "Enter") {
+          stopFontSizeRepeat();
+        }
+      }
+    }),
+    [handleFontSizeStep, startFontSizeRepeat, stopFontSizeRepeat]
+  );
+
+  const decreaseFontSizeButtonHandlers = getFontSizeButtonHandlers(-1);
+  const increaseFontSizeButtonHandlers = getFontSizeButtonHandlers(1);
   const toolbarShellClass = isToolbar
     ? "flex max-w-[min(90vw,48rem)] flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-border bg-background/95 px-2 py-1.5 shadow-md backdrop-blur-sm"
     : "flex flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 p-2";
@@ -646,7 +748,7 @@ const SubtitleTextControls = ({
                   patch({ font_style: italicActive ? "regular" : "italic" })
                 }
               >
-                <ItalicSerifIcon className="h-4 w-4" />
+                <ItalicSerifIcon className="h-4 w-4 -skew-x-12" />
               </Button>
             </span>
           </TooltipTrigger>
@@ -657,7 +759,7 @@ const SubtitleTextControls = ({
 
         <div
           className={cn(
-            "flex items-center overflow-hidden border border-input bg-background",
+            "flex h-8 items-stretch overflow-hidden border border-input bg-background",
             toolbarRound
           )}
         >
@@ -667,10 +769,11 @@ const SubtitleTextControls = ({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-none"
+            className="h-full w-8 rounded-none"
             aria-label="Decrease font size"
             data-testid="subtitle-style-font-size-decrease"
-            onClick={() => handleFontSizeStep(-1)}
+            {...decreaseFontSizeButtonHandlers}
+            disabled={!canDecreaseFontSize}
           >
             <span className="text-base leading-none">-</span>
           </Button>
@@ -697,7 +800,7 @@ const SubtitleTextControls = ({
                 value={sizeInputValue}
                 aria-label="Font size"
                 data-testid="subtitle-style-font-size-trigger"
-                className="h-8 min-w-14 max-w-16 rounded-none border-x border-input bg-background px-2 text-center text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                className="h-full min-w-12 max-w-14 rounded-none border-0 bg-transparent px-2 text-center text-xs focus-visible:ring-0"
                 onClick={handleFontSizeTriggerClick}
                 onChange={(e) => setSizeInputValue(e.target.value)}
                 onBlur={() => commitFontSize(sizeInputValue)}
@@ -746,10 +849,11 @@ const SubtitleTextControls = ({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-none"
+            className="h-full w-8 rounded-none"
             aria-label="Increase font size"
             data-testid="subtitle-style-font-size-increase"
-            onClick={() => handleFontSizeStep(1)}
+            {...increaseFontSizeButtonHandlers}
+            disabled={!canIncreaseFontSize}
           >
             <span className="text-base leading-none">+</span>
           </Button>
@@ -787,16 +891,13 @@ const SubtitleTextControls = ({
             align="center"
             {...floatingToolbarPopoverProps}
           >
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Text color</Label>
-              <ColorRow
-                kind="text"
-                value={appearance.text_color}
-                onChange={(color) => patch({ text_color: color })}
-                opacity={appearance.text_opacity}
-                onOpacityChange={(opacity) => patch({ text_opacity: opacity })}
-              />
-            </div>
+            <ColorPopoverContent
+              value={appearance.text_color}
+              onChange={(color) => patch({ text_color: color })}
+              opacity={appearance.text_opacity}
+              onOpacityChange={(opacity) => patch({ text_opacity: opacity })}
+              presets={TEXT_COLOR_PRESETS}
+            />
           </PopoverContent>
         </Popover>
 
@@ -922,7 +1023,7 @@ const SubtitleTextControls = ({
             {...floatingToolbarPopoverProps}
           >
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">
+              <Label className="text-xs text-foreground">
                 Text opacity
               </Label>
               <div className="grid grid-cols-[1fr_auto] items-center gap-3">
@@ -930,26 +1031,23 @@ const SubtitleTextControls = ({
                   min={10}
                   max={100}
                   step={1}
+                  opaqueColor={appearance.text_color}
                   value={[Math.round(appearance.text_opacity * 100)]}
                   onValueChange={([value]) =>
                     patch({ text_opacity: value / 100 })
                   }
                 />
-                <Input
-                  type="number"
-                  className="h-8 w-20 px-2 text-xs"
+                <StepperInput
+                  value={Math.round(appearance.text_opacity * 100)}
                   min={10}
                   max={100}
                   step={1}
-                  value={Math.round(appearance.text_opacity * 100)}
-                  onChange={(event) => {
-                    const nextValue = Number(event.target.value);
-                    if (!Number.isNaN(nextValue)) {
-                      patch({
-                        text_opacity: clampNumber(nextValue, 10, 100) / 100
-                      });
-                    }
-                  }}
+                  aria-label="Text opacity"
+                  onChange={(nextValue) =>
+                    patch({
+                      text_opacity: clampNumber(nextValue, 10, 100) / 100
+                    })
+                  }
                 />
               </div>
             </div>

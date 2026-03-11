@@ -12,11 +12,12 @@ import {
 } from "./shadowOffsetUtils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { OpacitySlider } from "@/components/ui/opacity-slider";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
+import { StepperInput } from "@/components/ui/stepper-input";
+import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
 import type { SubtitleStyleAppearance } from "@/settingsClient";
@@ -52,6 +53,7 @@ type OpacityRowProps = {
   max?: number;
   onChange: (v: number) => void;
   inputTestId?: string;
+  opaqueColor?: string;
 };
 
 type PaddingRowProps = {
@@ -60,6 +62,9 @@ type PaddingRowProps = {
   right: number;
   bottom: number;
   left: number;
+  previewColor: string;
+  previewOpacity: number;
+  previewRadius: number;
   linked: boolean;
   onToggleLink: () => void;
   onLinkedChange: (v: number) => void;
@@ -77,15 +82,15 @@ type CardPreviewPayload = {
 const PADDING_MIN = 0;
 const PADDING_MAX = 40;
 const PADDING_STEP = 1;
-const CARD_SAMPLE_TEXT = "Cue";
+const CARD_SAMPLE_TEXT = "Ag";
 
 const SHADOW_DEFAULTS: Partial<SubtitleStyleAppearance> = {
   shadow_enabled: true,
   shadow_offset_x: 0,
-  shadow_offset_y: 2,
+  shadow_offset_y: 0,
   shadow_color: "#000000",
-  shadow_opacity: 0.3,
-  shadow_blur: 6
+  shadow_opacity: 1,
+  shadow_blur: 10
 };
 
 const STATIC_CARD_PREVIEW_HIGHLIGHT_OPACITY = 0.8;
@@ -105,10 +110,10 @@ const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
   outline_color: "#000000",
   shadow_enabled: true,
   shadow_offset_x: 0,
-  shadow_offset_y: 2,
+  shadow_offset_y: 0,
   shadow_color: "#000000",
-  shadow_opacity: 0.3,
-  shadow_blur: 6,
+  shadow_opacity: 1,
+  shadow_blur: 10,
   background_mode: "line",
   line_bg_color: "#000000",
   line_bg_opacity: 0.7,
@@ -118,7 +123,7 @@ const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
   line_bg_padding_bottom: 8,
   line_bg_padding_left: 8,
   line_bg_padding_linked: true,
-  line_bg_radius: 0,
+  line_bg_radius: 8,
   word_bg_color: "#000000",
   word_bg_opacity: 0.4,
   word_bg_padding: 8,
@@ -127,7 +132,7 @@ const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
   word_bg_padding_bottom: 8,
   word_bg_padding_left: 8,
   word_bg_padding_linked: true,
-  word_bg_radius: 0,
+  word_bg_radius: 8,
   vertical_anchor: "bottom",
   vertical_offset: 28,
   position_x: 0.5,
@@ -325,9 +330,9 @@ const SliderRow = ({
   valueSuffix,
   inputTestId
 }: SliderRowProps) => (
-  <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+  <div className="space-y-1.5">
+    <Label className="text-xs text-foreground">{label}</Label>
+    <div className="grid grid-cols-[1fr_auto] items-center gap-3">
       <Slider
         min={min}
         max={max}
@@ -335,26 +340,20 @@ const SliderRow = ({
         value={[value]}
         onValueChange={([nextValue]) => onChange(nextValue)}
       />
-    </div>
-    <div className="flex items-center gap-1.5">
-      <Input
-        type="number"
-        className="h-8 w-16 px-2 text-xs"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        data-testid={inputTestId}
-        onChange={(event) => {
-          const nextValue = Number(event.target.value);
-          if (!Number.isNaN(nextValue)) {
-            onChange(Math.min(max, Math.max(min, nextValue)));
-          }
-        }}
-      />
-      {valueSuffix && (
-        <span className="text-xs text-muted-foreground">{valueSuffix}</span>
-      )}
+      <div className="flex items-center gap-1.5">
+        <StepperInput
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          aria-label={label}
+          data-testid={inputTestId}
+          onChange={onChange}
+        />
+        {valueSuffix && (
+          <span className="text-xs text-muted-foreground">{valueSuffix}</span>
+        )}
+      </div>
     </div>
   </div>
 );
@@ -365,39 +364,231 @@ const OpacityRow = ({
   min = 0,
   max = 100,
   onChange,
-  inputTestId
+  inputTestId,
+  opaqueColor
 }: OpacityRowProps) => (
-  <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+  <div className="space-y-1.5">
+    <Label className="text-xs text-foreground">{label}</Label>
+    <div className="grid grid-cols-[1fr_auto] items-center gap-3">
       <OpacitySlider
         min={min}
         max={max}
         step={1}
+        opaqueColor={opaqueColor}
         value={[Math.round(value)]}
         onValueChange={([nextValue]) => onChange(nextValue)}
       />
-    </div>
-    <div className="flex items-center gap-1.5">
-      <Input
-        type="number"
-        className="h-8 w-16 px-2 text-xs"
+      <StepperInput
+        value={Math.round(value)}
         min={min}
         max={max}
         step={1}
-        value={Math.round(value)}
+        aria-label={label}
         data-testid={inputTestId}
-        onChange={(event) => {
-          const nextValue = Number(event.target.value);
-          if (!Number.isNaN(nextValue)) {
-            onChange(Math.min(max, Math.max(min, nextValue)));
-          }
-        }}
+        onChange={onChange}
       />
-      <span className="text-xs text-muted-foreground">%</span>
     </div>
   </div>
 );
+
+type PaddingSide = "top" | "right" | "bottom" | "left";
+
+const PADDING_PREVIEW_SCALE = 0.75;
+const PADDING_PREVIEW_HANDLE_MIN_PX = 10;
+
+const scalePaddingPreview = (value: number) =>
+  Math.max(0, Math.min(30, Math.round(value * PADDING_PREVIEW_SCALE)));
+
+const paddingPreviewHandleThickness = (value: number) =>
+  Math.max(PADDING_PREVIEW_HANDLE_MIN_PX, scalePaddingPreview(value));
+
+const PaddingPreview = ({
+  top,
+  right,
+  bottom,
+  left,
+  color,
+  opacity,
+  radius,
+  activeSide,
+  onActiveSideChange,
+  onSideDragStart
+}: {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+  color: string;
+  opacity: number;
+  radius: number;
+  activeSide: PaddingSide | null;
+  onActiveSideChange: (side: PaddingSide | null) => void;
+  onSideDragStart: (side: PaddingSide, event: React.PointerEvent<HTMLDivElement>) => void;
+}) => {
+  const scaledTop = scalePaddingPreview(top);
+  const scaledRight = scalePaddingPreview(right);
+  const scaledBottom = scalePaddingPreview(bottom);
+  const scaledLeft = scalePaddingPreview(left);
+  const highlightSize = (value: number) => Math.max(2, value);
+  const topHandleHeight = paddingPreviewHandleThickness(top);
+  const rightHandleWidth = paddingPreviewHandleThickness(right);
+  const bottomHandleHeight = paddingPreviewHandleThickness(bottom);
+  const leftHandleWidth = paddingPreviewHandleThickness(left);
+
+  const previewHandle = (
+    side: PaddingSide,
+    className: string,
+    style: React.CSSProperties,
+    cursorClassName: string
+  ) => (
+    <div
+      aria-hidden="true"
+      className={cn("absolute z-20 touch-none", cursorClassName, className)}
+      style={style}
+      onPointerEnter={() => onActiveSideChange(side)}
+      onPointerLeave={() => onActiveSideChange(null)}
+      onPointerDown={(event) => onSideDragStart(side, event)}
+    />
+  );
+
+  return (
+    <div className="flex h-[5.25rem] w-[6.5rem] items-center justify-center rounded-xl border border-border/70 bg-muted/20 p-2 transition-colors">
+      <div
+        className="relative inline-flex items-center justify-center overflow-hidden shadow-sm transition-all duration-150"
+        style={{
+          paddingTop: `${scaledTop}px`,
+          paddingRight: `${scaledRight}px`,
+          paddingBottom: `${scaledBottom}px`,
+          paddingLeft: `${scaledLeft}px`,
+          borderRadius: `${Math.max(4, Math.round(radius * 0.6))}px`,
+          backgroundColor: colorWithOpacity(color, Math.max(opacity, 0.18))
+        }}
+      >
+        {activeSide === "top" && (
+          <span
+            className="pointer-events-none absolute inset-x-0 top-0 bg-primary/25"
+            style={{ height: highlightSize(scaledTop) }}
+          />
+        )}
+        {activeSide === "right" && (
+          <span
+            className="pointer-events-none absolute right-0 bg-primary/25"
+            style={{
+              top: scaledTop,
+              bottom: scaledBottom,
+              width: highlightSize(scaledRight)
+            }}
+          />
+        )}
+        {activeSide === "bottom" && (
+          <span
+            className="pointer-events-none absolute inset-x-0 bottom-0 bg-primary/25"
+            style={{ height: highlightSize(scaledBottom) }}
+          />
+        )}
+        {activeSide === "left" && (
+          <span
+            className="pointer-events-none absolute left-0 bg-primary/25"
+            style={{
+              top: scaledTop,
+              bottom: scaledBottom,
+              width: highlightSize(scaledLeft)
+            }}
+          />
+        )}
+        {previewHandle(
+          "top",
+          "inset-x-0 top-0",
+          { height: topHandleHeight },
+          "cursor-ns-resize!"
+        )}
+        {previewHandle(
+          "right",
+          "right-0",
+          {
+            top: topHandleHeight,
+            bottom: bottomHandleHeight,
+            width: rightHandleWidth
+          },
+          "cursor-ew-resize!"
+        )}
+        {previewHandle(
+          "bottom",
+          "inset-x-0 bottom-0",
+          { height: bottomHandleHeight },
+          "cursor-ns-resize!"
+        )}
+        {previewHandle(
+          "left",
+          "left-0",
+          {
+            top: topHandleHeight,
+            bottom: bottomHandleHeight,
+            width: leftHandleWidth
+          },
+          "cursor-ew-resize!"
+        )}
+        <span
+          className="relative z-10 text-xs font-semibold tracking-[0.01em]"
+          style={{ color: textColorContrastWith(color) }}
+        >
+          Ag
+        </span>
+      </div>
+    </div>
+  );
+};
+
+const PaddingSideField = ({
+  side,
+  value,
+  active,
+  onChange,
+  onActiveChange
+}: {
+  side: PaddingSide;
+  value: number;
+  active: boolean;
+  onChange: (value: number) => void;
+  onActiveChange: (side: PaddingSide | null) => void;
+}) => {
+  const label = side[0].toUpperCase() + side.slice(1);
+
+  return (
+    <div
+      className="flex flex-col items-center gap-1"
+      onPointerEnter={() => onActiveChange(side)}
+      onPointerLeave={() => onActiveChange(null)}
+      onFocusCapture={() => onActiveChange(side)}
+      onBlurCapture={(event) => {
+        const nextFocused = event.relatedTarget;
+        if (!(nextFocused instanceof Node) || !event.currentTarget.contains(nextFocused)) {
+          onActiveChange(null);
+        }
+      }}
+    >
+      <Label
+        className={cn(
+          "text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground",
+          active && "text-foreground"
+        )}
+      >
+        {label}
+      </Label>
+      <StepperInput
+        value={value}
+        min={PADDING_MIN}
+        max={PADDING_MAX}
+        step={PADDING_STEP}
+        aria-label={`${label} padding`}
+        className={cn(active && "border-primary/40 ring-1 ring-primary/20")}
+        inputClassName="w-10 px-1 text-[11px]"
+        buttonClassName="w-6"
+        onChange={(nextValue) => onChange(clampPadding(nextValue))}
+      />
+    </div>
+  );
+};
 
 const PaddingRow = ({
   label,
@@ -405,6 +596,9 @@ const PaddingRow = ({
   right,
   bottom,
   left,
+  previewColor,
+  previewOpacity,
+  previewRadius,
   linked,
   onToggleLink,
   onLinkedChange,
@@ -412,76 +606,215 @@ const PaddingRow = ({
   onRightChange,
   onBottomChange,
   onLeftChange
-}: PaddingRowProps) => (
-  <div className="space-y-1.5">
-    <div className="flex items-center justify-between gap-2">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      <Button
-        type="button"
-        variant="ghost"
-        size="iconSm"
-        className="shrink-0"
-        onClick={onToggleLink}
-        title={linked ? "Unlink padding" : "Link padding"}
-        aria-label={linked ? "Unlink padding" : "Link padding"}
-      >
-        {linked ? <Link className="h-3.5 w-3.5" /> : <Unlink className="h-3.5 w-3.5" />}
-      </Button>
-    </div>
-    {linked ? (
-      <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-        <Slider
-          min={PADDING_MIN}
-          max={PADDING_MAX}
-          step={PADDING_STEP}
-          value={[top]}
-          onValueChange={([nextValue]) => onLinkedChange(clampPadding(nextValue))}
-        />
-        <Input
-          type="number"
-          className="h-8 w-16 px-2 text-xs"
-          min={PADDING_MIN}
-          max={PADDING_MAX}
-          step={PADDING_STEP}
-          value={top}
-          onChange={(event) => {
-            const nextValue = Number(event.target.value);
-            if (!Number.isNaN(nextValue)) {
-              onLinkedChange(clampPadding(nextValue));
-            }
-          }}
-        />
+}: PaddingRowProps) => {
+  const [hoveredSide, setHoveredSide] = React.useState<PaddingSide | null>(null);
+  const [dragSide, setDragSide] = React.useState<PaddingSide | null>(null);
+  const dragStateRef = React.useRef<{
+    side: PaddingSide;
+    startX: number;
+    startY: number;
+    startValue: number;
+  } | null>(null);
+  const activeSide = dragSide ?? hoveredSide;
+
+  const setSideValue = React.useCallback(
+    (side: PaddingSide, value: number) => {
+      const nextValue = clampPadding(value);
+      if (side === "top") {
+        onTopChange(nextValue);
+        return;
+      }
+      if (side === "right") {
+        onRightChange(nextValue);
+        return;
+      }
+      if (side === "bottom") {
+        onBottomChange(nextValue);
+        return;
+      }
+      onLeftChange(nextValue);
+    },
+    [onBottomChange, onLeftChange, onRightChange, onTopChange]
+  );
+
+  const getSideValue = React.useCallback(
+    (side: PaddingSide) => {
+      if (side === "top") return top;
+      if (side === "right") return right;
+      if (side === "bottom") return bottom;
+      return left;
+    },
+    [bottom, left, right, top]
+  );
+
+  const handleActiveSideChange = React.useCallback((side: PaddingSide | null) => {
+    setHoveredSide(side);
+  }, []);
+
+  const handleSideDragStart = React.useCallback(
+    (side: PaddingSide, event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.pointerType === "mouse" && event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setHoveredSide(side);
+      setDragSide(side);
+      dragStateRef.current = {
+        side,
+        startX: event.clientX,
+        startY: event.clientY,
+        startValue: getSideValue(side)
+      };
+    },
+    [getSideValue]
+  );
+
+  React.useEffect(() => {
+    if (!dragSide) {
+      return;
+    }
+
+    const dragCursor = dragSide === "left" || dragSide === "right"
+      ? "ew-resize"
+      : "ns-resize";
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = dragCursor;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = dragStateRef.current;
+      if (!drag) {
+        return;
+      }
+
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+
+      let delta = 0;
+      if (drag.side === "right") {
+        delta = dx / PADDING_PREVIEW_SCALE;
+      } else if (drag.side === "left") {
+        delta = -dx / PADDING_PREVIEW_SCALE;
+      } else if (drag.side === "bottom") {
+        delta = dy / PADDING_PREVIEW_SCALE;
+      } else {
+        delta = -dy / PADDING_PREVIEW_SCALE;
+      }
+
+      setSideValue(drag.side, Math.round(drag.startValue + delta));
+    };
+
+    const stopDragging = () => {
+      dragStateRef.current = null;
+      setDragSide(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopDragging);
+    window.addEventListener("pointercancel", stopDragging);
+
+    return () => {
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopDragging);
+      window.removeEventListener("pointercancel", stopDragging);
+    };
+  }, [dragSide, setSideValue]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs text-foreground">{label}</Label>
+        <Button
+          type="button"
+          variant={linked ? "outline" : "secondary"}
+          size="sm"
+          className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+          onClick={onToggleLink}
+        >
+          {linked ? <Unlink className="h-3.5 w-3.5" /> : <Link className="h-3.5 w-3.5" />}
+          {linked ? "Edit individual sides" : "Edit all sides together"}
+        </Button>
       </div>
-    ) : (
-      <div className="grid grid-cols-4 gap-1.5">
-        {[
-          { label: "T", value: top, onChange: onTopChange },
-          { label: "R", value: right, onChange: onRightChange },
-          { label: "B", value: bottom, onChange: onBottomChange },
-          { label: "L", value: left, onChange: onLeftChange }
-        ].map((item) => (
-          <div key={item.label} className="space-y-0.5">
-            <Label className="text-[10px] text-muted-foreground">{item.label}</Label>
-            <Input
-              type="number"
-              className="h-8 px-1.5 text-xs"
-              min={PADDING_MIN}
-              max={PADDING_MAX}
-              step={PADDING_STEP}
-              value={item.value}
-              onChange={(event) => {
-                const nextValue = Number(event.target.value);
-                if (!Number.isNaN(nextValue)) {
-                  item.onChange(clampPadding(nextValue));
-                }
-              }}
+      {linked ? (
+        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+          <Slider
+            min={PADDING_MIN}
+            max={PADDING_MAX}
+            step={PADDING_STEP}
+            value={[top]}
+            onValueChange={([nextValue]) => onLinkedChange(clampPadding(nextValue))}
+          />
+          <StepperInput
+            value={top}
+            min={PADDING_MIN}
+            max={PADDING_MAX}
+            step={PADDING_STEP}
+            aria-label={label}
+            inputClassName="w-12"
+            onChange={(nextValue) => onLinkedChange(clampPadding(nextValue))}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-[max-content_auto_max-content] grid-rows-[auto_auto_auto] justify-center gap-x-3 gap-y-2">
+          <div className="col-start-2 row-start-1 justify-self-center">
+            <PaddingSideField
+              side="top"
+              value={top}
+              active={activeSide === "top"}
+              onChange={onTopChange}
+              onActiveChange={handleActiveSideChange}
             />
           </div>
-        ))}
-      </div>
-    )}
-  </div>
-);
+          <div className="col-start-1 row-start-2 justify-self-end">
+            <PaddingSideField
+              side="left"
+              value={left}
+              active={activeSide === "left"}
+              onChange={onLeftChange}
+              onActiveChange={handleActiveSideChange}
+            />
+          </div>
+          <div className="col-start-2 row-start-2">
+            <PaddingPreview
+              top={top}
+              right={right}
+              bottom={bottom}
+              left={left}
+              color={previewColor}
+              opacity={previewOpacity}
+              radius={previewRadius}
+              activeSide={activeSide}
+              onActiveSideChange={handleActiveSideChange}
+              onSideDragStart={handleSideDragStart}
+            />
+          </div>
+          <div className="col-start-3 row-start-2 justify-self-start">
+            <PaddingSideField
+              side="right"
+              value={right}
+              active={activeSide === "right"}
+              onChange={onRightChange}
+              onActiveChange={handleActiveSideChange}
+            />
+          </div>
+          <div className="col-start-2 row-start-3 justify-self-center">
+            <PaddingSideField
+              side="bottom"
+              value={bottom}
+              active={activeSide === "bottom"}
+              onChange={onBottomChange}
+              onActiveChange={handleActiveSideChange}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
   const { resolvedTheme } = useTheme();
@@ -501,9 +834,11 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
       ? "#000000"
       : previewAppearance.outline_color;
   const previewTextColor =
-    effectId === "outline" && previewAppearance.outline_width > 0
-      ? textColorContrastWith(outlineColor)
-      : "var(--foreground)";
+    effectId === "background" && resolvedTheme === "light"
+      ? "#ffffff"
+      : effectId === "outline" && previewAppearance.outline_width > 0
+        ? textColorContrastWith(outlineColor)
+        : "var(--foreground)";
 
   const baseStyle: React.CSSProperties = {
     fontFamily: "Heebo",
@@ -564,7 +899,10 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
 
   if (effectId === "karaoke") {
     return (
-      <div className={previewContainerClassName}>
+      <div
+        className={previewContainerClassName}
+        data-testid={`workbench-effect-card-${effectId}-preview`}
+      >
         <div
           className="flex flex-wrap items-center justify-center gap-x-1.5 text-2xl font-semibold tracking-[0.01em]"
           style={{ ...baseStyle, fontSize: "2.025rem" }}
@@ -591,7 +929,10 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
   }
 
   return (
-    <div className={previewContainerClassName}>
+    <div
+      className={previewContainerClassName}
+      data-testid={`workbench-effect-card-${effectId}-preview`}
+    >
       <span className="text-2xl font-semibold tracking-[0.01em]" style={baseStyle}>
         {CARD_SAMPLE_TEXT}
       </span>
@@ -776,20 +1117,8 @@ const WorkbenchEffectsPanel = ({
     if (effectId === "outline") {
       return (
         <div className="space-y-4" data-testid="workbench-effect-detail-outline">
-          <SliderRow
-            label="Width"
-            value={appearance.outline_width}
-            min={1}
-            max={10}
-            step={0.5}
-            valueSuffix={appearance.outline_width === 0 ? "Off" : undefined}
-            inputTestId="workbench-effect-outline-width-input"
-            onChange={(value) =>
-              patch({ outline_width: value, outline_enabled: value > 0 })
-            }
-          />
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Color</Label>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-foreground">Color</Label>
             <ColorRow
               kind="outline"
               value={appearance.outline_color}
@@ -804,8 +1133,48 @@ const WorkbenchEffectsPanel = ({
                       : appearance.outline_color
                 })
               }
+              hideAutoButton
+              compact
             />
           </div>
+          <div className="flex items-start justify-between gap-4">
+            <div className="grid gap-1.5">
+              <Label
+                htmlFor="workbench-outline-color-auto"
+                className="text-xs text-foreground"
+              >
+                Color-match to text
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Automatically adjust outline color so it stays readable on any text color.
+              </p>
+            </div>
+            <Switch
+              id="workbench-outline-color-auto"
+              checked={appearance.outline_color === "auto"}
+              onCheckedChange={(checked) =>
+                patch({
+                  outline_color: checked
+                    ? "auto"
+                    : appearance.outline_color === "auto"
+                      ? "#000000"
+                      : appearance.outline_color
+                })
+              }
+            />
+          </div>
+          <SliderRow
+            label="Width"
+            value={appearance.outline_width}
+            min={1}
+            max={10}
+            step={0.5}
+            valueSuffix={appearance.outline_width === 0 ? "Off" : undefined}
+            inputTestId="workbench-effect-outline-width-input"
+            onChange={(value) =>
+              patch({ outline_width: value, outline_enabled: value > 0 })
+            }
+          />
         </div>
       );
     }
@@ -814,13 +1183,14 @@ const WorkbenchEffectsPanel = ({
       return (
         <div className="space-y-4" data-testid="workbench-effect-detail-shadow">
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Color</Label>
+            <Label className="text-xs text-foreground">Color</Label>
             <ColorRow
               kind="shadow"
               value={appearance.shadow_color}
               opacity={appearance.shadow_opacity}
               onChange={(color) => patch({ shadow_color: color })}
               onOpacityChange={(opacity) => patch({ shadow_opacity: opacity })}
+              compact
             />
           </div>
           <OpacityRow
@@ -829,6 +1199,7 @@ const WorkbenchEffectsPanel = ({
             min={0}
             max={100}
             inputTestId="workbench-effect-shadow-opacity-input"
+            opaqueColor={appearance.shadow_color}
             onChange={(value) => patch({ shadow_opacity: value / 100 })}
           />
           <SliderRow
@@ -881,48 +1252,29 @@ const WorkbenchEffectsPanel = ({
 
       return (
         <div className="space-y-4" data-testid="workbench-effect-detail-background">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Mode</Label>
-            <RadioGroup
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-foreground">Mode</Label>
+            <ToggleGroup
+              type="single"
+              variant="outline"
               value={backgroundMode}
               onValueChange={(value) =>
-                patch({ background_mode: value as SubtitleStyleAppearance["background_mode"] })
+                value && patch({ background_mode: value as SubtitleStyleAppearance["background_mode"] })
               }
-              className="grid grid-cols-2 gap-2"
+              className="inline-flex [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground [&_[data-state=on]]:border [&_[data-state=on]]:border-primary"
             >
-              <Label
-                htmlFor="workbench-background-line"
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 rounded-2xl border px-3 py-2 text-sm transition-colors",
-                  backgroundMode === "line"
-                    ? "border-primary bg-primary/10 text-foreground"
-                    : "border-border/70 bg-muted/20 text-muted-foreground hover:bg-muted/35"
-                )}
+              <ToggleGroupItem value="line" aria-label="Around line">
+                Around line
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="word"
+                aria-label="Around spoken word"
+                disabled={!karaokeActive}
+                data-testid="workbench-effect-background-mode-word"
               >
-                <RadioGroupItem id="workbench-background-line" value="line" />
-                Line
-              </Label>
-              <Label
-                htmlFor="workbench-background-word"
-                className={cn(
-                  "flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm transition-colors",
-                  karaokeActive
-                    ? "cursor-pointer"
-                    : "cursor-not-allowed opacity-60",
-                  backgroundMode === "word"
-                    ? "border-primary bg-primary/10 text-foreground"
-                    : "border-border/70 bg-muted/20 text-muted-foreground hover:bg-muted/35"
-                )}
-              >
-                <RadioGroupItem
-                  id="workbench-background-word"
-                  value="word"
-                  disabled={!karaokeActive}
-                  data-testid="workbench-effect-background-mode-word"
-                />
-                Word
-              </Label>
-            </RadioGroup>
+                Around spoken word
+              </ToggleGroupItem>
+            </ToggleGroup>
             {!karaokeActive && (
               <p className="text-[11px] text-muted-foreground">
                 Word backgrounds unlock when Karaoke is active.
@@ -933,7 +1285,7 @@ const WorkbenchEffectsPanel = ({
           {backgroundMode === "line" && (
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">
+                <Label className="text-xs text-foreground">
                   Color
                 </Label>
                 <ColorRow
@@ -942,6 +1294,7 @@ const WorkbenchEffectsPanel = ({
                   opacity={appearance.line_bg_opacity}
                   onChange={(color) => patch({ line_bg_color: color })}
                   onOpacityChange={(opacity) => patch({ line_bg_opacity: opacity })}
+                  compact
                 />
               </div>
               <OpacityRow
@@ -949,6 +1302,7 @@ const WorkbenchEffectsPanel = ({
                 value={Math.round(appearance.line_bg_opacity * 100)}
                 min={0}
                 max={100}
+                opaqueColor={appearance.line_bg_color}
                 onChange={(value) => patch({ line_bg_opacity: value / 100 })}
               />
               <PaddingRow
@@ -957,6 +1311,9 @@ const WorkbenchEffectsPanel = ({
                 right={linePaddingRight}
                 bottom={linePaddingBottom}
                 left={linePaddingLeft}
+                previewColor={appearance.line_bg_color}
+                previewOpacity={appearance.line_bg_opacity}
+                previewRadius={appearance.line_bg_radius}
                 linked={appearance.line_bg_padding_linked ?? true}
                 onToggleLink={() => {
                   const linked = appearance.line_bg_padding_linked ?? true;
@@ -964,13 +1321,14 @@ const WorkbenchEffectsPanel = ({
                     patch({ line_bg_padding_linked: false });
                     return;
                   }
+                  const linkedValue = appearance.line_bg_padding ?? linePaddingTop;
                   patch({
                     line_bg_padding_linked: true,
-                    line_bg_padding: linePaddingTop,
-                    line_bg_padding_top: linePaddingTop,
-                    line_bg_padding_right: linePaddingTop,
-                    line_bg_padding_bottom: linePaddingTop,
-                    line_bg_padding_left: linePaddingTop
+                    line_bg_padding: linkedValue,
+                    line_bg_padding_top: linkedValue,
+                    line_bg_padding_right: linkedValue,
+                    line_bg_padding_bottom: linkedValue,
+                    line_bg_padding_left: linkedValue
                   });
                 }}
                 onLinkedChange={(value) =>
@@ -988,7 +1346,7 @@ const WorkbenchEffectsPanel = ({
                 onLeftChange={(value) => patch({ line_bg_padding_left: value })}
               />
               <SliderRow
-                label="Corner radius"
+                label="Corner roundness"
                 value={appearance.line_bg_radius}
                 min={0}
                 max={40}
@@ -1001,7 +1359,7 @@ const WorkbenchEffectsPanel = ({
           {backgroundMode === "word" && (
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">
+                <Label className="text-xs text-foreground">
                   Color
                 </Label>
                 <ColorRow
@@ -1010,6 +1368,7 @@ const WorkbenchEffectsPanel = ({
                   opacity={appearance.word_bg_opacity}
                   onChange={(color) => patch({ word_bg_color: color })}
                   onOpacityChange={(opacity) => patch({ word_bg_opacity: opacity })}
+                  compact
                 />
               </div>
               <OpacityRow
@@ -1017,6 +1376,7 @@ const WorkbenchEffectsPanel = ({
                 value={Math.round(appearance.word_bg_opacity * 100)}
                 min={0}
                 max={100}
+                opaqueColor={appearance.word_bg_color}
                 onChange={(value) => patch({ word_bg_opacity: value / 100 })}
               />
               <PaddingRow
@@ -1025,6 +1385,9 @@ const WorkbenchEffectsPanel = ({
                 right={wordPaddingRight}
                 bottom={wordPaddingBottom}
                 left={wordPaddingLeft}
+                previewColor={appearance.word_bg_color}
+                previewOpacity={appearance.word_bg_opacity}
+                previewRadius={appearance.word_bg_radius}
                 linked={appearance.word_bg_padding_linked ?? true}
                 onToggleLink={() => {
                   const linked = appearance.word_bg_padding_linked ?? true;
@@ -1032,13 +1395,14 @@ const WorkbenchEffectsPanel = ({
                     patch({ word_bg_padding_linked: false });
                     return;
                   }
+                  const linkedValue = appearance.word_bg_padding ?? wordPaddingTop;
                   patch({
                     word_bg_padding_linked: true,
-                    word_bg_padding: wordPaddingTop,
-                    word_bg_padding_top: wordPaddingTop,
-                    word_bg_padding_right: wordPaddingTop,
-                    word_bg_padding_bottom: wordPaddingTop,
-                    word_bg_padding_left: wordPaddingTop
+                    word_bg_padding: linkedValue,
+                    word_bg_padding_top: linkedValue,
+                    word_bg_padding_right: linkedValue,
+                    word_bg_padding_bottom: linkedValue,
+                    word_bg_padding_left: linkedValue
                   });
                 }}
                 onLinkedChange={(value) =>
@@ -1056,7 +1420,7 @@ const WorkbenchEffectsPanel = ({
                 onLeftChange={(value) => patch({ word_bg_padding_left: value })}
               />
               <SliderRow
-                label="Corner radius"
+                label="Corner roundness"
                 value={appearance.word_bg_radius}
                 min={0}
                 max={40}
@@ -1072,13 +1436,14 @@ const WorkbenchEffectsPanel = ({
     return (
       <div className="space-y-4" data-testid="workbench-effect-detail-karaoke">
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Color</Label>
+          <Label className="text-xs text-foreground">Color</Label>
           <ColorRow
             kind="highlight"
             value={appearance.highlight_color}
             opacity={highlightOpacity}
             onChange={(color) => patch({ highlight_color: color })}
             onOpacityChange={onHighlightOpacityChange}
+            compact
           />
         </div>
         <OpacityRow
@@ -1087,6 +1452,7 @@ const WorkbenchEffectsPanel = ({
           min={0}
           max={100}
           inputTestId="workbench-effect-karaoke-opacity-input"
+          opaqueColor={appearance.highlight_color}
           onChange={(value) => onHighlightOpacityChange(value / 100)}
         />
       </div>
@@ -1124,14 +1490,14 @@ const WorkbenchEffectsPanel = ({
                 onMouseEnter={() => onPreviewEffect(effectId)}
                 onMouseLeave={() => onPreviewEffect(null)}
                 className={cn(
-                  "group relative flex min-h-0 flex-col items-stretch gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left shadow-[var(--shadow-card)] transition-colors cursor-pointer",
+                  "group relative flex min-h-0 flex-col items-stretch gap-4 rounded-lg border border-border bg-card px-4 py-3 text-left shadow-[var(--shadow-card)] transition-colors cursor-pointer",
                   active && "border-primary/50 bg-muted/30",
                   !active && "hover:bg-muted/30",
                   focused && active && "ring-2 ring-primary/20 ring-offset-2 ring-offset-card",
                   !expanded && "pb-6"
                 )}
               >
-                <div className="flex w-full items-center gap-2">
+                <div className="flex w-full items-center gap-2 pr-24">
                   <div
                     className="flex shrink-0"
                     onClick={(e) => e.stopPropagation()}
@@ -1147,45 +1513,43 @@ const WorkbenchEffectsPanel = ({
                   <span className="text-sm font-semibold text-foreground">
                     {effectLabels[effectId]}
                   </span>
-                  <div className="ml-auto flex shrink-0 items-center gap-1">
-                    {active && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className={cn(
-                          "h-7 px-2 text-xs",
-                          !showReset && "invisible pointer-events-none"
-                        )}
-                        data-testid={`workbench-effect-reset-${effectId}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onResetEffect(effectId);
-                        }}
-                      >
-                        Reset
-                      </Button>
-                    )}
-                    {active && (
-                      <button
-                        type="button"
-                        aria-label={expanded ? "Collapse" : "Expand"}
-                        className="-m-2 flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleExpanded(effectId)(e);
-                        }}
-                      >
-                        <ChevronDown
-                          className={cn(
-                            "h-4 w-4 transition-transform duration-200 ease-out",
-                            expanded && "rotate-180"
-                          )}
-                        />
-                      </button>
-                    )}
-                  </div>
                 </div>
+                {active && (
+                  <div className="absolute right-4 top-3 flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={cn(
+                        "h-7 px-2 text-xs",
+                        !showReset && "invisible pointer-events-none"
+                      )}
+                      data-testid={`workbench-effect-reset-${effectId}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onResetEffect(effectId);
+                      }}
+                    >
+                      Reset
+                    </Button>
+                    <button
+                      type="button"
+                      aria-label={expanded ? "Collapse" : "Expand"}
+                      className="-m-2 flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleExpanded(effectId)(e);
+                      }}
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 transition-transform duration-200 ease-out",
+                          expanded && "rotate-180"
+                        )}
+                      />
+                    </button>
+                  </div>
+                )}
                 <div className="min-h-[5.25rem]">
                   <EffectCardPreview effectId={effectId} />
                 </div>
@@ -1196,7 +1560,7 @@ const WorkbenchEffectsPanel = ({
                       expandedVisible ? "grid-rows-[1fr]" : "grid-rows-[0fr] -mt-3"
                     )}
                   >
-                    <div className="min-h-0 overflow-hidden">
+                    <div className="min-h-0 overflow-x-visible overflow-y-hidden">
                       <div
                         className="space-y-4 pt-3"
                         onClick={(e) => e.stopPropagation()}

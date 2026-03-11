@@ -99,6 +99,7 @@ export type SettingsConfig = {
   save_policy: string;
   save_folder?: string;
   transcription_quality: TranscriptionQuality;
+  interface_scale: number;
   punctuation_rescue_fallback_enabled: boolean;
   apply_audio_filter: boolean;
   keep_extracted_audio: boolean;

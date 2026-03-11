@@ -22,6 +22,7 @@
   /* Motion: use for transition-duration when not using Tailwind duration-* */
   --duration-fast: 150ms;
   --duration-normal: 200ms;
+  --app-scale: 1;
   --background: #f5f9ff;
   --foreground: #0f172a;
   --card: #ffffff;
@@ -128,6 +129,10 @@
   body {
     margin: 0;
     overflow: hidden;
+  }
+
+  html {
+    font-size: calc(16px * var(--app-scale));
   }
 
   body {

@@ -148,7 +148,7 @@ function SortableTitleTab({
       {...listeners}
     >
       <div
-        className="min-w-0 flex-1"
+        className="min-w-0 flex-1 overflow-hidden"
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
       >
@@ -166,7 +166,7 @@ function SortableTitleTab({
                 onTabClick(tab.projectId);
               }}
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-1 truncate py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                "flex w-full min-w-0 items-center gap-1 overflow-hidden truncate py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                 isIconOnly && "flex-1 justify-center p-1",
                 isActive && "!cursor-default"
               )}
@@ -198,7 +198,7 @@ function SortableTitleTab({
         onClick={(e) => onCloseTab(tab.projectId, e)}
         aria-label={`Close ${title}`}
         data-testid={`title-bar-tab-close-${tab.projectId}`}
-        className="shrink-0 rounded-md p-0.5 hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <X className="h-3.5 w-3.5 text-muted-foreground" />
       </button>

@@ -61,9 +61,7 @@ const Slider = React.forwardRef<
                 key={i}
                 className={cn(
                   "h-2 w-2 shrink-0 rounded-full ring-1",
-                  hideRange
-                    ? "bg-muted-foreground/20 ring-muted-foreground/60"
-                    : "bg-background ring-muted-foreground/50",
+                  "bg-background ring-muted-foreground/50",
                   isUnderThumb && "invisible"
                 )}
               />
@@ -77,9 +75,7 @@ const Slider = React.forwardRef<
       style={thumbStyle}
       className={cn(
         "relative z-20 block h-4 w-4 cursor-pointer rounded-full bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
-        hideRange
-          ? "border-2 border-primary ring-2 ring-primary/30"
-          : "border border-primary/50"
+        "border border-primary/50"
       )}
     />
   </SliderPrimitive.Root>
