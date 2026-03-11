@@ -159,9 +159,10 @@ export function ColorPopoverContent({
         />
       </div>
 
-      <div className="space-y-1">
-        <Label className="text-xs text-foreground">Hue</Label>
+      <div>
+        <Label className="text-sm text-foreground">Hue</Label>
         <HueSlider
+          className="mt-1.5"
           min={0}
           max={360}
           step={1}
@@ -172,7 +173,7 @@ export function ColorPopoverContent({
       </div>
 
       <div className="space-y-1">
-        <Label className="text-xs text-foreground">Opacity</Label>
+        <Label className="text-sm text-foreground">Opacity</Label>
         <div className="grid grid-cols-[1fr_auto] items-center gap-3">
           <OpacitySlider
             min={0}
@@ -231,9 +232,9 @@ export function ColorPopoverContent({
         </div>
       </div>
 
-      <div className="space-y-1">
-        <Label className="text-xs text-foreground">Hex</Label>
-        <div className="flex items-center gap-2">
+      <div>
+        <Label className="text-sm text-foreground">Hex</Label>
+        <div className="mt-1.5 flex items-center gap-2">
           <Input
             className="h-8 w-24 font-mono text-xs"
             value={hexInput}
@@ -260,8 +261,8 @@ export function ColorPopoverContent({
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label className="text-xs text-foreground">Presets</Label>
+      <div className="flex flex-col gap-1.5">
+        <Label className="text-sm text-foreground">Presets</Label>
         <div className="flex flex-wrap gap-1.5">
           {presets.map((swatch) => (
             <button

@@ -331,7 +331,7 @@ const SliderRow = ({
   inputTestId
 }: SliderRowProps) => (
   <div className="space-y-1.5">
-    <Label className="text-xs text-foreground">{label}</Label>
+    <Label className="text-sm text-foreground">{label}</Label>
     <div className="grid grid-cols-[1fr_auto] items-center gap-3">
       <Slider
         min={min}
@@ -368,7 +368,7 @@ const OpacityRow = ({
   opaqueColor
 }: OpacityRowProps) => (
   <div className="space-y-1.5">
-    <Label className="text-xs text-foreground">{label}</Label>
+    <Label className="text-sm text-foreground">{label}</Label>
     <div className="grid grid-cols-[1fr_auto] items-center gap-3">
       <OpacitySlider
         min={min}
@@ -569,7 +569,7 @@ const PaddingSideField = ({
     >
       <Label
         className={cn(
-          "text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground",
+          "text-xs font-medium text-muted-foreground",
           active && "text-foreground"
         )}
       >
@@ -727,7 +727,7 @@ const PaddingRow = ({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs text-foreground">{label}</Label>
+        <Label className="text-sm text-foreground">{label}</Label>
         <Button
           type="button"
           variant={linked ? "outline" : "secondary"}
@@ -868,21 +868,25 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
   }
 
   if (effectId === "background" && previewAppearance.background_mode === "line") {
+    const linePaddingTop =
+      previewAppearance.line_bg_padding_top ?? previewAppearance.line_bg_padding ?? 8;
+    const linePaddingRight =
+      previewAppearance.line_bg_padding_right ?? previewAppearance.line_bg_padding ?? 8;
+    const linePaddingBottom =
+      previewAppearance.line_bg_padding_bottom ?? previewAppearance.line_bg_padding ?? 8;
+    const linePaddingLeft =
+      previewAppearance.line_bg_padding_left ?? previewAppearance.line_bg_padding ?? 8;
+    const scaledTop = scalePaddingPreview(linePaddingTop);
+    const scaledRight = scalePaddingPreview(linePaddingRight);
+    const scaledBottom = scalePaddingPreview(linePaddingBottom);
+    const scaledLeft = scalePaddingPreview(linePaddingLeft);
+
     baseStyle.backgroundColor = colorWithOpacity(
       previewAppearance.line_bg_color,
       previewAppearance.line_bg_opacity
     );
-    baseStyle.padding = `${Math.max(0, linePaddingTop * 0.4)}px ${Math.max(
-      0,
-      linePaddingRight * 0.5
-    )}px ${Math.max(0, linePaddingBottom * 0.4)}px ${Math.max(
-      0,
-      linePaddingLeft * 0.5
-    )}px`;
-    baseStyle.borderRadius = `${Math.max(
-      0,
-      previewAppearance.line_bg_radius * 0.5
-    )}px`;
+    baseStyle.padding = `${scaledTop}px ${scaledRight}px ${scaledBottom}px ${scaledLeft}px`;
+    baseStyle.borderRadius = `${Math.max(4, Math.round(previewAppearance.line_bg_radius * 0.6))}px`;
   }
 
   const wordHighlightStyle: React.CSSProperties = {
@@ -1118,7 +1122,7 @@ const WorkbenchEffectsPanel = ({
       return (
         <div className="space-y-4" data-testid="workbench-effect-detail-outline">
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-foreground">Color</Label>
+            <Label className="text-sm text-foreground">Color</Label>
             <ColorRow
               kind="outline"
               value={appearance.outline_color}
@@ -1141,7 +1145,7 @@ const WorkbenchEffectsPanel = ({
             <div className="grid gap-1.5">
               <Label
                 htmlFor="workbench-outline-color-auto"
-                className="text-xs text-foreground"
+                className="text-sm text-foreground"
               >
                 Color-match to text
               </Label>
@@ -1183,7 +1187,7 @@ const WorkbenchEffectsPanel = ({
       return (
         <div className="space-y-4" data-testid="workbench-effect-detail-shadow">
           <div className="space-y-1.5">
-            <Label className="text-xs text-foreground">Color</Label>
+            <Label className="text-sm text-foreground">Color</Label>
             <ColorRow
               kind="shadow"
               value={appearance.shadow_color}
@@ -1253,17 +1257,22 @@ const WorkbenchEffectsPanel = ({
       return (
         <div className="space-y-4" data-testid="workbench-effect-detail-background">
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-foreground">Mode</Label>
+            <Label className="text-sm text-foreground">Mode</Label>
             <ToggleGroup
               type="single"
               variant="outline"
+              size="sm"
               value={backgroundMode}
               onValueChange={(value) =>
                 value && patch({ background_mode: value as SubtitleStyleAppearance["background_mode"] })
               }
-              className="inline-flex [&_[data-state=on]]:bg-primary [&_[data-state=on]]:text-primary-foreground [&_[data-state=on]]:border [&_[data-state=on]]:border-primary"
+              className="flex w-full"
             >
-              <ToggleGroupItem value="line" aria-label="Around line">
+              <ToggleGroupItem
+                value="line"
+                aria-label="Around line"
+                className="basis-0 grow justify-center"
+              >
                 Around line
               </ToggleGroupItem>
               <ToggleGroupItem
@@ -1271,12 +1280,13 @@ const WorkbenchEffectsPanel = ({
                 aria-label="Around spoken word"
                 disabled={!karaokeActive}
                 data-testid="workbench-effect-background-mode-word"
+                className="basis-0 grow-[1.45] justify-center"
               >
                 Around spoken word
               </ToggleGroupItem>
             </ToggleGroup>
             {!karaokeActive && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Word backgrounds unlock when Karaoke is active.
               </p>
             )}
@@ -1285,7 +1295,7 @@ const WorkbenchEffectsPanel = ({
           {backgroundMode === "line" && (
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-xs text-foreground">
+                <Label className="text-sm text-foreground">
                   Color
                 </Label>
                 <ColorRow
@@ -1359,7 +1369,7 @@ const WorkbenchEffectsPanel = ({
           {backgroundMode === "word" && (
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-xs text-foreground">
+                <Label className="text-sm text-foreground">
                   Color
                 </Label>
                 <ColorRow
@@ -1436,7 +1446,7 @@ const WorkbenchEffectsPanel = ({
     return (
       <div className="space-y-4" data-testid="workbench-effect-detail-karaoke">
         <div className="space-y-1.5">
-          <Label className="text-xs text-foreground">Color</Label>
+          <Label className="text-sm text-foreground">Color</Label>
           <ColorRow
             kind="highlight"
             value={appearance.highlight_color}
@@ -1474,7 +1484,7 @@ const WorkbenchEffectsPanel = ({
           className="flex flex-col gap-5"
           data-testid="workbench-effects-grid"
         >
-          {effectOrder.map((effectId) => {
+            {effectOrder.map((effectId) => {
             const active = isEffectActive(effectId, appearance);
             const focused = resolvedFocusedEffect === effectId;
             const expanded = expandedEffects.has(effectId);
@@ -1510,7 +1520,7 @@ const WorkbenchEffectsPanel = ({
                       className="group-hover:bg-muted data-[state=checked]:group-hover:bg-primary/80"
                     />
                   </div>
-                  <span className="text-sm font-semibold text-foreground">
+                  <span className="text-lg font-semibold text-foreground">
                     {effectLabels[effectId]}
                   </span>
                 </div>
