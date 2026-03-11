@@ -7013,7 +7013,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                 data-testid="workbench-right-panel"
               >
               <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                <h2 className="text-base font-semibold">Effects</h2>
+                <h2 className="text-lg font-semibold">Effects</h2>
                 <Button
                   type="button"
                   variant="ghost"
@@ -7072,8 +7072,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,360px)] flex-col border-l border-border bg-card shadow"
               data-testid="workbench-right-drawer"
             >
-              <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
-                <h2 className="text-base font-semibold">Effects</h2>
+            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+              <h2 className="text-lg font-semibold">Effects</h2>
                 <div className="flex items-center gap-1.5">
                   <Button
                     type="button"

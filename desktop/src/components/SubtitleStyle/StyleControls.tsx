@@ -68,7 +68,7 @@ const SliderRow = ({
 }: SliderRowProps) => (
   <div className="grid grid-cols-[1fr_auto] items-center gap-3">
     <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Label className="text-sm text-muted-foreground">{label}</Label>
       <Slider
         min={min}
         max={max}
@@ -114,7 +114,7 @@ const OpacityRow = ({
 }: OpacityRowProps) => (
   <div className="grid grid-cols-[1fr_auto] items-center gap-3">
     <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Label className="text-sm text-muted-foreground">{label}</Label>
       <OpacitySlider
         min={min}
         max={max}
@@ -172,7 +172,7 @@ const PaddingRow = ({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs text-muted-foreground">{label}</Label>
+        <Label className="text-sm text-muted-foreground">{label}</Label>
         <Button
           type="button"
           variant="ghost"
