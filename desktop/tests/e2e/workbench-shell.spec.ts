@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 const initMocks = () => {
   Object.defineProperty(File.prototype, "path", {
@@ -88,16 +88,16 @@ const DEFAULT_PROJECT_STYLE = {
       shadow_offset_y: 0,
       shadow_color: "#000000",
       shadow_opacity: 1.0,
-      shadow_blur: 6,
+      shadow_blur: 10,
       background_mode: "none",
       line_bg_color: "#000000",
       line_bg_opacity: 0.7,
       line_bg_padding: 8,
-      line_bg_radius: 0,
+      line_bg_radius: 8,
       word_bg_color: "#000000",
       word_bg_opacity: 0.4,
       word_bg_padding: 8,
-      word_bg_radius: 0,
+      word_bg_radius: 8,
       vertical_anchor: "bottom",
       vertical_offset: 28,
       position_x: 0.5,
@@ -1223,6 +1223,26 @@ const readActiveSubtitleTextShadow = async (page) =>
 
 const readEffectCardPressed = async (page, effectId) =>
   (await (await getEffectCard(page, effectId)).getAttribute("aria-pressed")) === "true";
+
+const readLocatorTop = async (locator: Locator) => {
+  const box = await locator.boundingBox();
+  if (!box) {
+    throw new Error("Expected locator to have a visible bounding box");
+  }
+  return box.y;
+};
+
+const readEffectCardVerticalAnchors = async (page, effectId) => {
+  const card = await getEffectCard(page, effectId);
+  return {
+    checkboxTop: await readLocatorTop(
+      card.getByTestId(`workbench-effect-card-${effectId}-checkbox`)
+    ),
+    previewTop: await readLocatorTop(
+      card.getByTestId(`workbench-effect-card-${effectId}-preview`)
+    )
+  };
+};
 
 const setToolbarFontSize = async (page, value) => {
   await ensureAdvancedStyleControlsVisible(page);
@@ -3594,13 +3614,82 @@ test("on-video contract keeps toolbar open while using seek bar and still closes
   await expect(toolbar).toBeVisible();
   await expect.poll(() => readVideoCurrentTimeSeconds(page)).toBeGreaterThan(35);
 
-  const videoWrapper = page.getByTestId("workbench-center-panel-video-wrapper");
-  await videoWrapper.click({
-    position: {
-      x: 40,
-      y: 40
-    }
-  });
+  const videoClickSurfaceRect = await page
+    .locator('[data-testid="workbench-center-panel-video-wrapper"] > div.absolute.cursor-default')
+    .first()
+    .boundingBox();
+  if (!videoClickSurfaceRect) {
+    throw new Error("Displayed video click surface not found");
+  }
+  await page.mouse.click(videoClickSurfaceRect.x + 40, videoClickSurfaceRect.y + 40);
+  await expect(editor).toHaveCount(0);
+  await expect(toolbar).toHaveCount(0);
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(true);
+});
+
+test("dragging out of the text color picker does not close the floating toolbar", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await page.getByTestId("workbench-active-subtitle").click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  const toolbar = page.getByTestId("workbench-subtitle-editor-controls");
+  await expect(editor).toBeVisible();
+  await expect(toolbar).toBeVisible();
+
+  await page.getByTestId("subtitle-style-text-color").click();
+
+  const saturationValueBox = page.getByRole("slider", { name: "Saturation and value" });
+  const videoClickSurface = page
+    .locator('[data-testid="workbench-center-panel-video-wrapper"] > div.absolute.cursor-default')
+    .first();
+  await expect(saturationValueBox).toBeVisible();
+  await expect(videoClickSurface).toBeVisible();
+
+  const saturationValueBoxRect = await saturationValueBox.boundingBox();
+  const videoClickSurfaceRect = await videoClickSurface.boundingBox();
+
+  if (!saturationValueBoxRect || !videoClickSurfaceRect) {
+    throw new Error("Missing geometry for text color picker drag reproduction");
+  }
+
+  const startX = saturationValueBoxRect.x + saturationValueBoxRect.width * 0.45;
+  const startY = saturationValueBoxRect.y + saturationValueBoxRect.height * 0.5;
+  const edgeX = saturationValueBoxRect.x + saturationValueBoxRect.width - 2;
+  const edgeY = startY;
+  const overshootX = videoClickSurfaceRect.x + 40;
+  const overshootY = videoClickSurfaceRect.y + 40;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(edgeX, edgeY, { steps: 10 });
+  await page.mouse.move(overshootX, overshootY, { steps: 18 });
+  await page.mouse.up();
+
+  await expect(toolbar).toBeVisible();
+  await expect(editor).toBeVisible();
+  await expect(saturationValueBox).toBeVisible();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+    )
+    .toBe(false);
+
+  await page.mouse.click(videoClickSurfaceRect.x + 40, videoClickSurfaceRect.y + 40);
+
   await expect(editor).toHaveCount(0);
   await expect(toolbar).toHaveCount(0);
   await expect
@@ -3842,6 +3931,35 @@ test("effects pane reset restores one effect without clearing the others", async
   await expect
     .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.shadow_opacity ?? null)
     .toBe(0.3);
+});
+
+test("effects pane card layout stays fixed when actions appear", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+
+  const before = await readEffectCardVerticalAnchors(page, "shadow");
+  const shadowCard = await getEffectCard(page, "shadow");
+  const shadowCheckbox = shadowCard.getByTestId("workbench-effect-card-shadow-checkbox");
+  await shadowCheckbox.click();
+  await expect(shadowCheckbox).toHaveAttribute("data-state", "checked");
+
+  const afterEnable = await readEffectCardVerticalAnchors(page, "shadow");
+  expect(Math.abs(afterEnable.checkboxTop - before.checkboxTop)).toBeLessThanOrEqual(1);
+  expect(Math.abs(afterEnable.previewTop - before.previewTop)).toBeLessThanOrEqual(1);
+
+  await setShadowOpacityValue(page, 60);
+  await expect(page.getByTestId("workbench-effect-reset-shadow")).toBeVisible();
+
+  const afterResetAppears = await readEffectCardVerticalAnchors(page, "shadow");
+  expect(Math.abs(afterResetAppears.checkboxTop - before.checkboxTop)).toBeLessThanOrEqual(1);
+  expect(Math.abs(afterResetAppears.previewTop - before.previewTop)).toBeLessThanOrEqual(1);
 });
 
 test("background word mode falls back to line when karaoke is turned off", async ({

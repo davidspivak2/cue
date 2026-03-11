@@ -19,6 +19,7 @@ build_temp/
 _tmp_backend_server.pyc.*
 logs/
 debug-*.log
+.playwright-cli/
 
 # Desktop UI (Node)
 desktop/node_modules/

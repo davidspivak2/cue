@@ -80,7 +80,7 @@ const SliderRow = ({
     <div className="flex items-center gap-1.5">
       <Input
         type="number"
-        className="h-7 w-16 px-2 text-xs"
+        className="h-7 w-12 px-2 text-center text-xs"
         min={min}
         max={max}
         step={step}
@@ -123,21 +123,18 @@ const OpacityRow = ({
         onValueChange={([v]) => onChange(v)}
       />
     </div>
-    <div className="flex items-center gap-1.5">
-      <Input
-        type="number"
-        className="h-7 w-16 px-2 text-xs"
-        min={min}
-        max={max}
-        step={1}
-        value={Math.round(value)}
-        onChange={(e) => {
-          const n = Number(e.target.value);
-          if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)));
-        }}
-      />
-      <span className="text-xs text-muted-foreground">%</span>
-    </div>
+    <Input
+      type="number"
+      className="h-7 w-12 px-2 text-center text-xs"
+      min={min}
+      max={max}
+      step={1}
+      value={Math.round(value)}
+      onChange={(e) => {
+        const n = Number(e.target.value);
+        if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)));
+      }}
+    />
   </div>
 );
 
@@ -203,7 +200,7 @@ const PaddingRow = ({
           />
           <Input
             type="number"
-            className="h-7 w-16 px-2 text-xs"
+            className="h-7 w-12 px-2 text-center text-xs"
             min={PADDING_MIN}
             max={PADDING_MAX}
             step={PADDING_STEP}
@@ -226,7 +223,7 @@ const PaddingRow = ({
               <Label className="text-[10px] text-muted-foreground">{sub}</Label>
               <Input
                 type="number"
-                className="h-7 px-1.5 text-xs"
+                className="h-7 w-12 px-1.5 text-center text-xs"
                 min={PADDING_MIN}
                 max={PADDING_MAX}
                 step={PADDING_STEP}
@@ -310,7 +307,7 @@ const StyleControls = ({
       : appearance.outline_color === "auto"
         ? `${appearance.outline_width} | Auto`
         : `${appearance.outline_width} | ${appearance.outline_color}`;
-  const shadowBlur = appearance.shadow_blur ?? 6;
+  const shadowBlur = appearance.shadow_blur ?? 10;
   const shadowSummary = !appearance.shadow_enabled
     ? "Off"
     : `Blur ${shadowBlur} | X${appearance.shadow_offset_x} Y${appearance.shadow_offset_y} | ${Math.round(appearance.shadow_opacity * 100)}%`;
@@ -640,7 +637,7 @@ const StyleControls = ({
                   onLeftChange={(v) => patch({ line_bg_padding_left: v })}
                 />
                 <SliderRow
-                  label="Corner radius"
+                  label="Corner roundness"
                   value={appearance.line_bg_radius}
                   min={0}
                   max={40}
@@ -708,7 +705,7 @@ const StyleControls = ({
                   onLeftChange={(v) => patch({ word_bg_padding_left: v })}
                 />
                 <SliderRow
-                  label="Corner radius"
+                  label="Corner roundness"
                   value={appearance.word_bg_radius}
                   min={0}
                   max={40}

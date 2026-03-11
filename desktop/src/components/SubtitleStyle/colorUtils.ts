@@ -14,6 +14,34 @@ export function rgbToHex(r: number, g: number, b: number): string {
   return `#${[r, g, b].map((c) => clamp(c).toString(16).padStart(2, "0")).join("")}`;
 }
 
+export function hexToRelativeLuminance(hex: string): number {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  const normalize = (channel: number) => {
+    const value = channel / 255;
+    return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  };
+  const r = normalize(rgb.r);
+  const g = normalize(rgb.g);
+  const b = normalize(rgb.b);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+export function pickContrastingColor(
+  hex: string,
+  darkHex = "#0f172a",
+  lightHex = "#f8fafc"
+): string {
+  const luminance = hexToRelativeLuminance(hex);
+  const darkLuminance = hexToRelativeLuminance(darkHex);
+  const lightLuminance = hexToRelativeLuminance(lightHex);
+  const contrastWithDark =
+    (Math.max(luminance, darkLuminance) + 0.05) / (Math.min(luminance, darkLuminance) + 0.05);
+  const contrastWithLight =
+    (Math.max(luminance, lightLuminance) + 0.05) / (Math.min(luminance, lightLuminance) + 0.05);
+  return contrastWithDark >= contrastWithLight ? darkHex : lightHex;
+}
+
 export function hexToHsv(hex: string): { h: number; s: number; v: number } | null {
   const rgb = hexToRgb(hex);
   if (!rgb) return null;

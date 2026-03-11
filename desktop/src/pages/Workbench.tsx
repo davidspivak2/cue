@@ -158,7 +158,7 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   shadow_offset_y: 0,
   shadow_color: "#000000",
   shadow_opacity: 1.0,
-  shadow_blur: 6,
+  shadow_blur: 10,
   background_mode: "none",
   line_bg_color: "#000000",
   line_bg_opacity: 0.7,
@@ -168,7 +168,7 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   line_bg_padding_bottom: 8,
   line_bg_padding_left: 8,
   line_bg_padding_linked: true,
-  line_bg_radius: 0,
+  line_bg_radius: 8,
   word_bg_color: "#000000",
   word_bg_opacity: 0.4,
   word_bg_padding: 8,
@@ -177,7 +177,7 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   word_bg_padding_bottom: 8,
   word_bg_padding_left: 8,
   word_bg_padding_linked: true,
-  word_bg_radius: 0,
+  word_bg_radius: 8,
   vertical_anchor: "bottom",
   vertical_offset: 28,
   position_x: 0.5,
@@ -193,17 +193,17 @@ type WorkbenchEffectChange = {
 
 const DEFAULT_EFFECT_OUTLINE: Partial<SubtitleStyleAppearance> = {
   outline_enabled: true,
-  outline_width: 2,
+  outline_width: 1,
   outline_color: "#000000"
 };
 
 const DEFAULT_EFFECT_SHADOW: Partial<SubtitleStyleAppearance> = {
   shadow_enabled: true,
   shadow_offset_x: 0,
-  shadow_offset_y: 2,
+  shadow_offset_y: 0,
   shadow_color: "#000000",
-  shadow_opacity: 0.3,
-  shadow_blur: 6
+  shadow_opacity: 1.0,
+  shadow_blur: 10
 };
 
 const DEFAULT_EFFECT_BACKGROUND: Partial<SubtitleStyleAppearance> = {
@@ -216,7 +216,7 @@ const DEFAULT_EFFECT_BACKGROUND: Partial<SubtitleStyleAppearance> = {
   line_bg_padding_bottom: 8,
   line_bg_padding_left: 8,
   line_bg_padding_linked: true,
-  line_bg_radius: 0
+  line_bg_radius: 8
 };
 
 const DEFAULT_EFFECT_KARAOKE: Partial<SubtitleStyleAppearance> = {
@@ -320,6 +320,7 @@ const buildWorkbenchEffectToggleChange = (
     : { appearance: { subtitle_mode: "word_highlight" } };
 };
 
+/** Resets a single effect's values to defaults; keeps the effect on. Used by in-card Reset. */
 const buildWorkbenchEffectResetChange = (
   effectId: WorkbenchEffectId
 ): WorkbenchEffectChange => {
@@ -360,6 +361,44 @@ const buildWorkbenchEffectResetChange = (
   };
 };
 
+/** Full global default: outline on at default, shadow/background/karaoke off. Used by header "Reset all". */
+const buildWorkbenchResetAllChange = (): WorkbenchEffectChange => ({
+  appearance: {
+    ...DEFAULT_EFFECT_OUTLINE,
+    shadow_enabled: false,
+    background_mode: "none",
+    subtitle_mode: "static"
+  },
+  highlightOpacity: 1
+});
+
+const ALL_WORKBENCH_EFFECT_IDS: WorkbenchEffectId[] = [
+  "outline",
+  "shadow",
+  "background",
+  "karaoke"
+];
+
+/** True if global state matches default (outline on default, others off). Used for header "Reset all" visibility. */
+const isWorkbenchAtGlobalDefault = (
+  appearance: SubtitleStyleAppearance,
+  highlightOpacity: number
+): boolean => {
+  const d = DEFAULT_EFFECT_OUTLINE;
+  if (
+    !appearance.outline_enabled ||
+    appearance.outline_width !== (d.outline_width as number) ||
+    appearance.outline_color !== (d.outline_color as string)
+  ) {
+    return false;
+  }
+  if (appearance.shadow_enabled) return false;
+  if (appearance.background_mode !== "none") return false;
+  if (appearance.subtitle_mode !== "static") return false;
+  return true;
+};
+
+/** True if this effect's values match its default (for in-card Reset visibility). Effect stays on; only values compared. */
 const isWorkbenchEffectAtDefault = (
   effectId: WorkbenchEffectId,
   appearance: SubtitleStyleAppearance,
@@ -374,9 +413,9 @@ const isWorkbenchEffectAtDefault = (
     );
   }
   if (effectId === "shadow") {
+    if (!appearance.shadow_enabled) return true;
     const d = DEFAULT_EFFECT_SHADOW;
     return (
-      appearance.shadow_enabled === true &&
       appearance.shadow_offset_x === (d.shadow_offset_x as number) &&
       appearance.shadow_offset_y === (d.shadow_offset_y as number) &&
       appearance.shadow_color === (d.shadow_color as string) &&
@@ -385,7 +424,21 @@ const isWorkbenchEffectAtDefault = (
     );
   }
   if (effectId === "background") {
+    if (appearance.background_mode === "none") return true;
     const d = DEFAULT_EFFECT_BACKGROUND;
+    if (appearance.background_mode === "word") {
+      return (
+        appearance.word_bg_color === d.line_bg_color &&
+        appearance.word_bg_opacity === d.line_bg_opacity &&
+        (appearance.word_bg_padding ?? 8) === (d.line_bg_padding ?? 8) &&
+        (appearance.word_bg_padding_top ?? 8) === (d.line_bg_padding_top ?? 8) &&
+        (appearance.word_bg_padding_right ?? 8) === (d.line_bg_padding_right ?? 8) &&
+        (appearance.word_bg_padding_bottom ?? 8) === (d.line_bg_padding_bottom ?? 8) &&
+        (appearance.word_bg_padding_left ?? 8) === (d.line_bg_padding_left ?? 8) &&
+        (appearance.word_bg_padding_linked ?? true) === (d.line_bg_padding_linked ?? true) &&
+        appearance.word_bg_radius === (d.line_bg_radius ?? 8)
+      );
+    }
     return (
       appearance.background_mode === (d.background_mode as SubtitleStyleAppearance["background_mode"]) &&
       appearance.line_bg_color === d.line_bg_color &&
@@ -396,11 +449,11 @@ const isWorkbenchEffectAtDefault = (
       (appearance.line_bg_padding_bottom ?? 8) === (d.line_bg_padding_bottom ?? 8) &&
       (appearance.line_bg_padding_left ?? 8) === (d.line_bg_padding_left ?? 8) &&
       (appearance.line_bg_padding_linked ?? true) === (d.line_bg_padding_linked ?? true) &&
-      appearance.line_bg_radius === (d.line_bg_radius ?? 0)
+      appearance.line_bg_radius === (d.line_bg_radius ?? 8)
     );
   }
+  if (appearance.subtitle_mode !== "word_highlight") return true;
   return (
-    appearance.subtitle_mode === "word_highlight" &&
     appearance.highlight_color === (DEFAULT_EFFECT_KARAOKE.highlight_color as string) &&
     highlightOpacity === DEFAULT_EFFECT_KARAOKE_HIGHLIGHT_OPACITY
   );
@@ -3825,7 +3878,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     ) {
       const blurRadius = Math.max(
         0,
-        Math.round((effectiveAppearance.shadow_blur ?? 6) * visualScale)
+        Math.round((effectiveAppearance.shadow_blur ?? 10) * visualScale)
       );
       shadows.push(
         `${effectiveAppearance.shadow_offset_x * visualScale}px ${effectiveAppearance.shadow_offset_y * visualScale}px ${blurRadius}px ${colorWithOpacity(
@@ -4733,6 +4786,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     [applyEffectStyleChange]
   );
 
+  const handleResetAllEffects = React.useCallback(() => {
+    setHoveredEffectPreview(null);
+    applyEffectStyleChange(buildWorkbenchResetAllChange(), {
+      kind: "effect:reset-all",
+      canCoalesce: false
+    });
+  }, [applyEffectStyleChange]);
+
   const handleEffectPreview = React.useCallback(
     (effectId: WorkbenchEffectId | null) => {
       setHoveredEffectPreview(effectId);
@@ -5299,6 +5360,91 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, []);
   const videoSingleClickTimeoutRef = React.useRef<BrowserTimeout | null>(null);
   const videoClickSurfaceRef = React.useRef<HTMLDivElement | null>(null);
+  const floatingToolbarPointerDownInsideRef = React.useRef(false);
+  const suppressFloatingToolbarDragReleaseClickRef = React.useRef(false);
+  const suppressFloatingToolbarDragReleaseClickTimeoutRef = React.useRef<BrowserTimeout | null>(
+    null
+  );
+
+  const clearFloatingToolbarDragReleaseClickSuppression = React.useCallback(() => {
+    if (suppressFloatingToolbarDragReleaseClickTimeoutRef.current !== null) {
+      window.clearTimeout(suppressFloatingToolbarDragReleaseClickTimeoutRef.current);
+      suppressFloatingToolbarDragReleaseClickTimeoutRef.current = null;
+    }
+    suppressFloatingToolbarDragReleaseClickRef.current = false;
+  }, []);
+
+  const isWithinFloatingToolbarInteractionLayer = React.useCallback((target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    if (subtitleEditorControlsRef.current?.contains(target)) {
+      return true;
+    }
+    if (target.closest(FLOATING_TOOLBAR_POPOVER_SELECTOR)) {
+      return true;
+    }
+    const popoverWrapper = target.closest(FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR);
+    return Boolean(popoverWrapper?.querySelector(FLOATING_TOOLBAR_POPOVER_SELECTOR));
+  }, []);
+
+  React.useEffect(() => {
+    if (!isEditingActiveCue) {
+      floatingToolbarPointerDownInsideRef.current = false;
+      clearFloatingToolbarDragReleaseClickSuppression();
+      return;
+    }
+
+    const resetFloatingToolbarPointerSequence = () => {
+      floatingToolbarPointerDownInsideRef.current = false;
+      clearFloatingToolbarDragReleaseClickSuppression();
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      floatingToolbarPointerDownInsideRef.current = isWithinFloatingToolbarInteractionLayer(
+        event.target
+      );
+      if (!floatingToolbarPointerDownInsideRef.current) {
+        clearFloatingToolbarDragReleaseClickSuppression();
+      }
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const startedInsideFloatingToolbar = floatingToolbarPointerDownInsideRef.current;
+      floatingToolbarPointerDownInsideRef.current = false;
+      if (!startedInsideFloatingToolbar) {
+        return;
+      }
+      if (isWithinFloatingToolbarInteractionLayer(event.target)) {
+        clearFloatingToolbarDragReleaseClickSuppression();
+        return;
+      }
+      suppressFloatingToolbarDragReleaseClickRef.current = true;
+      if (suppressFloatingToolbarDragReleaseClickTimeoutRef.current !== null) {
+        window.clearTimeout(suppressFloatingToolbarDragReleaseClickTimeoutRef.current);
+      }
+      suppressFloatingToolbarDragReleaseClickTimeoutRef.current = window.setTimeout(() => {
+        suppressFloatingToolbarDragReleaseClickTimeoutRef.current = null;
+        suppressFloatingToolbarDragReleaseClickRef.current = false;
+      }, 0);
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointerup", handlePointerUp, true);
+    window.addEventListener("pointercancel", resetFloatingToolbarPointerSequence, true);
+    window.addEventListener("blur", resetFloatingToolbarPointerSequence);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointerup", handlePointerUp, true);
+      window.removeEventListener("pointercancel", resetFloatingToolbarPointerSequence, true);
+      window.removeEventListener("blur", resetFloatingToolbarPointerSequence);
+      resetFloatingToolbarPointerSequence();
+    };
+  }, [
+    clearFloatingToolbarDragReleaseClickSuppression,
+    isEditingActiveCue,
+    isWithinFloatingToolbarInteractionLayer
+  ]);
 
   const handleSpeedPopoverMouseLeave = React.useCallback(() => {
     if (speedPopoverOpenDelayRef.current) {
@@ -5541,6 +5687,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   React.useEffect(() => {
     if (!isEditingActiveCue) return;
     const handleDocumentClick = (event: MouseEvent) => {
+      if (suppressFloatingToolbarDragReleaseClickRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (isVideoProgressInteractionEvent(event) || videoProgressInteractionRef.current) {
         clearVideoProgressInteraction();
         return;
@@ -5625,6 +5776,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         />
       )}
     </div>
+  );
+
+  const hasAnyEffectChangedFromDefault = React.useMemo(
+    () => !isWorkbenchAtGlobalDefault(appearance, highlightOpacity),
+    [appearance, highlightOpacity]
   );
 
   const exportAreaTopBar = hasSubtitles && (
@@ -6399,9 +6555,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 tabIndex={0}
                                 data-testid="workbench-active-subtitle"
                                 className={cn(
-                                  "m-0 inline-block min-w-16 max-w-full cursor-text box-border border-0 bg-transparent px-3 py-2 text-white shadow-lg transition focus-visible:outline-none hover:bg-background hover:ring-2 hover:ring-primary/45",
+                                  "m-0 inline-block min-w-16 max-w-full cursor-text box-border border-0 bg-transparent px-3 py-2 text-white transition focus-visible:outline-none hover:bg-background hover:ring-2 hover:ring-primary/45 hover:shadow-lg",
                                   showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
-                                  (isHoveringActiveSubtitle || subtitleResizeDrag || subtitlePositionDrag) && "bg-background ring-2 ring-primary/45",
+                                  (isHoveringActiveSubtitle || subtitleResizeDrag || subtitlePositionDrag) &&
+                                    "bg-background ring-2 ring-primary/45 shadow-lg",
                                   isActiveCueSelected
                                     ? "outline-2 outline-offset-2 outline-primary ring-2 ring-primary/50"
                                     : "outline-none"
@@ -6855,8 +7012,20 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                 className="flex min-h-0 w-88 shrink-0 flex-col rounded-lg border border-border bg-card xl:w-96"
                 data-testid="workbench-right-panel"
               >
-                <div className="border-b border-border px-4 py-2">
-                  <h2 className="text-sm font-semibold">Effects</h2>
+              <div className="flex items-center justify-between border-b border-border px-4 py-2">
+                <h2 className="text-base font-semibold">Effects</h2>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResetAllEffects}
+                  data-testid="workbench-effects-reset-all"
+                  className={cn(
+                    !hasAnyEffectChangedFromDefault && "invisible pointer-events-none"
+                  )}
+                >
+                  Reset all
+                </Button>
                 </div>
                 <ScrollArea
                   type="always"
@@ -6903,11 +7072,25 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,360px)] flex-col border-l border-border bg-card shadow"
               data-testid="workbench-right-drawer"
             >
-              <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                <h2 className="text-sm font-semibold">Effects</h2>
-                <Button variant="ghost" size="sm" onClick={() => setRightOverlayOpen(false)}>
-                  Close
-                </Button>
+              <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+                <h2 className="text-base font-semibold">Effects</h2>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetAllEffects}
+                    data-testid="workbench-effects-reset-all"
+                    className={cn(
+                      !hasAnyEffectChangedFromDefault && "invisible pointer-events-none"
+                    )}
+                  >
+                    Reset all
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setRightOverlayOpen(false)}>
+                    Close
+                  </Button>
+                </div>
               </div>
               <ScrollArea
                 type="always"

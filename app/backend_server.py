@@ -297,6 +297,8 @@ class ProjectRelinkRequest(BaseModel):
 VALID_SAVE_POLICIES = {"same_folder", "fixed_folder", "ask_every_time"}
 VALID_TRANSCRIPTION_QUALITIES = {"auto", "speed", "quality", "ultra"}
 LEGACY_QUALITY_TO_NEW = {"fast": "speed", "accurate": "auto"}
+VALID_INTERFACE_SCALES = (1.0, 1.1, 1.25, 1.5)
+DEFAULT_INTERFACE_SCALE = 1.0
 DEFAULT_DIAGNOSTICS_CATEGORIES = {
     "app_system": True,
     "video_info": True,
@@ -327,6 +329,25 @@ def _normalize_settings(raw: dict[str, Any]) -> dict[str, Any]:
         data["transcription_quality"] = "quality"
     if data["transcription_quality"] == "ultra" and not ultra_available():
         data["transcription_quality"] = "quality"
+
+    interface_scale = data.get("interface_scale")
+    if isinstance(interface_scale, bool):
+        data["interface_scale"] = DEFAULT_INTERFACE_SCALE
+    elif isinstance(interface_scale, (int, float)):
+        numeric_scale = float(interface_scale)
+        matched_scale = next(
+            (
+                option
+                for option in VALID_INTERFACE_SCALES
+                if abs(option - numeric_scale) < 0.001
+            ),
+            None,
+        )
+        data["interface_scale"] = (
+            matched_scale if matched_scale is not None else DEFAULT_INTERFACE_SCALE
+        )
+    else:
+        data["interface_scale"] = DEFAULT_INTERFACE_SCALE
 
     data["punctuation_rescue_fallback_enabled"] = (
         data.get("punctuation_rescue_fallback_enabled")

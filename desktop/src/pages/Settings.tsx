@@ -26,6 +26,15 @@ import {
   messageForBackendError,
   waitForBackendHealthy
 } from "@/backendHealth";
+import { cn } from "@/lib/utils";
+import {
+  DEFAULT_INTERFACE_SCALE,
+  getInterfaceScaleIndex,
+  INTERFACE_SCALE_OPTIONS,
+  normalizeInterfaceScale,
+  setLocalInterfaceScale,
+  subscribeToInterfaceScaleChanges
+} from "@/lib/interfaceScale";
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends Record<string, unknown> ? DeepPartial<T[K]> : T[K];
@@ -179,6 +188,9 @@ const Settings = () => {
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [, setIsBackendStarting] = React.useState(true);
+  const [pendingInterfaceScale, setPendingInterfaceScale] = React.useState<number | null>(
+    null
+  );
   const deviceInfo = useDeviceInfo();
   const { isCalibrating, calibrationPct } = useCalibration();
   const gpuAvailable = deviceInfo?.gpu_available ?? null;
@@ -213,6 +225,9 @@ const Settings = () => {
   const [, setSaveFolderTruncated] = React.useState(false);
   const savePolicy = settings?.save_policy ?? "same_folder";
   const saveFolderValue = settings?.save_folder ?? "";
+  const storedInterfaceScale = settings?.interface_scale ?? DEFAULT_INTERFACE_SCALE;
+  const interfaceScale = pendingInterfaceScale ?? normalizeInterfaceScale(storedInterfaceScale);
+  const interfaceScaleIndex = getInterfaceScaleIndex(interfaceScale);
 
   React.useEffect(() => {
     let active = true;
@@ -271,6 +286,26 @@ const Settings = () => {
   );
 
   React.useEffect(() => {
+    if (!settings || pendingInterfaceScale !== null) {
+      return;
+    }
+    const normalized = normalizeInterfaceScale(settings.interface_scale);
+    setLocalInterfaceScale(normalized, "settings");
+  }, [pendingInterfaceScale, settings]);
+
+  React.useEffect(() => {
+    return subscribeToInterfaceScaleChanges((scale, source) => {
+      if (source === "settings") {
+        return;
+      }
+      setPendingInterfaceScale(null);
+      setSettings((current) =>
+        current ? { ...current, interface_scale: scale } : current
+      );
+    });
+  }, []);
+
+  React.useEffect(() => {
     if (
       !settings ||
       downgradeUltraPersistedRef.current ||
@@ -283,6 +318,58 @@ const Settings = () => {
       transcription_quality: steps[steps.length - 1]
     });
   }, [settings, storedQuality, steps, persistSettings]);
+
+  const previewInterfaceScale = React.useCallback((nextScale: number) => {
+    const normalized = normalizeInterfaceScale(nextScale);
+    setPendingInterfaceScale(normalized);
+    setLocalInterfaceScale(normalized, "settings");
+  }, []);
+
+  const persistInterfaceScale = React.useCallback(
+    async (nextScale: number) => {
+      if (!settings) {
+        return;
+      }
+      const previousSettings = settings;
+      const previousScale = normalizeInterfaceScale(previousSettings.interface_scale);
+      const normalized = normalizeInterfaceScale(nextScale);
+      setPendingInterfaceScale(null);
+      if (normalized === previousScale) {
+        setLocalInterfaceScale(previousScale, "settings");
+        return;
+      }
+      const optimistic = mergeDeep(previousSettings, {
+        interface_scale: normalized
+      });
+      setSettings(optimistic);
+      try {
+        const next = await updateSettings({ interface_scale: normalized });
+        const savedScale = normalizeInterfaceScale(next.interface_scale);
+        setSettings(next);
+        setError(null);
+        setLocalInterfaceScale(savedScale, "settings");
+      } catch (err) {
+        setError(
+          messageForBackendError(
+            err,
+            err instanceof Error ? err.message : "Failed to save settings."
+          )
+        );
+        setSettings(previousSettings);
+        setLocalInterfaceScale(previousScale, "settings");
+      }
+    },
+    [settings]
+  );
+
+  const scaleFromSliderValue = React.useCallback((value: number[]) => {
+    const rawIndex = typeof value[0] === "number" ? value[0] : interfaceScaleIndex;
+    const clampedIndex = Math.max(
+      0,
+      Math.min(Math.round(rawIndex), INTERFACE_SCALE_OPTIONS.length - 1)
+    );
+    return INTERFACE_SCALE_OPTIONS[clampedIndex]?.value ?? DEFAULT_INTERFACE_SCALE;
+  }, [interfaceScaleIndex]);
 
   const openFolderDialog = React.useCallback(async () => {
     try {
@@ -632,28 +719,86 @@ const Settings = () => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Theme">
-        <div className="space-y-2">
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            value={theme ?? "system"}
-            onValueChange={(v) => v && setTheme(v)}
-            className="inline-flex"
-          >
-            <ToggleGroupItem value="light" aria-label="Light">
-              <Sun className="mr-2 size-4" />
-              Light
-            </ToggleGroupItem>
-            <ToggleGroupItem value="dark" aria-label="Dark">
-              <Moon className="mr-2 size-4" />
-              Dark
-            </ToggleGroupItem>
-            <ToggleGroupItem value="system" aria-label="System">
-              <Laptop className="mr-2 size-4" />
-              System
-            </ToggleGroupItem>
-          </ToggleGroup>
+      <SettingsSection title="Appearance">
+        <div className="space-y-4">
+          <div className="mb-6 grid gap-2">
+            <p className="text-sm font-medium text-foreground">Theme</p>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={theme ?? "system"}
+              onValueChange={(v) => v && setTheme(v)}
+              className="flex w-full"
+            >
+              <ToggleGroupItem value="light" aria-label="Light" className="flex-1 justify-center">
+                <Sun className="mr-2 size-4" />
+                Light
+              </ToggleGroupItem>
+              <ToggleGroupItem value="dark" aria-label="Dark" className="flex-1 justify-center">
+                <Moon className="mr-2 size-4" />
+                Dark
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="system"
+                aria-label="System"
+                className="flex-1 justify-center"
+              >
+                <Laptop className="mr-2 size-4" />
+                System
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
+          <div className="grid gap-4">
+            <p className="text-sm font-medium text-foreground">Interface size</p>
+            <div className="px-1.5">
+              <Slider
+                aria-label="Interface size"
+                value={[interfaceScaleIndex]}
+                onValueChange={(value) => {
+                  previewInterfaceScale(scaleFromSliderValue(value));
+                }}
+                onValueCommit={(value) => {
+                  void persistInterfaceScale(scaleFromSliderValue(value));
+                }}
+                min={0}
+                max={INTERFACE_SCALE_OPTIONS.length - 1}
+                step={1}
+                stops={INTERFACE_SCALE_OPTIONS.length}
+                thumbEdgeOffset={5}
+                className="w-full"
+              />
+              <div className="relative mt-2 h-7 text-[0.7rem] text-muted-foreground">
+                {INTERFACE_SCALE_OPTIONS.map((option, index) => {
+                  const lastIndex = INTERFACE_SCALE_OPTIONS.length - 1;
+                  const leftPercent = lastIndex === 0 ? 0 : (index / lastIndex) * 100;
+                  return (
+                    <button
+                      key={option.label}
+                      type="button"
+                      className={cn(
+                        "absolute top-0 rounded-sm py-1 whitespace-nowrap transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                        index === 0
+                          ? "translate-x-0 text-left"
+                          : index === lastIndex
+                            ? "-translate-x-full text-right"
+                            : "-translate-x-1/2 text-center",
+                        index === interfaceScaleIndex && "font-semibold text-foreground"
+                      )}
+                      style={{ left: `${leftPercent}%` }}
+                      onClick={() => {
+                        previewInterfaceScale(option.value);
+                        void persistInterfaceScale(option.value);
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
       </SettingsSection>
 

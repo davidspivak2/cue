@@ -31,8 +31,8 @@ def test_default_preset_starts_static_with_effects_off() -> None:
     assert style.line_spacing == 1.0
     assert style.text_opacity == 1.0
     assert style.letter_spacing == 0.0
-    assert style.outline_enabled is False
-    assert style.outline_width == 0
+    assert style.outline_enabled is True
+    assert style.outline_width == 1
     assert style.shadow_enabled is False
     assert style.shadow_strength == 0.0
     assert style.subtitle_mode == "static"
