@@ -95,7 +95,7 @@ const DEFAULT_PROJECT_STYLE = {
       line_bg_padding: 8,
       line_bg_radius: 8,
       word_bg_color: "#000000",
-      word_bg_opacity: 0.4,
+      word_bg_opacity: 0.7,
       word_bg_padding: 8,
       word_bg_radius: 8,
       vertical_anchor: "bottom",
@@ -202,11 +202,17 @@ const mockProjects = async (
   let createdProjectCount = 0;
   let settings = JSON.parse(JSON.stringify(initialSettings));
   const subtitlesByProject = new Map();
+  const wordTimingsByProject = new Map();
   if (typeof initialSrtText === "string") {
     projects.forEach((project) => {
       subtitlesByProject.set(project.project_id, initialSrtText);
     });
   }
+  projects.forEach((project) => {
+    if (project.word_timings_response) {
+      wordTimingsByProject.set(project.project_id, project.word_timings_response);
+    }
+  });
   const eventsByJob = new Map();
   const projectGetDelaysByProject = new Map();
   const eventRequestCounts = new Map();
@@ -372,6 +378,27 @@ const mockProjects = async (
     });
   });
 
+  await page.route("**://127.0.0.1:8765/projects/*/word-timings", async (route) => {
+    const request = route.request();
+    if (request.method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const projectId = getProjectIdFromUrl(request.url());
+    const payload =
+      wordTimingsByProject.get(projectId) ?? {
+        available: false,
+        stale: null,
+        reason: "word_timings_not_found",
+        document: null
+      };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(payload)
+    });
+  });
+
   await page.route("**://127.0.0.1:8765/projects/*", async (route) => {
     const request = route.request();
     const projectId = getProjectIdFromUrl(request.url());
@@ -424,6 +451,7 @@ const mockProjects = async (
     if (request.method() === "DELETE") {
       projects = projects.filter((entry) => entry.project_id !== projectId);
       subtitlesByProject.delete(projectId);
+      wordTimingsByProject.delete(projectId);
       projectGetCounts.delete(projectId);
       await route.fulfill({
         status: 200,
@@ -474,12 +502,51 @@ const mockProjects = async (
     let heading = "Creating subtitles";
     let eventsBody = "";
     if (kind === "create_subtitles" && payloadProjectId) {
-      subtitlesByProject.set(payloadProjectId, GENERATED_SRT);
+      const reuseExistingSubtitles =
+        lastJobPayload?.options?.reuse_existing_subtitles === true;
+      if (!reuseExistingSubtitles) {
+        subtitlesByProject.set(payloadProjectId, GENERATED_SRT);
+      }
       const target = projects.find((entry) => entry.project_id === payloadProjectId);
       if (target) {
         target.status = "ready";
       }
-      heading = "Creating subtitles";
+      if (lastJobPayload?.options?.subtitle_mode === "word_highlight") {
+        const cueText = reuseExistingSubtitles
+          ? "Original subtitle line"
+          : "Generated subtitle line";
+        wordTimingsByProject.set(payloadProjectId, {
+          available: true,
+          stale: false,
+          reason: null,
+          document: {
+            schema_version: 1,
+            created_utc: "2026-02-09T00:00:00Z",
+            language: "en",
+            srt_sha256: "fake",
+            cues: [
+              {
+                cue_index: 1,
+                cue_start: 0,
+                cue_end: 3,
+                cue_text: cueText,
+                words: [
+                  { text: cueText.split(" ")[0], start: 0.1, end: 0.6, confidence: 0.9 },
+                  { text: cueText.split(" ")[1], start: 0.7, end: 1.2, confidence: 0.9 }
+                ]
+              }
+            ]
+          }
+        });
+      } else {
+        wordTimingsByProject.set(payloadProjectId, {
+          available: false,
+          stale: null,
+          reason: "word_timings_not_found",
+          document: null
+        });
+      }
+      heading = reuseExistingSubtitles ? "Syncing karaoke timing" : "Creating subtitles";
       eventsBody = [
         `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "started", heading })}\n\n`,
         `event: message\ndata: ${JSON.stringify({ job_id: jobId, ts, type: "progress", pct: 100, message: "Done" })}\n\n`,
@@ -567,6 +634,9 @@ const mockProjects = async (
     },
     setProjectGetDelays: (projectId, delays) => {
       projectGetDelaysByProject.set(projectId, [...delays]);
+    },
+    setProjectWordTimings: (projectId, payload) => {
+      wordTimingsByProject.set(projectId, payload);
     },
     setJobEvents: (jobId, events) => {
       eventsByJob.set(jobId, events);
@@ -730,8 +800,11 @@ const readTypographyMetrics = async (locator) =>
       letterSpacing: style.letterSpacing,
       direction: style.direction,
       boxSizing: style.boxSizing,
+      paddingTop: style.paddingTop,
       paddingLeft: style.paddingLeft,
-      paddingRight: style.paddingRight
+      paddingRight: style.paddingRight,
+      paddingBottom: style.paddingBottom,
+      borderRadius: style.borderRadius
     };
   });
 
@@ -1132,14 +1205,21 @@ const getEffectCard = async (page, effectId) => {
   return card;
 };
 
+const getEffectCardSwitch = async (page, effectId) => {
+  const card = await getEffectCard(page, effectId);
+  const toggle = card.getByTestId(`workbench-effect-card-${effectId}-switch`);
+  await expect(toggle).toBeVisible();
+  return toggle;
+};
+
 const ensureEffectDetailVisible = async (page, effectId) => {
   const panel = await ensureWorkbenchEffectsPanelVisible(page);
   const detail = panel.getByTestId(`workbench-effect-detail-${effectId}`);
   if ((await detail.count()) > 0 && (await detail.isVisible())) {
     return detail;
   }
-  const card = await getEffectCard(page, effectId);
-  await card.click();
+  const toggle = await getEffectCardSwitch(page, effectId);
+  await toggle.click();
   await expect(detail).toBeVisible();
   return detail;
 };
@@ -1221,8 +1301,9 @@ const readActiveSubtitleTextShadow = async (page) =>
     return styles.textShadow;
   });
 
-const readEffectCardPressed = async (page, effectId) =>
-  (await (await getEffectCard(page, effectId)).getAttribute("aria-pressed")) === "true";
+const readEffectCardEnabled = async (page, effectId) =>
+  (await (await getEffectCardSwitch(page, effectId)).getAttribute("data-state")) ===
+  "checked";
 
 const readLocatorTop = async (locator: Locator) => {
   const box = await locator.boundingBox();
@@ -1235,8 +1316,8 @@ const readLocatorTop = async (locator: Locator) => {
 const readEffectCardVerticalAnchors = async (page, effectId) => {
   const card = await getEffectCard(page, effectId);
   return {
-    checkboxTop: await readLocatorTop(
-      card.getByTestId(`workbench-effect-card-${effectId}-checkbox`)
+    switchTop: await readLocatorTop(
+      card.getByTestId(`workbench-effect-card-${effectId}-switch`)
     ),
     previewTop: await readLocatorTop(
       card.getByTestId(`workbench-effect-card-${effectId}-preview`)
@@ -1477,6 +1558,81 @@ test("title bar: switch between Home and video tab", async ({ page }) => {
   await expect(getVisibleWorkbenchHeading(page)).toContainText("good");
 });
 
+test("title bar: single tab label stays untruncated at 150% interface size", async ({
+  page
+}) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1200, height: 800 });
+  const projects = [
+    {
+      ...buildProjects()[0],
+      title: "test_30s.mp4",
+      video_path: "C:\\fake\\test_30s.mp4",
+      status: "ready"
+    }
+  ];
+  await mockProjects(page, projects, DEFAULT_SRT, {
+    ...buildSettings(),
+    interface_scale: 1.5
+  });
+
+  await page.goto("/");
+  await page.getByText("test_30s.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  const tabTitle = page.getByTestId("title-bar-tab-project-1").locator("button span").first();
+  await expect(tabTitle).toHaveText("test_30s.mp4");
+  const titleMetrics = await tabTitle.evaluate((node) => ({
+    clientWidth: node.clientWidth,
+    scrollWidth: node.scrollWidth
+  }));
+  expect(titleMetrics.scrollWidth).toBeLessThanOrEqual(titleMetrics.clientWidth + 1);
+});
+
+test("title bar: shorter labels stay compact at 150% interface size", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const seedProject = buildProjects()[0];
+  const projects = [
+    {
+      ...seedProject,
+      title: "calibration_60s.mp4",
+      video_path: "C:\\fake\\calibration_60s.mp4",
+      status: "ready"
+    },
+    {
+      ...seedProject,
+      project_id: "project-2",
+      title: "test.mp4",
+      video_path: "C:\\fake\\test.mp4",
+      status: "ready"
+    }
+  ];
+  await mockProjects(page, projects, DEFAULT_SRT, {
+    ...buildSettings(),
+    interface_scale: 1.5
+  });
+
+  await page.goto("/");
+  await page.getByText("calibration_60s.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await page.getByTestId("title-bar-home").click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByText("test.mp4").click();
+  await page.waitForURL("**/workbench/project-2");
+
+  const longTab = page.getByTestId("title-bar-tab-project-1");
+  const shortTab = page.getByTestId("title-bar-tab-project-2");
+  await expect(longTab).toBeVisible();
+  await expect(shortTab).toBeVisible();
+
+  const [longTabWidth, shortTabWidth] = await Promise.all([
+    longTab.evaluate((node) => node.getBoundingClientRect().width),
+    shortTab.evaluate((node) => node.getBoundingClientRect().width)
+  ]);
+  expect(shortTabWidth + 40).toBeLessThan(longTabWidth);
+});
+
 test("navigation without sidebar: Projects to Editor to Home via title bar", async ({
   page
 }) => {
@@ -1595,6 +1751,53 @@ test("workbench creates subtitles from empty state", async ({ page }) => {
   expect(api.getLastJobPayload()?.project_id).toBe("project-1");
 });
 
+test("workbench auto-start uses the saved karaoke style for subtitle creation", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0] = {
+    ...projects[0],
+    style: {
+      subtitle_mode: "word_highlight",
+      subtitle_style: {
+        ...DEFAULT_PROJECT_STYLE.subtitle_style,
+        appearance: {
+          ...DEFAULT_PROJECT_STYLE.subtitle_style.appearance,
+          subtitle_mode: "word_highlight",
+          highlight_color: "#00FF99"
+        },
+        highlight_color: "#00FF99"
+      }
+    }
+  };
+  const api = await mockProjects(page, projects, null);
+  await page.addInitScript(() => {
+    history.replaceState(
+      { usr: { autoStartSubtitles: true }, key: "autostart", idx: 0 },
+      "",
+      location.href
+    );
+  });
+
+  const createRequest = page.waitForRequest(
+    (request) => request.url().includes("/jobs") && request.method() === "POST"
+  );
+
+  await page.goto("/workbench/project-1");
+  await page.waitForURL("**/workbench/project-1");
+  const request = await createRequest;
+  const payload = request.postDataJSON() as {
+    options?: {
+      subtitle_mode?: string;
+      highlight_color?: string;
+    };
+  };
+
+  expect(payload.options?.subtitle_mode).toBe("word_highlight");
+  expect(payload.options?.highlight_color).toBe("#00FF99");
+});
+
 test("workbench exports video from the top bar", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
@@ -1683,6 +1886,9 @@ test("workbench resumes create progress with inline checklist detail and elapsed
   await expect(page.getByTestId("workbench-create-elapsed")).not.toContainText("Warming up engine");
   const checklistRow = page.locator("[data-testid='workbench-create-checklist'] p").first();
   await expect(checklistRow).toBeVisible();
+  await expect(page.getByTestId("workbench-create-checklist")).toContainText(
+    "Building word-by-word karaoke effect"
+  );
   // Checklist shows create-subtitles progress (exact text depends on stream/default steps)
   await expect(checklistRow).toContainText(/Loading AI model|Extracting audio|Warming up/);
 });
@@ -2228,6 +2434,72 @@ test("app layout suppresses export-cancel task notices from toast polling", asyn
   await expect(
     page.getByRole("status").filter({ hasText: "Task cancelled: Operation cancelled." })
   ).toHaveCount(0);
+});
+
+test("app layout does not replay old export-complete toasts on launch", async ({ page }) => {
+  await page.addInitScript(initMocks);
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 1300, height: 800 });
+
+  const projects = [
+    {
+      ...buildProjects()[0],
+      status: "ready",
+      latest_export: {
+        output_video_path: "C:\\fake\\already_exported.mp4",
+        exported_at: "2026-02-09T00:06:00Z"
+      }
+    },
+    {
+      project_id: "project-2",
+      title: "background.mp4",
+      video_path: "C:\\fake\\background.mp4",
+      missing_video: false,
+      status: "needs_subtitles",
+      created_at: "2026-02-09T00:00:00Z",
+      updated_at: "2026-02-09T00:00:00Z",
+      duration_seconds: 42,
+      thumbnail_path: "",
+      latest_export: null,
+      active_task: {
+        job_id: "job-bg-keep-polling",
+        kind: "create_subtitles",
+        status: "running",
+        heading: "Creating subtitles",
+        message: "Loading model",
+        pct: 20,
+        step_id: "load_model",
+        started_at: "2026-02-09T00:00:01Z",
+        updated_at: "2026-02-09T00:00:01Z",
+        checklist: [
+          {
+            id: "load_model",
+            label: "Loading AI model",
+            state: "active"
+          }
+        ]
+      }
+    }
+  ];
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await expectProjectHubHome(page);
+  await page.waitForTimeout(1000);
+  await expect(page.getByRole("status").filter({ hasText: "already_exported.mp4" })).toHaveCount(
+    0
+  );
+
+  api.setProjectFields("project-1", {
+    latest_export: {
+      output_video_path: "C:\\fake\\fresh_export.mp4",
+      exported_at: "2026-02-09T00:07:00Z"
+    }
+  });
+
+  await expect(page.getByRole("status").filter({ hasText: "fresh_export.mp4" })).toBeVisible({
+    timeout: 10000
+  });
 });
 
 test("new project auto-starts subtitle creation in Workbench", async ({ page }) => {
@@ -3283,6 +3555,96 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   expect(Math.abs(editorRectAfterControls.height - editorRectOnEnter.height)).toBeLessThanOrEqual(1);
 });
 
+test("karaoke line background edit overlay keeps textarea padding and radius aligned with the visible line box", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  const projects = buildProjects();
+  const karaokeLineAppearance = {
+    ...DEFAULT_PROJECT_STYLE.subtitle_style.appearance,
+    font_family: "Assistant",
+    font_size: 58,
+    background_mode: "line",
+    line_bg_padding: 4,
+    line_bg_padding_top: 7,
+    line_bg_padding_right: 4,
+    line_bg_padding_bottom: 9,
+    line_bg_padding_left: 4,
+    line_bg_padding_linked: false,
+    line_bg_radius: 19,
+    subtitle_mode: "word_highlight"
+  };
+  const karaokeLineStyle = {
+    subtitle_mode: "word_highlight",
+    subtitle_style: {
+      ...DEFAULT_PROJECT_STYLE.subtitle_style,
+      appearance: karaokeLineAppearance
+    }
+  };
+  projects[0].style = karaokeLineStyle;
+
+  await mockProjects(
+    page,
+    projects,
+    LONG_HEBREW_SRT,
+    {
+      ...buildSettings(),
+      subtitle_mode: "word_highlight",
+      subtitle_style: {
+        ...buildSettings().subtitle_style,
+        appearance: karaokeLineAppearance
+      }
+    }
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await page.getByTestId("workbench-active-subtitle").click();
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  const editorSurface = getEditorSurface(page);
+  const visibleLineBox = page.locator(
+    "[data-testid='workbench-subtitle-editor-surface'] > span[aria-hidden]"
+  );
+  await expect(editor).toBeVisible();
+  await expect(visibleLineBox).toBeVisible();
+
+  const editorTypography = await readTypographyMetrics(editor);
+  const visibleLineTypography = await readTypographyMetrics(visibleLineBox);
+  expect(editorTypography.paddingTop).toBe(visibleLineTypography.paddingTop);
+  expect(editorTypography.paddingRight).toBe(visibleLineTypography.paddingRight);
+  expect(editorTypography.paddingBottom).toBe(visibleLineTypography.paddingBottom);
+  expect(editorTypography.paddingLeft).toBe(visibleLineTypography.paddingLeft);
+  expect(editorTypography.borderRadius).toBe(visibleLineTypography.borderRadius);
+
+  const geometry = await page.evaluate(() => {
+    const textarea = document.querySelector("[data-workbench-subtitle-editor]");
+    const surface = document.querySelector("[data-testid='workbench-subtitle-editor-surface']");
+    if (!(textarea instanceof HTMLTextAreaElement) || !(surface instanceof HTMLElement)) {
+      return null;
+    }
+    const textareaRect = textarea.getBoundingClientRect();
+    const surfaceRect = surface.getBoundingClientRect();
+    return {
+      textareaHeight: textareaRect.height,
+      surfaceHeight: surfaceRect.height,
+      textareaBottom: textareaRect.bottom,
+      surfaceBottom: surfaceRect.bottom,
+      scrollHeight: textarea.scrollHeight,
+      surfaceClientHeight: surface.clientHeight
+    };
+  });
+  if (!geometry) {
+    throw new Error("Editor geometry was not available");
+  }
+  expect(Math.abs(geometry.textareaHeight - geometry.surfaceHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.textareaBottom - geometry.surfaceBottom)).toBeLessThanOrEqual(1);
+  expect(geometry.scrollHeight - geometry.surfaceClientHeight).toBeLessThanOrEqual(1);
+});
+
 test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated line height", async ({
   page
 }) => {
@@ -3776,6 +4138,20 @@ test("on-video formatting toolbar replaces undo and save controls", async ({
 test("effects pane cards support hover preview and multi-select", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
+  projects[0] = {
+    ...projects[0],
+    style: {
+      ...DEFAULT_PROJECT_STYLE,
+      subtitle_style: {
+        ...DEFAULT_PROJECT_STYLE.subtitle_style,
+        appearance: {
+          ...DEFAULT_PROJECT_STYLE.subtitle_style.appearance,
+          outline_enabled: true,
+          outline_width: 2
+        }
+      }
+    }
+  };
   const api = await mockProjects(page, projects);
 
   await page.goto("/");
@@ -3785,8 +4161,14 @@ test("effects pane cards support hover preview and multi-select", async ({ page 
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
 
   const backgroundCard = await getEffectCard(page, "background");
-  await expect(backgroundCard).toHaveAttribute("aria-pressed", "false");
-  await expect(await getEffectCard(page, "outline")).toHaveAttribute("aria-pressed", "true");
+  await expect(await getEffectCardSwitch(page, "background")).toHaveAttribute(
+    "data-state",
+    "unchecked"
+  );
+  await expect(await getEffectCardSwitch(page, "outline")).toHaveAttribute(
+    "data-state",
+    "checked"
+  );
 
   const baseBackgroundColor = await readActiveSubtitleBackgroundColor(page);
   await backgroundCard.hover();
@@ -3797,9 +4179,9 @@ test("effects pane cards support hover preview and multi-select", async ({ page 
   await expect.poll(() => readActiveSubtitleBackgroundColor(page)).toBe(baseBackgroundColor);
   expect(api.getPutCallCount()).toBe(0);
 
-  await backgroundCard.click();
-  await expect.poll(() => readEffectCardPressed(page, "background")).toBe(true);
-  await expect.poll(() => readEffectCardPressed(page, "outline")).toBe(true);
+  await (await getEffectCardSwitch(page, "background")).click();
+  await expect.poll(() => readEffectCardEnabled(page, "background")).toBe(true);
+  await expect.poll(() => readEffectCardEnabled(page, "outline")).toBe(true);
   await expect
     .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.background_mode ?? null)
     .toBe("line");
@@ -3866,7 +4248,10 @@ test("effects pane shadow hover preview is visual only", async ({ page }) => {
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
 
   const shadowCard = await getEffectCard(page, "shadow");
-  await expect(shadowCard).toHaveAttribute("aria-pressed", "false");
+  await expect(await getEffectCardSwitch(page, "shadow")).toHaveAttribute(
+    "data-state",
+    "unchecked"
+  );
 
   const baseTextShadow = await readActiveSubtitleTextShadow(page);
   await shadowCard.hover();
@@ -3917,8 +4302,8 @@ test("effects pane reset restores one effect without clearing the others", async
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
 
   await setShadowOpacityValue(page, 60);
-  await (await getEffectCard(page, "background")).click();
-  await expect.poll(() => readEffectCardPressed(page, "background")).toBe(true);
+  await (await getEffectCardSwitch(page, "background")).click();
+  await expect.poll(() => readEffectCardEnabled(page, "background")).toBe(true);
 
   const shadowOpacityInput = await getShadowOpacityInput(page);
   await expect(shadowOpacityInput).toHaveValue("60");
@@ -3927,7 +4312,7 @@ test("effects pane reset restores one effect without clearing the others", async
   await expect(shadowOpacityInput).toHaveValue("30");
   await expect(await getShadowAngleInput(page)).toHaveValue("180");
   await expect(await getShadowDistanceInput(page)).toHaveValue("2");
-  await expect.poll(() => readEffectCardPressed(page, "background")).toBe(true);
+  await expect.poll(() => readEffectCardEnabled(page, "background")).toBe(true);
   await expect
     .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.shadow_opacity ?? null)
     .toBe(0.3);
@@ -3945,21 +4330,82 @@ test("effects pane card layout stays fixed when actions appear", async ({ page }
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
 
   const before = await readEffectCardVerticalAnchors(page, "shadow");
-  const shadowCard = await getEffectCard(page, "shadow");
-  const shadowCheckbox = shadowCard.getByTestId("workbench-effect-card-shadow-checkbox");
-  await shadowCheckbox.click();
-  await expect(shadowCheckbox).toHaveAttribute("data-state", "checked");
+  const shadowSwitch = await getEffectCardSwitch(page, "shadow");
+  await shadowSwitch.click();
+  await expect(shadowSwitch).toHaveAttribute("data-state", "checked");
 
   const afterEnable = await readEffectCardVerticalAnchors(page, "shadow");
-  expect(Math.abs(afterEnable.checkboxTop - before.checkboxTop)).toBeLessThanOrEqual(1);
+  expect(Math.abs(afterEnable.switchTop - before.switchTop)).toBeLessThanOrEqual(1);
   expect(Math.abs(afterEnable.previewTop - before.previewTop)).toBeLessThanOrEqual(1);
 
   await setShadowOpacityValue(page, 60);
   await expect(page.getByTestId("workbench-effect-reset-shadow")).toBeVisible();
 
   const afterResetAppears = await readEffectCardVerticalAnchors(page, "shadow");
-  expect(Math.abs(afterResetAppears.checkboxTop - before.checkboxTop)).toBeLessThanOrEqual(1);
+  expect(Math.abs(afterResetAppears.switchTop - before.switchTop)).toBeLessThanOrEqual(1);
   expect(Math.abs(afterResetAppears.previewTop - before.previewTop)).toBeLessThanOrEqual(1);
+});
+
+test("karaoke projects with empty timings show a sync action and reuse existing subtitles", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  projects[0] = {
+    ...projects[0],
+    status: "done",
+    style: {
+      subtitle_mode: "word_highlight",
+      subtitle_style: {
+        ...DEFAULT_PROJECT_STYLE.subtitle_style,
+        appearance: {
+          ...DEFAULT_PROJECT_STYLE.subtitle_style.appearance,
+          subtitle_mode: "word_highlight"
+        }
+      }
+    },
+    word_timings_response: {
+      available: false,
+      stale: false,
+      reason: "word_timings_empty",
+      document: {
+        schema_version: 1,
+        created_utc: "2026-02-09T00:00:00Z",
+        language: "en",
+        srt_sha256: "fake",
+        cues: [
+          {
+            cue_index: 1,
+            cue_start: 0,
+            cue_end: 4,
+            cue_text: "Original subtitle line",
+            words: []
+          }
+        ]
+      }
+    }
+  };
+  const api = await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-karaoke-sync-alert")).toContainText(
+    "word timing data is empty"
+  );
+  await expect(page.getByTestId("workbench-sync-karaoke-timing")).toBeVisible();
+  await expect(page.getByTestId("workbench-export-cta")).toBeDisabled();
+
+  await page.getByTestId("workbench-sync-karaoke-timing").click();
+
+  await expect(page.getByTestId("workbench-empty-state")).toContainText("Syncing karaoke timing");
+  await expect
+    .poll(() => api.getLastJobPayload()?.options?.reuse_existing_subtitles ?? null)
+    .toBe(true);
+  await expect
+    .poll(() => api.getLastJobPayload()?.options?.subtitle_mode ?? null)
+    .toBe("word_highlight");
 });
 
 test("background word mode falls back to line when karaoke is turned off", async ({
@@ -3975,7 +4421,7 @@ test("background word mode falls back to line when karaoke is turned off", async
 
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
 
-  await (await getEffectCard(page, "background")).click();
+  await (await getEffectCardSwitch(page, "background")).click();
   const backgroundDetail = await ensureEffectDetailVisible(page, "background");
   const wordMode = backgroundDetail.getByTestId("workbench-effect-background-mode-word");
   await expect(wordMode).toBeEnabled();
@@ -3984,11 +4430,9 @@ test("background word mode falls back to line when karaoke is turned off", async
     .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.background_mode ?? null)
     .toBe("word");
 
-  const karaokeCard = await getEffectCard(page, "karaoke");
-  await karaokeCard.click();
-  await karaokeCard.click();
+  await (await getEffectCardSwitch(page, "karaoke")).click();
 
-  await expect.poll(() => readEffectCardPressed(page, "karaoke")).toBe(false);
+  await expect.poll(() => readEffectCardEnabled(page, "karaoke")).toBe(false);
   await expect
     .poll(() => api.getLastPutPayload()?.style?.subtitle_style?.appearance?.background_mode ?? null)
     .toBe("line");
@@ -3996,7 +4440,7 @@ test("background word mode falls back to line when karaoke is turned off", async
   const refocusedBackgroundDetail = await ensureEffectDetailVisible(page, "background");
   await expect(
     refocusedBackgroundDetail.getByTestId("workbench-effect-background-mode-word")
-  ).toBeDisabled();
+  ).toBeEnabled();
 });
 
 test("effects pane shadow angle edits undo back to the previous direction", async ({

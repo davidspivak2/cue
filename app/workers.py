@@ -172,6 +172,7 @@ class Worker(QtCore.QObject):
         highlight_opacity: Optional[float] = None,
         diagnostics_settings: Optional[DiagnosticsSettings] = None,
         session_log_path: Optional[Path] = None,
+        reuse_existing_subtitles: bool = False,
     ) -> None:
         super().__init__()
         self.signals = WorkerSignals()
@@ -187,6 +188,7 @@ class Worker(QtCore.QObject):
         self.highlight_opacity = highlight_opacity
         self.diagnostics_settings = diagnostics_settings
         self.session_log_path = session_log_path
+        self.reuse_existing_subtitles = reuse_existing_subtitles
         self._cancelled = threading.Event()
         self._process: Optional[subprocess.Popen[str]] = None
         self._progress_value = 0
@@ -321,13 +323,62 @@ class Worker(QtCore.QObject):
             self._maybe_write_diagnostics(success, message, result)
             self.signals.finished.emit(success, message, result)
 
+    def _mark_existing_subtitles_reused(self) -> None:
+        settings = self.transcription_settings
+        self.signals.log.emit("Using existing subtitles for karaoke timing sync.", True)
+        self._emit_step_progress(
+            ProgressStep.TRANSCRIBE,
+            1.0,
+            "Using existing subtitles",
+            force=True,
+        )
+        self._emit_step_event(
+            ChecklistStep.LOAD_MODEL,
+            StepState.SKIPPED,
+            reason_text="Using existing subtitles",
+        )
+        self._emit_step_event(
+            ChecklistStep.DETECT_LANGUAGE,
+            StepState.SKIPPED,
+            reason_text="Using existing subtitles",
+        )
+        self._emit_step_event(
+            ChecklistStep.WRITE_SUBTITLES,
+            StepState.SKIPPED,
+            reason_text="Using existing subtitles",
+        )
+        if settings and settings.punctuation_rescue_fallback_enabled:
+            self._emit_step_event(
+                ChecklistStep.FIX_PUNCTUATION,
+                StepState.SKIPPED,
+                reason_text="Kept existing punctuation",
+            )
+            self._emit_step_progress(
+                ProgressStep.FIX_PUNCTUATION,
+                1.0,
+                "Kept existing punctuation",
+                force=True,
+            )
+        if settings and settings.vad_gap_rescue_enabled:
+            self._emit_step_event(
+                ChecklistStep.FIX_MISSING_SUBTITLES,
+                StepState.SKIPPED,
+                reason_text="Kept existing subtitles",
+            )
+            self._emit_step_progress(
+                ProgressStep.FIX_GAPS,
+                1.0,
+                "Kept existing subtitles",
+                force=True,
+            )
+
     def _run_generate_srt(self) -> dict:
         settings = self.transcription_settings
         if settings is None:
             raise ValueError("Missing transcription settings")
 
-        audio_path = self.output_dir / f"{self.video_path.stem}_audio_for_whisper.wav"
-        srt_path = self.output_dir / f"{self.video_path.stem}.srt"
+        srt_path = self.srt_path or self.output_dir / f"{self.video_path.stem}.srt"
+        audio_path = audio_path_for_srt(srt_path)
         self._audio_path = audio_path
         self._srt_path = srt_path
         self.signals.log.emit(f"Audio file: {audio_path}", True)
@@ -365,66 +416,74 @@ class Worker(QtCore.QObject):
         if self._cancelled.is_set():
             raise CancelledError()
 
-        transcribe_start = time.monotonic()
-        try:
-            self._run_transcription_subprocess(
-                audio_path=audio_path,
-                srt_path=srt_path,
-                duration_seconds=duration_seconds,
-                force_cpu=False,
-                safe_mode=False,
-            )
-        except TranscriptionError as exc:
-            if self._cancelled.is_set():
-                raise CancelledError("Operation cancelled.")
-            should_retry = (
-                exc.return_code == 3221225477
-                or exc.watchdog_triggered
-                or not exc.srt_exists
-                or exc.srt_size == 0
-            )
-            if should_retry:
-                model_dir = get_models_dir() / TRANSCRIBE_MODEL_NAME
-                if exc.return_code == 3221225477 and model_dir.exists():
+        if self.reuse_existing_subtitles:
+            self._transcribe_seconds = 0.0
+            if not srt_path.exists() or srt_path.stat().st_size == 0:
+                raise RuntimeError(
+                    "Existing subtitles are missing. Create subtitles again before syncing karaoke."
+                )
+            self._mark_existing_subtitles_reused()
+        else:
+            transcribe_start = time.monotonic()
+            try:
+                self._run_transcription_subprocess(
+                    audio_path=audio_path,
+                    srt_path=srt_path,
+                    duration_seconds=duration_seconds,
+                    force_cpu=False,
+                    safe_mode=False,
+                )
+            except TranscriptionError as exc:
+                if self._cancelled.is_set():
+                    raise CancelledError("Operation cancelled.")
+                should_retry = (
+                    exc.return_code == 3221225477
+                    or exc.watchdog_triggered
+                    or not exc.srt_exists
+                    or exc.srt_size == 0
+                )
+                if should_retry:
+                    model_dir = get_models_dir() / TRANSCRIBE_MODEL_NAME
+                    if exc.return_code == 3221225477 and model_dir.exists():
+                        self.signals.log.emit(
+                            f"Clearing cached data due to an access issue: {model_dir}",
+                            True,
+                        )
+                        shutil.rmtree(model_dir, ignore_errors=True)
                     self.signals.log.emit(
-                        f"Clearing cached data due to an access issue: {model_dir}",
+                        "Fast mode failed; retrying in compatibility mode. This may take longer.",
                         True,
                     )
-                    shutil.rmtree(model_dir, ignore_errors=True)
-                self.signals.log.emit(
-                    "Fast mode failed; retrying in compatibility mode. This may take longer.",
-                    True,
-                )
-                try:
-                    if self._cancelled.is_set():
-                        raise CancelledError("Operation cancelled.")
-                    self._run_transcription_subprocess(
-                        audio_path=audio_path,
-                        srt_path=srt_path,
-                        duration_seconds=duration_seconds,
-                        force_cpu=True,
-                        safe_mode=True,
+                    try:
+                        if self._cancelled.is_set():
+                            raise CancelledError("Operation cancelled.")
+                        self._run_transcription_subprocess(
+                            audio_path=audio_path,
+                            srt_path=srt_path,
+                            duration_seconds=duration_seconds,
+                            force_cpu=True,
+                            safe_mode=True,
+                        )
+                    except TranscriptionError as retry_exc:
+                        self.signals.log.emit(str(retry_exc), True)
+                        message = "Couldn't create subtitles after a retry.\n" + str(retry_exc)
+                        raise RuntimeError(message) from retry_exc
+                else:
+                    self.signals.log.emit(
+                        f"Couldn't create subtitles; keeping audio file: {audio_path}",
+                        True,
                     )
-                except TranscriptionError as retry_exc:
-                    self.signals.log.emit(str(retry_exc), True)
-                    message = "Couldn't create subtitles after a retry.\n" + str(retry_exc)
-                    raise RuntimeError(message) from retry_exc
-            else:
+                    raise
+            except CancelledError:
+                raise
+            except Exception:
                 self.signals.log.emit(
                     f"Couldn't create subtitles; keeping audio file: {audio_path}",
                     True,
                 )
                 raise
-        except CancelledError:
-            raise
-        except Exception:
-            self.signals.log.emit(
-                f"Couldn't create subtitles; keeping audio file: {audio_path}",
-                True,
-            )
-            raise
-        finally:
-            self._transcribe_seconds = time.monotonic() - transcribe_start
+            finally:
+                self._transcribe_seconds = time.monotonic() - transcribe_start
 
         if not srt_path.exists() or srt_path.stat().st_size == 0:
             raise RuntimeError(f"Subtitles were not created: {srt_path}")
@@ -433,37 +492,42 @@ class Worker(QtCore.QObject):
 
         cues = parse_srt_file(srt_path)
         self._ensure_word_timings_file(srt_path, cues)
-        self._emit_transcription_post_steps()
+        if not self.reuse_existing_subtitles:
+            self._emit_transcription_post_steps()
 
-        if self.subtitle_mode == "word_highlight":
-            try:
-                timing_state, timing_reason = self._run_alignment_if_needed(
-                    srt_path,
-                    audio_path_for_srt(srt_path),
-                    context="create_subtitles",
-                )
-            except AlignmentError as exc:
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.FAILED,
-                    reason_code=exc.reason_code,
-                )
+        try:
+            timing_state, timing_reason = self._run_alignment_if_needed(
+                srt_path,
+                audio_path_for_srt(srt_path),
+                context="create_subtitles",
+            )
+        except AlignmentError as exc:
+            self._emit_step_event(
+                ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                StepState.FAILED,
+                reason_code=exc.reason_code,
+            )
+            if self.subtitle_mode == "word_highlight":
                 raise RuntimeError(
                     "Word highlighting couldn’t be synced to the audio. "
                     "Try generating subtitles again. If it still fails, switch to Static mode."
                 ) from exc
-            if timing_state == StepState.SKIPPED:
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.SKIPPED,
-                    reason_text=timing_reason or "already timed",
-                )
-            else:
-                self._emit_step_event(
-                    ChecklistStep.TIMING_WORD_HIGHLIGHTS,
-                    StepState.DONE,
-                    reason_text=timing_reason,
-                )
+            raise RuntimeError(
+                "Word timing couldn't be synced to the audio. "
+                "Try generating subtitles again."
+            ) from exc
+        if timing_state == StepState.SKIPPED:
+            self._emit_step_event(
+                ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                StepState.SKIPPED,
+                reason_text=timing_reason or "already timed",
+            )
+        else:
+            self._emit_step_event(
+                ChecklistStep.TIMING_WORD_HIGHLIGHTS,
+                StepState.DONE,
+                reason_text=timing_reason,
+            )
 
         self._emit_step_progress(
             ProgressStep.PREPARING_PREVIEW,
@@ -2701,11 +2765,11 @@ class Worker(QtCore.QObject):
         return "en"
 
     def _resolve_word_timings_path(self, srt_path: Path) -> Path:
-        if self.word_timings_path is not None:
-            return self.word_timings_path
         derived_path = word_timings_path_for_srt(srt_path)
         if derived_path.exists():
             return derived_path
+        if self.word_timings_path is not None:
+            return self.word_timings_path
         # Project artifacts use a fixed filename; keep backward compatibility.
         if srt_path.name == "subtitles.srt":
             project_fallback_path = srt_path.with_name("word_timings.json")
@@ -2786,7 +2850,6 @@ class Worker(QtCore.QObject):
         self._alignment_emit_events = emit_step_events
         try:
             plan = build_alignment_plan(
-                subtitle_mode=self.subtitle_mode,
                 srt_path=srt_path,
                 audio_path=audio_path,
                 language=self._get_subtitle_language(srt_path),
@@ -2798,6 +2861,8 @@ class Worker(QtCore.QObject):
                 f"{str(plan.should_run).lower()} reason={plan.reason} (context={context})",
                 True,
             )
+            if plan.output_path.exists():
+                self._word_timings_path = plan.output_path
             if not plan.should_run:
                 if context == "create_subtitles":
                     self._emit_step_progress(
@@ -3083,6 +3148,7 @@ class Worker(QtCore.QObject):
                         True,
                     )
                     total_words = self._alignment_words_total
+                self._word_timings_path = plan.output_path
                 with alignment_lock:
                     alignment_target["total"] = total_words
                     alignment_target["current"] = total_words

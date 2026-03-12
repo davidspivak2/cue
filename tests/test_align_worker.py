@@ -229,16 +229,7 @@ def test_build_alignment_plan_for_preview(tmp_path: Path) -> None:
     output_path = srt_path.with_suffix(".word_timings.json")
     save_word_timings_json(output_path, doc)
 
-    plan_static = build_alignment_plan(
-        subtitle_mode="static",
-        srt_path=srt_path,
-        audio_path=audio_path,
-        language="he",
-    )
-    assert plan_static.should_run is False
-
     plan = build_alignment_plan(
-        subtitle_mode="word_highlight",
         srt_path=srt_path,
         audio_path=audio_path,
         language="he",
@@ -265,7 +256,6 @@ def test_alignment_plan_runs_when_word_timings_empty(tmp_path: Path) -> None:
     save_word_timings_json(output_path, doc)
 
     plan = build_alignment_plan(
-        subtitle_mode="word_highlight",
         srt_path=srt_path,
         audio_path=audio_path,
         language="he",

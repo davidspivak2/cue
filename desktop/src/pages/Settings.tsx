@@ -729,22 +729,22 @@ const Settings = () => {
               size="sm"
               value={theme ?? "system"}
               onValueChange={(v) => v && setTheme(v)}
-              className="flex w-full"
+              className="flex w-full [&_[data-slot=toggle-group-item]]:px-4"
             >
-              <ToggleGroupItem value="light" aria-label="Light" className="flex-1 justify-center">
-                <Sun className="mr-2 size-4" />
+              <ToggleGroupItem value="light" aria-label="Light" className="flex-1 justify-center gap-2">
+                <Sun className="size-4 shrink-0" />
                 Light
               </ToggleGroupItem>
-              <ToggleGroupItem value="dark" aria-label="Dark" className="flex-1 justify-center">
-                <Moon className="mr-2 size-4" />
+              <ToggleGroupItem value="dark" aria-label="Dark" className="flex-1 justify-center gap-2">
+                <Moon className="size-4 shrink-0" />
                 Dark
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="system"
                 aria-label="System"
-                className="flex-1 justify-center"
+                className="flex-1 justify-center gap-2"
               >
-                <Laptop className="mr-2 size-4" />
+                <Laptop className="size-4 shrink-0" />
                 System
               </ToggleGroupItem>
             </ToggleGroup>

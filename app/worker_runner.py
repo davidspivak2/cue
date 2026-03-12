@@ -254,6 +254,7 @@ def main() -> int:
 
     options = _parse_options(args.options_json)
     settings = _resolve_settings(options)
+    reuse_existing_subtitles = bool(options.get("reuse_existing_subtitles"))
 
     video_path = Path(args.video_path)
     output_dir = Path(args.output_dir)
@@ -312,7 +313,9 @@ def main() -> int:
 
     def _on_started(message: str) -> None:
         heading = (
-            "Creating subtitles"
+            "Syncing karaoke timing"
+            if args.task == TaskType.GENERATE_SRT and reuse_existing_subtitles
+            else "Creating subtitles"
             if args.task == TaskType.GENERATE_SRT
             else "Creating video with subtitles"
         )
@@ -383,6 +386,7 @@ def main() -> int:
         highlight_opacity=None,
         diagnostics_settings=None,
         session_log_path=log_path,
+        reuse_existing_subtitles=reuse_existing_subtitles,
     )
     worker.signals.log.connect(_on_log)
     worker.signals.started.connect(_on_started)

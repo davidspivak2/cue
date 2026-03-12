@@ -4,6 +4,7 @@ import {
   Pause,
   Play,
   Plus,
+  RotateCcw,
   Volume2,
   VolumeX
 } from "lucide-react";
@@ -47,6 +48,7 @@ import {
   fetchProjectSubtitles,
   ProjectManifest,
   ProjectWordTimingsDocument,
+  ProjectWordTimingsResponse,
   updateProject
 } from "@/projectsClient";
 import { useRunningJobs } from "@/contexts/RunningJobsContext";
@@ -93,6 +95,21 @@ function normalizeCreateSubtitlesErrorMessage(raw: string | null | undefined): s
   const isFileNotFound =
     raw.includes("No such file or directory") || raw.includes("Error opening input");
   return isFileNotFound ? CREATE_SUBTITLES_FILE_NOT_FOUND_MESSAGE : raw;
+}
+
+function getKaraokeTimingSyncMessage(
+  payload: ProjectWordTimingsResponse | null | undefined
+): string {
+  if (payload?.reason === "word_timings_empty") {
+    return "Karaoke is on, but this project's word timing data is empty. Sync karaoke timing to rebuild it.";
+  }
+  if (payload?.reason === "word_timings_invalid") {
+    return "Karaoke is on, but this project's word timing data is invalid. Sync karaoke timing to rebuild it.";
+  }
+  if (payload?.stale) {
+    return "Karaoke is on, but the word timing data is out of date. Sync karaoke timing before exporting.";
+  }
+  return "Karaoke is on, but this project still needs word timing data. Sync karaoke timing before exporting.";
 }
 
 const ELEVATOR_MUSIC_TRACK_NAMES = [
@@ -170,7 +187,7 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   line_bg_padding_linked: true,
   line_bg_radius: 8,
   word_bg_color: "#000000",
-  word_bg_opacity: 0.4,
+  word_bg_opacity: 0.7,
   word_bg_padding: 8,
   word_bg_padding_top: 8,
   word_bg_padding_right: 8,
@@ -216,7 +233,16 @@ const DEFAULT_EFFECT_BACKGROUND: Partial<SubtitleStyleAppearance> = {
   line_bg_padding_bottom: 8,
   line_bg_padding_left: 8,
   line_bg_padding_linked: true,
-  line_bg_radius: 8
+  line_bg_radius: 8,
+  word_bg_color: "#000000",
+  word_bg_opacity: 0.7,
+  word_bg_padding: 8,
+  word_bg_padding_top: 8,
+  word_bg_padding_right: 8,
+  word_bg_padding_bottom: 8,
+  word_bg_padding_left: 8,
+  word_bg_padding_linked: true,
+  word_bg_radius: 8
 };
 
 const DEFAULT_EFFECT_KARAOKE: Partial<SubtitleStyleAppearance> = {
@@ -361,7 +387,7 @@ const buildWorkbenchEffectResetChange = (
   };
 };
 
-/** Full global default: outline on at default, shadow/background/karaoke off. Used by header "Reset all". */
+/** Full global default: outline on at default, shadow/background/karaoke off. Used by header "Reset to default". */
 const buildWorkbenchResetAllChange = (): WorkbenchEffectChange => ({
   appearance: {
     ...DEFAULT_EFFECT_OUTLINE,
@@ -379,7 +405,7 @@ const ALL_WORKBENCH_EFFECT_IDS: WorkbenchEffectId[] = [
   "karaoke"
 ];
 
-/** True if global state matches default (outline on default, others off). Used for header "Reset all" visibility. */
+/** True if global state matches default (outline on default, others off). Used for header "Reset to default" visibility. */
 const isWorkbenchAtGlobalDefault = (
   appearance: SubtitleStyleAppearance,
   highlightOpacity: number
@@ -1024,6 +1050,48 @@ const HIDDEN_FLOATING_SUBTITLE_TOOLBAR_POSITION: FloatingSubtitleToolbarPosition
   visible: false
 };
 
+const EFFECTS_PANE_SCROLLED_SHADOW_CLASS =
+  "shadow-[0_4px_12px_-4px_rgba(0,0,0,0.2)] dark:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)]";
+
+const useScrollAreaShadow = (enabled: boolean) => {
+  const scrollAreaRef = React.useRef<HTMLDivElement>(null);
+  const [scrolled, setScrolled] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!enabled) {
+      setScrolled(false);
+      return;
+    }
+
+    let cancelled = false;
+    let teardown: (() => void) | null = null;
+    const id = window.setTimeout(() => {
+      if (cancelled) return;
+      const root = scrollAreaRef.current;
+      if (!root) return;
+      const viewport = root.querySelector("[data-radix-scroll-area-viewport]");
+      if (!(viewport instanceof HTMLElement) || cancelled) return;
+
+      const handleScroll = () => setScrolled(viewport.scrollTop > 0);
+      handleScroll();
+      viewport.addEventListener("scroll", handleScroll);
+
+      teardown = () => {
+        viewport.removeEventListener("scroll", handleScroll);
+        setScrolled(false);
+      };
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+      teardown?.();
+    };
+  }, [enabled]);
+
+  return { scrollAreaRef, scrolled };
+};
+
 const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const location = useLocation();
   const incomingState = location.state as WorkbenchLocationState;
@@ -1109,6 +1177,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [wordTimingsDoc, setWordTimingsDoc] = React.useState<ProjectWordTimingsDocument | null>(
     null
   );
+  const [wordTimingsResponse, setWordTimingsResponse] =
+    React.useState<ProjectWordTimingsResponse | null>(null);
   const cuesRef = React.useRef<SrtCue[]>([]);
   cuesRef.current = cues;
   const [selectedCueId, setSelectedCueId] = React.useState<string | null>(null);
@@ -1646,17 +1716,20 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     let active = true;
     if (!projectId) {
       setWordTimingsDoc(null);
+      setWordTimingsResponse(null);
       return () => {
         active = false;
       };
     }
 
     setWordTimingsDoc(null);
+    setWordTimingsResponse(null);
     fetchProjectWordTimings(projectId)
       .then((payload) => {
         if (!active) {
           return;
         }
+        setWordTimingsResponse(payload);
         if (payload.available && payload.document && payload.stale === false) {
           setWordTimingsDoc(payload.document);
           return;
@@ -1668,6 +1741,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           return;
         }
         setWordTimingsDoc(null);
+        setWordTimingsResponse(null);
       });
 
     return () => {
@@ -2081,17 +2155,36 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     window.history.replaceState({}, "");
   }, [incomingState, location.key]);
 
-  const buildJobOptions = React.useCallback((config: SettingsConfig) => {
-    return {
-      quality: config.transcription_quality,
-      apply_audio_filter: config.apply_audio_filter,
-      keep_extracted_audio: config.keep_extracted_audio,
-      punctuation_rescue_fallback_enabled: config.punctuation_rescue_fallback_enabled,
-      vad_gap_rescue_enabled: true,
-      subtitle_mode: appearance.subtitle_mode,
-      highlight_color: appearance.highlight_color
-    };
-  }, [appearance.highlight_color, appearance.subtitle_mode]);
+  const buildJobOptions = React.useCallback(
+    (
+      config: SettingsConfig,
+      options?: {
+        reuseExistingSubtitles?: boolean;
+      }
+    ) => {
+      return {
+        quality: config.transcription_quality,
+        apply_audio_filter: config.apply_audio_filter,
+        keep_extracted_audio: config.keep_extracted_audio,
+        punctuation_rescue_fallback_enabled: config.punctuation_rescue_fallback_enabled,
+        vad_gap_rescue_enabled: true,
+        subtitle_mode: appearance.subtitle_mode,
+        highlight_color: appearance.highlight_color,
+        reuse_existing_subtitles: options?.reuseExistingSubtitles === true
+      };
+    },
+    [appearance.highlight_color, appearance.subtitle_mode]
+  );
+
+  const buildCreateSubtitlesChecklistItems = React.useCallback(
+    (config?: SettingsConfig | null) =>
+      buildGenerateChecklist({
+        apply_audio_filter: config?.apply_audio_filter,
+        punctuation_rescue_fallback_enabled: config?.punctuation_rescue_fallback_enabled,
+        vad_gap_rescue_enabled: true
+      }),
+    []
+  );
 
   const resolveOutputDir = React.useCallback(
     async (
@@ -2537,7 +2630,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     ]
   );
 
-  const startCreateSubtitles = React.useCallback(async () => {
+  const startCreateSubtitles = React.useCallback(async (options?: { reuseExistingSubtitles?: boolean }) => {
     if (!projectId || !project?.video?.path || isCreatingSubtitles || isExporting) {
       return;
     }
@@ -2545,14 +2638,20 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setCreateSubtitlesError("Settings are still loading. Please try again.");
       return;
     }
+    if (isStyleLoading) {
+      setCreateSubtitlesError("Subtitle effects are still loading. Please wait a moment.");
+      return;
+    }
 
     if (cuesRef.current.length === 0) {
       autoEnterEditOnNextCueLoadRef.current = true;
     }
     setCreateSubtitlesError(null);
-    setCreateSubtitlesHeading("Creating subtitles");
+    setCreateSubtitlesHeading(
+      options?.reuseExistingSubtitles ? "Syncing karaoke timing" : "Creating subtitles"
+    );
     setCreateSubtitlesProgressPct(0);
-    const genItems = buildGenerateChecklist(settings);
+    const genItems = buildCreateSubtitlesChecklistItems(settings);
     const initialChecklist = defaultChecklist(genItems);
     if (initialChecklist.length > 0) {
       initialChecklist[0] = { ...initialChecklist[0], state: "active" };
@@ -2594,7 +2693,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           inputPath: project.video.path,
           outputDir: resolvedOutputDir,
           projectId,
-          options: buildJobOptions(settings)
+          options: buildJobOptions(settings, options)
         },
         {
           onEvent: handleCreateSubtitlesEvent,
@@ -2670,6 +2769,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       );
     }
   }, [
+    buildCreateSubtitlesChecklistItems,
     buildJobOptions,
     clearTimingFallbackProgress,
     clearPreparingPreviewTimers,
@@ -2677,6 +2777,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     handleCreateSubtitlesEvent,
     isCreatingSubtitles,
     isExporting,
+    isStyleLoading,
     openCreateSubtitlesStream,
     project,
     projectId,
@@ -2965,6 +3066,41 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     ]
   );
 
+  const title = resolveTitle(project);
+  const videoPath = project?.video?.path ?? "";
+  const previewSrc = videoPath ? (isTauriEnv ? convertFileSrc(videoPath) : videoPath) : "";
+  const hasSubtitles = cues.length > 0;
+  const latestOutputPath = exportOutputPath ?? project?.latest_export?.output_video_path ?? null;
+  const hasActiveCreateFromApi = project?.active_task?.kind === "create_subtitles";
+  const showNoSubtitlesState = !isLoading && !error && !subtitleLoadError && !hasSubtitles;
+  const persistedCreateJob = projectId ? getPersistedRunningJob(projectId) : null;
+  const hasActiveCreateSubtitles =
+    isCreatingSubtitles ||
+    project?.active_task?.kind === "create_subtitles" ||
+    persistedCreateJob?.kind === "create_subtitles";
+  const showCreateSubtitlesState = showNoSubtitlesState || hasActiveCreateSubtitles;
+  const hasReadyWordTimings =
+    wordTimingsResponse?.available === true &&
+    wordTimingsResponse.document != null &&
+    wordTimingsResponse.stale === false;
+  const karaokeTimingNeedsSync =
+    hasSubtitles &&
+    appearance.subtitle_mode === "word_highlight" &&
+    !hasReadyWordTimings;
+  const karaokeTimingSyncMessage = karaokeTimingNeedsSync
+    ? getKaraokeTimingSyncMessage(wordTimingsResponse)
+    : null;
+  const canExport =
+    hasSubtitles &&
+    !karaokeTimingNeedsSync &&
+    !isExporting &&
+    (!isCreatingSubtitles || !hasActiveCreateFromApi);
+  const hasVideoPreview = Boolean(previewSrc);
+  const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
+  const showScrim =
+    isNarrow &&
+    (hasSubtitles && ((showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen));
+
   const startExport = React.useCallback(async () => {
     if (!projectId || !project?.video?.path || isExporting) {
       return;
@@ -2974,6 +3110,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
     if (!settings) {
       setExportError("Settings are still loading. Please try again.");
+      return;
+    }
+    if (isStyleLoading) {
+      setExportError("Subtitle effects are still loading. Please wait a moment.");
+      return;
+    }
+    if (karaokeTimingNeedsSync) {
+      setExportError("Karaoke needs word timing sync before export. Click Sync karaoke timing first.");
       return;
     }
     if (
@@ -3086,6 +3230,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     handleExportEvent,
     isCreatingSubtitles,
     isExporting,
+    isStyleLoading,
+    karaokeTimingNeedsSync,
     openExportStream,
     preset,
     project,
@@ -3158,7 +3304,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           );
           setCreateSubtitlesProgressPct(pct);
           setCreateSubtitlesProgressMessage(message);
-          const fullList = defaultChecklist(buildGenerateChecklist(settings ?? {}));
+          const fullList = defaultChecklist(buildCreateSubtitlesChecklistItems(settings));
           const merged =
             checklist.length > 0
               ? fullList.map((fullItem) => {
@@ -3259,7 +3405,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         if (!isSameSessionJustStarted) {
           setCreateSubtitlesProgressMessage("");
           setCreateSubtitlesChecklist(
-            settings ? defaultChecklist(buildGenerateChecklist(settings)) : []
+            defaultChecklist(buildCreateSubtitlesChecklistItems(settings))
           );
           setCreateSubtitlesStartedAt(null);
         }
@@ -3331,6 +3477,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       }
     }
   }, [
+    buildCreateSubtitlesChecklistItems,
     clearTimingFallbackProgress,
     clearPreparingPreviewTimers,
     createSubtitlesStartedAt,
@@ -3377,7 +3524,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (!pendingAutoStartSubtitles) {
       return;
     }
-    if (isLoading || !project || !settings || isCreatingSubtitles || isExporting) {
+    if (
+      isLoading ||
+      isStyleLoading ||
+      !project ||
+      !settings ||
+      isCreatingSubtitles ||
+      isExporting
+    ) {
       return;
     }
     setPendingAutoStartSubtitles(false);
@@ -3390,6 +3544,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     isCreatingSubtitles,
     isExporting,
     isLoading,
+    isStyleLoading,
     pendingAutoStartSubtitles,
     project,
     settings,
@@ -3397,27 +3552,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     subtitleLoadError
   ]);
 
-  const title = resolveTitle(project);
-  const videoPath = project?.video?.path ?? "";
-  const previewSrc = videoPath ? (isTauriEnv ? convertFileSrc(videoPath) : videoPath) : "";
-  const hasSubtitles = cues.length > 0;
-  const latestOutputPath = exportOutputPath ?? project?.latest_export?.output_video_path ?? null;
-  const hasActiveCreateFromApi = project?.active_task?.kind === "create_subtitles";
-  const canExport =
-    hasSubtitles &&
-    !isExporting &&
-    (!isCreatingSubtitles || !hasActiveCreateFromApi);
-  const showNoSubtitlesState = !isLoading && !error && !subtitleLoadError && !hasSubtitles;
-  const persistedCreateJob = projectId ? getPersistedRunningJob(projectId) : null;
-  const hasActiveCreateSubtitles =
-    isCreatingSubtitles ||
-    project?.active_task?.kind === "create_subtitles" ||
-    persistedCreateJob?.kind === "create_subtitles";
-  const hasVideoPreview = Boolean(previewSrc);
-  const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
-  const showScrim =
-    isNarrow &&
-    (hasSubtitles && ((showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen));
   React.useEffect(() => {
     if ((!hasSubtitles || (isNarrow && !rightOverlayOpen)) && hoveredEffectPreview !== null) {
       setHoveredEffectPreview(null);
@@ -3542,36 +3676,97 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     effectiveAppearance.text_opacity
   );
   const hasWordBackground = effectiveAppearance.background_mode === "word";
+  const isEditingWordHighlightWithLineBackground =
+    effectiveAppearance.subtitle_mode === "word_highlight" &&
+    editingWordCount > 0 &&
+    effectiveAppearance.background_mode === "line";
   const activeCueHasRtlChars = activeCue ? RTL_CHAR_PATTERN.test(activeCue.text) : false;
   const subtitleDirection: "rtl" | "auto" = activeCueHasRtlChars ? "rtl" : "auto";
-  const wordPadT =
-    effectiveAppearance.word_bg_padding_top ??
-    effectiveAppearance.word_bg_padding ?? 8;
-  const wordPadR =
-    effectiveAppearance.word_bg_padding_right ??
-    effectiveAppearance.word_bg_padding ?? 8;
-  const wordPadB =
-    effectiveAppearance.word_bg_padding_bottom ??
-    effectiveAppearance.word_bg_padding ?? 8;
-  const wordPadL =
-    effectiveAppearance.word_bg_padding_left ??
-    effectiveAppearance.word_bg_padding ?? 8;
+  const subtitlePreviewLayoutMetrics = React.useMemo(() => {
+    const visualScale = displayedVideoRect.scale;
+    const fontScale = isTauriEnv ? visualScale * QT_POINT_TO_CSS_PX : visualScale;
+    const fontSizePx = Math.max(10 * fontScale, effectiveAppearance.font_size * fontScale);
+    const lineHeightRatio = isTauriEnv
+      ? QT_SUBTITLE_LINE_HEIGHT_RATIO
+      : WEB_SUBTITLE_LINE_HEIGHT_RATIO;
+    const lineHeightPx = fontSizePx * lineHeightRatio * effectiveAppearance.line_spacing;
+
+    return {
+      visualScale,
+      fontSizePx,
+      lineHeightPx,
+      linePaddingTopPx: Math.max(
+        0,
+        (effectiveAppearance.line_bg_padding_top ?? effectiveAppearance.line_bg_padding ?? 8) *
+          visualScale
+      ),
+      linePaddingRightPx: Math.max(
+        0,
+        (effectiveAppearance.line_bg_padding_right ??
+          effectiveAppearance.line_bg_padding ??
+          8) * visualScale
+      ),
+      linePaddingBottomPx: Math.max(
+        0,
+        (effectiveAppearance.line_bg_padding_bottom ??
+          effectiveAppearance.line_bg_padding ??
+          8) * visualScale
+      ),
+      linePaddingLeftPx: Math.max(
+        0,
+        (effectiveAppearance.line_bg_padding_left ?? effectiveAppearance.line_bg_padding ?? 8) *
+          visualScale
+      ),
+      lineRadiusPx: Math.max(0, effectiveAppearance.line_bg_radius * visualScale),
+      wordPaddingTopPx: Math.max(
+        0,
+        (effectiveAppearance.word_bg_padding_top ?? effectiveAppearance.word_bg_padding ?? 8) *
+          visualScale
+      ),
+      wordPaddingRightPx: Math.max(
+        0,
+        (effectiveAppearance.word_bg_padding_right ??
+          effectiveAppearance.word_bg_padding ??
+          8) * visualScale
+      ),
+      wordPaddingBottomPx: Math.max(
+        0,
+        (effectiveAppearance.word_bg_padding_bottom ??
+          effectiveAppearance.word_bg_padding ??
+          8) * visualScale
+      ),
+      wordPaddingLeftPx: Math.max(
+        0,
+        (effectiveAppearance.word_bg_padding_left ?? effectiveAppearance.word_bg_padding ?? 8) *
+          visualScale
+      ),
+      wordRadiusPx: Math.max(0, effectiveAppearance.word_bg_radius * visualScale)
+    };
+  }, [displayedVideoRect.scale, effectiveAppearance, isTauriEnv]);
   const activeWordStyle: React.CSSProperties = hasWordBackground
-    ? {}
+    ? {
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: `${subtitlePreviewLayoutMetrics.lineHeightPx}px`,
+        lineHeight: `${subtitlePreviewLayoutMetrics.lineHeightPx}px`,
+        verticalAlign: "baseline",
+        zIndex: 0
+      }
     : {};
   const wordBgBackingStyle: React.CSSProperties =
     hasWordBackground
       ? {
           position: "absolute",
-          left: -Math.max(0, wordPadL),
-          top: -Math.max(0, wordPadT),
-          right: -Math.max(0, wordPadR),
-          bottom: -Math.max(0, wordPadB),
+          left: -subtitlePreviewLayoutMetrics.wordPaddingLeftPx,
+          top: -subtitlePreviewLayoutMetrics.wordPaddingTopPx,
+          right: -subtitlePreviewLayoutMetrics.wordPaddingRightPx,
+          bottom: -subtitlePreviewLayoutMetrics.wordPaddingBottomPx,
           backgroundColor: colorWithOpacity(
             effectiveAppearance.word_bg_color,
             effectiveAppearance.word_bg_opacity
           ),
-          borderRadius: `${Math.max(0, effectiveAppearance.word_bg_radius)}px`,
+          borderRadius: `${subtitlePreviewLayoutMetrics.wordRadiusPx}px`,
           zIndex: -1,
           pointerEvents: "none"
         }
@@ -3827,19 +4022,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [subtitleControlsPushPx]);
 
   const subtitlePreviewTextStyle = React.useMemo<React.CSSProperties>(() => {
-    const visualScale = displayedVideoRect.scale;
-    const fontScale = isTauriEnv ? visualScale * QT_POINT_TO_CSS_PX : visualScale;
-    const computedFontSizePx = Math.max(
-      10 * fontScale,
-      effectiveAppearance.font_size * fontScale
-    );
-    const lineHeightRatio = isTauriEnv
-      ? QT_SUBTITLE_LINE_HEIGHT_RATIO
-      : WEB_SUBTITLE_LINE_HEIGHT_RATIO;
+    const visualScale = subtitlePreviewLayoutMetrics.visualScale;
     const style: React.CSSProperties = {
       fontFamily: effectiveAppearance.font_family || DEFAULT_APPEARANCE.font_family,
-      fontSize: `${computedFontSizePx}px`,
-      lineHeight: `${computedFontSizePx * lineHeightRatio * effectiveAppearance.line_spacing}px`,
+      fontSize: `${subtitlePreviewLayoutMetrics.fontSizePx}px`,
+      lineHeight: `${subtitlePreviewLayoutMetrics.lineHeightPx}px`,
       fontWeight: effectiveAppearance.font_weight,
       fontStyle:
         effectiveAppearance.font_style === "italic" ||
@@ -3897,33 +4084,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         effectiveAppearance.line_bg_color,
         effectiveAppearance.line_bg_opacity
       );
-      const pt =
-        (effectiveAppearance.line_bg_padding_top ??
-          effectiveAppearance.line_bg_padding ??
-          8) * visualScale;
-      const pr =
-        (effectiveAppearance.line_bg_padding_right ??
-          effectiveAppearance.line_bg_padding ??
-          8) * visualScale;
-      const pb =
-        (effectiveAppearance.line_bg_padding_bottom ??
-          effectiveAppearance.line_bg_padding ??
-          8) * visualScale;
-      const pl =
-        (effectiveAppearance.line_bg_padding_left ??
-          effectiveAppearance.line_bg_padding ??
-          8) * visualScale;
-      const radius = effectiveAppearance.line_bg_radius * visualScale;
       style.backgroundColor = backgroundColor;
-      style.paddingTop = `${Math.max(0, pt)}px`;
-      style.paddingRight = `${Math.max(0, pr)}px`;
-      style.paddingBottom = `${Math.max(0, pb)}px`;
-      style.paddingLeft = `${Math.max(0, pl)}px`;
-      style.borderRadius = `${Math.max(0, radius)}px`;
+      style.paddingTop = `${subtitlePreviewLayoutMetrics.linePaddingTopPx}px`;
+      style.paddingRight = `${subtitlePreviewLayoutMetrics.linePaddingRightPx}px`;
+      style.paddingBottom = `${subtitlePreviewLayoutMetrics.linePaddingBottomPx}px`;
+      style.paddingLeft = `${subtitlePreviewLayoutMetrics.linePaddingLeftPx}px`;
+      style.borderRadius = `${subtitlePreviewLayoutMetrics.lineRadiusPx}px`;
     }
 
     return style;
-  }, [displayedVideoRect.scale, effectiveAppearance, isTauriEnv]);
+  }, [effectiveAppearance, subtitlePreviewLayoutMetrics]);
 
   const subtitleEditorTextStyle = React.useMemo<React.CSSProperties>(
     () => ({
@@ -4059,8 +4229,19 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
     textarea.style.height = "auto";
-    textarea.style.height = `${textarea.scrollHeight}px`;
-  }, [displayedVideoRect.height, displayedVideoRect.scale, displayedVideoRect.width, editingText, isEditingActiveCue, subtitleEditorTextStyle]);
+    const editorHeightPx = isEditingWordHighlightWithLineBackground
+      ? textarea.parentElement?.clientHeight ?? textarea.scrollHeight
+      : textarea.scrollHeight;
+    textarea.style.height = `${editorHeightPx}px`;
+  }, [
+    displayedVideoRect.height,
+    displayedVideoRect.scale,
+    displayedVideoRect.width,
+    editingText,
+    isEditingActiveCue,
+    isEditingWordHighlightWithLineBackground,
+    subtitleEditorTextStyle
+  ]);
 
   React.useLayoutEffect(() => {
     if (!isEditingActiveCue) {
@@ -5782,6 +5963,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     () => !isWorkbenchAtGlobalDefault(appearance, highlightOpacity),
     [appearance, highlightOpacity]
   );
+  const { scrollAreaRef: effectsPanelScrollRef, scrolled: effectsPanelScrolled } =
+    useScrollAreaShadow(hasSubtitles && !isNarrow);
+  const { scrollAreaRef: effectsDrawerScrollRef, scrolled: effectsDrawerScrolled } =
+    useScrollAreaShadow(hasSubtitles && isNarrow && rightOverlayOpen);
 
   const exportAreaTopBar = hasSubtitles && (
     <div className="flex flex-wrap items-center gap-2">
@@ -5829,6 +6014,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           </Button>
         </div>
       )}
+      {karaokeTimingNeedsSync && !hasActiveCreateSubtitles && (
+        <Button
+          variant="secondary"
+          size="sm"
+          data-testid="workbench-sync-karaoke-timing"
+          onClick={() => void startCreateSubtitles({ reuseExistingSubtitles: true })}
+        >
+          Sync karaoke timing
+        </Button>
+      )}
       <Button
         size="sm"
         data-testid="workbench-export-cta"
@@ -5839,6 +6034,22 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       </Button>
     </div>
   );
+  const karaokeTimingAlert =
+    hasSubtitles &&
+    !hasActiveCreateSubtitles &&
+    (karaokeTimingNeedsSync || createSubtitlesError) ? (
+      <div
+        className={cn(
+          "mb-3 rounded-md border p-3 text-sm",
+          createSubtitlesError
+            ? "border-destructive/40 bg-destructive/10 text-destructive"
+            : "border-amber-300/50 bg-amber-50 text-amber-900"
+        )}
+        data-testid="workbench-karaoke-sync-alert"
+      >
+        {createSubtitlesError ?? karaokeTimingSyncMessage}
+      </div>
+    ) : null;
 
   const subtitleEditorToolbarMaxWidthPx = Math.max(
     0,
@@ -5927,6 +6138,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
+      {karaokeTimingAlert}
       {error ? (
         <div
           className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-12"
@@ -5938,7 +6150,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         </div>
       ) : (
         <>
-      {showNoSubtitlesState && (
+      {showCreateSubtitlesState && (
         <section
           className="relative flex min-h-0 flex-1 flex-col items-center rounded-lg border border-border bg-card p-6"
           data-testid="workbench-empty-state"
@@ -5950,7 +6162,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               </div>
             )}
 
-            {!hasActiveCreateSubtitles &&
+            {!hasSubtitles &&
+            !hasActiveCreateSubtitles &&
             !pendingAutoStartSubtitles &&
             !incomingState?.autoStartSubtitles ? (
               <>
@@ -5981,9 +6194,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             ) : (() => {
               const at = project?.active_task;
               const heading =
-                createSubtitlesHeading ||
-                (at?.status === "queued" ? "Queued" : at?.heading) ||
-                "Creating subtitles";
+                at?.status === "queued"
+                  ? "Queued"
+                  : hasSubtitles
+                    ? "Syncing karaoke timing"
+                    : createSubtitlesHeading || at?.heading || "Creating subtitles";
               const checklistFromApi =
                 at && at.checklist?.length
                   ? buildChecklistFromActiveTask(at)
@@ -5994,7 +6209,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                   : checklistFromApi.length > 0
                     ? checklistFromApi
                     : settings
-                      ? defaultChecklist(buildGenerateChecklist(settings))
+                      ? defaultChecklist(buildCreateSubtitlesChecklistItems(settings))
                       : [];
               const checklist = withTimingFallbackChecklist(checklistBase);
               const rawPct =
@@ -6130,7 +6345,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         </section>
       )}
 
-      {!showNoSubtitlesState && (
+      {!showCreateSubtitlesState && (
         <>
           {hasSubtitles && showSubtitlesOverlay && showLeftToggle && (
             <div className="relative z-50 flex flex-wrap items-center gap-2">
@@ -6386,11 +6601,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 className={cn(
                                   "relative inline-block min-w-16 max-w-full",
                                   showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
-                                  !(
-                                    effectiveAppearance.subtitle_mode === "word_highlight" &&
-                                    editingWordCount > 0 &&
-                                    effectiveAppearance.background_mode === "line"
-                                  ) && "px-3 py-2"
+                                  !isEditingWordHighlightWithLineBackground && "px-3 py-2"
                                 )}
                                 style={
                                   {
@@ -6473,7 +6684,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                       data-testid="workbench-subtitle-editor"
                                       data-workbench-subtitle-editor
                                       className={cn(
-                                        "z-2 m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden border-0 bg-transparent px-3 py-2 whitespace-pre-wrap text-transparent caret-white shadow-none ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45",
+                                        "z-2 m-0 absolute inset-0 w-full appearance-none box-border resize-none overflow-hidden border-0 bg-transparent whitespace-pre-wrap text-transparent caret-white shadow-none ring-1 ring-primary/45 transition focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary/45",
+                                        !isEditingWordHighlightWithLineBackground && "px-3 py-2",
                                         showSubtitleResizeHandles ? "rounded-sm" : "rounded-md"
                                       )}
                                       style={(() => {
@@ -6482,11 +6694,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                         delete rest.color;
                                         delete rest.textShadow;
                                         delete rest.backgroundColor;
-                                        delete rest.paddingTop;
-                                        delete rest.paddingRight;
-                                        delete rest.paddingBottom;
-                                        delete rest.paddingLeft;
-                                        delete rest.borderRadius;
+                                        if (!isEditingWordHighlightWithLineBackground) {
+                                          delete rest.paddingTop;
+                                          delete rest.paddingRight;
+                                          delete rest.paddingBottom;
+                                          delete rest.paddingLeft;
+                                          delete rest.borderRadius;
+                                        }
                                         return { ...rest, color: "transparent" };
                                       })()}
                                       value={editingText}
@@ -6555,10 +6769,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                 tabIndex={0}
                                 data-testid="workbench-active-subtitle"
                                 className={cn(
-                                  "m-0 inline-block min-w-16 max-w-full cursor-text box-border border-0 bg-transparent px-3 py-2 text-white transition focus-visible:outline-none hover:bg-background hover:ring-2 hover:ring-primary/45 hover:shadow-lg",
+                                  "m-0 inline-block min-w-16 max-w-full cursor-text box-border border-0 bg-transparent px-3 py-2 text-white transition focus-visible:outline-none hover:bg-background/50 hover:ring-2 hover:ring-primary/45 hover:shadow-lg",
                                   showSubtitleResizeHandles ? "rounded-sm" : "rounded-md",
                                   (isHoveringActiveSubtitle || subtitleResizeDrag || subtitlePositionDrag) &&
-                                    "bg-background ring-2 ring-primary/45 shadow-lg",
+                                    "bg-background/50 ring-2 ring-primary/45 shadow-lg",
                                   isActiveCueSelected
                                     ? "outline-2 outline-offset-2 outline-primary ring-2 ring-primary/50"
                                     : "outline-none"
@@ -7012,22 +7226,29 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                 className="flex min-h-0 w-88 shrink-0 flex-col rounded-lg border border-border bg-card xl:w-96"
                 data-testid="workbench-right-panel"
               >
-              <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                <h2 className="text-lg font-semibold">Effects</h2>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleResetAllEffects}
-                  data-testid="workbench-effects-reset-all"
+                <div
                   className={cn(
-                    !hasAnyEffectChangedFromDefault && "invisible pointer-events-none"
+                    "relative z-10 flex items-center justify-between border-b border-border px-4 py-2 transition-shadow duration-200",
+                    effectsPanelScrolled && EFFECTS_PANE_SCROLLED_SHADOW_CLASS
                   )}
                 >
-                  Reset all
-                </Button>
+                  <h2 className="text-lg font-semibold">Effects</h2>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetAllEffects}
+                    data-testid="workbench-effects-reset-all"
+                    className={cn(
+                      !hasAnyEffectChangedFromDefault && "invisible pointer-events-none"
+                    )}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+                    Reset to default
+                  </Button>
                 </div>
                 <ScrollArea
+                  ref={effectsPanelScrollRef}
                   type="always"
                   className="min-h-0 flex-1"
                   data-testid="workbench-effects-scroll-panel"
@@ -7072,8 +7293,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,360px)] flex-col border-l border-border bg-card shadow"
               data-testid="workbench-right-drawer"
             >
-            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
-              <h2 className="text-lg font-semibold">Effects</h2>
+              <div
+                className={cn(
+                  "relative z-10 flex items-center justify-between gap-2 border-b border-border px-4 py-2 transition-shadow duration-200",
+                  effectsDrawerScrolled && EFFECTS_PANE_SCROLLED_SHADOW_CLASS
+                )}
+              >
+                <h2 className="text-lg font-semibold">Effects</h2>
                 <div className="flex items-center gap-1.5">
                   <Button
                     type="button"
@@ -7085,7 +7311,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                       !hasAnyEffectChangedFromDefault && "invisible pointer-events-none"
                     )}
                   >
-                    Reset all
+                    <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+                    Reset to default
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setRightOverlayOpen(false)}>
                     Close
@@ -7093,6 +7320,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                 </div>
               </div>
               <ScrollArea
+                ref={effectsDrawerScrollRef}
                 type="always"
                 className="min-h-0 flex-1"
                 data-testid="workbench-effects-scroll-drawer"

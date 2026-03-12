@@ -17,7 +17,6 @@ def test_build_alignment_plan_uses_python_module_command_when_not_frozen(
     audio_path = tmp_path / "sample_audio_for_whisper.wav"
 
     plan = align_utils.build_alignment_plan(
-        subtitle_mode="word_highlight",
         srt_path=srt_path,
         audio_path=audio_path,
         language="he",
@@ -40,7 +39,6 @@ def test_build_alignment_plan_skips_when_frozen_align_worker_is_missing(
     audio_path = tmp_path / "sample_audio_for_whisper.wav"
 
     plan = align_utils.build_alignment_plan(
-        subtitle_mode="word_highlight",
         srt_path=srt_path,
         audio_path=audio_path,
         language="he",
@@ -65,7 +63,6 @@ def test_build_alignment_plan_allows_explicit_python_override_when_frozen(
     audio_path = tmp_path / "sample_audio_for_whisper.wav"
 
     plan = align_utils.build_alignment_plan(
-        subtitle_mode="word_highlight",
         srt_path=srt_path,
         audio_path=audio_path,
         language="he",
