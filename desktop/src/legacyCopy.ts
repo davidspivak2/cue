@@ -68,7 +68,6 @@ export type ChecklistOptions = {
   apply_audio_filter?: boolean;
   punctuation_rescue_fallback_enabled?: boolean;
   vad_gap_rescue_enabled?: boolean;
-  subtitle_mode?: string;
 };
 
 export type ChecklistDefinition = {
@@ -83,7 +82,6 @@ export const buildGenerateChecklist = (
   const useAudioFilter = options.apply_audio_filter !== false;
   const includePunctuation = options.punctuation_rescue_fallback_enabled !== false;
   const includeGapRescue = options.vad_gap_rescue_enabled !== false;
-  const isWordHighlight = options.subtitle_mode === "word_highlight";
 
   const items: ChecklistDefinition[] = [
     {
@@ -103,10 +101,7 @@ export const buildGenerateChecklist = (
     items.push({ id: checklistStepIds.fixMissingSubtitles, label: labels.checkMissedSpeech });
   }
 
-  if (isWordHighlight) {
-    items.push({ id: checklistStepIds.timingWordHighlights, label: labels.matchWords });
-  }
-
+  items.push({ id: checklistStepIds.timingWordHighlights, label: labels.matchWords });
   items.push({ id: checklistStepIds.preparingPreview, label: labels.preparingPreview });
   return items;
 };

@@ -113,3 +113,36 @@ def test_runner_command_frozen_requires_sibling_runner_executable(
 
     with pytest.raises(RuntimeError, match="Missing packaged runner executable"):
         backend_server._build_runner_command(request)
+
+
+def test_reuse_existing_subtitles_request_resolves_project_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+    project_store.update_project(
+        project_id,
+        subtitles_srt_text="1\n00:00:00,000 --> 00:00:01,000\nHello\n",
+    )
+
+    project_dir = get_projects_dir() / project_id
+    word_timings_path = project_dir / "word_timings.json"
+    word_timings_path.write_text("{}", encoding="utf-8")
+
+    request = backend_server.JobRequest(
+        kind="create_subtitles",
+        input_path="stale.mp4",
+        output_dir=str(tmp_path),
+        project_id=project_id,
+        options={"reuse_existing_subtitles": True},
+    )
+
+    backend_server._resolve_create_subtitles_request_from_project(request)
+
+    assert request.input_path == str(video_path)
+    assert request.srt_path == str(project_dir / "subtitles.srt")
+    assert request.word_timings_path == str(word_timings_path)

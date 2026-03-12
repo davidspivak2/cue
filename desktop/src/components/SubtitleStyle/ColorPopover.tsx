@@ -65,7 +65,7 @@ export function ColorPopoverContent({
       const v = 1 - y;
       setHsv((prev) => {
         const next = { ...prev, s, v };
-        syncFromHsv(next.h, next.s, next.v);
+        queueMicrotask(() => syncFromHsv(next.h, next.s, next.v));
         return next;
       });
     },
@@ -93,7 +93,7 @@ export function ColorPopoverContent({
   const handleHueChange = (h: number) => {
     setHsv((prev) => {
       const next = { ...prev, h };
-      syncFromHsv(next.h, next.s, next.v);
+      queueMicrotask(() => syncFromHsv(next.h, next.s, next.v));
       return next;
     });
   };
@@ -124,7 +124,7 @@ export function ColorPopoverContent({
             setHsv((prev) => {
               const s = Math.max(0, prev.s - step / 100);
               const next = { ...prev, s };
-              syncFromHsv(next.h, next.s, next.v);
+              queueMicrotask(() => syncFromHsv(next.h, next.s, next.v));
               return next;
             });
           }
@@ -133,7 +133,7 @@ export function ColorPopoverContent({
             setHsv((prev) => {
               const s = Math.min(1, prev.s + step / 100);
               const next = { ...prev, s };
-              syncFromHsv(next.h, next.s, next.v);
+              queueMicrotask(() => syncFromHsv(next.h, next.s, next.v));
               return next;
             });
           }
@@ -236,7 +236,7 @@ export function ColorPopoverContent({
         <Label className="text-sm text-foreground">Hex</Label>
         <div className="mt-1.5 flex items-center gap-2">
           <Input
-            className="h-8 w-24 font-mono text-xs"
+            className="h-8 w-24 font-mono text-xs bg-background text-foreground border border-input"
             value={hexInput}
             onChange={(e) => setHexInput(e.target.value)}
             onPaste={(e) => {
@@ -270,10 +270,9 @@ export function ColorPopoverContent({
               type="button"
               aria-label={`Select ${swatch}`}
               className={cn(
-                "h-6 w-6 shrink-0 rounded-full border-2 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                value.toLowerCase() === swatch.toLowerCase()
-                  ? "border-foreground ring-2 ring-foreground/30"
-                  : "border-transparent"
+                "h-6 w-6 shrink-0 rounded-full border border-black/70 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                value.toLowerCase() === swatch.toLowerCase() &&
+                  "border-foreground ring-2 ring-foreground/30"
               )}
               style={{ backgroundColor: swatch }}
               onClick={() => {
@@ -384,7 +383,10 @@ export function ColorRow({
             {!compact && <span className="text-xs text-muted-foreground">Custom</span>}
           </button>
         </PopoverTrigger>
-        <PopoverContent className="w-80" align="start">
+        <PopoverContent
+          className="w-80 dark:bg-zinc-700 dark:border-zinc-600 dark:shadow-xl"
+          align="start"
+        >
           <ColorPopoverContent
             value={value === "auto" ? "#000000" : value}
             onChange={(hex) => {

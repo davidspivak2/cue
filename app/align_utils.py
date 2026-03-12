@@ -43,7 +43,6 @@ def _resolve_alignment_worker_command(
 
 def build_alignment_plan(
     *,
-    subtitle_mode: str,
     srt_path: Path,
     audio_path: Path,
     language: str,
@@ -53,17 +52,6 @@ def build_alignment_plan(
     python_executable: Optional[str] = None,
 ) -> AlignmentPlan:
     output_path = word_timings_path_for_srt(srt_path)
-    if subtitle_mode != "word_highlight":
-        return AlignmentPlan(
-            should_run=False,
-            command=[],
-            output_path=output_path,
-            reason="disabled",
-            device=device,
-            align_model=align_model,
-            prefer_gpu=prefer_gpu,
-        )
-
     reason = None
     if not output_path.exists():
         reason = "missing"

@@ -58,7 +58,7 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   line_bg_padding_left: 8,
   line_bg_radius: 8,
   word_bg_color: "#000000",
-  word_bg_opacity: 0.4,
+  word_bg_opacity: 0.7,
   word_bg_padding: 8,
   word_bg_padding_top: 8,
   word_bg_padding_right: 8,

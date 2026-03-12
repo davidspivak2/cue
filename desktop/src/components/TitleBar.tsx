@@ -22,6 +22,7 @@ import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { useSettings } from "@/contexts/SettingsContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
+import { readStoredInterfaceScale, subscribeToInterfaceScaleChanges } from "@/lib/interfaceScale";
 import { normalizeLocalPath } from "@/lib/normalizeLocalPath";
 import { truncatePathMiddle } from "@/lib/truncatePathMiddle";
 import { cn } from "@/lib/utils";
@@ -34,8 +35,14 @@ const TITLE_BAR_LOGO_WIDTH = 90;
 const TITLE_BAR_HOME_WIDTH = 40;
 /** Width for window controls (4 × w-10). */
 const TITLE_BAR_CONTROLS_WIDTH = 160;
-/** Min width per tab in "wide" mode (max-w-[180px] + padding/close). */
-const TITLE_BAR_WIDE_TAB_PX = 180;
+/** Preferred tab width used to decide when "wide" mode still fits. */
+const TITLE_BAR_WIDE_LAYOUT_TARGET_PX = 180;
+/** Maximum tab width in "wide" mode at 100% interface scale. */
+const TITLE_BAR_WIDE_TAB_MAX_PX = 224;
+/** Maximum tab width in "medium" mode at 100% interface scale. */
+const TITLE_BAR_MEDIUM_TAB_MAX_PX = 100;
+/** Maximum tab width in "narrow" mode at 100% interface scale. */
+const TITLE_BAR_NARROW_TAB_MAX_PX = 44;
 /** Window width below which we use "narrow" when we can't fit wide tabs. */
 const TITLE_BAR_NARROW_BREAKPOINT = 520;
 type TabLayoutMode = "wide" | "medium" | "narrow";
@@ -46,10 +53,25 @@ function getTabLayoutMode(
 ): TabLayoutMode {
   const availableForTabs =
     windowWidth - TITLE_BAR_LOGO_WIDTH - TITLE_BAR_HOME_WIDTH - TITLE_BAR_CONTROLS_WIDTH;
-  const requiredForWide = tabCount * TITLE_BAR_WIDE_TAB_PX;
+  const requiredForWide = tabCount * TITLE_BAR_WIDE_LAYOUT_TARGET_PX;
   if (availableForTabs >= requiredForWide) return "wide";
   if (windowWidth >= TITLE_BAR_NARROW_BREAKPOINT) return "medium";
   return "narrow";
+}
+
+function getTitleTabSizeStyle(
+  layoutMode: TabLayoutMode,
+  interfaceScale: number
+): React.CSSProperties {
+  if (layoutMode === "wide") {
+    return {
+      maxWidth: TITLE_BAR_WIDE_TAB_MAX_PX * interfaceScale,
+    };
+  }
+  if (layoutMode === "medium") {
+    return { maxWidth: TITLE_BAR_MEDIUM_TAB_MAX_PX * interfaceScale };
+  }
+  return { maxWidth: TITLE_BAR_NARROW_TAB_MAX_PX * interfaceScale };
 }
 
 export const TITLE_BAR_HEIGHT = 36;
@@ -60,12 +82,14 @@ function SortableTitleTab({
   tab,
   isActive,
   layoutMode,
+  interfaceScale,
   onTabClick,
   onCloseTab,
 }: {
   tab: WorkbenchTab;
   isActive: boolean;
   layoutMode: TabLayoutMode;
+  interfaceScale: number;
   onTabClick: (projectId: string) => void;
   onCloseTab: (projectId: string, e: React.MouseEvent) => void;
 }) {
@@ -81,15 +105,10 @@ function SortableTitleTab({
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
+    ...getTitleTabSizeStyle(layoutMode, interfaceScale),
   };
 
   const isIconOnly = layoutMode === "narrow";
-  const maxWidthClass =
-    layoutMode === "wide"
-      ? "max-w-[180px]"
-      : layoutMode === "medium"
-        ? "max-w-[100px]"
-        : "max-w-[44px]";
 
   const thumbnailSrc =
     isIconOnly && tab.thumbnail_path
@@ -138,7 +157,6 @@ function SortableTitleTab({
       onAuxClick={handleAuxClick}
       className={cn(
         "flex h-full shrink-0 items-center gap-1 border-b-2 border-r border-foreground/15 pl-3 pr-2 transition-colors duration-200",
-        maxWidthClass,
         isActive
           ? "border-b-foreground/30 bg-foreground/8"
           : "border-b-transparent hover:bg-foreground/5",
@@ -256,9 +274,15 @@ const TitleBar = () => {
   const [settingsSpinDirection, setSettingsSpinDirection] = React.useState<
     "open" | "close" | null
   >(null);
+  const [interfaceScale, setInterfaceScale] = React.useState(() => readStoredInterfaceScale());
   const prevSettingsOpenRef = React.useRef(settingsOpen);
   const { tabs, activeView, setActiveView, closeTab, reorderTabs } = useWorkbenchTabs();
-  const tabLayoutMode = getTabLayoutMode(width, tabs.length);
+  const tabLayoutMode = getTabLayoutMode(width / interfaceScale, tabs.length);
+
+  React.useEffect(
+    () => subscribeToInterfaceScaleChanges((scale) => setInterfaceScale(scale)),
+    []
+  );
 
   React.useEffect(() => {
     if (prevSettingsOpenRef.current && !settingsOpen) {
@@ -402,6 +426,7 @@ const TitleBar = () => {
                 tab={tab}
                 isActive={activeView === tab.projectId}
                 layoutMode={tabLayoutMode}
+                interfaceScale={interfaceScale}
                 onTabClick={handleTabClick}
                 onCloseTab={handleCloseTab}
               />

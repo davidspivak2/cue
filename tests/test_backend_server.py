@@ -388,6 +388,50 @@ def test_project_word_timings_endpoint_handles_missing_file(tmp_path: Path, monk
     assert payload["document"] is None
 
 
+def test_project_word_timings_endpoint_marks_empty_documents_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+
+    initial_srt = "1\n00:00:00,000 --> 00:00:01,000\nHello\n"
+    project_store.update_project(project_id, subtitles_srt_text=initial_srt)
+
+    project_dir = get_projects_dir() / project_id
+    subtitles_path = project_dir / "subtitles.srt"
+    word_timings_path = project_dir / "word_timings.json"
+    doc = WordTimingDocument(
+        schema_version=SCHEMA_VERSION,
+        created_utc=datetime.now(timezone.utc).isoformat(),
+        language="en",
+        srt_sha256=compute_srt_sha256(subtitles_path),
+        cues=[
+            CueWordTimings(
+                cue_index=1,
+                cue_start=0.0,
+                cue_end=1.0,
+                cue_text="Hello",
+                words=[],
+            )
+        ],
+    )
+    save_word_timings_json(word_timings_path, doc)
+
+    with TestClient(backend_server.app) as client:
+        response = client.get(f"/projects/{project_id}/word-timings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["stale"] is False
+    assert payload["reason"] == "word_timings_empty"
+    assert payload["document"] is not None
+    assert payload["document"]["cues"][0]["words"] == []
+
+
 def test_project_word_timings_endpoint_marks_stale(tmp_path: Path, monkeypatch) -> None:
     _setup_env(tmp_path, monkeypatch)
     video_path = tmp_path / "video.mp4"

@@ -1,6 +1,8 @@
 import * as React from "react";
 
-import { ChevronDown, Link, Unlink } from "lucide-react";
+import { Info, Link, Unlink } from "lucide-react";
+import horizontalPaddingIconUrl from "./icons/padding-horizontal.svg";
+import verticalPaddingIconUrl from "./icons/padding-vertical.svg";
 
 import { ColorRow } from "./ColorPopover";
 import {
@@ -11,12 +13,17 @@ import {
   shadowUiPolarToOffsets
 } from "./shadowOffsetUtils";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { OpacitySlider } from "@/components/ui/opacity-slider";
 import { Slider } from "@/components/ui/slider";
 import { StepperInput } from "@/components/ui/stepper-input";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
@@ -62,16 +69,11 @@ type PaddingRowProps = {
   right: number;
   bottom: number;
   left: number;
-  previewColor: string;
-  previewOpacity: number;
-  previewRadius: number;
   linked: boolean;
   onToggleLink: () => void;
   onLinkedChange: (v: number) => void;
-  onTopChange: (v: number) => void;
-  onRightChange: (v: number) => void;
-  onBottomChange: (v: number) => void;
-  onLeftChange: (v: number) => void;
+  onHorizontalChange: (v: number) => void;
+  onVerticalChange: (v: number) => void;
 };
 
 type CardPreviewPayload = {
@@ -82,7 +84,7 @@ type CardPreviewPayload = {
 const PADDING_MIN = 0;
 const PADDING_MAX = 40;
 const PADDING_STEP = 1;
-const CARD_SAMPLE_TEXT = "Ag";
+const CARD_SAMPLE_TEXT = "Preview";
 
 const SHADOW_DEFAULTS: Partial<SubtitleStyleAppearance> = {
   shadow_enabled: true,
@@ -125,7 +127,7 @@ const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
   line_bg_padding_linked: true,
   line_bg_radius: 8,
   word_bg_color: "#000000",
-  word_bg_opacity: 0.4,
+  word_bg_opacity: 0.7,
   word_bg_padding: 8,
   word_bg_padding_top: 8,
   word_bg_padding_right: 8,
@@ -164,8 +166,14 @@ const effectLabels: Record<WorkbenchEffectId, string> = {
   karaoke: "Karaoke"
 };
 
+const getActiveEffectIds = (appearance: SubtitleStyleAppearance) =>
+  effectOrder.filter((effectId) => isEffectActive(effectId, appearance));
+
 const clampPadding = (value: number) =>
   Math.min(PADDING_MAX, Math.max(PADDING_MIN, value));
+
+const getSplitPaddingValue = (a: number, b: number) =>
+  a === b ? a : clampPadding(Math.round((a + b) / 2));
 
 const isOutlineActive = (appearance: SubtitleStyleAppearance) =>
   appearance.outline_enabled && appearance.outline_width > 0;
@@ -391,204 +399,65 @@ const OpacityRow = ({
   </div>
 );
 
-type PaddingSide = "top" | "right" | "bottom" | "left";
+const paddingAxisIconMaskStyle = (iconUrl: string): React.CSSProperties => ({
+  WebkitMaskImage: `url(${iconUrl})`,
+  maskImage: `url(${iconUrl})`,
+  WebkitMaskPosition: "center",
+  maskPosition: "center",
+  WebkitMaskRepeat: "no-repeat",
+  maskRepeat: "no-repeat",
+  WebkitMaskSize: "contain",
+  maskSize: "contain"
+});
 
-const PADDING_PREVIEW_SCALE = 0.75;
-const PADDING_PREVIEW_HANDLE_MIN_PX = 10;
-
-const scalePaddingPreview = (value: number) =>
-  Math.max(0, Math.min(30, Math.round(value * PADDING_PREVIEW_SCALE)));
-
-const paddingPreviewHandleThickness = (value: number) =>
-  Math.max(PADDING_PREVIEW_HANDLE_MIN_PX, scalePaddingPreview(value));
-
-const PaddingPreview = ({
-  top,
-  right,
-  bottom,
-  left,
-  color,
-  opacity,
-  radius,
-  activeSide,
-  onActiveSideChange,
-  onSideDragStart
+const PaddingAxisIcon = ({
+  iconUrl
 }: {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-  color: string;
-  opacity: number;
-  radius: number;
-  activeSide: PaddingSide | null;
-  onActiveSideChange: (side: PaddingSide | null) => void;
-  onSideDragStart: (side: PaddingSide, event: React.PointerEvent<HTMLDivElement>) => void;
-}) => {
-  const scaledTop = scalePaddingPreview(top);
-  const scaledRight = scalePaddingPreview(right);
-  const scaledBottom = scalePaddingPreview(bottom);
-  const scaledLeft = scalePaddingPreview(left);
-  const highlightSize = (value: number) => Math.max(2, value);
-  const topHandleHeight = paddingPreviewHandleThickness(top);
-  const rightHandleWidth = paddingPreviewHandleThickness(right);
-  const bottomHandleHeight = paddingPreviewHandleThickness(bottom);
-  const leftHandleWidth = paddingPreviewHandleThickness(left);
-
-  const previewHandle = (
-    side: PaddingSide,
-    className: string,
-    style: React.CSSProperties,
-    cursorClassName: string
-  ) => (
-    <div
-      aria-hidden="true"
-      className={cn("absolute z-20 touch-none", cursorClassName, className)}
-      style={style}
-      onPointerEnter={() => onActiveSideChange(side)}
-      onPointerLeave={() => onActiveSideChange(null)}
-      onPointerDown={(event) => onSideDragStart(side, event)}
+  iconUrl: string;
+}) => (
+  <span
+    aria-hidden="true"
+    className="flex h-8 w-5 shrink-0 items-center justify-center text-muted-foreground"
+  >
+    <span
+      className="block h-4 w-4 bg-current"
+      style={paddingAxisIconMaskStyle(iconUrl)}
     />
-  );
+  </span>
+);
 
-  return (
-    <div className="flex h-[5.25rem] w-[6.5rem] items-center justify-center rounded-xl border border-border/70 bg-muted/20 p-2 transition-colors">
-      <div
-        className="relative inline-flex items-center justify-center overflow-hidden shadow-sm transition-all duration-150"
-        style={{
-          paddingTop: `${scaledTop}px`,
-          paddingRight: `${scaledRight}px`,
-          paddingBottom: `${scaledBottom}px`,
-          paddingLeft: `${scaledLeft}px`,
-          borderRadius: `${Math.max(4, Math.round(radius * 0.6))}px`,
-          backgroundColor: colorWithOpacity(color, Math.max(opacity, 0.18))
-        }}
-      >
-        {activeSide === "top" && (
-          <span
-            className="pointer-events-none absolute inset-x-0 top-0 bg-primary/25"
-            style={{ height: highlightSize(scaledTop) }}
-          />
-        )}
-        {activeSide === "right" && (
-          <span
-            className="pointer-events-none absolute right-0 bg-primary/25"
-            style={{
-              top: scaledTop,
-              bottom: scaledBottom,
-              width: highlightSize(scaledRight)
-            }}
-          />
-        )}
-        {activeSide === "bottom" && (
-          <span
-            className="pointer-events-none absolute inset-x-0 bottom-0 bg-primary/25"
-            style={{ height: highlightSize(scaledBottom) }}
-          />
-        )}
-        {activeSide === "left" && (
-          <span
-            className="pointer-events-none absolute left-0 bg-primary/25"
-            style={{
-              top: scaledTop,
-              bottom: scaledBottom,
-              width: highlightSize(scaledLeft)
-            }}
-          />
-        )}
-        {previewHandle(
-          "top",
-          "inset-x-0 top-0",
-          { height: topHandleHeight },
-          "cursor-ns-resize!"
-        )}
-        {previewHandle(
-          "right",
-          "right-0",
-          {
-            top: topHandleHeight,
-            bottom: bottomHandleHeight,
-            width: rightHandleWidth
-          },
-          "cursor-ew-resize!"
-        )}
-        {previewHandle(
-          "bottom",
-          "inset-x-0 bottom-0",
-          { height: bottomHandleHeight },
-          "cursor-ns-resize!"
-        )}
-        {previewHandle(
-          "left",
-          "left-0",
-          {
-            top: topHandleHeight,
-            bottom: bottomHandleHeight,
-            width: leftHandleWidth
-          },
-          "cursor-ew-resize!"
-        )}
-        <span
-          className="relative z-10 text-xs font-semibold tracking-[0.01em]"
-          style={{ color: textColorContrastWith(color) }}
-        >
-          Ag
-        </span>
-      </div>
-    </div>
-  );
-};
-
-const PaddingSideField = ({
-  side,
+const PaddingAxisRow = ({
+  iconUrl,
+  label,
   value,
-  active,
-  onChange,
-  onActiveChange
+  onChange
 }: {
-  side: PaddingSide;
+  iconUrl: string;
+  label: string;
   value: number;
-  active: boolean;
   onChange: (value: number) => void;
-  onActiveChange: (side: PaddingSide | null) => void;
-}) => {
-  const label = side[0].toUpperCase() + side.slice(1);
-
-  return (
-    <div
-      className="flex flex-col items-center gap-1"
-      onPointerEnter={() => onActiveChange(side)}
-      onPointerLeave={() => onActiveChange(null)}
-      onFocusCapture={() => onActiveChange(side)}
-      onBlurCapture={(event) => {
-        const nextFocused = event.relatedTarget;
-        if (!(nextFocused instanceof Node) || !event.currentTarget.contains(nextFocused)) {
-          onActiveChange(null);
-        }
-      }}
-    >
-      <Label
-        className={cn(
-          "text-xs font-medium text-muted-foreground",
-          active && "text-foreground"
-        )}
-      >
-        {label}
-      </Label>
-      <StepperInput
-        value={value}
-        min={PADDING_MIN}
-        max={PADDING_MAX}
-        step={PADDING_STEP}
-        aria-label={`${label} padding`}
-        className={cn(active && "border-primary/40 ring-1 ring-primary/20")}
-        inputClassName="w-10 px-1 text-[11px]"
-        buttonClassName="w-6"
-        onChange={(nextValue) => onChange(clampPadding(nextValue))}
-      />
-    </div>
-  );
-};
+}) => (
+  <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+    <PaddingAxisIcon iconUrl={iconUrl} />
+    <Slider
+      min={PADDING_MIN}
+      max={PADDING_MAX}
+      step={PADDING_STEP}
+      value={[value]}
+      aria-label={label}
+      onValueChange={([nextValue]) => onChange(clampPadding(nextValue))}
+    />
+    <StepperInput
+      value={value}
+      min={PADDING_MIN}
+      max={PADDING_MAX}
+      step={PADDING_STEP}
+      aria-label={label}
+      inputClassName="w-12"
+      onChange={(nextValue) => onChange(clampPadding(nextValue))}
+    />
+  </div>
+);
 
 const PaddingRow = ({
   label,
@@ -596,222 +465,82 @@ const PaddingRow = ({
   right,
   bottom,
   left,
-  previewColor,
-  previewOpacity,
-  previewRadius,
   linked,
   onToggleLink,
   onLinkedChange,
-  onTopChange,
-  onRightChange,
-  onBottomChange,
-  onLeftChange
+  onHorizontalChange,
+  onVerticalChange
 }: PaddingRowProps) => {
-  const [hoveredSide, setHoveredSide] = React.useState<PaddingSide | null>(null);
-  const [dragSide, setDragSide] = React.useState<PaddingSide | null>(null);
-  const dragStateRef = React.useRef<{
-    side: PaddingSide;
-    startX: number;
-    startY: number;
-    startValue: number;
-  } | null>(null);
-  const activeSide = dragSide ?? hoveredSide;
+  const horizontal = getSplitPaddingValue(left, right);
+  const vertical = getSplitPaddingValue(top, bottom);
+  const modeTooltip = linked
+    ? "Uniform padding"
+    : "Split horizontal and vertical";
 
-  const setSideValue = React.useCallback(
-    (side: PaddingSide, value: number) => {
+  const handleHorizontalChange = React.useCallback(
+    (value: number) => {
       const nextValue = clampPadding(value);
-      if (side === "top") {
-        onTopChange(nextValue);
+      if (linked) {
+        onLinkedChange(nextValue);
         return;
       }
-      if (side === "right") {
-        onRightChange(nextValue);
-        return;
-      }
-      if (side === "bottom") {
-        onBottomChange(nextValue);
-        return;
-      }
-      onLeftChange(nextValue);
+      onHorizontalChange(nextValue);
     },
-    [onBottomChange, onLeftChange, onRightChange, onTopChange]
+    [linked, onHorizontalChange, onLinkedChange]
   );
 
-  const getSideValue = React.useCallback(
-    (side: PaddingSide) => {
-      if (side === "top") return top;
-      if (side === "right") return right;
-      if (side === "bottom") return bottom;
-      return left;
-    },
-    [bottom, left, right, top]
-  );
-
-  const handleActiveSideChange = React.useCallback((side: PaddingSide | null) => {
-    setHoveredSide(side);
-  }, []);
-
-  const handleSideDragStart = React.useCallback(
-    (side: PaddingSide, event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.pointerType === "mouse" && event.button !== 0) {
+  const handleVerticalChange = React.useCallback(
+    (value: number) => {
+      const nextValue = clampPadding(value);
+      if (linked) {
+        onLinkedChange(nextValue);
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
-      setHoveredSide(side);
-      setDragSide(side);
-      dragStateRef.current = {
-        side,
-        startX: event.clientX,
-        startY: event.clientY,
-        startValue: getSideValue(side)
-      };
+      onVerticalChange(nextValue);
     },
-    [getSideValue]
+    [linked, onLinkedChange, onVerticalChange]
   );
-
-  React.useEffect(() => {
-    if (!dragSide) {
-      return;
-    }
-
-    const dragCursor = dragSide === "left" || dragSide === "right"
-      ? "ew-resize"
-      : "ns-resize";
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = dragCursor;
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const drag = dragStateRef.current;
-      if (!drag) {
-        return;
-      }
-
-      const dx = event.clientX - drag.startX;
-      const dy = event.clientY - drag.startY;
-
-      let delta = 0;
-      if (drag.side === "right") {
-        delta = dx / PADDING_PREVIEW_SCALE;
-      } else if (drag.side === "left") {
-        delta = -dx / PADDING_PREVIEW_SCALE;
-      } else if (drag.side === "bottom") {
-        delta = dy / PADDING_PREVIEW_SCALE;
-      } else {
-        delta = -dy / PADDING_PREVIEW_SCALE;
-      }
-
-      setSideValue(drag.side, Math.round(drag.startValue + delta));
-    };
-
-    const stopDragging = () => {
-      dragStateRef.current = null;
-      setDragSide(null);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-
-    return () => {
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-    };
-  }, [dragSide, setSideValue]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <div className="flex items-center justify-between gap-2">
         <Label className="text-sm text-foreground">{label}</Label>
-        <Button
-          type="button"
-          variant={linked ? "outline" : "secondary"}
-          size="sm"
-          className="h-7 shrink-0 gap-1.5 px-2 text-xs"
-          onClick={onToggleLink}
-        >
-          {linked ? <Unlink className="h-3.5 w-3.5" /> : <Link className="h-3.5 w-3.5" />}
-          {linked ? "Edit individual sides" : "Edit all sides together"}
-        </Button>
+        <TooltipProvider delayDuration={250}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                aria-label={modeTooltip}
+                onClick={onToggleLink}
+              >
+                {linked ? (
+                  <Link className="h-3.5 w-3.5" />
+                ) : (
+                  <Unlink className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{modeTooltip}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
-      {linked ? (
-        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-          <Slider
-            min={PADDING_MIN}
-            max={PADDING_MAX}
-            step={PADDING_STEP}
-            value={[top]}
-            onValueChange={([nextValue]) => onLinkedChange(clampPadding(nextValue))}
-          />
-          <StepperInput
-            value={top}
-            min={PADDING_MIN}
-            max={PADDING_MAX}
-            step={PADDING_STEP}
-            aria-label={label}
-            inputClassName="w-12"
-            onChange={(nextValue) => onLinkedChange(clampPadding(nextValue))}
-          />
-        </div>
-      ) : (
-        <div className="grid grid-cols-[max-content_auto_max-content] grid-rows-[auto_auto_auto] justify-center gap-x-3 gap-y-2">
-          <div className="col-start-2 row-start-1 justify-self-center">
-            <PaddingSideField
-              side="top"
-              value={top}
-              active={activeSide === "top"}
-              onChange={onTopChange}
-              onActiveChange={handleActiveSideChange}
-            />
-          </div>
-          <div className="col-start-1 row-start-2 justify-self-end">
-            <PaddingSideField
-              side="left"
-              value={left}
-              active={activeSide === "left"}
-              onChange={onLeftChange}
-              onActiveChange={handleActiveSideChange}
-            />
-          </div>
-          <div className="col-start-2 row-start-2">
-            <PaddingPreview
-              top={top}
-              right={right}
-              bottom={bottom}
-              left={left}
-              color={previewColor}
-              opacity={previewOpacity}
-              radius={previewRadius}
-              activeSide={activeSide}
-              onActiveSideChange={handleActiveSideChange}
-              onSideDragStart={handleSideDragStart}
-            />
-          </div>
-          <div className="col-start-3 row-start-2 justify-self-start">
-            <PaddingSideField
-              side="right"
-              value={right}
-              active={activeSide === "right"}
-              onChange={onRightChange}
-              onActiveChange={handleActiveSideChange}
-            />
-          </div>
-          <div className="col-start-2 row-start-3 justify-self-center">
-            <PaddingSideField
-              side="bottom"
-              value={bottom}
-              active={activeSide === "bottom"}
-              onChange={onBottomChange}
-              onActiveChange={handleActiveSideChange}
-            />
-          </div>
-        </div>
-      )}
+      <div className="space-y-2">
+        <PaddingAxisRow
+          iconUrl={horizontalPaddingIconUrl}
+          label="Horizontal padding"
+          value={horizontal}
+          onChange={handleHorizontalChange}
+        />
+        <PaddingAxisRow
+          iconUrl={verticalPaddingIconUrl}
+          label="Vertical padding"
+          value={vertical}
+          onChange={handleVerticalChange}
+        />
+      </div>
     </div>
   );
 };
@@ -828,6 +557,14 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
     previewAppearance.line_bg_padding_bottom ?? previewAppearance.line_bg_padding ?? 8;
   const linePaddingLeft =
     previewAppearance.line_bg_padding_left ?? previewAppearance.line_bg_padding ?? 8;
+  const wordPaddingTop =
+    previewAppearance.word_bg_padding_top ?? previewAppearance.word_bg_padding ?? 8;
+  const wordPaddingRight =
+    previewAppearance.word_bg_padding_right ?? previewAppearance.word_bg_padding ?? 8;
+  const wordPaddingBottom =
+    previewAppearance.word_bg_padding_bottom ?? previewAppearance.word_bg_padding ?? 8;
+  const wordPaddingLeft =
+    previewAppearance.word_bg_padding_left ?? previewAppearance.word_bg_padding ?? 8;
 
   const outlineColor =
     previewAppearance.outline_color === "auto"
@@ -868,24 +605,11 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
   }
 
   if (effectId === "background" && previewAppearance.background_mode === "line") {
-    const linePaddingTop =
-      previewAppearance.line_bg_padding_top ?? previewAppearance.line_bg_padding ?? 8;
-    const linePaddingRight =
-      previewAppearance.line_bg_padding_right ?? previewAppearance.line_bg_padding ?? 8;
-    const linePaddingBottom =
-      previewAppearance.line_bg_padding_bottom ?? previewAppearance.line_bg_padding ?? 8;
-    const linePaddingLeft =
-      previewAppearance.line_bg_padding_left ?? previewAppearance.line_bg_padding ?? 8;
-    const scaledTop = scalePaddingPreview(linePaddingTop);
-    const scaledRight = scalePaddingPreview(linePaddingRight);
-    const scaledBottom = scalePaddingPreview(linePaddingBottom);
-    const scaledLeft = scalePaddingPreview(linePaddingLeft);
-
     baseStyle.backgroundColor = colorWithOpacity(
       previewAppearance.line_bg_color,
       previewAppearance.line_bg_opacity
     );
-    baseStyle.padding = `${scaledTop}px ${scaledRight}px ${scaledBottom}px ${scaledLeft}px`;
+    baseStyle.padding = `${linePaddingTop}px ${linePaddingRight}px ${linePaddingBottom}px ${linePaddingLeft}px`;
     baseStyle.borderRadius = `${Math.max(4, Math.round(previewAppearance.line_bg_radius * 0.6))}px`;
   }
 
@@ -895,10 +619,28 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
       preview.highlightOpacity
     )
   };
+  const karaokeWordPreviewStyle: React.CSSProperties =
+    previewAppearance.background_mode === "word"
+      ? {
+          display: "inline-flex",
+          alignItems: "center",
+          padding: `${wordPaddingTop}px ${wordPaddingRight}px ${wordPaddingBottom}px ${wordPaddingLeft}px`,
+          borderRadius: `${Math.max(4, Math.round(previewAppearance.word_bg_radius * 0.6))}px`,
+          backgroundColor: colorWithOpacity(
+            previewAppearance.word_bg_color,
+            previewAppearance.word_bg_opacity
+          )
+        }
+      : {};
 
+  const needsPreviewSurface =
+    resolvedTheme === "dark" &&
+    (effectId === "outline" || effectId === "shadow");
   const previewContainerClassName =
     resolvedTheme === "dark"
-      ? "flex min-h-[5.25rem] w-full items-center justify-center rounded-2xl border border-border/50 bg-muted/30 px-3 text-center"
+      ? needsPreviewSurface
+        ? "flex min-h-[5.25rem] w-full items-center justify-center rounded-2xl border border-border/70 bg-white/30 px-3 text-center"
+        : "flex min-h-[5.25rem] w-full items-center justify-center rounded-2xl px-3 text-center"
       : "flex min-h-[5.25rem] w-full items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.24),transparent_58%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))] px-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]";
 
   if (effectId === "karaoke") {
@@ -912,18 +654,7 @@ const EffectCardPreview = ({ effectId }: { effectId: WorkbenchEffectId }) => {
           style={{ ...baseStyle, fontSize: "2.025rem" }}
         >
           <span>This will </span>
-          <span className="relative">
-            {previewAppearance.background_mode === "word" && (
-              <span
-                className="absolute inset-0 z-[-1] rounded-md"
-                style={{
-                  backgroundColor: colorWithOpacity(
-                    previewAppearance.word_bg_color,
-                    previewAppearance.word_bg_opacity
-                  )
-                }}
-              />
-            )}
+          <span className="relative" style={karaokeWordPreviewStyle}>
             <span style={wordHighlightStyle}>highlight</span>
           </span>
           <span> spoken words</span>
@@ -954,16 +685,18 @@ const WorkbenchEffectsPanel = ({
   onResetEffect,
   onPreviewEffect
 }: WorkbenchEffectsPanelProps) => {
-  const [focusedEffect, setFocusedEffect] = React.useState<WorkbenchEffectId | null>(null);
   const [expandedEffects, setExpandedEffects] = React.useState<Set<WorkbenchEffectId>>(
-    () => new Set()
+    () => new Set(getActiveEffectIds(appearance))
   );
   const [expandedVisibleEffects, setExpandedVisibleEffects] = React.useState<
     Set<WorkbenchEffectId>
-  >(() => new Set());
+  >(() => new Set(getActiveEffectIds(appearance)));
   const [collapsingEffects, setCollapsingEffects] = React.useState<
     Set<WorkbenchEffectId>
   >(() => new Set());
+  const previousActiveEffectsRef = React.useRef<Set<WorkbenchEffectId>>(
+    new Set(getActiveEffectIds(appearance))
+  );
 
   const COLLAPSE_DURATION_MS = 200;
 
@@ -993,14 +726,7 @@ const WorkbenchEffectsPanel = ({
   const [draftShadowAngle, setDraftShadowAngle] = React.useState(
     DEFAULT_SHADOW_UI_ANGLE_DEGREES
   );
-  const activeEffects = React.useMemo(
-    () => effectOrder.filter((effectId) => isEffectActive(effectId, appearance)),
-    [appearance]
-  );
-  const resolvedFocusedEffect =
-    focusedEffect && isEffectActive(focusedEffect, appearance)
-      ? focusedEffect
-      : null;
+  const activeEffects = React.useMemo(() => getActiveEffectIds(appearance), [appearance]);
   const shadowPolar = React.useMemo(
     () => shadowOffsetsToUiPolar(appearance.shadow_offset_x, appearance.shadow_offset_y),
     [appearance.shadow_offset_x, appearance.shadow_offset_y]
@@ -1013,10 +739,50 @@ const WorkbenchEffectsPanel = ({
   const karaokeActive = isKaraokeActive(appearance);
 
   React.useEffect(() => {
-    if (focusedEffect && !isEffectActive(focusedEffect, appearance)) {
-      setFocusedEffect(activeEffects[0] ?? null);
+    const previousActiveEffects = previousActiveEffectsRef.current;
+    const nextActiveEffects = new Set(activeEffects);
+    const newlyActive = effectOrder.filter(
+      (effectId) =>
+        nextActiveEffects.has(effectId) && !previousActiveEffects.has(effectId)
+    );
+    const newlyInactive = effectOrder.filter(
+      (effectId) =>
+        previousActiveEffects.has(effectId) && !nextActiveEffects.has(effectId)
+    );
+
+    if (newlyActive.length > 0) {
+      setCollapsingEffects((prev) => {
+        const next = new Set(prev);
+        newlyActive.forEach((effectId) => next.delete(effectId));
+        return next;
+      });
+      setExpandedEffects((prev) => {
+        const next = new Set(prev);
+        newlyActive.forEach((effectId) => next.add(effectId));
+        return next;
+      });
     }
-  }, [activeEffects, appearance, focusedEffect]);
+
+    if (newlyInactive.length > 0) {
+      setCollapsingEffects((prev) => {
+        const next = new Set(prev);
+        newlyInactive.forEach((effectId) => next.add(effectId));
+        return next;
+      });
+      setExpandedVisibleEffects((prev) => {
+        const next = new Set(prev);
+        newlyInactive.forEach((effectId) => next.delete(effectId));
+        return next;
+      });
+      setExpandedEffects((prev) => {
+        const next = new Set(prev);
+        newlyInactive.forEach((effectId) => next.delete(effectId));
+        return next;
+      });
+    }
+
+    previousActiveEffectsRef.current = nextActiveEffects;
+  }, [activeEffects]);
 
   React.useEffect(() => {
     if (shadowPolar.hasVisibleOffset) {
@@ -1028,16 +794,15 @@ const WorkbenchEffectsPanel = ({
     onAppearanceChange(changes);
   };
 
-  const handleCardClick = (effectId: WorkbenchEffectId) => {
-    const isActive = isEffectActive(effectId, appearance);
-    if (isActive) {
-      if (resolvedFocusedEffect === effectId) {
-        const remaining = effectOrder.filter(
-          (candidate) =>
-            candidate !== effectId && isEffectActive(candidate, appearance)
-        );
-        setFocusedEffect(remaining[0] ?? null);
-      }
+  const handleSwitchChange = (effectId: WorkbenchEffectId) => (checked: boolean) => {
+    if (checked) {
+      setCollapsingEffects((prev) => {
+        const next = new Set(prev);
+        next.delete(effectId);
+        return next;
+      });
+      setExpandedEffects((prev) => new Set(prev).add(effectId));
+    } else {
       setCollapsingEffects((prev) => new Set(prev).add(effectId));
       setExpandedVisibleEffects((prev) => {
         const next = new Set(prev);
@@ -1049,58 +814,8 @@ const WorkbenchEffectsPanel = ({
         next.delete(effectId);
         return next;
       });
-    } else {
-      setExpandedEffects((prev) => new Set(prev).add(effectId));
     }
     onToggleEffect(effectId);
-  };
-
-  const handleCheckboxChange = (effectId: WorkbenchEffectId) => (
-    checked: boolean | "indeterminate"
-  ) => {
-    if (checked === "indeterminate") return;
-    if (checked) {
-      onToggleEffect(effectId);
-      setExpandedEffects((prev) => new Set(prev).add(effectId));
-    } else {
-      if (resolvedFocusedEffect === effectId) {
-        const remaining = effectOrder.filter(
-          (candidate) =>
-            candidate !== effectId && isEffectActive(candidate, appearance)
-        );
-        setFocusedEffect(remaining[0] ?? null);
-      }
-      setCollapsingEffects((prev) => new Set(prev).add(effectId));
-      setExpandedVisibleEffects((prev) => {
-        const next = new Set(prev);
-        next.delete(effectId);
-        return next;
-      });
-      setExpandedEffects((prev) => {
-        const next = new Set(prev);
-        next.delete(effectId);
-        return next;
-      });
-      onToggleEffect(effectId);
-    }
-  };
-
-  const toggleExpanded = (effectId: WorkbenchEffectId) => (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setExpandedEffects((prev) => {
-      const next = new Set(prev);
-      if (next.has(effectId)) {
-        next.delete(effectId);
-        setExpandedVisibleEffects((v) => {
-          const vNext = new Set(v);
-          vNext.delete(effectId);
-          return vNext;
-        });
-      } else {
-        next.add(effectId);
-      }
-      return next;
-    });
   };
 
   const handleShadowAngleChange = (value: number) => {
@@ -1168,7 +883,7 @@ const WorkbenchEffectsPanel = ({
             />
           </div>
           <SliderRow
-            label="Width"
+            label="Thickness"
             value={appearance.outline_width}
             min={1}
             max={10}
@@ -1186,7 +901,7 @@ const WorkbenchEffectsPanel = ({
     if (effectId === "shadow") {
       return (
         <div className="space-y-4" data-testid="workbench-effect-detail-shadow">
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             <Label className="text-sm text-foreground">Color</Label>
             <ColorRow
               kind="shadow"
@@ -1263,9 +978,17 @@ const WorkbenchEffectsPanel = ({
               variant="outline"
               size="sm"
               value={backgroundMode}
-              onValueChange={(value) =>
-                value && patch({ background_mode: value as SubtitleStyleAppearance["background_mode"] })
-              }
+              onValueChange={(value) => {
+                if (!value) return;
+                if (value === "word" && !karaokeActive) {
+                  patch({
+                    background_mode: "word",
+                    subtitle_mode: "word_highlight"
+                  });
+                } else {
+                  patch({ background_mode: value as SubtitleStyleAppearance["background_mode"] });
+                }
+              }}
               className="flex w-full"
             >
               <ToggleGroupItem
@@ -1278,7 +1001,6 @@ const WorkbenchEffectsPanel = ({
               <ToggleGroupItem
                 value="word"
                 aria-label="Around spoken word"
-                disabled={!karaokeActive}
                 data-testid="workbench-effect-background-mode-word"
                 className="basis-0 grow-[1.45] justify-center"
               >
@@ -1286,15 +1008,16 @@ const WorkbenchEffectsPanel = ({
               </ToggleGroupItem>
             </ToggleGroup>
             {!karaokeActive && (
-              <p className="text-xs text-muted-foreground">
-                Word backgrounds unlock when Karaoke is active.
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Info className="h-3 w-3 shrink-0 self-center" aria-hidden />
+                Selecting Around spoken word turns on Karaoke.
               </p>
             )}
           </div>
 
           {backgroundMode === "line" && (
             <div className="space-y-4">
-              <div className="space-y-1.5">
+              <div className="flex flex-col gap-1.5">
                 <Label className="text-sm text-foreground">
                   Color
                 </Label>
@@ -1321,9 +1044,6 @@ const WorkbenchEffectsPanel = ({
                 right={linePaddingRight}
                 bottom={linePaddingBottom}
                 left={linePaddingLeft}
-                previewColor={appearance.line_bg_color}
-                previewOpacity={appearance.line_bg_opacity}
-                previewRadius={appearance.line_bg_radius}
                 linked={appearance.line_bg_padding_linked ?? true}
                 onToggleLink={() => {
                   const linked = appearance.line_bg_padding_linked ?? true;
@@ -1331,7 +1051,10 @@ const WorkbenchEffectsPanel = ({
                     patch({ line_bg_padding_linked: false });
                     return;
                   }
-                  const linkedValue = appearance.line_bg_padding ?? linePaddingTop;
+                  const linkedValue = getSplitPaddingValue(
+                    getSplitPaddingValue(linePaddingLeft, linePaddingRight),
+                    getSplitPaddingValue(linePaddingTop, linePaddingBottom)
+                  );
                   patch({
                     line_bg_padding_linked: true,
                     line_bg_padding: linkedValue,
@@ -1350,10 +1073,18 @@ const WorkbenchEffectsPanel = ({
                     line_bg_padding_left: value
                   })
                 }
-                onTopChange={(value) => patch({ line_bg_padding_top: value })}
-                onRightChange={(value) => patch({ line_bg_padding_right: value })}
-                onBottomChange={(value) => patch({ line_bg_padding_bottom: value })}
-                onLeftChange={(value) => patch({ line_bg_padding_left: value })}
+                onHorizontalChange={(value) =>
+                  patch({
+                    line_bg_padding_right: value,
+                    line_bg_padding_left: value
+                  })
+                }
+                onVerticalChange={(value) =>
+                  patch({
+                    line_bg_padding_top: value,
+                    line_bg_padding_bottom: value
+                  })
+                }
               />
               <SliderRow
                 label="Corner roundness"
@@ -1368,7 +1099,7 @@ const WorkbenchEffectsPanel = ({
 
           {backgroundMode === "word" && (
             <div className="space-y-4">
-              <div className="space-y-1.5">
+              <div className="flex flex-col gap-1.5">
                 <Label className="text-sm text-foreground">
                   Color
                 </Label>
@@ -1395,9 +1126,6 @@ const WorkbenchEffectsPanel = ({
                 right={wordPaddingRight}
                 bottom={wordPaddingBottom}
                 left={wordPaddingLeft}
-                previewColor={appearance.word_bg_color}
-                previewOpacity={appearance.word_bg_opacity}
-                previewRadius={appearance.word_bg_radius}
                 linked={appearance.word_bg_padding_linked ?? true}
                 onToggleLink={() => {
                   const linked = appearance.word_bg_padding_linked ?? true;
@@ -1405,7 +1133,10 @@ const WorkbenchEffectsPanel = ({
                     patch({ word_bg_padding_linked: false });
                     return;
                   }
-                  const linkedValue = appearance.word_bg_padding ?? wordPaddingTop;
+                  const linkedValue = getSplitPaddingValue(
+                    getSplitPaddingValue(wordPaddingLeft, wordPaddingRight),
+                    getSplitPaddingValue(wordPaddingTop, wordPaddingBottom)
+                  );
                   patch({
                     word_bg_padding_linked: true,
                     word_bg_padding: linkedValue,
@@ -1424,10 +1155,18 @@ const WorkbenchEffectsPanel = ({
                     word_bg_padding_left: value
                   })
                 }
-                onTopChange={(value) => patch({ word_bg_padding_top: value })}
-                onRightChange={(value) => patch({ word_bg_padding_right: value })}
-                onBottomChange={(value) => patch({ word_bg_padding_bottom: value })}
-                onLeftChange={(value) => patch({ word_bg_padding_left: value })}
+                onHorizontalChange={(value) =>
+                  patch({
+                    word_bg_padding_right: value,
+                    word_bg_padding_left: value
+                  })
+                }
+                onVerticalChange={(value) =>
+                  patch({
+                    word_bg_padding_top: value,
+                    word_bg_padding_bottom: value
+                  })
+                }
               />
               <SliderRow
                 label="Corner roundness"
@@ -1445,7 +1184,7 @@ const WorkbenchEffectsPanel = ({
 
     return (
       <div className="space-y-4" data-testid="workbench-effect-detail-karaoke">
-        <div className="space-y-1.5">
+        <div className="flex flex-col gap-1.5">
           <Label className="text-sm text-foreground">Color</Label>
           <ColorRow
             kind="highlight"
@@ -1479,15 +1218,13 @@ const WorkbenchEffectsPanel = ({
         } as React.CSSProperties
       }
     >
-      <section className="space-y-3 pt-4">
+      <section className="space-y-3 pt-2">
         <div
           className="flex flex-col gap-5"
           data-testid="workbench-effects-grid"
         >
-            {effectOrder.map((effectId) => {
+          {effectOrder.map((effectId) => {
             const active = isEffectActive(effectId, appearance);
-            const focused = resolvedFocusedEffect === effectId;
-            const expanded = expandedEffects.has(effectId);
             const expandedVisible = expandedVisibleEffects.has(effectId);
             const isCollapsing = collapsingEffects.has(effectId);
             const showExpandable = active || isCollapsing;
@@ -1496,43 +1233,27 @@ const WorkbenchEffectsPanel = ({
               <div
                 key={effectId}
                 data-testid={`workbench-effect-card-${effectId}`}
-                onClick={() => handleCardClick(effectId)}
                 onMouseEnter={() => onPreviewEffect(effectId)}
                 onMouseLeave={() => onPreviewEffect(null)}
                 className={cn(
-                  "group relative flex min-h-0 flex-col items-stretch gap-4 rounded-lg border border-border bg-card px-4 py-3 text-left shadow-[var(--shadow-card)] transition-colors cursor-pointer",
-                  active && "border-primary/50 bg-muted/30",
-                  !active && "hover:bg-muted/30",
-                  focused && active && "ring-2 ring-primary/20 ring-offset-2 ring-offset-card",
-                  !expanded && "pb-6"
+                  "group relative flex min-h-0 flex-col items-stretch gap-4 rounded-lg border border-border bg-card px-4 py-3 text-left shadow-[var(--shadow-card)] transition-colors"
                 )}
               >
-                <div className="flex w-full items-center gap-2 pr-24">
-                  <div
-                    className="flex shrink-0"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Checkbox
-                      checked={active}
-                      onCheckedChange={handleCheckboxChange(effectId)}
-                      aria-label={`Toggle ${effectLabels[effectId]}`}
-                      data-testid={`workbench-effect-card-${effectId}-checkbox`}
-                      className="group-hover:bg-muted data-[state=checked]:group-hover:bg-primary/80"
-                    />
+                <div className="flex w-full items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <span className="text-lg font-semibold text-foreground">
+                      {effectLabels[effectId]}
+                    </span>
                   </div>
-                  <span className="text-lg font-semibold text-foreground">
-                    {effectLabels[effectId]}
-                  </span>
-                </div>
-                {active && (
-                  <div className="absolute right-4 top-3 flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-2">
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
+                      disabled={!showReset}
                       className={cn(
                         "h-7 px-2 text-xs",
-                        !showReset && "invisible pointer-events-none"
+                        !showReset && "invisible"
                       )}
                       data-testid={`workbench-effect-reset-${effectId}`}
                       onClick={(e) => {
@@ -1542,24 +1263,14 @@ const WorkbenchEffectsPanel = ({
                     >
                       Reset
                     </Button>
-                    <button
-                      type="button"
-                      aria-label={expanded ? "Collapse" : "Expand"}
-                      className="-m-2 flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleExpanded(effectId)(e);
-                      }}
-                    >
-                      <ChevronDown
-                        className={cn(
-                          "h-4 w-4 transition-transform duration-200 ease-out",
-                          expanded && "rotate-180"
-                        )}
-                      />
-                    </button>
+                    <Switch
+                      checked={active}
+                      onCheckedChange={handleSwitchChange(effectId)}
+                      aria-label={`Toggle ${effectLabels[effectId]}`}
+                      data-testid={`workbench-effect-card-${effectId}-switch`}
+                    />
                   </div>
-                )}
+                </div>
                 <div className="min-h-[5.25rem]">
                   <EffectCardPreview effectId={effectId} />
                 </div>
@@ -1571,10 +1282,7 @@ const WorkbenchEffectsPanel = ({
                     )}
                   >
                     <div className="min-h-0 overflow-x-visible overflow-y-hidden">
-                      <div
-                        className="space-y-4 pt-3"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                      <div className="space-y-4 pt-3">
                         {renderEffectControls(effectId)}
                       </div>
                     </div>

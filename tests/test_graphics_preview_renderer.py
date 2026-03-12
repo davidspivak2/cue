@@ -7,6 +7,9 @@ import pytest
 
 from app.graphics_preview_renderer import (
     _build_text_layout,
+    _build_line_paths,
+    _compute_text_rect_from_lines,
+    _compute_text_rect_from_paths,
     _resolve_qt_font_family,
     build_preview_cache_key,
 )
@@ -132,3 +135,27 @@ def test_build_preview_cache_key_changes_for_new_typography_fields() -> None:
     assert key_default != key_weight
     assert key_default != key_align
     assert key_default != key_spacing
+
+
+def test_build_text_layout_keeps_centered_rtl_text_centered() -> None:
+    pytest.importorskip("PySide6")
+    style = replace(preset_defaults(PRESET_DEFAULT), font_family="IBM Plex Sans Hebrew")
+    text = "הספר האדם והטבע של א.ד גורדון"
+    font = _build_font(style)
+
+    layout, lines, _ = _build_text_layout(
+        text,
+        font,
+        width=1280,
+        height=720,
+        position_x=0.5,
+        position_y=0.8,
+        text_align="center",
+        line_spacing=1.0,
+    )
+    text_rect = _compute_text_rect_from_lines(lines)
+    path_rect = _compute_text_rect_from_paths(_build_line_paths(layout, lines, text, font))
+
+    assert abs(text_rect.center().x() - 640.0) <= 1.0
+    assert abs(path_rect.center().x() - 640.0) <= 2.0
+    assert abs(path_rect.center().x() - text_rect.center().x()) <= 2.0

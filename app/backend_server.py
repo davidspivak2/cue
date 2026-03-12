@@ -629,6 +629,26 @@ def _resolve_export_request_from_project(payload: JobRequest) -> None:
     payload.style_path = artifacts.get("style_path")
 
 
+def _reuses_existing_subtitles(payload: JobRequest) -> bool:
+    if payload.kind != "create_subtitles":
+        return False
+    options = payload.options if isinstance(payload.options, dict) else {}
+    return bool(options.get("reuse_existing_subtitles"))
+
+
+def _resolve_create_subtitles_request_from_project(payload: JobRequest) -> None:
+    if not payload.project_id or not _reuses_existing_subtitles(payload):
+        return
+    artifacts = project_store.get_project_export_artifacts(payload.project_id)
+    video_path = artifacts.get("video_path")
+    subtitles_path = artifacts.get("subtitles_path")
+    if isinstance(video_path, str) and video_path:
+        payload.input_path = video_path
+    if isinstance(subtitles_path, str) and subtitles_path:
+        payload.srt_path = subtitles_path
+    payload.word_timings_path = artifacts.get("word_timings_path")
+
+
 def _resolve_port() -> int:
     raw = os.getenv("CUE_BACKEND_PORT")
     if not raw:
@@ -1200,6 +1220,11 @@ async def _queue_worker_create_subtitles() -> None:
             _mark_cancelled(job)
             continue
         if job.status != "running":
+            create_heading = (
+                "Syncing karaoke timing"
+                if _reuses_existing_subtitles(request)
+                else "Creating subtitles"
+            )
             job.status = "running"
             job.started_at = datetime.now(timezone.utc)
             _enqueue_event(
@@ -1207,7 +1232,7 @@ async def _queue_worker_create_subtitles() -> None:
                 _build_event(
                     job.job_id,
                     "started",
-                    heading="Creating subtitles",
+                    heading=create_heading,
                     message="Preparing audio",
                 ),
             )
@@ -1583,6 +1608,8 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
     request_received_at = datetime.now(timezone.utc)
     if payload.project_id:
         project_store.get_project(payload.project_id)
+    if payload.kind == "create_subtitles" and payload.project_id:
+        _resolve_create_subtitles_request_from_project(payload)
     if payload.kind == "create_video_with_subtitles" and payload.project_id:
         _resolve_export_request_from_project(payload)
     if payload.kind in {"pipeline", "create_subtitles", "create_video_with_subtitles", "calibrate"}:
@@ -1659,6 +1686,11 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
         events_url = f"http://{HOST}:{PORT}/jobs/{job_id}/events"
         return {"job_id": job_id, "events_url": events_url, "status": job.status}
     if payload.kind == "create_subtitles":
+        create_heading = (
+            "Syncing karaoke timing"
+            if _reuses_existing_subtitles(payload)
+            else "Creating subtitles"
+        )
         slot_free = _count_running_by_kind("create_subtitles") == 0
         if slot_free:
             job.status = "running"
@@ -1668,7 +1700,7 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
                 _build_event(
                     job_id,
                     "started",
-                    heading="Creating subtitles",
+                    heading=create_heading,
                     message="Preparing audio",
                 ),
             )
@@ -1852,6 +1884,7 @@ def get_project_word_timings(project_id: str) -> dict[str, Any]:
         }
 
     stale = is_word_timing_stale(word_timings_path, subtitles_path)
+    total_words = sum(len(cue.words) for cue in doc.cues)
     document_payload = {
         "schema_version": doc.schema_version,
         "created_utc": doc.created_utc,
@@ -1876,6 +1909,13 @@ def get_project_word_timings(project_id: str) -> dict[str, Any]:
             for cue in doc.cues
         ],
     }
+    if total_words <= 0:
+        return {
+            "available": False,
+            "stale": stale,
+            "reason": "word_timings_empty",
+            "document": document_payload,
+        }
     return {
         "available": True,
         "stale": stale,

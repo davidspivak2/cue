@@ -561,12 +561,9 @@ def _build_text_layout(
 ) -> tuple[QtGui.QTextLayout, list[QtGui.QTextLine], float]:
     layout = QtGui.QTextLayout(text, font)
     option = QtGui.QTextOption()
-    alignment = QtCore.Qt.AlignCenter
-    if text_align == "left":
-        alignment = QtCore.Qt.AlignLeft
-    elif text_align == "right":
-        alignment = QtCore.Qt.AlignRight
-    option.setAlignment(alignment)
+    # Horizontal placement is handled below so fill, outline, and backgrounds
+    # all share one coordinate system across LTR and RTL text.
+    option.setAlignment(QtCore.Qt.AlignLeft)
     option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
     if _is_rtl(text):
         option.setTextDirection(QtCore.Qt.RightToLeft)
@@ -1030,12 +1027,7 @@ def _build_line_paths(
         if not line.textLength():
             continue
         baseline = QtCore.QPointF(line.position().x(), line.position().y() + line.ascent())
-        expected = QtCore.QRectF(
-            line.position().x(),
-            line.position().y(),
-            line.naturalTextWidth(),
-            line.height(),
-        )
+        expected = _line_text_rect(line)
         runs = _glyph_runs_for_line(layout, line) if glyph_runs_supported else None
         if runs is None:
             line_path = QtGui.QPainterPath()
@@ -1110,16 +1102,27 @@ def _compute_text_rect_from_paths(paths: Iterable[QtGui.QPainterPath]) -> QtCore
 def _compute_text_rect_from_lines(lines: Iterable[QtGui.QTextLine]) -> QtCore.QRectF:
     rect: Optional[QtCore.QRectF] = None
     for line in lines:
-        if not line.textLength():
+        line_rect = _line_text_rect(line)
+        if line_rect.isEmpty():
             continue
-        line_rect = QtCore.QRectF(
-            line.position().x(),
-            line.position().y(),
-            line.naturalTextWidth(),
-            line.height(),
-        )
         rect = line_rect if rect is None else rect.united(line_rect)
     return rect or QtCore.QRectF()
+
+
+def _line_text_rect(line: QtGui.QTextLine) -> QtCore.QRectF:
+    if not line.textLength():
+        return QtCore.QRectF()
+    line_start = line.textStart()
+    line_end = line_start + line.textLength()
+    x_start = _to_layout_x(line, _cursor_x_value(line.cursorToX(line_start)))
+    x_end = _to_layout_x(line, _cursor_x_value(line.cursorToX(line_end)))
+    left = min(x_start, x_end)
+    right = max(x_start, x_end)
+    width = right - left
+    if width <= 0:
+        left = float(line.position().x())
+        width = float(line.naturalTextWidth())
+    return QtCore.QRectF(left, float(line.y()), width, float(line.height()))
 
 
 def _compute_text_rect_from_metrics(

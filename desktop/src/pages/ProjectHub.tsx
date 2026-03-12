@@ -94,6 +94,9 @@ const PROJECT_HUB_VIEW_KEY = "cue_project_hub_view";
 const PROJECT_HUB_LAST_COUNT_KEY = "cue_project_hub_last_count";
 const ADD_VIDEO_BUTTON = "Add video";
 const REMOVE_FROM_CUE_LABEL = "Remove from Cue";
+const PROJECT_LIST_ACTIONS_COLUMN_WIDTH = "3.75rem";
+const PROJECT_LIST_DATA_COLUMN_WIDTH =
+  `calc((100% - ${PROJECT_LIST_ACTIONS_COLUMN_WIDTH}) / 4)`;
 
 type ViewMode = "cards" | "list";
 
@@ -1241,11 +1244,15 @@ const ProjectHub = () => {
           <Table className="table-fixed w-full">
             <TableHeader>
               <TableRow>
-                <TableHead scope="col" className="min-w-0 px-2" style={{ width: "calc((100% - 60px) / 4)" }}>Video</TableHead>
-                <TableHead scope="col" className="min-w-0 pl-2 pr-6" style={{ width: "calc((100% - 60px) / 4)" }}>Duration</TableHead>
-                <TableHead scope="col" className="min-w-0 pl-6 pr-2" style={{ width: "calc((100% - 60px) / 4)" }}>Status</TableHead>
-                <TableHead scope="col" className="min-w-0 px-2" style={{ width: "calc((100% - 60px) / 4)" }}>Progress</TableHead>
-                <TableHead scope="col" className="w-[60px] shrink-0 px-2">
+                <TableHead scope="col" className="min-w-0 px-2" style={{ width: PROJECT_LIST_DATA_COLUMN_WIDTH }}>Video</TableHead>
+                <TableHead scope="col" className="min-w-0 pl-2 pr-6" style={{ width: PROJECT_LIST_DATA_COLUMN_WIDTH }}>Duration</TableHead>
+                <TableHead scope="col" className="min-w-0 pl-6 pr-2" style={{ width: PROJECT_LIST_DATA_COLUMN_WIDTH }}>Status</TableHead>
+                <TableHead scope="col" className="min-w-0 px-2" style={{ width: PROJECT_LIST_DATA_COLUMN_WIDTH }}>Progress</TableHead>
+                <TableHead
+                  scope="col"
+                  className="shrink-0 px-2"
+                  style={{ width: PROJECT_LIST_ACTIONS_COLUMN_WIDTH }}
+                >
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -1377,7 +1384,10 @@ const ProjectHub = () => {
                         </div>
                       ) : null}
                     </TableCell>
-                    <TableCell className="w-[60px] shrink-0 px-2">
+                    <TableCell
+                      className="shrink-0 px-2"
+                      style={{ width: PROJECT_LIST_ACTIONS_COLUMN_WIDTH }}
+                    >
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button

@@ -79,6 +79,7 @@ def run_worker_inprocess(
     )
     options = getattr(request, "options", None) or {}
     settings = _resolve_settings(options)
+    reuse_existing_subtitles = bool(options.get("reuse_existing_subtitles"))
 
     video_path = Path(getattr(request, "input_path", "") or "")
     output_dir = Path(getattr(request, "output_dir", "") or "")
@@ -132,7 +133,9 @@ def run_worker_inprocess(
 
     def _on_started(message: str) -> None:
         heading = (
-            "Creating subtitles"
+            "Syncing karaoke timing"
+            if task_type == TaskType.GENERATE_SRT and reuse_existing_subtitles
+            else "Creating subtitles"
             if task_type == TaskType.GENERATE_SRT
             else "Creating video with subtitles"
         )
@@ -209,6 +212,7 @@ def run_worker_inprocess(
         highlight_opacity=None,
         diagnostics_settings=None,
         session_log_path=log_path,
+        reuse_existing_subtitles=reuse_existing_subtitles,
     )
     direct = QtCore.Qt.ConnectionType.DirectConnection
     worker.signals.log.connect(_on_log, direct)

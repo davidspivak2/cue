@@ -305,7 +305,7 @@ const SubtitleTextControls = ({
     const nextOptions = isCurrentFontUnavailable
       ? [{ ...selectedFont, unavailable: true }, ...fonts]
       : [...fonts];
-    return nextOptions.filter(
+    const deduped = nextOptions.filter(
       (font, index, allFonts) =>
         allFonts.findIndex(
           (candidate) =>
@@ -313,6 +313,14 @@ const SubtitleTextControls = ({
             font.family.trim().toLowerCase()
         ) === index
     );
+    return [...deduped].sort((a, b) => {
+      if (a.unavailable && !b.unavailable) return -1;
+      if (!a.unavailable && b.unavailable) return 1;
+      if (a.unavailable && b.unavailable) return 0;
+      return a.family.localeCompare(b.family, undefined, {
+        sensitivity: "base"
+      });
+    });
   }, [fonts, isCurrentFontUnavailable, selectedFont]);
   const isCurrentWeightListed = selectedFont.weights.includes(currentFontWeight);
   const fontControlsDisabled = fontsLoading || Boolean(fontsError);
@@ -578,9 +586,9 @@ const SubtitleTextControls = ({
               type="button"
               variant="outline"
               className={cn(
-                "h-8 justify-between gap-2 px-3 text-xs font-normal",
+                "h-8 w-auto min-w-0 justify-between gap-2 px-3 text-xs font-normal",
                 toolbarRound,
-                isToolbar ? "min-w-0 max-w-40 shrink" : "min-w-40 max-w-56"
+                isToolbar ? "shrink-0" : "min-w-40"
               )}
               disabled={fontControlsDisabled}
               aria-label="Font family"
@@ -588,7 +596,7 @@ const SubtitleTextControls = ({
             >
               <span className="flex min-w-0 items-center gap-2">
                 <span
-                  className="truncate"
+                  className="whitespace-nowrap"
                   style={
                     isCurrentFontUnavailable
                       ? undefined
@@ -887,7 +895,7 @@ const SubtitleTextControls = ({
             <TooltipContent>Text color</TooltipContent>
           </Tooltip>
           <PopoverContent
-            className="w-80 space-y-3"
+            className="w-80 space-y-3 dark:bg-zinc-700 dark:border-zinc-600 dark:shadow-xl"
             align="center"
             {...floatingToolbarPopoverProps}
           >
@@ -1087,7 +1095,7 @@ const SubtitleTextControls = ({
               align="center"
               {...floatingToolbarPopoverProps}
             >
-              <div className="space-y-1.5">
+              <div className="flex flex-col gap-1.5">
                 <Label className="text-xs text-muted-foreground">
                   Highlight
                 </Label>

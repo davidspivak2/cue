@@ -45,6 +45,9 @@ type ToastItem = {
   actions?: ToastAction[];
 };
 
+const getExportCompleteKey = (projectId: string, outputPath: string, exportedAt: string) =>
+  `${projectId}:${outputPath}:${exportedAt}`;
+
 const AppLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -57,6 +60,7 @@ const AppLayout = () => {
   }, [setShowSplash]);
   const seenNoticeIdsRef = React.useRef<Set<string>>(new Set());
   const seenExportCompleteRef = React.useRef<Set<string>>(new Set());
+  const exportToastBaselineReadyRef = React.useRef(false);
   const locationRef = React.useRef(location);
   locationRef.current = location;
   const [toasts, setToasts] = React.useState<ToastItem[]>([]);
@@ -120,16 +124,16 @@ const AppLayout = () => {
 
   const markExportCompleteSeen = React.useCallback(
     (projectId: string, outputPath: string, exportedAt: string) => {
-      const key = `${projectId}:${outputPath}:${exportedAt}`;
-      seenExportCompleteRef.current.add(key);
+      seenExportCompleteRef.current.add(getExportCompleteKey(projectId, outputPath, exportedAt));
     },
     []
   );
 
   const haveExportCompleteBeenSeen = React.useCallback(
     (projectId: string, outputPath: string, exportedAt: string) => {
-      const key = `${projectId}:${outputPath}:${exportedAt}`;
-      return seenExportCompleteRef.current.has(key);
+      return seenExportCompleteRef.current.has(
+        getExportCompleteKey(projectId, outputPath, exportedAt)
+      );
     },
     []
   );
@@ -180,11 +184,18 @@ const AppLayout = () => {
         }
         for (const project of projects) {
           const outputPath = project.latest_export?.output_video_path;
-          if (!outputPath || project.active_task) {
+          if (!outputPath) {
             continue;
           }
           const exportedAt = project.latest_export?.exported_at ?? "";
-          const key = `${project.project_id}:${outputPath}:${exportedAt}`;
+          const key = getExportCompleteKey(project.project_id, outputPath, exportedAt);
+          if (!exportToastBaselineReadyRef.current) {
+            seenExportCompleteRef.current.add(key);
+            continue;
+          }
+          if (project.active_task) {
+            continue;
+          }
           if (seenExportCompleteRef.current.has(key)) {
             continue;
           }
@@ -210,6 +221,7 @@ const AppLayout = () => {
           }
           pushToast("Export complete", filename, { actions });
         }
+        exportToastBaselineReadyRef.current = true;
       } catch {
         nextDelay = IDLE_TASK_POLL_MS;
       } finally {
