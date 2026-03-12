@@ -1138,6 +1138,7 @@ def _maybe_update_project_from_runner_event(
                     srt_path=payload.get("srt_path"),
                     word_timings_path=payload.get("word_timings_path"),
                 )
+                project_store.refresh_project_status(project_id)
             elif request.kind == "create_video_with_subtitles":
                 exported_at = project_store.record_export_result(
                     project_id,
@@ -1992,7 +1993,7 @@ def preview_style(payload: PreviewStyleRequest) -> dict[str, Any]:
     from .graphics_preview_renderer import build_preview_cache_key, render_graphics_preview
     from .paths import get_preview_frames_dir
     from .srt_utils import parse_srt_file, select_cue_for_timestamp, select_preview_moment
-    from .subtitle_style import normalize_style_model, preset_defaults
+    from .subtitle_style import normalize_style_model, preset_defaults, resolve_style_for_frame
 
     video_path = Path(payload.video_path)
     srt_path = Path(payload.srt_path)
@@ -2068,10 +2069,12 @@ def preview_style(payload: PreviewStyleRequest) -> dict[str, Any]:
     if frame.isNull():
         raise HTTPException(status_code=500, detail="frame_load_failed")
 
+    resolved_style = resolve_style_for_frame(style, frame.height())
+
     result = render_graphics_preview(
         frame,
         subtitle_text=subtitle_text,
-        style=style,
+        style=resolved_style,
         subtitle_mode=payload.subtitle_mode,
         highlight_color=payload.highlight_color,
         highlight_opacity=payload.highlight_opacity,
@@ -2099,8 +2102,10 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
     from .paths import get_preview_frames_dir
     from .subtitle_style import (
         DEFAULT_FONT_NAME,
+        RENDER_MODEL_VERSION,
         normalize_style_model,
         preset_defaults,
+        resolve_style_for_frame,
         style_model_to_dict,
     )
 
@@ -2117,6 +2122,7 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
         highlight_color=payload.highlight_color,
     )
     style = normalize_style_model(payload.subtitle_style, fallback)
+    resolved_style = resolve_style_for_frame(style, height)
     resolved_highlight_color = payload.highlight_color
     resolved_highlight_opacity = max(0.0, min(float(payload.highlight_opacity), 1.0))
 
@@ -2127,11 +2133,12 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
 
     signature = json.dumps(
         {
+            "render_model_version": RENDER_MODEL_VERSION,
             "width": width,
             "height": height,
             "subtitle_text": payload.subtitle_text,
             "highlight_word_index": payload.highlight_word_index,
-            "style": style_model_to_dict(style),
+            "style": style_model_to_dict(resolved_style),
             "resolved_font_family": resolved_font_family,
             "subtitle_mode": payload.subtitle_mode,
             "highlight_color": resolved_highlight_color,
@@ -2163,7 +2170,7 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
     result = render_graphics_preview(
         frame,
         subtitle_text=payload.subtitle_text,
-        style=style,
+        style=resolved_style,
         subtitle_mode=payload.subtitle_mode,
         highlight_color=resolved_highlight_color,
         highlight_opacity=resolved_highlight_opacity,

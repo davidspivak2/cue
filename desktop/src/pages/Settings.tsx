@@ -8,11 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCalibration } from "@/contexts/CalibrationContext";
-import { useDeviceInfo } from "@/contexts/DeviceInfoContext";
+import { useDeviceInfo, useDeviceInfoLoading } from "@/contexts/DeviceInfoContext";
 import { useSettings } from "@/contexts/SettingsContext";
 import {
   fetchSettings,
@@ -166,6 +167,36 @@ const SettingsSection = ({
   </section>
 );
 
+const TranscriptionQualitySkeleton = () => (
+  <div
+    className="mt-5 space-y-4"
+    data-testid="transcription-quality-skeleton"
+    aria-busy="true"
+    aria-label="Loading transcription quality"
+  >
+    <div className="space-y-2">
+      <Skeleton className="h-5 w-52 max-w-full" />
+      <Skeleton className="h-4 w-36 max-w-full" />
+      <Skeleton className="h-4 w-40 max-w-full" />
+    </div>
+    <div className="space-y-3">
+      <div className="px-1.5">
+        <Skeleton className="h-4 w-full rounded-full" />
+      </div>
+      <div className="flex w-full justify-between">
+        <div className="flex flex-col items-start gap-2">
+          <Skeleton className="h-5 w-5 rounded-full" />
+          <Skeleton className="h-4 w-16" />
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <Skeleton className="h-5 w-5 rounded-full" />
+          <Skeleton className="h-4 w-20" />
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 const DIAGNOSTICS_CATEGORIES = [
   { key: "app_system", label: "Include app and system info" },
   { key: "video_info", label: "Include video file info" },
@@ -192,6 +223,7 @@ const Settings = () => {
     null
   );
   const deviceInfo = useDeviceInfo();
+  const isDeviceInfoLoading = useDeviceInfoLoading();
   const { isCalibrating, calibrationPct } = useCalibration();
   const gpuAvailable = deviceInfo?.gpu_available ?? null;
   const ultraAvailable = deviceInfo?.ultra_available === true;
@@ -228,6 +260,7 @@ const Settings = () => {
   const storedInterfaceScale = settings?.interface_scale ?? DEFAULT_INTERFACE_SCALE;
   const interfaceScale = pendingInterfaceScale ?? normalizeInterfaceScale(storedInterfaceScale);
   const interfaceScaleIndex = getInterfaceScaleIndex(interfaceScale);
+  const showTranscriptionQualitySkeleton = deviceInfo === null && isDeviceInfoLoading;
 
   React.useEffect(() => {
     let active = true;
@@ -308,6 +341,7 @@ const Settings = () => {
   React.useEffect(() => {
     if (
       !settings ||
+      !deviceInfo ||
       downgradeUltraPersistedRef.current ||
       steps.includes(storedQuality as (typeof steps)[number])
     ) {
@@ -317,7 +351,7 @@ const Settings = () => {
     void persistSettings({
       transcription_quality: steps[steps.length - 1]
     });
-  }, [settings, storedQuality, steps, persistSettings]);
+  }, [settings, deviceInfo, storedQuality, steps, persistSettings]);
 
   const previewInterfaceScale = React.useCallback((nextScale: number) => {
     const normalized = normalizeInterfaceScale(nextScale);
@@ -470,7 +504,10 @@ const Settings = () => {
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <SettingsSection title="Transcription quality" sectionClassName="pb-4">
-        <div className="space-y-3">
+        {showTranscriptionQualitySkeleton ? (
+          <TranscriptionQualitySkeleton />
+        ) : (
+          <div className="space-y-3">
           {steps.length === 2 ? (
             (() => {
               const safeIndex = Math.max(0, Math.min(sliderIndex, steps.length - 1));
@@ -620,7 +657,8 @@ const Settings = () => {
               </div>
             </>
           )}
-        </div>
+          </div>
+        )}
       </SettingsSection>
 
       <SettingsSection title="Transcription options">

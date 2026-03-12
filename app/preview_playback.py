@@ -29,7 +29,7 @@ from .graphics_preview_renderer import (
 )
 from .paths import get_preview_clips_dir
 from .srt_utils import SrtCue, parse_srt_file
-from .subtitle_style import SubtitleStyle, to_preview_params
+from .subtitle_style import RENDER_MODEL_VERSION, SubtitleStyle, to_preview_params
 from .word_timing_schema import WordTimingValidationError, load_word_timings_json, word_timings_path_for_srt
 
 _SRT_TIMESTAMP_RE = re.compile(
@@ -380,6 +380,7 @@ class PreviewPlaybackController(QtCore.QObject):
         word_timings_stat = self._stat_payload(word_timings_path)
         payload = {
             "version": 2,
+            "render_model_version": RENDER_MODEL_VERSION,
             "video": self._stat_payload(settings.video_path),
             "srt": self._stat_payload(settings.srt_path),
             "word_timings": word_timings_stat,

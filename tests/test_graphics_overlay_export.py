@@ -7,9 +7,10 @@ import pytest
 
 from app.graphics_overlay_export import (
     OVERLAY_RESOLUTION_SCALE,
+    _scale_style_for_supersampling,
     render_overlay_frame,
 )
-from app.subtitle_style import PRESET_DEFAULT, preset_defaults
+from app.subtitle_style import PRESET_DEFAULT, QT_POINT_TO_PIXEL_RATIO, preset_defaults, resolve_style_for_frame
 
 _skip_qt_render_on_win = pytest.mark.skipif(
     sys.platform == "win32",
@@ -76,3 +77,13 @@ def test_render_overlay_frame_accepts_chunk1_typography_fields() -> None:
     )
 
     assert len(data) == width * height * 4
+
+
+def test_export_style_resolves_frame_height_before_supersampling() -> None:
+    style = preset_defaults(PRESET_DEFAULT)
+
+    resolved = resolve_style_for_frame(style, 720)
+    draw_style = _scale_style_for_supersampling(resolved, OVERLAY_RESOLUTION_SCALE)
+
+    assert draw_style.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(20.16 * 4, abs=0.2)
+    assert draw_style.outline_width == pytest.approx(0.72 * 4, abs=0.001)

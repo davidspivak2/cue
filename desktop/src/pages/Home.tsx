@@ -89,6 +89,17 @@ const formatElapsed = (elapsedSeconds: number) => {
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" ? value : undefined;
 
+const normalizeChecklistDetail = (value: string | null | undefined): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed === "already timed" ? "Already timed" : trimmed;
+};
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -424,7 +435,9 @@ const Home = () => {
               : "pending";
     setChecklistItems((prev) =>
       prev.map((item) =>
-        item.id === stepId ? { ...item, state: mappedState, detail: reason ?? item.detail } : item
+        item.id === stepId
+          ? { ...item, state: mappedState, detail: normalizeChecklistDetail(reason) ?? item.detail }
+          : item
       )
     );
   };
@@ -433,7 +446,7 @@ const Home = () => {
     if (event.type !== "checklist") {
       return undefined;
     }
-    const reasonText = asString(event.reason_text);
+    const reasonText = normalizeChecklistDetail(asString(event.reason_text));
     if (reasonText) {
       return reasonText;
     }

@@ -17,8 +17,8 @@ def test_apply_config_defaults_adds_missing_keys() -> None:
     assert result["subtitle_style"]["highlight_opacity"] == DEFAULT_HIGHLIGHT_OPACITY
     appearance = result["subtitle_style"]["appearance"]
     assert appearance["font_weight"] == 400
-    assert appearance["font_family"] == "Heebo"
-    assert appearance["font_size"] == 28
+    assert appearance["font_family"] == "Assistant"
+    assert appearance["font_size"] == 44
     assert appearance["text_align"] == "center"
     assert appearance["line_spacing"] == 1.0
     assert appearance["text_color"] == "#FFFFFF"

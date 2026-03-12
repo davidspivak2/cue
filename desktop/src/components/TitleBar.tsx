@@ -40,22 +40,27 @@ const TITLE_BAR_WIDE_LAYOUT_TARGET_PX = 180;
 /** Maximum tab width in "wide" mode at 100% interface scale. */
 const TITLE_BAR_WIDE_TAB_MAX_PX = 224;
 /** Maximum tab width in "medium" mode at 100% interface scale. */
-const TITLE_BAR_MEDIUM_TAB_MAX_PX = 100;
+const TITLE_BAR_MEDIUM_TAB_MAX_PX = 64;
 /** Maximum tab width in "narrow" mode at 100% interface scale. */
-const TITLE_BAR_NARROW_TAB_MAX_PX = 44;
-/** Window width below which we use "narrow" when we can't fit wide tabs. */
-const TITLE_BAR_NARROW_BREAKPOINT = 520;
+const TITLE_BAR_NARROW_TAB_MAX_PX = 56;
 type TabLayoutMode = "wide" | "medium" | "narrow";
 
 function getTabLayoutMode(
   windowWidth: number,
-  tabCount: number
+  tabCount: number,
+  interfaceScale: number
 ): TabLayoutMode {
-  const availableForTabs =
-    windowWidth - TITLE_BAR_LOGO_WIDTH - TITLE_BAR_HOME_WIDTH - TITLE_BAR_CONTROLS_WIDTH;
-  const requiredForWide = tabCount * TITLE_BAR_WIDE_LAYOUT_TARGET_PX;
+  if (tabCount <= 0) {
+    return "wide";
+  }
+  const reservedWidth =
+    (TITLE_BAR_LOGO_WIDTH + TITLE_BAR_HOME_WIDTH + TITLE_BAR_CONTROLS_WIDTH) *
+    interfaceScale;
+  const availableForTabs = Math.max(0, windowWidth - reservedWidth);
+  const requiredForWide = tabCount * TITLE_BAR_WIDE_LAYOUT_TARGET_PX * interfaceScale;
+  const requiredForMedium = tabCount * TITLE_BAR_MEDIUM_TAB_MAX_PX * interfaceScale;
   if (availableForTabs >= requiredForWide) return "wide";
-  if (windowWidth >= TITLE_BAR_NARROW_BREAKPOINT) return "medium";
+  if (availableForTabs >= requiredForMedium) return "medium";
   return "narrow";
 }
 
@@ -109,6 +114,7 @@ function SortableTitleTab({
   };
 
   const isIconOnly = layoutMode === "narrow";
+  const isMedium = layoutMode === "medium";
 
   const thumbnailSrc =
     isIconOnly && tab.thumbnail_path
@@ -156,7 +162,12 @@ function SortableTitleTab({
       data-testid={`title-bar-tab-${tab.projectId}`}
       onAuxClick={handleAuxClick}
       className={cn(
-        "flex h-full shrink-0 items-center gap-1 border-b-2 border-r border-foreground/15 pl-3 pr-2 transition-colors duration-200",
+        "flex h-full shrink-0 items-center border-b-2 border-r border-foreground/15 transition-colors duration-200",
+        isIconOnly
+          ? "gap-0.5 pl-1.5 pr-1"
+          : isMedium
+            ? "gap-1 pl-2 pr-1.5"
+            : "gap-1 pl-3 pr-2",
         isActive
           ? "border-b-foreground/30 bg-foreground/8"
           : "border-b-transparent hover:bg-foreground/5",
@@ -184,8 +195,8 @@ function SortableTitleTab({
                 onTabClick(tab.projectId);
               }}
               className={cn(
-                "flex w-full min-w-0 items-center gap-1 overflow-hidden truncate py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                isIconOnly && "flex-1 justify-center p-1",
+                "flex w-full min-w-0 items-center gap-1 overflow-hidden truncate text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                isIconOnly ? "flex-1 justify-center p-0.5" : "py-1.5",
                 isActive && "!cursor-default"
               )}
             >
@@ -216,9 +227,17 @@ function SortableTitleTab({
         onClick={(e) => onCloseTab(tab.projectId, e)}
         aria-label={`Close ${title}`}
         data-testid={`title-bar-tab-close-${tab.projectId}`}
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className={cn(
+          "flex shrink-0 items-center justify-center rounded-md hover:bg-foreground/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          isIconOnly ? "h-4 w-4" : "h-5 w-5"
+        )}
       >
-        <X className="h-3.5 w-3.5 text-muted-foreground" />
+        <X
+          className={cn(
+            "text-muted-foreground",
+            isIconOnly ? "h-3 w-3" : "h-3.5 w-3.5"
+          )}
+        />
       </button>
     </div>
   );
@@ -277,7 +296,7 @@ const TitleBar = () => {
   const [interfaceScale, setInterfaceScale] = React.useState(() => readStoredInterfaceScale());
   const prevSettingsOpenRef = React.useRef(settingsOpen);
   const { tabs, activeView, setActiveView, closeTab, reorderTabs } = useWorkbenchTabs();
-  const tabLayoutMode = getTabLayoutMode(width / interfaceScale, tabs.length);
+  const tabLayoutMode = getTabLayoutMode(width, tabs.length, interfaceScale);
 
   React.useEffect(
     () => subscribeToInterfaceScaleChanges((scale) => setInterfaceScale(scale)),

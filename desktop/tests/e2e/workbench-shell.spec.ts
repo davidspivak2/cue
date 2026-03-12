@@ -70,8 +70,8 @@ const DEFAULT_PROJECT_STYLE = {
     highlight_color: "#FFD400",
     highlight_opacity: 1.0,
     appearance: {
-      font_family: "Heebo",
-      font_size: 28,
+      font_family: "Assistant",
+      font_size: 44,
       font_style: "regular",
       font_weight: 400,
       text_align: "center",
@@ -1633,6 +1633,62 @@ test("title bar: shorter labels stay compact at 150% interface size", async ({ p
   expect(shortTabWidth + 40).toBeLessThan(longTabWidth);
 });
 
+test("title bar: small 150% window with a few tabs still shows tab labels", async ({
+  page
+}) => {
+  await page.addInitScript(initTauriRuntimeMock);
+  await page.setViewportSize({ width: 760, height: 800 });
+  const seedProject = buildProjects()[0];
+  const projects = [
+    {
+      ...seedProject,
+      title: "alpha.mp4",
+      video_path: "C:\\fake\\alpha.mp4",
+      status: "ready"
+    },
+    {
+      ...seedProject,
+      project_id: "project-2",
+      title: "beta.mp4",
+      video_path: "C:\\fake\\beta.mp4",
+      status: "ready"
+    },
+    {
+      ...seedProject,
+      project_id: "project-3",
+      title: "gamma.mp4",
+      video_path: "C:\\fake\\gamma.mp4",
+      status: "ready"
+    }
+  ];
+  await mockProjects(page, projects, DEFAULT_SRT, {
+    ...buildSettings(),
+    interface_scale: 1.5
+  });
+
+  await page.goto("/");
+  await page.getByText("alpha.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await page.getByTestId("title-bar-home").click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByText("beta.mp4").click();
+  await page.waitForURL("**/workbench/project-2");
+  await page.getByTestId("title-bar-home").click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByText("gamma.mp4").click();
+  await page.waitForURL("**/workbench/project-3");
+
+  await expect(
+    page.getByTestId("title-bar-tab-project-1").locator("button span").first()
+  ).toContainText("alpha.mp4");
+  await expect(
+    page.getByTestId("title-bar-tab-project-2").locator("button span").first()
+  ).toContainText("beta.mp4");
+  await expect(
+    page.getByTestId("title-bar-tab-project-3").locator("button span").first()
+  ).toContainText("gamma.mp4");
+});
+
 test("navigation without sidebar: Projects to Editor to Home via title bar", async ({
   page
 }) => {
@@ -1891,6 +1947,288 @@ test("workbench resumes create progress with inline checklist detail and elapsed
   );
   // Checklist shows create-subtitles progress (exact text depends on stream/default steps)
   await expect(checklistRow).toContainText(/Loading AI model|Extracting audio|Warming up/);
+});
+
+test("workbench shows skipped word timing with dashed icon and title-case detail", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const startedAt = new Date(Date.now() - 15_000).toISOString();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-skipped-word-timing",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Preparing preview",
+    pct: 88,
+    step_id: "preparing_preview",
+    started_at: startedAt,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "extract_audio",
+        label: "Extracting audio",
+        state: "done",
+        detail: "Video track ready"
+      },
+      {
+        id: "timing_word_highlights",
+        label: "Building word-by-word karaoke effect",
+        state: "skipped",
+        detail: "already timed"
+      },
+      {
+        id: "preparing_preview",
+        label: "Preparing preview",
+        state: "active"
+      }
+    ]
+  };
+  const api = await mockProjects(page, projects, null);
+  api.setJobEvents(
+    "job-skipped-word-timing",
+    toSseBody([
+      {
+        job_id: "job-skipped-word-timing",
+        ts,
+        type: "started",
+        heading: "Creating subtitles"
+      }
+    ])
+  );
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+
+  const skippedRow = page.locator(
+    "[data-testid='workbench-create-checklist'] [data-checklist-item-id='timing_word_highlights']"
+  );
+  await expect(skippedRow).toBeVisible();
+  await expect(skippedRow).toContainText("Already timed");
+  await expect(skippedRow).not.toContainText("already timed");
+
+  const iconInfo = await skippedRow
+    .locator("[data-checklist-icon-state='skipped']")
+    .evaluate((node) => ({
+      className: node.className,
+      tagName: node.tagName
+    }));
+
+  expect(iconInfo.tagName).toBe("SPAN");
+  expect(iconInfo.className).toContain("border-dashed");
+  expect(iconInfo.className).toContain("rounded-full");
+});
+
+test("workbench checklist uses a wider, scroll-safe layout at 150% interface size", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  const projects = buildProjects();
+  const startedAt = new Date(Date.now() - 30_000).toISOString();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-large-interface-checklist",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Matching word timing",
+    pct: 44,
+    step_id: "timing_word_highlights",
+    started_at: startedAt,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "extract_audio",
+        label: "Extracting audio",
+        state: "done",
+        detail: "Video track ready"
+      },
+      {
+        id: "load_model",
+        label: "Loading AI model",
+        state: "done",
+        detail: "Whisper model initialized"
+      },
+      {
+        id: "write_subtitles",
+        label: "Writing subtitles",
+        state: "done",
+        detail: "642 words"
+      },
+      {
+        id: "timing_word_highlights",
+        label: "Building word-by-word karaoke effect",
+        state: "active",
+        detail: "Matching 35/100 words for preview timing"
+      },
+      {
+        id: "preparing_preview",
+        label: "Preparing preview",
+        state: "pending"
+      }
+    ]
+  };
+  await mockProjects(page, projects, null, {
+    ...buildSettings(),
+    interface_scale: 1.5
+  });
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-create-checklist")).toBeVisible();
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+
+  const layout = await page.evaluate(() => {
+    const state = document.querySelector("[data-testid='workbench-empty-state']");
+    if (!(state instanceof HTMLElement)) {
+      throw new Error("Missing create-subtitles layout");
+    }
+    const checklist = state.querySelector("[data-testid='workbench-create-checklist']");
+    const cancelButton = state.querySelector("[data-testid='workbench-cancel-create-subtitles']");
+    const progressBar = state.querySelector("[role='progressbar']");
+    if (
+      !(checklist instanceof HTMLElement) ||
+      !(cancelButton instanceof HTMLElement) ||
+      !(progressBar instanceof HTMLElement)
+    ) {
+      throw new Error("Missing create-subtitles layout");
+    }
+    const cancelRect = cancelButton.getBoundingClientRect();
+    const progressRect = progressBar.getBoundingClientRect();
+    return {
+      cancelCenterX: (cancelRect.left + cancelRect.right) / 2,
+      overflowY: getComputedStyle(state).overflowY,
+      progressCenterX: (progressRect.left + progressRect.right) / 2,
+      stateInnerWidth: state.clientWidth,
+      checklistWidth: checklist.getBoundingClientRect().width
+    };
+  });
+
+  expect(Math.abs(layout.cancelCenterX - layout.progressCenterX)).toBeLessThanOrEqual(6);
+  expect(layout.overflowY).toBe("auto");
+  expect(layout.checklistWidth).toBeGreaterThan(layout.stateInnerWidth * 0.78);
+});
+
+test("workbench music prompt stays below the checklist content", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 760 });
+  const projects = buildProjects();
+  const startedAt = new Date(Date.now() - 30_000).toISOString();
+  const ts = new Date().toISOString();
+  projects[0].active_task = {
+    job_id: "job-music-prompt-layout",
+    kind: "create_subtitles",
+    status: "running",
+    heading: "Creating subtitles",
+    message: "Listening to audio",
+    pct: 44,
+    step_id: "write_subtitles",
+    started_at: startedAt,
+    updated_at: ts,
+    checklist: [
+      {
+        id: "extract_audio",
+        label: "Extracting audio",
+        state: "done",
+        detail: "Video track ready"
+      },
+      {
+        id: "load_model",
+        label: "Loading AI model",
+        state: "done",
+        detail: "OpenAI Whisper Large v3 loaded"
+      },
+      {
+        id: "detect_language",
+        label: "Detecting language",
+        state: "done",
+        detail: "Hebrew detected"
+      },
+      {
+        id: "write_subtitles",
+        label: "Writing subtitles",
+        state: "active",
+        detail: "Listening to audio (01:26/03:14)"
+      },
+      {
+        id: "fix_punctuation",
+        label: "Reviewing punctuation",
+        state: "pending"
+      },
+      {
+        id: "fix_missing_subtitles",
+        label: "Making sure no words were missed",
+        state: "pending"
+      },
+      {
+        id: "timing_word_highlights",
+        label: "Building word-by-word karaoke effect",
+        state: "pending"
+      },
+      {
+        id: "preparing_preview",
+        label: "Preparing preview",
+        state: "pending"
+      }
+    ]
+  };
+  await mockProjects(page, projects, null, {
+    ...buildSettings(),
+    interface_scale: 1.5
+  });
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+  await page.waitForFunction(
+    () => Boolean(document.querySelector("[data-testid='workbench-elevator-music-row']")),
+    undefined,
+    { timeout: 3_000 }
+  );
+
+  const layout = await page.evaluate(() => {
+    const state = document.querySelector("[data-testid='workbench-empty-state']");
+    if (!(state instanceof HTMLElement)) {
+      throw new Error("Missing music prompt layout");
+    }
+    const cancelButton = state.querySelector("[data-testid='workbench-cancel-create-subtitles']");
+    const musicRow = state.querySelector("[data-testid='workbench-elevator-music-row']");
+    const progressBar = state.querySelector("[role='progressbar']");
+    if (
+      !(cancelButton instanceof HTMLElement) ||
+      !(musicRow instanceof HTMLElement) ||
+      !(progressBar instanceof HTMLElement)
+    ) {
+      throw new Error("Missing music prompt layout");
+    }
+    const cancelRect = cancelButton.getBoundingClientRect();
+    const musicContent =
+      musicRow.firstElementChild instanceof HTMLElement ? musicRow.firstElementChild : musicRow;
+    const musicRect = musicContent.getBoundingClientRect();
+    const progressRect = progressBar.getBoundingClientRect();
+    const stateRect = state.getBoundingClientRect();
+    return {
+      cancelBottom: cancelRect.bottom,
+      musicText: musicRow.textContent ?? "",
+      musicCenterX: (musicRect.left + musicRect.right) / 2,
+      musicBottom: musicRect.bottom,
+      musicTop: musicRect.top,
+      progressCenterX: (progressRect.left + progressRect.right) / 2,
+      stateBottom: stateRect.bottom
+    };
+  });
+
+  expect(Math.abs(layout.musicCenterX - layout.progressCenterX)).toBeLessThanOrEqual(6);
+  expect(layout.musicText).toContain("Listen to some music while you wait?");
+  expect(layout.musicText).toContain("Play");
+  expect(layout.musicTop).toBeGreaterThanOrEqual(layout.cancelBottom);
+  expect(layout.stateBottom - layout.musicBottom).toBeLessThanOrEqual(32);
 });
 
 test("workbench falls back to project polling when resumed create stream attach fails", async ({
@@ -2560,6 +2898,8 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   expect(createPayload.kind).toBe("create_subtitles");
   expect(createPayload.project_id).toBe("project-new-1");
   expect(createPayload.options?.subtitle_mode).toBe("static");
+  await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0, { timeout: 2000 });
+  await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible({ timeout: 2000 });
   await expect
     .poll(() => {
       const payload = api.getLastStylePutPayload()?.style;
@@ -3694,6 +4034,43 @@ test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated 
   expect(Number.isFinite(fontSizePx)).toBe(true);
   expect(Number.isFinite(lineHeightPx)).toBe(true);
   expect(Math.abs(lineHeightPx / fontSizePx - 1.125)).toBeLessThanOrEqual(0.02);
+});
+
+test("subtitle preview font size follows the displayed video height", async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 1400 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, {
+    playing: false,
+    currentTime: 1.2,
+    videoWidth: 1280,
+    videoHeight: 720
+  });
+
+  const subtitleButton = page.getByTestId("workbench-active-subtitle");
+  await expect(subtitleButton).toHaveCount(1);
+  const fontSize720Px = Number.parseFloat((await readTypographyMetrics(subtitleButton)).fontSize);
+  expect(fontSize720Px).toBeGreaterThan(20);
+  expect(fontSize720Px).toBeLessThan(21);
+
+  await primeVideoState(page, {
+    playing: false,
+    currentTime: 1.2,
+    videoWidth: 1280,
+    videoHeight: 1080
+  });
+  await page.waitForTimeout(40);
+
+  const fontSize1080Px = Number.parseFloat((await readTypographyMetrics(subtitleButton)).fontSize);
+  expect(fontSize1080Px).toBeGreaterThan(30);
+  expect(fontSize1080Px).toBeLessThan(31);
+  expect(fontSize1080Px / fontSize720Px).toBeGreaterThan(1.45);
+  expect(fontSize1080Px / fontSize720Px).toBeLessThan(1.55);
 });
 
 test("floating toolbar stays fully visible above the subtitle near the top and after resize", async ({

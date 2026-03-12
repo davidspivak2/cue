@@ -52,7 +52,6 @@ import {
   updateProject
 } from "@/projectsClient";
 import { useRunningJobs } from "@/contexts/RunningJobsContext";
-import { useWindowHeight } from "@/hooks/useWindowHeight";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
 import {
   clearPersistedRunningJob,
@@ -84,6 +83,8 @@ type WorkbenchProps = {
 
 const SUBTITLE_FONT_SIZE_MIN = 18;
 const SUBTITLE_FONT_SIZE_MAX = 72;
+const SUBTITLE_STYLE_REFERENCE_HEIGHT = 1000;
+const SUBTITLE_MIN_RENDER_FONT_SIZE_PX = 10;
 const FLOATING_TOOLBAR_POPOVER_SELECTOR = "[data-cue-floating-toolbar-popover]";
 const FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR = "[data-radix-popper-content-wrapper]";
 
@@ -157,8 +158,8 @@ const extractErrorDetail = (message: string): string => {
 };
 
 const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
-  font_family: "Heebo",
-  font_size: 28,
+  font_family: "Assistant",
+  font_size: 44,
   font_style: "regular",
   font_weight: 400,
   text_align: "center",
@@ -216,11 +217,11 @@ const DEFAULT_EFFECT_OUTLINE: Partial<SubtitleStyleAppearance> = {
 
 const DEFAULT_EFFECT_SHADOW: Partial<SubtitleStyleAppearance> = {
   shadow_enabled: true,
-  shadow_offset_x: 0,
-  shadow_offset_y: 0,
+  shadow_offset_x: 3.44,
+  shadow_offset_y: 4.92,
   shadow_color: "#000000",
   shadow_opacity: 1.0,
-  shadow_blur: 10
+  shadow_blur: 4
 };
 
 const DEFAULT_EFFECT_BACKGROUND: Partial<SubtitleStyleAppearance> = {
@@ -551,11 +552,9 @@ const SUBTITLE_CONTROLS_PUSH_TOLERANCE_PX = 0.5;
 const SUBTITLE_EDITOR_TOOLBAR_GAP_PX = 8;
 const SUBTITLE_EDITOR_TOOLBAR_VIEWPORT_PADDING_PX = 12;
 const SUBTITLE_EDITOR_TOOLBAR_POSITION_TOLERANCE_PX = 0.5;
-const QT_POINT_TO_CSS_PX = 96 / 72;
 const WEB_SUBTITLE_LINE_HEIGHT_RATIO = 1.375;
 const QT_SUBTITLE_LINE_HEIGHT_RATIO = 1.125;
 const ACTIVE_TASK_SYNC_POLL_MS = 2500;
-const PREPARING_PREVIEW_MIN_ACTIVE_MS = 5000;
 const PREPARING_PREVIEW_DONE_VISIBLE_MS = 150;
 const STREAM_ATTACH_COOLDOWN_MS = 10_000;
 const ALIGNMENT_PROGRESS_STEP_IDS = new Set(["ALIGN_WORDS", checklistStepIds.timingWordHighlights]);
@@ -735,6 +734,17 @@ const asNonEmptyString = (value: unknown): string | null => {
   return trimmed ? trimmed : null;
 };
 
+const normalizeChecklistDetail = (value: string | null | undefined): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed === "already timed" ? "Already timed" : trimmed;
+};
+
 const parseIsoTimestampMs = (value: unknown): number => {
   if (typeof value !== "string" || !value.trim()) {
     return 0;
@@ -779,7 +789,7 @@ const buildChecklistFromActiveTask = (activeTask: ProjectManifest["active_task"]
         id: row.id,
         label: typeof row.label === "string" && row.label.trim() ? row.label : row.id,
         state: normalizeChecklistState(row.state),
-        detail: typeof row.detail === "string" && row.detail.trim() ? row.detail.trim() : undefined
+        detail: normalizeChecklistDetail(row.detail)
       };
     });
 };
@@ -863,22 +873,40 @@ function resolveOutlineColor(outlineColor: string, textColor: string): string {
 }
 
 const buildOutlineShadows = (color: string, width: number) => {
-  const radius = Math.max(0, Math.round(width));
-  if (radius <= 0) {
+  if (width <= 0) {
     return [] as string[];
   }
-  const shadows: string[] = [];
-  for (let x = -radius; x <= radius; x += 1) {
-    for (let y = -radius; y <= radius; y += 1) {
-      if (x === 0 && y === 0) {
-        continue;
-      }
-      if (x * x + y * y <= radius * radius) {
-        shadows.push(`${x}px ${y}px 0 ${color}`);
-      }
+
+  // Keep DOM preview outlines continuous while resizing; integer rounding makes thin strokes blink off.
+  const radii: number[] = [];
+  if (width < 1) {
+    radii.push(width);
+  } else {
+    const wholeRadii = Math.floor(width);
+    for (let radius = 1; radius <= wholeRadii; radius += 1) {
+      radii.push(radius);
+    }
+    if (width - wholeRadii > 0.001) {
+      radii.push(width);
     }
   }
-  return shadows;
+
+  const shadows = new Set<string>();
+  for (const radius of radii) {
+    const pointCount =
+      radius <= 1 ? 8 : radius <= 2 ? 12 : radius <= 4 ? 16 : radius <= 7 ? 20 : 24;
+
+    for (let index = 0; index < pointCount; index += 1) {
+      const angle = (Math.PI * 2 * index) / pointCount;
+      const rawX = Math.cos(angle) * radius;
+      const rawY = Math.sin(angle) * radius;
+      const x = Math.abs(rawX) < 0.001 ? 0 : Number(rawX.toFixed(3));
+      const y = Math.abs(rawY) < 0.001 ? 0 : Number(rawY.toFixed(3));
+      shadows.add(`${x}px ${y}px 0 ${color}`);
+    }
+  }
+
+  return [...shadows];
 };
 
 const normalizePathInput = (value: string) => {
@@ -1101,9 +1129,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const { pushToast, markExportCompleteSeen, haveExportCompleteBeenSeen } = useToast();
   const { ensureTab, updateTabMeta } = useWorkbenchTabs();
   const width = useWindowWidth();
-  const height = useWindowHeight();
   const isNarrow = width < 1100;
-  const isShortWindow = height < 600;
   const isTauriEnv = isTauri();
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const activeSubtitleRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -1272,6 +1298,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const latestCreateLiveEventAtMsRef = React.useRef(0);
   const createSubtitlesJobIdRef = React.useRef<string | null>(null);
   const createSubtitlesJustStartedRef = React.useRef(false);
+  const completedCreateSubtitlesJobIdRef = React.useRef<string | null>(null);
   const projectIdRef = React.useRef<string | null>(null);
   projectIdRef.current = projectId ?? null;
   const [createSubtitlesStartedAt, setCreateSubtitlesStartedAt] = React.useState<string | null>(
@@ -1997,6 +2024,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setIsCreatingSubtitles(false);
     setCreateSubtitlesStartedAt(null);
     createSubtitlesJobIdRef.current = null;
+    completedCreateSubtitlesJobIdRef.current = null;
     latestCreateLiveEventAtMsRef.current = 0;
     knownTimingWordsTotalRef.current = null;
     latestTimingAuthoritativeAtMsRef.current = 0;
@@ -2103,11 +2131,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (!createSubtitlesStartedAt || !isCreatingSubtitles || elevatorMusicRowScheduledRef.current) {
       return;
     }
+    const startedAtMs = Date.parse(createSubtitlesStartedAt);
+    const elapsedMs = Number.isFinite(startedAtMs)
+      ? Math.max(0, Date.now() - startedAtMs)
+      : 0;
+    const delayMs = Math.max(0, 10_000 - elapsedMs);
     elevatorMusicRowScheduledRef.current = true;
     elevatorMusicTimerRef.current = window.setTimeout(() => {
       elevatorMusicTimerRef.current = null;
       setShowElevatorMusicRow(true);
-    }, 10_000);
+    }, delayMs);
     return () => {
       if (elevatorMusicTimerRef.current !== null) {
         clearTimeout(elevatorMusicTimerRef.current);
@@ -2235,7 +2268,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               : "pending";
     setCreateSubtitlesChecklist((prev) =>
       prev.map((item) =>
-        item.id === stepId ? { ...item, state: mappedState, detail: reason ?? item.detail } : item
+        item.id === stepId
+          ? { ...item, state: mappedState, detail: normalizeChecklistDetail(reason) ?? item.detail }
+          : item
       )
     );
   }, []);
@@ -2244,7 +2279,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (event.type !== "checklist") {
       return undefined;
     }
-    const reasonText = asNonEmptyString(event.reason_text);
+    const reasonText = normalizeChecklistDetail(asNonEmptyString(event.reason_text));
     if (reasonText) {
       return reasonText;
     }
@@ -2272,7 +2307,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                 : "pending";
       setExportChecklist((prev) =>
         prev.map((item) =>
-          item.id === stepId ? { ...item, state: mappedState, detail: reason ?? item.detail } : item
+          item.id === stepId
+            ? { ...item, state: mappedState, detail: normalizeChecklistDetail(reason) ?? item.detail }
+            : item
         )
       );
     },
@@ -2391,9 +2428,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     }
     preparingPreviewCompletionScheduledRef.current = true;
     setIsCreatingSubtitles(false);
-    const startedAtMs = preparingPreviewStartedAtRef.current;
-    const elapsedMs = startedAtMs != null ? Date.now() - startedAtMs : PREPARING_PREVIEW_MIN_ACTIVE_MS;
-    const remainingActiveMs = Math.max(0, PREPARING_PREVIEW_MIN_ACTIVE_MS - elapsedMs);
     const finalize = () => {
       updateCreateChecklist(checklistStepIds.preparingPreview, "done");
       preparingPreviewDoneTimerRef.current = window.setTimeout(() => {
@@ -2401,13 +2435,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         finalizeCreateSubtitlesCompleted();
       }, PREPARING_PREVIEW_DONE_VISIBLE_MS);
     };
-    if (remainingActiveMs > 0) {
-      preparingPreviewDelayTimerRef.current = window.setTimeout(() => {
-        preparingPreviewDelayTimerRef.current = null;
-        finalize();
-      }, remainingActiveMs);
-      return;
-    }
     finalize();
   }, [finalizeCreateSubtitlesCompleted, updateCreateChecklist]);
 
@@ -2442,15 +2469,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         if (stepId === checklistStepIds.preparingPreview && state === "start") {
           clearPreparingPreviewTimers();
           preparingPreviewStartedAtRef.current = Date.now();
-        }
-        if (stepId === checklistStepIds.preparingPreview && state === "done") {
-          const startedAtMs = preparingPreviewStartedAtRef.current;
-          if (
-            startedAtMs != null &&
-            Date.now() - startedAtMs < PREPARING_PREVIEW_MIN_ACTIVE_MS
-          ) {
-            return;
-          }
         }
         updateCreateChecklist(stepId, state, checklistReason);
         return;
@@ -2494,10 +2512,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         return;
       }
       if (event.type === "completed") {
+        completedCreateSubtitlesJobIdRef.current =
+          typeof event.job_id === "string" && event.job_id ? event.job_id : createSubtitlesJobIdRef.current;
         scheduleCreateSubtitlesCompletion();
         return;
       }
       if (event.type === "cancelled") {
+        completedCreateSubtitlesJobIdRef.current = null;
         clearPreparingPreviewTimers();
         preparingPreviewStartedAtRef.current = null;
         createSubtitlesUnregisterRef.current?.();
@@ -2523,6 +2544,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         return;
       }
       if (event.type === "error") {
+        completedCreateSubtitlesJobIdRef.current = null;
         clearPreparingPreviewTimers();
         preparingPreviewStartedAtRef.current = null;
         createSubtitlesUnregisterRef.current?.();
@@ -2664,6 +2686,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     knownTimingWordsTotalRef.current = null;
     latestTimingAuthoritativeAtMsRef.current = 0;
     latestCreateLiveEventAtMsRef.current = 0;
+    completedCreateSubtitlesJobIdRef.current = null;
     if (createSubtitlesStreamCooldownTimerRef.current !== null) {
       clearTimeout(createSubtitlesStreamCooldownTimerRef.current);
       createSubtitlesStreamCooldownTimerRef.current = null;
@@ -3071,7 +3094,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const previewSrc = videoPath ? (isTauriEnv ? convertFileSrc(videoPath) : videoPath) : "";
   const hasSubtitles = cues.length > 0;
   const latestOutputPath = exportOutputPath ?? project?.latest_export?.output_video_path ?? null;
-  const hasActiveCreateFromApi = project?.active_task?.kind === "create_subtitles";
+  const hasStaleCompletedCreateFromApi =
+    project?.active_task?.kind === "create_subtitles" &&
+    project.active_task.job_id === completedCreateSubtitlesJobIdRef.current &&
+    project.active_task.status !== "completed";
+  const hasActiveCreateFromApi =
+    project?.active_task?.kind === "create_subtitles" && !hasStaleCompletedCreateFromApi;
   const showNoSubtitlesState = !isLoading && !error && !subtitleLoadError && !hasSubtitles;
   const persistedCreateJob = projectId ? getPersistedRunningJob(projectId) : null;
   const hasActiveCreateSubtitles =
@@ -3284,6 +3312,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       const snapshotUpdatedAtMs = parseIsoTimestampMs(activeTask.updated_at);
       const checklist = buildChecklistFromActiveTask(activeTask);
       if (activeTask.kind === "create_subtitles") {
+        const shouldIgnoreCompletedCreateSnapshot =
+          completedCreateSubtitlesJobIdRef.current === activeTask.job_id &&
+          activeTask.status !== "completed";
+        if (shouldIgnoreCompletedCreateSnapshot) {
+          return;
+        }
         const createStreamOpenForJob =
           createSubtitlesStreamHealthRef.current === "open" &&
           createSubtitlesJobStreamRef.current?.jobId === activeTask.job_id;
@@ -3313,10 +3347,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     return {
                       ...fullItem,
                       state: normalizeChecklistState(fromApi.state),
-                      detail:
-                        typeof fromApi.detail === "string" && fromApi.detail.trim()
-                          ? fromApi.detail.trim()
-                          : fullItem.detail
+                      detail: normalizeChecklistDetail(fromApi.detail) ?? fullItem.detail
                     };
                   return fullItem;
                 })
@@ -3383,6 +3414,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           openExportStream(activeTask.job_id);
         }
       }
+      return;
+    }
+
+    if (
+      project.status === "ready" &&
+      !activeTask &&
+      (isCreatingSubtitles || persistedCreateJob?.kind === "create_subtitles")
+    ) {
+      completedCreateSubtitlesJobIdRef.current = null;
+      finalizeCreateSubtitlesCompleted();
       return;
     }
 
@@ -3485,10 +3526,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     closeExportStream,
     createSubtitlesStreamHealth,
     exportStreamHealth,
+    finalizeCreateSubtitlesCompleted,
     isCreatingSubtitles,
     isExporting,
     openCreateSubtitlesStream,
     openExportStream,
+    persistedCreateJob?.kind,
     project,
     projectId,
     rememberTimingAuthoritativeDetail,
@@ -3684,8 +3727,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const subtitleDirection: "rtl" | "auto" = activeCueHasRtlChars ? "rtl" : "auto";
   const subtitlePreviewLayoutMetrics = React.useMemo(() => {
     const visualScale = displayedVideoRect.scale;
-    const fontScale = isTauriEnv ? visualScale * QT_POINT_TO_CSS_PX : visualScale;
-    const fontSizePx = Math.max(10 * fontScale, effectiveAppearance.font_size * fontScale);
+    const frameScale = displayedVideoRect.height / SUBTITLE_STYLE_REFERENCE_HEIGHT;
+    const minFontScale =
+      effectiveAppearance.font_size > 0
+        ? (SUBTITLE_MIN_RENDER_FONT_SIZE_PX * visualScale) / effectiveAppearance.font_size
+        : frameScale;
+    const metricScale = Math.max(frameScale, minFontScale);
+    const fontSizePx = Math.max(
+      SUBTITLE_MIN_RENDER_FONT_SIZE_PX * visualScale,
+      effectiveAppearance.font_size * frameScale
+    );
     const lineHeightRatio = isTauriEnv
       ? QT_SUBTITLE_LINE_HEIGHT_RATIO
       : WEB_SUBTITLE_LINE_HEIGHT_RATIO;
@@ -3693,56 +3744,57 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
     return {
       visualScale,
+      metricScale,
       fontSizePx,
       lineHeightPx,
       linePaddingTopPx: Math.max(
         0,
         (effectiveAppearance.line_bg_padding_top ?? effectiveAppearance.line_bg_padding ?? 8) *
-          visualScale
+          metricScale
       ),
       linePaddingRightPx: Math.max(
         0,
         (effectiveAppearance.line_bg_padding_right ??
           effectiveAppearance.line_bg_padding ??
-          8) * visualScale
+          8) * metricScale
       ),
       linePaddingBottomPx: Math.max(
         0,
         (effectiveAppearance.line_bg_padding_bottom ??
           effectiveAppearance.line_bg_padding ??
-          8) * visualScale
+          8) * metricScale
       ),
       linePaddingLeftPx: Math.max(
         0,
         (effectiveAppearance.line_bg_padding_left ?? effectiveAppearance.line_bg_padding ?? 8) *
-          visualScale
+          metricScale
       ),
-      lineRadiusPx: Math.max(0, effectiveAppearance.line_bg_radius * visualScale),
+      lineRadiusPx: Math.max(0, effectiveAppearance.line_bg_radius * metricScale),
       wordPaddingTopPx: Math.max(
         0,
         (effectiveAppearance.word_bg_padding_top ?? effectiveAppearance.word_bg_padding ?? 8) *
-          visualScale
+          metricScale
       ),
       wordPaddingRightPx: Math.max(
         0,
         (effectiveAppearance.word_bg_padding_right ??
           effectiveAppearance.word_bg_padding ??
-          8) * visualScale
+          8) * metricScale
       ),
       wordPaddingBottomPx: Math.max(
         0,
         (effectiveAppearance.word_bg_padding_bottom ??
           effectiveAppearance.word_bg_padding ??
-          8) * visualScale
+          8) * metricScale
       ),
       wordPaddingLeftPx: Math.max(
         0,
         (effectiveAppearance.word_bg_padding_left ?? effectiveAppearance.word_bg_padding ?? 8) *
-          visualScale
+          metricScale
       ),
-      wordRadiusPx: Math.max(0, effectiveAppearance.word_bg_radius * visualScale)
+      wordRadiusPx: Math.max(0, effectiveAppearance.word_bg_radius * metricScale)
     };
-  }, [displayedVideoRect.scale, effectiveAppearance, isTauriEnv]);
+  }, [displayedVideoRect.height, displayedVideoRect.scale, effectiveAppearance, isTauriEnv]);
   const activeWordStyle: React.CSSProperties = hasWordBackground
     ? {
         position: "relative",
@@ -3985,18 +4037,23 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   );
 
   const VIDEO_CONTROL_BAR_HEIGHT_PX = 44;
+  const VIDEO_CONTROL_BAR_VERTICAL_PADDING_PX = 6;
   const VIDEO_PROGRESS_STRIP_HEIGHT_PX = 6;
   const VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER = 9;
   const VIDEO_PROGRESS_THUMB_SIZE_PX = 12;
   const effectiveProgressStripHeightPx =
     progressHoverSeconds !== null ? VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER : VIDEO_PROGRESS_STRIP_HEIGHT_PX;
   const VIDEO_PROGRESS_HIT_AREA_PY = 16;
+  const VIDEO_PROGRESS_SECTION_PADDING_PX = 8;
+  const VIDEO_CONTROLS_BOTTOM_INSET_PX =
+    VIDEO_PROGRESS_HIT_AREA_PY + VIDEO_PROGRESS_SECTION_PADDING_PX;
   const VIDEO_CONTROLS_TOTAL_HEIGHT_PX =
     VIDEO_CONTROL_BAR_HEIGHT_PX +
-    8 +
+    VIDEO_PROGRESS_SECTION_PADDING_PX +
     VIDEO_PROGRESS_HIT_AREA_PY * 2 +
     VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER +
-    8;
+    VIDEO_PROGRESS_SECTION_PADDING_PX +
+    VIDEO_CONTROLS_BOTTOM_INSET_PX;
   const videoControlsBarContainerStyle = React.useMemo<React.CSSProperties>(() => {
     const totalHeight = VIDEO_CONTROLS_TOTAL_HEIGHT_PX;
     return {
@@ -4022,7 +4079,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [subtitleControlsPushPx]);
 
   const subtitlePreviewTextStyle = React.useMemo<React.CSSProperties>(() => {
-    const visualScale = subtitlePreviewLayoutMetrics.visualScale;
+    const metricScale = subtitlePreviewLayoutMetrics.metricScale;
     const style: React.CSSProperties = {
       fontFamily: effectiveAppearance.font_family || DEFAULT_APPEARANCE.font_family,
       fontSize: `${subtitlePreviewLayoutMetrics.fontSizePx}px`,
@@ -4034,7 +4091,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           ? "italic"
           : "normal",
       textAlign: effectiveAppearance.text_align,
-      letterSpacing: `${effectiveAppearance.letter_spacing * visualScale}px`,
+      letterSpacing: `${effectiveAppearance.letter_spacing * metricScale}px`,
       color: colorWithOpacity(
         effectiveAppearance.text_color,
         effectiveAppearance.text_opacity
@@ -4045,7 +4102,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (effectiveAppearance.outline_enabled && effectiveAppearance.outline_width > 0) {
       const scaledOutlineWidth = Math.min(
         MAX_OUTLINE_SHADOW_RADIUS,
-        effectiveAppearance.outline_width * visualScale
+        effectiveAppearance.outline_width * metricScale
       );
       shadows.push(
         ...buildOutlineShadows(
@@ -4065,10 +4122,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     ) {
       const blurRadius = Math.max(
         0,
-        Math.round((effectiveAppearance.shadow_blur ?? 10) * visualScale)
+        Math.round((effectiveAppearance.shadow_blur ?? 10) * metricScale)
       );
       shadows.push(
-        `${effectiveAppearance.shadow_offset_x * visualScale}px ${effectiveAppearance.shadow_offset_y * visualScale}px ${blurRadius}px ${colorWithOpacity(
+        `${effectiveAppearance.shadow_offset_x * metricScale}px ${effectiveAppearance.shadow_offset_y * metricScale}px ${blurRadius}px ${colorWithOpacity(
           effectiveAppearance.shadow_color,
           effectiveAppearance.shadow_opacity
         )}`
@@ -4375,7 +4432,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     displayedVideoRect.scale,
     displayedVideoRect.width,
     editingText,
-    height,
     isEditingActiveCue,
     subtitleEditorControlsElement,
     subtitleEditorToolbarLayoutTick,
@@ -4841,7 +4897,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       }
       const dy = e.clientY - drag.startY;
       const verticalDirection = drag.corner === "nw" || drag.corner === "ne" ? -1 : 1;
-      const deltaSize = dy * verticalDirection * 0.25;
+      const baseFrameScale = displayedVideoRect.height / SUBTITLE_STYLE_REFERENCE_HEIGHT;
+      const minFontScale =
+        drag.startFontSize > 0
+          ? (SUBTITLE_MIN_RENDER_FONT_SIZE_PX * displayedVideoRect.scale) / drag.startFontSize
+          : baseFrameScale;
+      const fontUnitScale = Math.max(baseFrameScale, minFontScale, 0.001);
+      const deltaSize = (dy * verticalDirection * 0.25) / fontUnitScale;
       const raw = drag.startFontSize + deltaSize;
       const newSize = Math.round(
         Math.max(SUBTITLE_FONT_SIZE_MIN, Math.min(SUBTITLE_FONT_SIZE_MAX, raw))
@@ -4858,7 +4920,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       document.removeEventListener("mousemove", onMouseMove, true);
       document.removeEventListener("mouseup", onMouseUp, true);
     };
-  }, [subtitleResizeDrag]);
+  }, [displayedVideoRect.height, displayedVideoRect.scale, subtitleResizeDrag]);
 
   const SUBTITLE_POSITION_SNAP_THRESHOLD = 0.02;
   React.useEffect(() => {
@@ -6108,6 +6170,25 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     return <WorkbenchSkeleton isNarrow={isNarrow} />;
   }
 
+  const isCreateSubtitlesIdleState =
+    !hasSubtitles &&
+    !hasActiveCreateSubtitles &&
+    !pendingAutoStartSubtitles &&
+    !incomingState?.autoStartSubtitles;
+  const createSubtitlesStateContentClassName = cn(
+    "mx-auto flex w-full flex-col gap-4",
+    isCreateSubtitlesIdleState
+      ? "my-auto max-w-xl text-center"
+      : "max-w-[min(100%,56rem)] flex-1 justify-center text-left"
+  );
+  const showCreateElevatorMusicPrompt =
+    showElevatorMusicRow &&
+    hasActiveCreateSubtitles &&
+    !(
+      project?.active_task?.status === "queued" &&
+      project?.active_task?.kind === "create_subtitles"
+    );
+
   return (
     <div data-testid="workbench" className="flex h-full min-h-0 flex-col gap-4">
       <header
@@ -6152,10 +6233,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         <>
       {showCreateSubtitlesState && (
         <section
-          className="relative flex min-h-0 flex-1 flex-col items-center rounded-lg border border-border bg-card p-6"
+          className="relative flex min-h-0 flex-1 flex-col overflow-y-auto rounded-lg border border-border bg-card p-4 sm:p-6"
           data-testid="workbench-empty-state"
         >
-          <div className="flex w-full max-w-xl flex-1 flex-col justify-center space-y-4 text-center">
+          <div className={createSubtitlesStateContentClassName}>
             {createSubtitlesError && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                 {createSubtitlesError}
@@ -6268,80 +6349,39 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                 </>
               );
             })()}
-            {isShortWindow &&
-              showElevatorMusicRow &&
-              hasActiveCreateSubtitles &&
-              !(
-                project?.active_task?.status === "queued" &&
-                project?.active_task?.kind === "create_subtitles"
-              ) && (
-                <div
-                  className="absolute bottom-4 right-4 animate-in fade-in duration-300"
-                  data-testid="workbench-elevator-music-row"
-                >
-                  <Button
-                    variant="secondary"
-                    onClick={handleElevatorMusicToggle}
-                    className="inline-flex shrink-0 [&_svg]:size-4"
-                    aria-label={
-                      elevatorMusicPlaying
-                        ? "Pause background music"
-                        : "Play background music"
-                    }
-                  >
-                    {elevatorMusicPlaying ? (
-                      <>
-                        <Pause />
-                        Pause
-                      </>
-                    ) : (
-                      <>
-                        <Play />
-                        Some music?
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
           </div>
-          {!isShortWindow &&
-            showElevatorMusicRow &&
-            hasActiveCreateSubtitles &&
-            !(
-              project?.active_task?.status === "queued" &&
-              project?.active_task?.kind === "create_subtitles"
-            ) && (
-              <div
-                className="absolute bottom-6 left-0 right-0 flex justify-center animate-in fade-in duration-300"
-                data-testid="workbench-elevator-music-row"
-              >
-                <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-muted-foreground">
-                  <span>Listen to some music while you wait?</span>
-                  <Button
-                    variant="secondary"
-                    onClick={handleElevatorMusicToggle}
-                    className="inline-flex shrink-0"
-                    aria-label={
-                      elevatorMusicPlaying
-                        ? "Pause background music"
-                        : "Play background music"
-                    }
-                  >
-                    {elevatorMusicPlaying ? (
-                      <>
-                        <Pause />
-                        Pause
-                      </>
-                    ) : (
-                      <>
-                        <Play />
-                        Play
-                      </>
-                    )}
-                  </Button>
-                </div>
+          {showCreateElevatorMusicPrompt && (
+            <div
+              className="mx-auto mt-auto flex w-full max-w-[min(100%,56rem)] justify-center pt-4"
+              data-testid="workbench-elevator-music-row"
+            >
+              <div className="flex flex-col items-center gap-2 text-center text-sm text-muted-foreground sm:flex-row sm:justify-center sm:gap-3">
+                <span>Listen to some music while you wait?</span>
+                <Button
+                  variant="secondary"
+                  onClick={handleElevatorMusicToggle}
+                  className="inline-flex shrink-0 [&_svg]:size-4"
+                  aria-label={
+                    elevatorMusicPlaying
+                      ? "Pause background music"
+                      : "Play background music"
+                  }
+                >
+                  {elevatorMusicPlaying ? (
+                    <>
+                      <Pause />
+                      Pause
+                    </>
+                  ) : (
+                    <>
+                      <Play />
+                      Play
+                    </>
+                  )}
+                </Button>
               </div>
-            )}
+            </div>
+          )}
         </section>
       )}
 
@@ -6974,11 +7014,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     }}
                   >
                     <div
-                      className="flex shrink-0 flex-col justify-center px-3 py-2"
+                      className="flex shrink-0 flex-col justify-center px-3"
                       style={{
                         minHeight:
                           VIDEO_PROGRESS_HIT_AREA_PY * 2 +
-                          VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER
+                          VIDEO_PROGRESS_STRIP_HEIGHT_PX_HOVER,
+                        paddingTop: VIDEO_PROGRESS_SECTION_PADDING_PX,
+                        paddingBottom: VIDEO_PROGRESS_SECTION_PADDING_PX
                       }}
                     >
                       <div className="relative w-full">
@@ -7055,9 +7097,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                       </div>
                     </div>
                     <div
-                      className="flex cursor-default items-center gap-2 px-2 py-1.5"
+                      className="flex cursor-default items-center gap-2 px-2"
                       style={{
-                        height: VIDEO_CONTROL_BAR_HEIGHT_PX,
+                        height: VIDEO_CONTROL_BAR_HEIGHT_PX + VIDEO_CONTROLS_BOTTOM_INSET_PX,
+                        paddingTop: VIDEO_CONTROL_BAR_VERTICAL_PADDING_PX,
+                        paddingBottom:
+                          VIDEO_CONTROL_BAR_VERTICAL_PADDING_PX + VIDEO_CONTROLS_BOTTOM_INSET_PX,
+                        boxSizing: "border-box",
                         background:
                           "linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 70%, transparent 100%)"
                       }}
