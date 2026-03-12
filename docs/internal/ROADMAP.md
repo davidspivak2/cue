@@ -55,7 +55,9 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Golden-path preview vs export checks show no material mismatch for font size/family/shadow rendering intent.
    - UX spec reference: E) Editor; G) Export progress + success
 
-4. [NEXT] Preview word-highlight sync (preview-only)
+4. [DONE] Preview word-highlight sync (preview-only)
+   - Current status:
+     - Completed on 2026-03-13.
    - Deliverable:
      - In-app preview highlight progression uses timed-word artifacts when available instead of evenly distributing highlight by cue duration.
      - Export timing behavior remains unchanged by this item.
@@ -64,14 +66,14 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Export output timing remains unchanged and regression-free.
    - UX spec reference: F) Create Subtitles pipeline contract; E) Editor
 
-5. [NEXT] Subtitle edit-mode reliability (data integrity + RTL + play-resume behavior)
+5. [DONE] Subtitle edit-mode reliability (data integrity + RTL + play-resume behavior)
    - Deliverable:
      - Inline editor always shows full cue text (including three-line cues) so every line is editable.
      - Edit textarea behavior for Hebrew/RTL text keeps punctuation placement and arrow-key movement intuitive.
      - Clicking `Play` while edit mode is active auto-saves, exits edit mode, and resumes playback immediately.
      - Edit affordance becomes more obvious while staying subtle and non-distracting.
    - Current status:
-     - Play-during-edit (auto-save, exit edit mode, resume playback) is implemented. See KI-007. Three-line cue visibility, RTL edit behavior, and edit affordance discoverability remain pending.
+     - Completed on 2026-03-13.
    - Acceptance criteria:
      - Three-line cues are fully visible and editable in the inline textarea.
      - RTL edit sessions keep comma/terminal punctuation placement correct and arrow-key navigation predictable.
@@ -90,7 +92,9 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - If upload fails, user still has a visible fallback path (`Copy diagnostics`).
    - UX spec reference: H) Error UX + Diagnostics; J) Settings page
 
-7. [NEXT] PR15 — Clarity pass (plain-language labels + CTA reduction)
+7. [DONE] PR15 — Clarity pass (plain-language labels + CTA reduction)
+   - Current status:
+     - Completed on 2026-03-13.
    - Deliverable:
      - Copy polish applied and CTA reduction pass completed across UI surfaces.
      - User-facing label updates include replacing technical wording (for example, Workbench/Editor naming) and ambiguous statuses (for example, `Ready`).
@@ -99,20 +103,22 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Project and Editor statuses read clearly for non-technical users, with no ambiguous standalone labels.
    - UX spec reference: K) Copywriting glossary (approved strings); D) Projects; E) Editor
 
-8. [NEXT] Navigation simplification — remove global left sidebar and standardize top-level header behavior
+8. [DONE] Navigation simplification — remove global left sidebar and standardize top-level header behavior
    - Deliverable:
      - Global left sidebar is removed from the redesign flow.
      - Header/back/title/status placement is consistent across Projects, Editor, and Settings.
      - Settings entry remains discoverable from all primary surfaces when navigation is allowed.
    - Current status:
-     - Global left sidebar is already removed; the app has no left sidebar. Remaining work is header/back/title/status consistency and Settings discoverability.
+     - Completed on 2026-03-13.
    - Acceptance criteria:
      - App remains fully navigable without the left sidebar.
      - No duplicate app/page headings or duplicated video-name labels appear in Editor.
      - Editor back button appears in a consistent top-left location.
    - UX spec reference: B) Top-level navigation model; E) Editor
 
-9. [NEXT] Progress truthfulness + continuity (Create Subtitles and Export)
+9. [DONE] Progress truthfulness + continuity (Create Subtitles and Export)
+   - Current status:
+     - Completed on 2026-03-13.
    - Deliverable:
       - Progress surface reflects pre-transcription work instead of appearing stuck at 0%.
       - If user leaves Editor during an active task, background progress remains visible from other pages.
@@ -125,7 +131,7 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
       - In both Create subtitles and Export progress UI, the right-side step/status label above the bar is removed and percentage plus progress bar remain visible.
    - UX spec reference: F) Create Subtitles pipeline contract; G) Export progress + success
 
-10. [NEXT] Settings clarity pass
+10. [DONE] Settings clarity pass
    - Deliverable:
      - Transcription quality control is redesigned as clear choice cards with plain-language hints.
      - “Always save to this folder” and its path controls are visually grouped.
@@ -133,14 +139,16 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - “Keep extracted WAV file” is removed; extracted WAV is auto-cleaned.
      - Theme toggle is exposed in Settings.
    - Current status:
-     - Theme toggle (Light/Dark/System) is already exposed in Settings under Appearance. Remaining deliverables (transcription quality cards, save-folder grouping, punctuation/audio merge, remove Keep WAV) are still pending.
+     - Completed on 2026-03-13.
    - Acceptance criteria:
      - Non-technical users can understand each transcription-quality option without prior knowledge.
      - Save-folder controls are only shown/enabled where policy context is explicit.
      - No user-facing control remains for keeping extracted WAV files.
    - UX spec reference: J) Settings page
 
-11. [NEXT] Style pane modernization (usability + defaults + overlay affordances)
+11. [DONE] Style pane modernization (usability + defaults + overlay affordances)
+   - Current status:
+     - Completed on 2026-03-13.
    - Deliverable:
       - Style controls are reorganized for lower cognitive load (spacing, grouping, progressive disclosure).
       - Background mode uses a segmented control pattern.
@@ -160,7 +168,9 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
       - Overlay textarea in Workbench has clear editable/input affordance and visible focus state without reducing subtitle readability.
    - UX spec reference: E) Editor; J) Settings page; K) Copywriting glossary
 
-12. [NEXT] Editor shell affordance polish (tabs + cursor semantics)
+12. [DONE] Editor shell affordance polish (tabs + cursor semantics)
+   - Current status:
+     - Completed on 2026-03-13.
    - Deliverable:
      - Open-project tabs in Editor use browser/Figma-style tab treatment (not pill chips).
      - Interactive controls consistently use pointer cursor affordance, while text-editing surfaces retain I-beam behavior.
@@ -169,7 +179,9 @@ Terminology note: the user-facing screen label is now **"Projects"** (same scree
      - Cursor feedback matches interaction type across Editor controls with no regressions in text-edit zones.
    - UX spec reference: E) Editor; I) State machine
 
-13. [NEXT] Editor/Projects micro-interaction polish
+13. [DONE] Editor/Projects micro-interaction polish
+   - Current status:
+     - Completed on 2026-03-13.
    - Deliverable:
      - Delete dialog appears without side-swoop animation.
      - Delete-success feedback uses toast behavior (not persistent inline banner).

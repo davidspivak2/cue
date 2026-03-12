@@ -29,8 +29,8 @@ export type ReviewLocationState = {
 const SESSION_KEY = "cue_review_state";
 
 const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
-  font_family: "Heebo",
-  font_size: 28,
+  font_family: "Assistant",
+  font_size: 44,
   font_style: "regular",
   font_weight: 400,
   text_align: "center",

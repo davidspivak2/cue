@@ -88,18 +88,18 @@ const CARD_SAMPLE_TEXT = "Preview";
 
 const SHADOW_DEFAULTS: Partial<SubtitleStyleAppearance> = {
   shadow_enabled: true,
-  shadow_offset_x: 0,
-  shadow_offset_y: 0,
+  shadow_offset_x: 3.44,
+  shadow_offset_y: 4.92,
   shadow_color: "#000000",
   shadow_opacity: 1,
-  shadow_blur: 10
+  shadow_blur: 4
 };
 
 const STATIC_CARD_PREVIEW_HIGHLIGHT_OPACITY = 0.8;
 
 const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
-  font_family: "Heebo",
-  font_size: 28,
+  font_family: "Assistant",
+  font_size: 44,
   font_style: "regular",
   font_weight: 400,
   text_align: "center",
@@ -111,11 +111,11 @@ const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
   outline_width: 2,
   outline_color: "#000000",
   shadow_enabled: true,
-  shadow_offset_x: 0,
-  shadow_offset_y: 0,
+  shadow_offset_x: 3.44,
+  shadow_offset_y: 4.92,
   shadow_color: "#000000",
   shadow_opacity: 1,
-  shadow_blur: 10,
+  shadow_blur: 4,
   background_mode: "line",
   line_bg_color: "#000000",
   line_bg_opacity: 0.7,

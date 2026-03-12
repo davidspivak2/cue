@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import re
 from typing import Any, Iterable
@@ -18,7 +18,7 @@ PRESET_NAMES = (
     PRESET_CUSTOM,
 )
 
-DEFAULT_FONT_NAME = "Heebo"
+DEFAULT_FONT_NAME = "Assistant"
 DEFAULT_TEXT_COLOR = "#FFFFFF"
 DEFAULT_OUTLINE_COLOR = "#000000"
 DEFAULT_SHADOW_COLOR = "#000000"
@@ -30,6 +30,11 @@ DEFAULT_FONT_WEIGHT = 400
 DEFAULT_TEXT_ALIGN = "center"
 DEFAULT_LINE_SPACING = 1.0
 MIN_TEXT_OPACITY = 0.10
+STYLE_REFERENCE_FRAME_HEIGHT = 1000.0
+MIN_RENDER_FONT_SIZE_PX = 10.0
+QT_POINT_TO_PIXEL_RATIO = 96.0 / 72.0
+QT_PIXEL_TO_POINT_RATIO = 72.0 / 96.0
+RENDER_MODEL_VERSION = "frame_height_v1"
 
 VALID_FONT_STYLES = {"regular", "bold", "italic", "bold_italic"}
 VALID_BACKGROUND_MODES = {"none", "line", "word"}
@@ -54,7 +59,7 @@ class PresetStyle:
 @dataclass(frozen=True)
 class SubtitleStyle:
     font_family: str
-    font_size: int
+    font_size: float
     font_style: str
     font_weight: int
     text_align: str
@@ -207,7 +212,7 @@ def preset_style_defaults(name: str) -> PresetStyle:
             box_padding=8,
         )
     return PresetStyle(
-        font_size=28,
+        font_size=44,
         outline=1,
         shadow=0,
         margin_v=28,
@@ -352,6 +357,55 @@ def _position_y_from_normalize_raw(
         default_y = getattr(fallback, "position_y", 0.92)
         return max(0.0, min(1.0, _coerce_float(raw.get("position_y"), default_y)))
     return max(0.0, min(1.0, _position_y_from_anchor_offset(vertical_anchor, vertical_offset)))
+
+
+def resolve_style_scale_for_frame(
+    style: SubtitleStyle,
+    frame_height: float,
+    *,
+    min_font_size_px: float = MIN_RENDER_FONT_SIZE_PX,
+) -> float:
+    base_scale = max(0.0, float(frame_height)) / STYLE_REFERENCE_FRAME_HEIGHT
+    if style.font_size <= 0:
+        return base_scale
+    return max(base_scale, min_font_size_px / float(style.font_size))
+
+
+def resolve_style_for_frame(
+    style: SubtitleStyle,
+    frame_height: float,
+    *,
+    min_font_size_px: float = MIN_RENDER_FONT_SIZE_PX,
+) -> SubtitleStyle:
+    pixel_scale = resolve_style_scale_for_frame(
+        style,
+        frame_height,
+        min_font_size_px=min_font_size_px,
+    )
+    # Qt font APIs take point sizes, while the stored style now scales in frame-relative pixels.
+    font_size_px = max(min_font_size_px, float(style.font_size) * pixel_scale)
+    return replace(
+        style,
+        font_size=font_size_px * QT_PIXEL_TO_POINT_RATIO,
+        letter_spacing=style.letter_spacing * pixel_scale,
+        outline_width=style.outline_width * pixel_scale,
+        shadow_strength=style.shadow_strength * pixel_scale,
+        shadow_offset_x=style.shadow_offset_x * pixel_scale,
+        shadow_offset_y=style.shadow_offset_y * pixel_scale,
+        shadow_blur=style.shadow_blur * pixel_scale,
+        line_bg_padding=style.line_bg_padding * pixel_scale,
+        line_bg_padding_top=style.line_bg_padding_top * pixel_scale,
+        line_bg_padding_right=style.line_bg_padding_right * pixel_scale,
+        line_bg_padding_bottom=style.line_bg_padding_bottom * pixel_scale,
+        line_bg_padding_left=style.line_bg_padding_left * pixel_scale,
+        line_bg_radius=style.line_bg_radius * pixel_scale,
+        word_bg_padding=style.word_bg_padding * pixel_scale,
+        word_bg_padding_top=style.word_bg_padding_top * pixel_scale,
+        word_bg_padding_right=style.word_bg_padding_right * pixel_scale,
+        word_bg_padding_bottom=style.word_bg_padding_bottom * pixel_scale,
+        word_bg_padding_left=style.word_bg_padding_left * pixel_scale,
+        word_bg_radius=style.word_bg_radius * pixel_scale,
+    )
 
 
 def preset_defaults(

@@ -26,8 +26,8 @@ const buildSettings = () => ({
     highlight_color: "#FFD400",
     highlight_opacity: 1.0,
     custom: {
-      font_family: "Heebo",
-      font_size: 28,
+      font_family: "Assistant",
+      font_size: 44,
       text_color: "#FFFFFF",
       outline: 0,
       shadow: 0,
@@ -37,8 +37,8 @@ const buildSettings = () => ({
       box_padding: 8
     },
     appearance: {
-      font_family: "Heebo",
-      font_size: 28,
+      font_family: "Assistant",
+      font_size: 44,
       text_align: "center",
       line_spacing: 1.0,
       text_color: "#FFFFFF",
@@ -100,6 +100,24 @@ test.beforeEach(async ({ page }) => {
     }
     await route.continue();
   });
+
+  await page.route("**://127.0.0.1:8765/device", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        gpu_available: false,
+        cpu_cores: 4,
+        calibration_done: true,
+        ultra_available: false,
+        ultra_device: null
+      })
+    });
+  });
 });
 
 test("save policy enables the path controls", async ({ page }) => {
@@ -110,8 +128,8 @@ test("save policy enables the path controls", async ({ page }) => {
   const pathField = page.getByPlaceholder("No folder selected");
   const browseButton = page.getByRole("button", { name: "Browse..." });
 
-  await expect(pathField).toBeDisabled();
-  await expect(browseButton).toBeDisabled();
+  await expect(pathField).toHaveCount(0);
+  await expect(browseButton).toHaveCount(0);
 
   await page.getByLabel("Specific folder").click();
   await expect(pathField).toBeEnabled();
@@ -125,9 +143,10 @@ test("diagnostics section is visible and master toggle gates categories", async 
   await page.getByTestId("title-bar").getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-content")).toBeVisible();
 
-  const settingsHeading = page.getByRole("heading", { name: "Settings" });
+  const settingsHeading = page.locator("#settings-dialog-title [role='button']");
+  await expect(settingsHeading).toBeVisible();
   for (let i = 0; i < 7; i++) {
-    await settingsHeading.click();
+    await settingsHeading.press("Enter");
   }
 
   await expect(page.getByTestId("settings-diagnostics-section")).toBeVisible({
@@ -167,31 +186,105 @@ test("transcription quality updates settings", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("title-bar").getByRole("button", { name: "Settings" }).click();
   await expect(page.getByTestId("settings-content")).toBeVisible();
+  await expect(page.getByTestId("transcription-quality-skeleton")).toHaveCount(0);
 
   const qualityRoot = page.getByTestId("transcription-quality-slider");
+  await expect(qualityRoot).toBeVisible();
   await qualityRoot.scrollIntoViewIfNeeded();
 
   const requestPromise = page.waitForRequest(
     (request) => request.url().includes("/settings") && request.method() === "PUT"
   );
 
-  const sliderThumb = qualityRoot.locator("[role=slider]");
   const description = page.locator("#transcription-quality-description");
-  if ((await sliderThumb.count()) > 0) {
-    await sliderThumb.waitFor({ state: "visible" });
-    await sliderThumb.focus();
-    await page.keyboard.press("ArrowLeft");
-    const request = await requestPromise;
-    const payload = request.postDataJSON();
-    expect(payload.settings.transcription_quality).toBe("speed");
-    await expect(description).toBeVisible();
-    await expect(description).toContainText("Fastest transcription");
-  } else {
-    await page.getByRole("button", { name: "Faster" }).click();
-    const request = await requestPromise;
-    const payload = request.postDataJSON();
-    expect(payload.settings.transcription_quality).toBe("speed");
-    await expect(description).toBeVisible();
-    await expect(description).toContainText("For nerds:");
-  }
+  await qualityRoot.getByRole("radio", { name: "Faster" }).click();
+
+  const request = await requestPromise;
+  const payload = request.postDataJSON();
+  expect(payload.settings.transcription_quality).toBe("speed");
+  await expect(description).toBeVisible();
+  await expect(description).toContainText("Runs on GPU (int8).");
+});
+
+test("transcription quality shows a skeleton until device info resolves", async ({
+  page
+}) => {
+  await page.route("**://127.0.0.1:8765/device", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        gpu_available: true,
+        cpu_cores: 8,
+        calibration_done: true,
+        ultra_available: false,
+        ultra_device: null
+      })
+    });
+  });
+
+  await page.goto("/");
+  await page.getByTestId("title-bar").getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("settings-content")).toBeVisible();
+
+  await expect(page.getByTestId("transcription-quality-skeleton")).toBeVisible();
+  await expect(page.getByTestId("transcription-quality-slider")).toHaveCount(0);
+
+  await expect(page.getByTestId("transcription-quality-skeleton")).toHaveCount(0, {
+    timeout: 5000
+  });
+  await expect(page.getByTestId("transcription-quality-slider")).toBeVisible();
+  await expect(page.locator("#transcription-quality-description")).toContainText(
+    "Runs on GPU"
+  );
+});
+
+test("transcription quality uses cached device info on later app loads", async ({
+  page
+}) => {
+  let deviceRequestCount = 0;
+
+  await page.route("**://127.0.0.1:8765/device", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    deviceRequestCount += 1;
+    if (deviceRequestCount > 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        gpu_available: true,
+        cpu_cores: 8,
+        calibration_done: true,
+        ultra_available: false,
+        ultra_device: null
+      })
+    });
+  });
+
+  await page.goto("/");
+  await page.getByTestId("title-bar").getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("settings-content")).toBeVisible();
+  await expect(page.getByTestId("transcription-quality-slider")).toBeVisible();
+  await expect(page.locator("#transcription-quality-description")).toContainText(
+    "Runs on GPU"
+  );
+
+  await page.reload();
+  await page.getByTestId("title-bar").getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("settings-content")).toBeVisible();
+  await expect(page.getByTestId("transcription-quality-skeleton")).toHaveCount(0);
+  await expect(page.getByTestId("transcription-quality-slider")).toBeVisible();
+  await expect(page.locator("#transcription-quality-description")).toContainText(
+    "Runs on GPU"
+  );
 });

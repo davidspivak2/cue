@@ -22,6 +22,7 @@ from .subtitle_style import (
     DEFAULT_TEXT_COLOR,
     DEFAULT_WORD_BG_COLOR,
     MIN_TEXT_OPACITY,
+    RENDER_MODEL_VERSION,
     SubtitleStyle,
     resolve_outline_color,
 )
@@ -222,6 +223,7 @@ def build_preview_cache_key(
     highlight_opacity: Optional[float],
 ) -> str:
     snapshot = {
+        "render_model_version": RENDER_MODEL_VERSION,
         "font_family": style.font_family,
         "font_size": style.font_size,
         "font_style": style.font_style,
@@ -297,7 +299,8 @@ def render_graphics_preview(
         )
 
     resolved_font_family, font_fallback_used = _resolve_qt_font_family(requested_font_family)
-    font = QtGui.QFont(resolved_font_family, int(round(style.font_size)))
+    font = QtGui.QFont(resolved_font_family)
+    font.setPointSizeF(max(0.1, float(style.font_size)))
     font.setWeight(QtGui.QFont.Weight(int(style.font_weight)))
     if style.font_style in ("italic", "bold_italic"):
         font.setItalic(True)

@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import app.graphics_preview_renderer as graphics_preview_renderer
 from asgi_lifespan import LifespanManager
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
-from app import backend_server, project_store
+from app import backend_server, project_store, subtitle_style
 from app.paths import get_diagnostics_dir, get_logs_dir, get_projects_dir
 from app.srt_utils import compute_srt_sha256
 from app.word_timing_schema import (
@@ -313,6 +314,10 @@ async def test_create_subtitles_job_updates_project_and_subtitles_file(
             sub_response = await client.get(f"/projects/{project_id}/subtitles")
             assert sub_response.status_code == 200
             assert sub_response.json()["subtitles_srt_text"].strip() == srt_content.strip()
+
+            project_response = await client.get(f"/projects/{project_id}")
+            assert project_response.status_code == 200
+            assert project_response.json()["status"] == "ready"
 
     project_dir = get_projects_dir() / project_id
     assert (project_dir / "subtitles.srt").exists()
@@ -846,6 +851,59 @@ def test_preview_overlay_returns_existing_cached_png(tmp_path: Path, monkeypatch
         assert second.status_code == 200
         second_path = second.json().get("overlay_path")
         assert second_path == first_path
+
+
+def test_build_preview_cache_key_changes_with_render_model_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    style = subtitle_style.preset_defaults(subtitle_style.PRESET_DEFAULT)
+    args = {
+        "video_path": r"C:\fake\video.mp4",
+        "srt_mtime": 123,
+        "word_timings_mtime": None,
+        "timestamp_ms": 456,
+        "preview_width": 1280,
+        "style": style,
+        "subtitle_mode": "static",
+        "highlight_color": "#FFD400",
+        "highlight_opacity": 1.0,
+    }
+
+    current_key = graphics_preview_renderer.build_preview_cache_key(**args)
+    monkeypatch.setattr(graphics_preview_renderer, "RENDER_MODEL_VERSION", "legacy")
+    legacy_key = graphics_preview_renderer.build_preview_cache_key(**args)
+
+    assert current_key != legacy_key
+
+
+def test_preview_overlay_cache_key_changes_with_render_model_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("PySide6")
+    _setup_env(tmp_path, monkeypatch)
+
+    payload = {
+        "width": 640,
+        "height": 360,
+        "subtitle_text": "Preview parity check",
+        "highlight_word_index": 0,
+        "subtitle_style": {},
+        "subtitle_mode": "word_highlight",
+        "highlight_color": "#FFD400",
+        "highlight_opacity": 1.0,
+    }
+
+    with TestClient(backend_server.app) as client:
+        first = client.post("/preview-overlay", json=payload)
+        assert first.status_code == 200
+        first_path = first.json().get("overlay_path")
+        assert isinstance(first_path, str) and first_path
+
+        monkeypatch.setattr(subtitle_style, "RENDER_MODEL_VERSION", "legacy")
+        second = client.post("/preview-overlay", json=payload)
+        assert second.status_code == 200
+        second_path = second.json().get("overlay_path")
+        assert isinstance(second_path, str) and second_path
+        assert second_path != first_path
 
 
 def test_enqueue_event_bounds_queue_without_dropping_terminal() -> None:

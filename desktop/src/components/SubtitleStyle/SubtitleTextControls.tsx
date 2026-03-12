@@ -1142,6 +1142,11 @@ const SubtitleTextControls = ({
           {italicHelperText}
         </p>
       )}
+      {!isToolbar && (
+        <p className={cn(helperTextClass, "text-muted-foreground")}>
+          Font size scales with the video height.
+        </p>
+      )}
       {fontHelperText && (
         <p
           className={cn(

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, Optional, TYPE_CHECKING
 
 from .ffmpeg_utils import get_ffprobe_json
 from .srt_utils import SrtCue
-from .subtitle_style import SubtitleStyle, resolve_outline_color
+from .subtitle_style import SubtitleStyle, resolve_outline_color, resolve_style_for_frame
 from .word_timing_schema import CueWordTimings, WordTimingDocument
 
 if TYPE_CHECKING:
@@ -556,53 +556,31 @@ OVERLAY_OUTLINE_SOFT_EDGE = "halo"
 OVERLAY_DOWNSCALE_TWO_STEP = True
 
 
-def _scale_style_for_resolution(style: SubtitleStyle, scale: float) -> SubtitleStyle:
+def _scale_style_for_supersampling(style: SubtitleStyle, scale: float) -> SubtitleStyle:
     if scale <= 1.0:
         return style
-    s = scale
-    return SubtitleStyle(
-        font_family=style.font_family,
-        font_size=max(1, int(round(style.font_size * s))),
-        font_style=style.font_style,
-        font_weight=style.font_weight,
-        text_align=style.text_align,
-        line_spacing=style.line_spacing,
-        text_color=style.text_color,
-        text_opacity=style.text_opacity,
-        letter_spacing=style.letter_spacing * s,
-        outline_enabled=style.outline_enabled,
-        outline_width=style.outline_width * s,
+    return replace(
+        style,
+        font_size=style.font_size * scale,
+        letter_spacing=style.letter_spacing * scale,
+        outline_width=style.outline_width * scale,
         outline_color=resolve_outline_color(style),
-        shadow_enabled=style.shadow_enabled,
-        shadow_strength=style.shadow_strength * s,
-        shadow_offset_x=style.shadow_offset_x * s,
-        shadow_offset_y=style.shadow_offset_y * s,
-        shadow_color=style.shadow_color,
-        shadow_opacity=style.shadow_opacity,
-        shadow_blur=style.shadow_blur * s,
-        background_mode=style.background_mode,
-        line_bg_color=style.line_bg_color,
-        line_bg_opacity=style.line_bg_opacity,
-        line_bg_padding=style.line_bg_padding * s,
-        line_bg_padding_top=style.line_bg_padding_top * s,
-        line_bg_padding_right=style.line_bg_padding_right * s,
-        line_bg_padding_bottom=style.line_bg_padding_bottom * s,
-        line_bg_padding_left=style.line_bg_padding_left * s,
-        line_bg_radius=style.line_bg_radius * s,
-        word_bg_color=style.word_bg_color,
-        word_bg_opacity=style.word_bg_opacity,
-        word_bg_padding=style.word_bg_padding * s,
-        word_bg_padding_top=style.word_bg_padding_top * s,
-        word_bg_padding_right=style.word_bg_padding_right * s,
-        word_bg_padding_bottom=style.word_bg_padding_bottom * s,
-        word_bg_padding_left=style.word_bg_padding_left * s,
-        word_bg_radius=style.word_bg_radius * s,
-        vertical_anchor=style.vertical_anchor,
-        vertical_offset=style.vertical_offset * s,
-        position_x=style.position_x,
-        position_y=style.position_y,
-        subtitle_mode=style.subtitle_mode,
-        highlight_color=style.highlight_color,
+        shadow_strength=style.shadow_strength * scale,
+        shadow_offset_x=style.shadow_offset_x * scale,
+        shadow_offset_y=style.shadow_offset_y * scale,
+        shadow_blur=style.shadow_blur * scale,
+        line_bg_padding=style.line_bg_padding * scale,
+        line_bg_padding_top=style.line_bg_padding_top * scale,
+        line_bg_padding_right=style.line_bg_padding_right * scale,
+        line_bg_padding_bottom=style.line_bg_padding_bottom * scale,
+        line_bg_padding_left=style.line_bg_padding_left * scale,
+        line_bg_radius=style.line_bg_radius * scale,
+        word_bg_padding=style.word_bg_padding * scale,
+        word_bg_padding_top=style.word_bg_padding_top * scale,
+        word_bg_padding_right=style.word_bg_padding_right * scale,
+        word_bg_padding_bottom=style.word_bg_padding_bottom * scale,
+        word_bg_padding_left=style.word_bg_padding_left * scale,
+        word_bg_radius=style.word_bg_radius * scale,
     )
 
 
@@ -624,7 +602,8 @@ def render_overlay_frame(
     scale = OVERLAY_RESOLUTION_SCALE
     render_w = width * scale
     render_h = height * scale
-    draw_style = _scale_style_for_resolution(style, scale)
+    draw_style = resolve_style_for_frame(style, height)
+    draw_style = _scale_style_for_supersampling(draw_style, scale)
     frame = QtGui.QImage(render_w, render_h, QtGui.QImage.Format_RGBA8888)
     frame.fill(QtCore.Qt.transparent)
     result = render_graphics_preview(

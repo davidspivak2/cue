@@ -36,6 +36,7 @@ from .ffmpeg_utils import (
 )
 from .subtitle_style import (
     SubtitleStyle,
+    resolve_style_for_frame,
 )
 from .graphics_preview_renderer import (
     LAYOUT_CACHE_MAX_ENTRIES,
@@ -520,7 +521,7 @@ class Worker(QtCore.QObject):
             self._emit_step_event(
                 ChecklistStep.TIMING_WORD_HIGHLIGHTS,
                 StepState.SKIPPED,
-                reason_text=timing_reason or "already timed",
+                reason_text=timing_reason or "Already timed",
             )
         else:
             self._emit_step_event(
@@ -884,10 +885,11 @@ class Worker(QtCore.QObject):
             cues = parse_srt_file(srt_path)
             cue = select_cue_for_timestamp(cues, timestamp_seconds)
             subtitle_text = cue.text if cue else ""
+            resolved_style = resolve_style_for_frame(style, frame_image.height())
             result = render_graphics_preview(
                 frame_image,
                 subtitle_text=subtitle_text,
-                style=style,
+                style=resolved_style,
                 subtitle_mode=self.subtitle_mode,
                 highlight_color=resolved_highlight_color,
                 highlight_opacity=resolved_highlight_opacity,
@@ -2871,7 +2873,7 @@ class Worker(QtCore.QObject):
                         "Building word-by-word karaoke effect",
                         force=True,
                     )
-                return StepState.SKIPPED, "already timed"
+                return StepState.SKIPPED, "Already timed"
             if plan.reason == "word_timings_has_no_words":
                 self.signals.log.emit(
                     "Alignment needed: word_timings_has_no_words",
