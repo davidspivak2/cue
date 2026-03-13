@@ -12,6 +12,18 @@ from PyInstaller.utils.hooks import (
 block_cipher = None
 
 project_dir = os.path.abspath(".")
+EXCLUDED_PACKAGE_EXTENSIONS = {
+    ".a",
+    ".cuh",
+    ".cpp",
+    ".exp",
+    ".h",
+    ".hpp",
+    ".ilk",
+    ".lib",
+    ".pdb",
+    ".pyi",
+}
 
 
 def safe_collect_all(package_name: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[str]]:
@@ -35,6 +47,14 @@ def safe_collect_submodules(package_name: str) -> list[str]:
         return []
 
 
+def should_keep_packaged_entry(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() not in EXCLUDED_PACKAGE_EXTENSIONS
+
+
+def filter_packaged_entries(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    return [entry for entry in entries if should_keep_packaged_entry(entry[0])]
+
+
 binaries: list[tuple[str, str]] = []
 ffmpeg_path = os.path.join(project_dir, "bin", "ffmpeg.exe")
 ffprobe_path = os.path.join(project_dir, "bin", "ffprobe.exe")
@@ -43,9 +63,7 @@ if os.path.exists(ffmpeg_path):
 if os.path.exists(ffprobe_path):
     binaries.append((ffprobe_path, "bin"))
 
-datas: list[tuple[str, str]] = [
-    (os.path.join("app", "ui", "styles.qss"), os.path.join("app", "ui"))
-]
+datas: list[tuple[str, str]] = []
 hiddenimports: list[str] = []
 
 for package_name in (
@@ -58,8 +76,8 @@ for package_name in (
     "torchaudio",
 ):
     pkg_datas, pkg_binaries, pkg_hidden = safe_collect_all(package_name)
-    datas += pkg_datas
-    binaries += pkg_binaries
+    datas += filter_packaged_entries(pkg_datas)
+    binaries += filter_packaged_entries(pkg_binaries)
     hiddenimports += pkg_hidden
 
 binaries += safe_collect_dynamic_libs("av")

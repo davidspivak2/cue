@@ -252,6 +252,17 @@ def _read_style_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     return normalize_style_payload(style_data)
 
 
+def _build_default_project_style() -> dict[str, Any]:
+    return normalize_style_payload(
+        {
+            "subtitle_mode": "static",
+            "subtitle_style": {
+                "preset": "Default",
+            },
+        }
+    )
+
+
 def _compute_status(manifest: dict[str, Any], *, allow_exporting: bool = False) -> str:
     video = manifest.get("video") if isinstance(manifest.get("video"), dict) else {}
     video_path = video.get("path")
@@ -478,27 +489,28 @@ def create_project(video_path: str, *, style: Optional[dict[str, Any]] = None) -
     with _STORE_LOCK:
         _ensure_store()
         canonical = _normalize_path(video_path)
+        provided_style = normalize_style_payload(style) if style else None
         summaries = list_projects()
         for summary in summaries:
             if summary.video_path and _normalize_path(summary.video_path) == canonical:
                 manifest = _read_manifest(summary.project_id)
                 manifest["video"] = _build_video_info(video_path)
-                if style is not None:
+                if provided_style is not None:
                     style_path = _artifact_path(manifest, "style_path")
-                    normalized_style = normalize_style_payload(style) if style else style
-                    _atomic_write_json(style_path, normalized_style if normalized_style else {})
+                    _atomic_write_json(style_path, provided_style)
                 _write_manifest(manifest)
                 _write_index(list_projects())
                 return _manifest_to_summary(manifest).model_dump()
         now = _now_iso()
         project_id = str(uuid.uuid4())
+        initial_style = provided_style if provided_style is not None else _build_default_project_style()
         manifest = _build_manifest(
             project_id=project_id,
             video_path=video_path,
             created_at=now,
             updated_at=now,
             status=None,
-            style=normalize_style_payload(style) if style else style,
+            style=initial_style,
             latest_export=None,
         )
         _atomic_write_json(_manifest_path(project_id), manifest)

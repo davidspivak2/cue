@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app import backend_server, project_store
+from app.paths import get_config_path
 
 
 def _setup_env(tmp_path: Path, monkeypatch) -> None:
@@ -104,6 +106,58 @@ def test_project_import_endpoint_stores_browser_upload_and_serves_it(
         file_response = client.get("/local-file", params={"path": str(video_path)})
         assert file_response.status_code == 200
         assert file_response.content == upload_bytes
+
+
+def test_project_import_endpoint_uses_built_in_default_style(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    get_config_path().write_text(
+        json.dumps(
+            {
+                "subtitle_mode": "word_highlight",
+                "subtitle_style": {
+                    "preset": "Default",
+                    "highlight_color": "#00FF99",
+                    "highlight_opacity": 0.35,
+                    "appearance": {
+                        "font_size": 61,
+                        "background_mode": "word",
+                        "subtitle_mode": "word_highlight",
+                        "highlight_color": "#00FF99",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(backend_server.app) as client:
+        response = client.post(
+            "/projects/import",
+            headers={
+                "X-Cue-Filename": "browser%20clip.mp4",
+                "Content-Type": "video/mp4",
+            },
+            content=b"browser-video",
+        )
+        assert response.status_code == 200
+        project_id = response.json()["project_id"]
+
+        detail_response = client.get(f"/projects/{project_id}")
+        assert detail_response.status_code == 200
+        style = detail_response.json()["style"]
+        appearance = style["subtitle_style"]["appearance"]
+
+        assert style["subtitle_mode"] == "static"
+        assert style["subtitle_style"]["preset"] == "Default"
+        assert style["subtitle_style"]["highlight_color"] == "#FFD400"
+        assert style["subtitle_style"]["highlight_opacity"] == 1.0
+        assert appearance["font_size"] == 44
+        assert appearance["background_mode"] == "line"
+        assert appearance["outline_enabled"] is False
+        assert appearance["subtitle_mode"] == "static"
 
 
 def test_relink_import_endpoint_replaces_project_video_with_browser_upload(

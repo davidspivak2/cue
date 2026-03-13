@@ -77,7 +77,7 @@ $engineSpec = Join-Path $repo "CueEngine.spec"
 $engineBuildDir = Join-Path $repo "build\CueEngine"
 $engineDistDir = Join-Path $repo "dist\CueEngine"
 $engineTemplate = Join-Path $repo "tools\pyinstaller.engine.spec.in"
-$enginePayloadArchive = Join-Path $repo "desktop\src-tauri\engine_payload.zip"
+$enginePayloadArchive = Join-Path $repo "desktop\src-tauri\cue-local-engine.zip"
 
 if (Test-Path $engineSpec) {
     Remove-Item -Force $engineSpec
@@ -127,24 +127,8 @@ if ($openMpSource) {
     Write-Host "[INFO] Normalized OpenMP runtime to $openMpTarget"
 }
 
-$engineTargetDir = Join-Path $repo "desktop\src-tauri\engine"
 if (-not (Test-Path (Join-Path $repo "desktop\src-tauri"))) {
     throw "desktop\src-tauri folder is missing."
-}
-if (-not (Test-Path $engineTargetDir)) {
-    New-Item -ItemType Directory -Path $engineTargetDir | Out-Null
-}
-
-Write-Host "[INFO] Syncing engine folder to $engineTargetDir"
-& robocopy $engineDistDir $engineTargetDir /MIR /NFL /NDL /NJH /NJS | Out-Null
-$robocopyCode = $LASTEXITCODE
-if ($robocopyCode -ge 8) {
-    throw "Failed to sync engine folder (robocopy=$robocopyCode)."
-}
-
-$gitkeepPath = Join-Path $engineTargetDir ".gitkeep"
-if (-not (Test-Path $gitkeepPath)) {
-    New-Item -ItemType File -Path $gitkeepPath | Out-Null
 }
 
 if (Test-Path $enginePayloadArchive) {
@@ -159,5 +143,4 @@ $archiveSizeBytes = (Get-Item $enginePayloadArchive).Length
 Write-Host ("[INFO] Engine archive size: {0:N0} bytes ({1:N2} MB)" -f $archiveSizeBytes, ($archiveSizeBytes / 1MB))
 
 Write-Host "[OK] Engine build complete."
-Write-Host "[OK] Engine folder: $engineTargetDir"
 Write-Host "[OK] Engine archive: $enginePayloadArchive"

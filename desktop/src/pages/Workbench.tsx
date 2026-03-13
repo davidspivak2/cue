@@ -5,6 +5,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  X,
   Volume2,
   VolumeX
 } from "lucide-react";
@@ -21,6 +22,7 @@ import WorkbenchEffectsPanel, {
 import { useToast } from "@/contexts/ToastContext";
 import SubtitleTextControls from "@/components/SubtitleStyle/SubtitleTextControls";
 import { WorkbenchSkeleton } from "@/components/WorkbenchSkeleton";
+import { TITLE_BAR_HEIGHT } from "@/components/TitleBar";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
@@ -393,29 +395,42 @@ const buildWorkbenchEffectResetChange = (
   };
 };
 
-/** Full global default: outline on at default, shadow/background/karaoke off. Used by header "Reset to default". */
+/** Full global default: background on, outline/shadow/karaoke off. Used by header "Reset to default". */
 const buildWorkbenchResetAllChange = (): WorkbenchEffectChange => ({
   appearance: {
-    ...DEFAULT_EFFECT_OUTLINE,
+    outline_enabled: false,
+    outline_width: 0,
+    ...DEFAULT_EFFECT_BACKGROUND,
     shadow_enabled: false,
-    background_mode: "none",
     subtitle_mode: "static"
   },
   highlightOpacity: 1
 });
 
-/** True if global state matches default (outline on default, others off). Used for header "Reset to default" visibility. */
+/** True if global state matches default (background on default, outline/shadow/karaoke off). Used for header "Reset to default" visibility. */
 const isWorkbenchAtGlobalDefault = (appearance: SubtitleStyleAppearance): boolean => {
-  const d = DEFAULT_EFFECT_OUTLINE;
+  const d = DEFAULT_EFFECT_BACKGROUND;
   if (
-    !appearance.outline_enabled ||
-    appearance.outline_width !== (d.outline_width as number) ||
-    appearance.outline_color !== (d.outline_color as string)
+    appearance.outline_enabled ||
+    appearance.outline_width !== 0
   ) {
     return false;
   }
   if (appearance.shadow_enabled) return false;
-  if (appearance.background_mode !== "none") return false;
+  if (
+    appearance.background_mode !== (d.background_mode as SubtitleStyleAppearance["background_mode"]) ||
+    appearance.line_bg_color !== d.line_bg_color ||
+    appearance.line_bg_opacity !== d.line_bg_opacity ||
+    (appearance.line_bg_padding ?? 8) !== (d.line_bg_padding ?? 8) ||
+    (appearance.line_bg_padding_top ?? 8) !== (d.line_bg_padding_top ?? 8) ||
+    (appearance.line_bg_padding_right ?? 8) !== (d.line_bg_padding_right ?? 8) ||
+    (appearance.line_bg_padding_bottom ?? 8) !== (d.line_bg_padding_bottom ?? 8) ||
+    (appearance.line_bg_padding_left ?? 8) !== (d.line_bg_padding_left ?? 8) ||
+    (appearance.line_bg_padding_linked ?? true) !== (d.line_bg_padding_linked ?? true) ||
+    appearance.line_bg_radius !== (d.line_bg_radius ?? 8)
+  ) {
+    return false;
+  }
   if (appearance.subtitle_mode !== "static") return false;
   return true;
 };
@@ -494,6 +509,25 @@ export type NamedPresetId = (typeof NAMED_PRESET_IDS)[number];
 
 const isNamedPresetId = (value: string): value is NamedPresetId =>
   NAMED_PRESET_IDS.includes(value as NamedPresetId);
+
+const LEGACY_PRESET_MAP: Record<string, string> = {
+  Default: "classic_static",
+  "Large outline": "bold_outline_static",
+  "Large outline + box": "boxed_static",
+  Lift: "lift_static"
+};
+
+const PRESET_ID_TO_BACKEND_NAME: Record<string, string> = {
+  classic_static: "Default",
+  bold_outline_static: "Large outline",
+  boxed_static: "Large outline + box",
+  lift_static: "Lift",
+  neon_karaoke: "Default",
+  boxed_karaoke: "Default"
+};
+
+const resolvePresetFromStored = (stored: string | undefined): string =>
+  LEGACY_PRESET_MAP[stored ?? ""] ?? stored ?? "classic_static";
 
 function migrateAppearancePadding(
   a: SubtitleStyleAppearance
@@ -1043,6 +1077,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const width = useWindowWidth();
   const isNarrow = width < 1100;
   const isTauriEnv = isTauri();
+  const overlayViewportStyle = isTauriEnv ? { top: TITLE_BAR_HEIGHT, bottom: 0 } : undefined;
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const activeSubtitleRef = React.useRef<HTMLTextAreaElement | null>(null);
   const subtitleOverlayPositionLayerRef = React.useRef<HTMLDivElement | null>(null);
@@ -1220,7 +1255,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [showElevatorMusicRow, setShowElevatorMusicRow] = React.useState(false);
   const [elevatorMusicPlaying, setElevatorMusicPlaying] = React.useState(false);
   const elevatorMusicTimerRef = React.useRef<BrowserTimeout | null>(null);
-  const elevatorMusicRowScheduledRef = React.useRef(false);
   const elevatorAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const selectedElevatorTrackIndexRef = React.useRef<number | null>(null);
   const preparingPreviewStartedAtRef = React.useRef<number | null>(null);
@@ -1264,6 +1298,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const styleBootstrapKeyRef = React.useRef<string | null>(null);
   const overlayRequestKeyRef = React.useRef<string | null>(null);
   const autoEnterEditOnNextCueLoadRef = React.useRef(false);
+  const pendingVideoSeekSecondsRef = React.useRef<number | null>(null);
   const pendingEditorSelectionRef = React.useRef<{
     start: number;
     end: number;
@@ -1295,6 +1330,34 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const cleanup = pendingVideoControlsRevealCleanupRef.current;
     pendingVideoControlsRevealCleanupRef.current = null;
     cleanup?.();
+  }, []);
+
+  const seekVideoToTime = React.useCallback((seconds: number) => {
+    const safeTime = Math.max(0, seconds);
+    const element = videoRef.current;
+    if (!element) {
+      pendingVideoSeekSecondsRef.current = safeTime;
+      setCurrentTimeSeconds(safeTime);
+      return;
+    }
+
+    const applyTime = (durationValue?: number) => {
+      const clampedTime =
+        typeof durationValue === "number" && Number.isFinite(durationValue) && durationValue >= 0
+          ? Math.min(safeTime, durationValue)
+          : safeTime;
+      element.currentTime = clampedTime;
+      setCurrentTimeSeconds(clampedTime);
+    };
+
+    if (element.readyState >= 1 || (Number.isFinite(element.duration) && element.duration >= 0)) {
+      pendingVideoSeekSecondsRef.current = null;
+      applyTime(element.duration);
+      return;
+    }
+
+    pendingVideoSeekSecondsRef.current = safeTime;
+    setCurrentTimeSeconds(safeTime);
   }, []);
 
   const isFloatingToolbarPopoverWrapper = React.useCallback((element: Element | null) => {
@@ -1688,36 +1751,64 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     };
   }, [projectId, subtitlesReloadTick]);
 
-  const LEGACY_PRESET_MAP: Record<string, string> = {
-    Default: "classic_static",
-    "Large outline": "bold_outline_static",
-    "Large outline + box": "boxed_static",
-    Lift: "lift_static"
-  };
-
-  const PRESET_ID_TO_BACKEND_NAME: Record<string, string> = {
-    classic_static: "Default",
-    bold_outline_static: "Large outline",
-    boxed_static: "Large outline + box",
-    lift_static: "Lift",
-    neon_karaoke: "Default",
-    boxed_karaoke: "Default"
-  };
-
-  const resolvePresetFromStored = (stored: string | undefined): string =>
-    LEGACY_PRESET_MAP[stored ?? ""] ?? stored ?? "classic_static";
+  const getSettingsProjectStyleState = React.useCallback(() => {
+    const styleSection =
+      settings?.subtitle_style && typeof settings.subtitle_style === "object"
+        ? (settings.subtitle_style as Record<string, unknown>)
+        : {};
+    const rawAppearance =
+      styleSection.appearance && typeof styleSection.appearance === "object"
+        ? (styleSection.appearance as Record<string, unknown>)
+        : {};
+    const resolvedAppearance = migrateAppearancePadding({
+      ...DEFAULT_APPEARANCE,
+      ...(rawAppearance as unknown as SubtitleStyleAppearance),
+      subtitle_mode:
+        typeof settings?.subtitle_mode === "string"
+          ? settings.subtitle_mode
+          : typeof rawAppearance.subtitle_mode === "string"
+            ? rawAppearance.subtitle_mode
+            : DEFAULT_APPEARANCE.subtitle_mode,
+      highlight_color:
+        typeof styleSection.highlight_color === "string"
+          ? styleSection.highlight_color
+          : typeof rawAppearance.highlight_color === "string"
+            ? rawAppearance.highlight_color
+            : DEFAULT_APPEARANCE.highlight_color
+    });
+    const storedPreset =
+      typeof styleSection.preset === "string" ? styleSection.preset : "Default";
+    const resolvedPreset = resolvePresetFromStored(storedPreset);
+    const storedLastPresetId =
+      typeof styleSection.last_preset_id === "string"
+        ? styleSection.last_preset_id
+        : undefined;
+    const lastPresetId = isNamedPresetId(resolvedPreset)
+      ? resolvedPreset
+      : storedLastPresetId && isNamedPresetId(storedLastPresetId)
+        ? storedLastPresetId
+        : null;
+    const highlightOpacity =
+      typeof styleSection.highlight_opacity === "number"
+        ? styleSection.highlight_opacity
+        : 1.0;
+    return {
+      appearance: resolvedAppearance,
+      preset: resolvedPreset,
+      lastPresetId,
+      highlightOpacity
+    };
+  }, [settings]);
 
   const applyDefaultProjectStyle = React.useCallback(() => {
-    const resolvedAppearance = migrateAppearancePadding({
-      ...DEFAULT_APPEARANCE
-    });
-    setAppearance(resolvedAppearance);
-    setPreset("classic_static");
-    setLastPresetId("classic_static");
-    customAppearanceRef.current = resolvedAppearance;
-    setHighlightOpacity(1.0);
-    return resolvedAppearance;
-  }, []);
+    const nextStyle = getSettingsProjectStyleState();
+    setAppearance(nextStyle.appearance);
+    setPreset(nextStyle.preset);
+    setLastPresetId(nextStyle.lastPresetId);
+    customAppearanceRef.current = nextStyle.appearance;
+    setHighlightOpacity(nextStyle.highlightOpacity);
+    return nextStyle;
+  }, [getSettingsProjectStyleState]);
 
   const applyStyleFromProject = React.useCallback((rawStyle: unknown): boolean => {
     if (!rawStyle || typeof rawStyle !== "object") {
@@ -1874,12 +1965,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
 
-    const defaultAppearance = applyDefaultProjectStyle();
+    const defaultStyle = applyDefaultProjectStyle();
     const fallbackPayload = buildProjectStylePayload(
-      defaultAppearance,
-      "classic_static",
-      1.0,
-      "classic_static"
+      defaultStyle.appearance,
+      defaultStyle.preset,
+      defaultStyle.highlightOpacity,
+      defaultStyle.lastPresetId
     );
     void updateProject(projectId, { style: fallbackPayload })
       .then(() => {
@@ -1975,6 +2066,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setDurationSeconds(0);
     setIsPlaying(false);
     autoEnterEditOnNextCueLoadRef.current = false;
+    pendingVideoSeekSecondsRef.current = null;
     pendingEditorSelectionRef.current = null;
     overlayRequestKeyRef.current = null;
     resetEditSessionState();
@@ -2040,7 +2132,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [createSubtitlesStartedAt, isCreatingSubtitles]);
 
   React.useEffect(() => {
-    if (!createSubtitlesStartedAt || !isCreatingSubtitles || elevatorMusicRowScheduledRef.current) {
+    if (elevatorMusicTimerRef.current !== null) {
+      clearTimeout(elevatorMusicTimerRef.current);
+      elevatorMusicTimerRef.current = null;
+    }
+    if (!createSubtitlesStartedAt || !isCreatingSubtitles || showElevatorMusicRow) {
       return;
     }
     const startedAtMs = Date.parse(createSubtitlesStartedAt);
@@ -2048,7 +2144,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       ? Math.max(0, Date.now() - startedAtMs)
       : 0;
     const delayMs = Math.max(0, 10_000 - elapsedMs);
-    elevatorMusicRowScheduledRef.current = true;
     elevatorMusicTimerRef.current = window.setTimeout(() => {
       elevatorMusicTimerRef.current = null;
       setShowElevatorMusicRow(true);
@@ -2059,13 +2154,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         elevatorMusicTimerRef.current = null;
       }
     };
-  }, [createSubtitlesStartedAt, isCreatingSubtitles]);
+  }, [createSubtitlesStartedAt, isCreatingSubtitles, showElevatorMusicRow]);
 
   React.useEffect(() => {
     if (createSubtitlesStartedAt !== null) {
       return;
     }
-    elevatorMusicRowScheduledRef.current = false;
     setShowElevatorMusicRow(false);
     setElevatorMusicPlaying(false);
     selectedElevatorTrackIndexRef.current = null;
@@ -2739,7 +2833,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       clearTimeout(elevatorMusicTimerRef.current);
       elevatorMusicTimerRef.current = null;
     }
-    elevatorMusicRowScheduledRef.current = false;
     setShowElevatorMusicRow(false);
     setElevatorMusicPlaying(false);
     elevatorAudioRef.current?.pause();
@@ -5258,6 +5351,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     ) {
       return;
     }
+    seekVideoToTime(cues[0].startSeconds);
     beginEditingCue(cues[0], false, { start: 0, end: 0 });
   }, [
     beginEditingCue,
@@ -5267,6 +5361,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     isExporting,
     isLoading,
     isSavingCue,
+    seekVideoToTime,
     selectedCueId
   ]);
 
@@ -6097,6 +6192,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     !hasActiveCreateSubtitles &&
     !pendingAutoStartSubtitles &&
     !incomingState?.autoStartSubtitles;
+  const canShowCreateElevatorMusicPrompt =
+    hasActiveCreateSubtitles &&
+    !(
+      project?.active_task?.status === "queued" &&
+      project?.active_task?.kind === "create_subtitles"
+    );
   const createSubtitlesStateContentClassName = cn(
     "mx-auto flex w-full flex-col gap-4",
     isCreateSubtitlesIdleState
@@ -6104,12 +6205,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       : "max-w-[min(100%,56rem)] flex-1 justify-center text-left"
   );
   const showCreateElevatorMusicPrompt =
-    showElevatorMusicRow &&
-    hasActiveCreateSubtitles &&
-    !(
-      project?.active_task?.status === "queued" &&
-      project?.active_task?.kind === "create_subtitles"
-    );
+    showElevatorMusicRow && canShowCreateElevatorMusicPrompt;
 
   return (
     <div data-testid="workbench" className="flex h-full min-h-0 flex-col gap-4">
@@ -6272,12 +6368,21 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               );
             })()}
           </div>
-          {showCreateElevatorMusicPrompt && (
+          {canShowCreateElevatorMusicPrompt && (
             <div
               className="mx-auto mt-auto flex w-full max-w-[min(100%,56rem)] justify-center pt-4"
-              data-testid="workbench-elevator-music-row"
+              aria-hidden={!showCreateElevatorMusicPrompt}
+              data-testid="workbench-elevator-music-shell"
             >
-              <div className="flex flex-col items-center gap-2 text-center text-sm text-muted-foreground sm:flex-row sm:justify-center sm:gap-3">
+              <div
+                className={cn(
+                  "flex flex-col items-center gap-2 text-center text-sm text-muted-foreground transition-opacity duration-300 sm:flex-row sm:justify-center sm:gap-3",
+                  showCreateElevatorMusicPrompt ? "opacity-100" : "invisible opacity-0"
+                )}
+                data-testid={
+                  showCreateElevatorMusicPrompt ? "workbench-elevator-music-row" : undefined
+                }
+              >
                 <span>Listen to some music while you wait?</span>
                 <Button
                   variant="secondary"
@@ -6358,8 +6463,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     onEnded={() => setIsPlaying(false)}
                     onLoadedMetadata={(event) => {
                       const element = event.currentTarget;
-                      setCurrentTimeSeconds(element.currentTime || 0);
                       const d = element.duration;
+                      const pendingSeekSeconds = pendingVideoSeekSecondsRef.current;
+                      if (typeof pendingSeekSeconds === "number") {
+                        const clampedTime =
+                          Number.isFinite(d) && d >= 0
+                            ? Math.min(Math.max(0, pendingSeekSeconds), d)
+                            : Math.max(0, pendingSeekSeconds);
+                        element.currentTime = clampedTime;
+                        pendingVideoSeekSecondsRef.current = null;
+                      }
+                      setCurrentTimeSeconds(element.currentTime || 0);
                       setDurationSeconds(
                         Number.isFinite(d) && d >= 0 ? d : 0
                       );
@@ -7229,7 +7343,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
           {showScrim && (
             <div
-              className="fixed inset-0 z-40 bg-overlay-soft"
+              className="fixed inset-x-0 bottom-0 z-40 bg-overlay-soft"
+              style={overlayViewportStyle}
               onClick={closeOverlays}
               data-testid="workbench-overlay-scrim"
             />
@@ -7240,6 +7355,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           {hasSubtitles && showSubtitlesOverlay && leftPanelOpen && (
             <aside
               className="fixed inset-y-0 left-0 z-50 flex w-[min(90vw,360px)] flex-col border-r border-border bg-card shadow"
+              style={overlayViewportStyle}
               data-testid="workbench-left-drawer"
             >
               <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -7259,6 +7375,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           {hasSubtitles && isNarrow && rightOverlayOpen && (
             <aside
               className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,360px)] flex-col border-l border-border bg-card shadow"
+              style={overlayViewportStyle}
               data-testid="workbench-right-drawer"
             >
               <div
@@ -7282,8 +7399,15 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     <RotateCcw className="h-3.5 w-3.5 shrink-0" />
                     Reset to default
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setRightOverlayOpen(false)}>
-                    Close
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    aria-label="Close"
+                    onClick={() => setRightOverlayOpen(false)}
+                  >
+                    <X className="size-4" />
                   </Button>
                 </div>
               </div>

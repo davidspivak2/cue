@@ -213,10 +213,10 @@ def preset_style_defaults(name: str) -> PresetStyle:
         )
     return PresetStyle(
         font_size=44,
-        outline=1,
+        outline=0,
         shadow=0,
         margin_v=28,
-        box_enabled=False,
+        box_enabled=True,
         box_opacity=70,
         box_padding=8,
     )

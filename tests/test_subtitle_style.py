@@ -26,7 +26,7 @@ def test_normalize_style_model_derives_font_weight_from_legacy_bold_style() -> N
     assert style.line_spacing == 1.0
 
 
-def test_default_preset_starts_static_with_effects_off() -> None:
+def test_default_preset_starts_static_with_background_on_and_outline_off() -> None:
     style = preset_defaults(PRESET_DEFAULT)
 
     assert style.font_family == "Assistant"
@@ -37,10 +37,11 @@ def test_default_preset_starts_static_with_effects_off() -> None:
     assert style.line_spacing == 1.0
     assert style.text_opacity == 1.0
     assert style.letter_spacing == 0.0
-    assert style.outline_enabled is True
-    assert style.outline_width == 1
+    assert style.outline_enabled is False
+    assert style.outline_width == 0
     assert style.shadow_enabled is False
     assert style.shadow_strength == 0.0
+    assert style.background_mode == "line"
     assert style.subtitle_mode == "static"
 
 
@@ -99,7 +100,8 @@ def test_resolve_style_for_frame_scales_font_size_to_1080_height() -> None:
     resolved = resolve_style_for_frame(style, 1080)
 
     assert resolved.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(47.52, abs=0.05)
-    assert resolved.outline_width == pytest.approx(1.08, abs=0.001)
+    assert resolved.outline_width == 0
+    assert resolved.line_bg_padding_top == pytest.approx(8.64, abs=0.001)
 
 
 def test_resolve_style_for_frame_scales_font_size_to_720_height() -> None:

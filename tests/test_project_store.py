@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import HTTPException
 
 from app import project_store
-from app.paths import get_projects_dir
+from app.paths import get_config_path, get_projects_dir
 
 
 def _setup_env(tmp_path: Path, monkeypatch) -> None:
@@ -105,3 +106,139 @@ def test_project_style_is_normalized_on_write_and_read(tmp_path: Path, monkeypat
     assert appearance["font_weight"] == 700
     assert appearance["text_align"] == "left"
     assert appearance["line_spacing"] == 1.5
+
+
+def test_create_project_uses_built_in_default_style_instead_of_saved_settings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    get_config_path().write_text(
+        json.dumps(
+            {
+                "subtitle_mode": "word_highlight",
+                "subtitle_style": {
+                    "preset": "Default",
+                    "highlight_color": "#00FF99",
+                    "highlight_opacity": 0.35,
+                    "appearance": {
+                        "font_size": 61,
+                        "background_mode": "word",
+                        "subtitle_mode": "word_highlight",
+                        "highlight_color": "#00FF99",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    video_path = tmp_path / "seeded.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    summary = project_store.create_project(str(video_path))
+    detail = project_store.get_project(summary["project_id"])
+    appearance = detail["style"]["subtitle_style"]["appearance"]
+
+    assert detail["style"]["subtitle_mode"] == "static"
+    assert detail["style"]["subtitle_style"]["preset"] == "Default"
+    assert detail["style"]["subtitle_style"]["highlight_color"] == "#FFD400"
+    assert detail["style"]["subtitle_style"]["highlight_opacity"] == 1.0
+    assert appearance["font_size"] == 44
+    assert appearance["background_mode"] == "line"
+    assert appearance["outline_enabled"] is False
+    assert appearance["subtitle_mode"] == "static"
+
+
+def test_create_project_does_not_clear_existing_style_when_style_is_omitted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "same-video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    summary = project_store.create_project(
+        str(video_path),
+        style={
+            "subtitle_mode": "word_highlight",
+            "subtitle_style": {
+                "preset": "Default",
+                "highlight_color": "#00FF99",
+                "appearance": {
+                    "font_size": 61,
+                    "background_mode": "word",
+                    "subtitle_mode": "word_highlight",
+                    "highlight_color": "#00FF99",
+                },
+            },
+        },
+    )
+
+    project_store.create_project(str(video_path))
+
+    detail = project_store.get_project(summary["project_id"])
+    appearance = detail["style"]["subtitle_style"]["appearance"]
+
+    assert detail["style"]["subtitle_mode"] == "word_highlight"
+    assert appearance["font_size"] == 61
+    assert appearance["background_mode"] == "word"
+
+
+def test_delete_then_recreate_same_video_starts_from_fresh_default_style(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    get_config_path().write_text(
+        json.dumps(
+            {
+                "subtitle_mode": "static",
+                "subtitle_style": {
+                    "preset": "Custom",
+                    "highlight_color": "#00FF99",
+                    "highlight_opacity": 0.35,
+                    "appearance": {
+                        "font_size": 61,
+                        "background_mode": "word",
+                        "outline_enabled": True,
+                        "outline_width": 2.0,
+                        "subtitle_mode": "word_highlight",
+                        "highlight_color": "#00FF99",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    video_path = tmp_path / "same-video.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    first_summary = project_store.create_project(
+        str(video_path),
+        style={
+            "subtitle_mode": "word_highlight",
+            "subtitle_style": {
+                "preset": "Default",
+                "highlight_color": "#00FF99",
+                "appearance": {
+                    "font_size": 61,
+                    "background_mode": "word",
+                    "subtitle_mode": "word_highlight",
+                    "highlight_color": "#00FF99",
+                },
+            },
+        },
+    )
+    project_store.delete_project(first_summary["project_id"])
+
+    recreated_summary = project_store.create_project(str(video_path))
+    recreated_detail = project_store.get_project(recreated_summary["project_id"])
+    recreated_appearance = recreated_detail["style"]["subtitle_style"]["appearance"]
+
+    assert recreated_summary["project_id"] != first_summary["project_id"]
+    assert recreated_detail["style"]["subtitle_mode"] == "static"
+    assert recreated_appearance["font_size"] == 44
+    assert recreated_appearance["background_mode"] == "line"
+    assert recreated_appearance["outline_enabled"] is False
