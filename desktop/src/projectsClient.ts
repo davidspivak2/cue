@@ -1,5 +1,6 @@
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const PROJECTS_URL = `${BACKEND_BASE_URL}/projects`;
+const BROWSER_UPLOAD_FILENAME_HEADER = "X-Cue-Filename";
 
 export type ActiveTaskChecklistItem = {
   id: string;
@@ -128,6 +129,24 @@ const ensureOk = async (response: Response) => {
   throw new Error(text || `Request failed: ${response.status}`);
 };
 
+const buildBrowserUploadHeaders = (file: File): Record<string, string> => {
+  const headers: Record<string, string> = {
+    [BROWSER_UPLOAD_FILENAME_HEADER]: encodeURIComponent(file.name || "video.mp4"),
+    "Content-Type": file.type || "application/octet-stream"
+  };
+  return headers;
+};
+
+const uploadProjectFile = async (url: string, file: File): Promise<ProjectSummary> => {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: buildBrowserUploadHeaders(file),
+    body: file
+  });
+  await ensureOk(response);
+  return (await response.json()) as ProjectSummary;
+};
+
 export const fetchProjects = async (): Promise<ProjectSummary[]> => {
   const response = await fetch(PROJECTS_URL);
   await ensureOk(response);
@@ -147,6 +166,10 @@ export const createProject = async (videoPath: string): Promise<ProjectSummary> 
   return (await response.json()) as ProjectSummary;
 };
 
+export const createProjectFromFile = async (file: File): Promise<ProjectSummary> => {
+  return uploadProjectFile(`${PROJECTS_URL}/import`, file);
+};
+
 export const relinkProject = async (
   projectId: string,
   videoPath: string
@@ -164,6 +187,16 @@ export const relinkProject = async (
   });
   await ensureOk(response);
   return (await response.json()) as ProjectSummary;
+};
+
+export const relinkProjectFromFile = async (
+  projectId: string,
+  file: File
+): Promise<ProjectSummary> => {
+  if (!projectId) {
+    throw new Error("project_id_required");
+  }
+  return uploadProjectFile(`${PROJECTS_URL}/${projectId}/relink-import`, file);
 };
 
 export const fetchProject = async (projectId: string): Promise<ProjectManifest> => {

@@ -55,13 +55,15 @@ For a deeper technical overview, see the [Architecture guide](docs/ARCHITECTURE.
 
 ## Contributing
 
-Contributions are welcome! See the [Contributing guide](docs/CONTRIBUTING.md) for setup instructions and the [Architecture guide](docs/ARCHITECTURE.md) for a codebase overview.
+Contributions are welcome. See the [Contributing guide](docs/CONTRIBUTING.md) for setup instructions and the [Architecture guide](docs/ARCHITECTURE.md) for a codebase overview.
+
+External contributors must sign Cue's contributor agreement before a pull request can be merged. See the [CLA policy](docs/CLA_POLICY.md).
 
 ## License
 
-<!-- TODO: Choose a license before making the repo public. See docs/internal/ for license discussion notes. -->
+Cue is licensed under [GPL-3.0-only](LICENSE).
 
-License TBD. This software is not yet licensed for public distribution or use.
+If someone distributes a modified version of Cue, they must also share the source code for that modified version under the same license.
 
 ## Acknowledgments
 

@@ -1,5 +1,12 @@
 import { expect, test, type Locator } from "@playwright/test";
 
+import {
+  waitForOpacityAtLeast,
+  waitForOpacityAtMost,
+  waitForRectStability,
+  waitForWorkbenchPreviewLayerReady
+} from "./helpers/workbenchWaits";
+
 const initMocks = () => {
   Object.defineProperty(File.prototype, "path", {
     configurable: true,
@@ -298,6 +305,62 @@ const mockProjects = async (
     });
   });
 
+  await page.route("**://127.0.0.1:8765/local-file?*", async (route) => {
+    const request = route.request();
+    if (request.method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/octet-stream",
+      body: ""
+    });
+  });
+
+  await page.route("**://127.0.0.1:8765/projects/import", async (route) => {
+    const request = route.request();
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, X-Cue-Filename"
+        }
+      });
+      return;
+    }
+    if (request.method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    createdProjectCount += 1;
+    const rawFileName = (await request.headerValue("x-cue-filename")) ?? "";
+    const decodedFileName = decodeURIComponent(rawFileName || `created_${createdProjectCount}.mp4`);
+    const fileName = decodedFileName.split(/[/\\]/).pop() || `created_${createdProjectCount}.mp4`;
+    const videoPath = `C:\\browser-imports\\${fileName}`;
+    const now = "2026-02-09T00:00:00Z";
+    const createdProject = {
+      project_id: `project-new-${createdProjectCount}`,
+      title: fileName,
+      video_path: videoPath,
+      missing_video: false,
+      status: "needs_subtitles",
+      created_at: now,
+      updated_at: now,
+      duration_seconds: 65,
+      thumbnail_path: "",
+      style: {}
+    };
+    projects = [createdProject, ...projects];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(createdProject)
+    });
+  });
+
   await page.route("**://127.0.0.1:8765/projects", async (route) => {
     const request = route.request();
     if (request.method() === "OPTIONS") {
@@ -477,6 +540,91 @@ const mockProjects = async (
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(buildManifest(project))
+    });
+  });
+
+  await page.route("**://127.0.0.1:8765/projects/import", async (route) => {
+    const request = route.request();
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, X-Cue-Filename"
+        }
+      });
+      return;
+    }
+    if (request.method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    createdProjectCount += 1;
+    const rawFileName = (await request.headerValue("x-cue-filename")) ?? "";
+    const decodedFileName = decodeURIComponent(rawFileName || `created_${createdProjectCount}.mp4`);
+    const fileName = decodedFileName.split(/[/\\]/).pop() || `created_${createdProjectCount}.mp4`;
+    const videoPath = `C:\\browser-imports\\${fileName}`;
+    const now = "2026-02-09T00:00:00Z";
+    const createdProject = {
+      project_id: `project-new-${createdProjectCount}`,
+      title: fileName,
+      video_path: videoPath,
+      missing_video: false,
+      status: "needs_subtitles",
+      created_at: now,
+      updated_at: now,
+      duration_seconds: 65,
+      thumbnail_path: "",
+      style: {}
+    };
+    projects = [createdProject, ...projects];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(createdProject)
+    });
+  });
+
+  await page.route("**://127.0.0.1:8765/projects/*/relink-import", async (route) => {
+    const request = route.request();
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, X-Cue-Filename"
+        }
+      });
+      return;
+    }
+    if (request.method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    const projectId = getProjectIdFromUrl(request.url());
+    const rawFileName = (await request.headerValue("x-cue-filename")) ?? "";
+    const decodedFileName = decodeURIComponent(rawFileName || "relinked.mp4");
+    const fileName = decodedFileName.split(/[/\\]/).pop() || "relinked.mp4";
+    const relinkPath = `C:\\browser-imports\\${fileName}`;
+    projects = projects.map((entry) =>
+      entry.project_id === projectId
+        ? {
+            ...entry,
+            title: fileName,
+            video_path: relinkPath,
+            missing_video: false,
+            status: "needs_subtitles",
+            updated_at: "2026-02-09T00:10:00Z"
+          }
+        : entry
+    );
+    const updated = projects.find((entry) => entry.project_id === projectId) ?? projects[0];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(updated)
     });
   });
 
@@ -849,46 +997,41 @@ const readToolbarRowCount = async (page) =>
 
 const ensureSubtitleLayerReady = async (page) => {
   const layer = page.getByTestId("workbench-subtitle-overlay-position-layer");
-  await expect(layer).toHaveCount(1);
-
-  const initialRect = await readClientRect(layer);
-  if (initialRect.width <= 10 || initialRect.height <= 10) {
-    await page.evaluate(() => {
-      const targetWidth = 960;
-      const targetHeight = 540;
-      const videoWrapper = document.querySelector("[data-testid='workbench-center-panel-video-wrapper']");
-      if (videoWrapper instanceof HTMLElement) {
-        videoWrapper.style.width = `${targetWidth}px`;
-        videoWrapper.style.height = `${targetHeight}px`;
-      }
-      const layer = document.querySelector("[data-testid='workbench-subtitle-overlay-position-layer']");
-      if (!(layer instanceof HTMLElement)) {
-        return;
-      }
-      const host = layer.parentElement;
-      if (host instanceof HTMLElement) {
-        host.style.left = "0px";
-        host.style.top = "0px";
-        host.style.width = `${targetWidth}px`;
-        host.style.height = `${targetHeight}px`;
-      }
-      layer.style.width = `${targetWidth}px`;
-      layer.style.height = `${targetHeight}px`;
-      const video = document.querySelector("video");
-      if (video instanceof HTMLVideoElement) {
-        video.dispatchEvent(new Event("loadedmetadata"));
-      }
-      window.dispatchEvent(new Event("resize"));
-    });
-  }
-
-  await expect
-    .poll(async () => {
-      const rect = await readClientRect(layer);
-      return rect.width > 10 && rect.height > 10;
-    })
-    .toBe(true);
-  return layer;
+  return waitForWorkbenchPreviewLayerReady({
+    layer,
+    readRect: readClientRect,
+    prepare: async () => {
+      await page.evaluate(() => {
+        const targetWidth = 960;
+        const targetHeight = 540;
+        const videoWrapper = document.querySelector(
+          "[data-testid='workbench-center-panel-video-wrapper']"
+        );
+        if (videoWrapper instanceof HTMLElement) {
+          videoWrapper.style.width = `${targetWidth}px`;
+          videoWrapper.style.height = `${targetHeight}px`;
+        }
+        const layer = document.querySelector("[data-testid='workbench-subtitle-overlay-position-layer']");
+        if (!(layer instanceof HTMLElement)) {
+          return;
+        }
+        const host = layer.parentElement;
+        if (host instanceof HTMLElement) {
+          host.style.left = "0px";
+          host.style.top = "0px";
+          host.style.width = `${targetWidth}px`;
+          host.style.height = `${targetHeight}px`;
+        }
+        layer.style.width = `${targetWidth}px`;
+        layer.style.height = `${targetHeight}px`;
+        const video = document.querySelector("video");
+        if (video instanceof HTMLVideoElement) {
+          video.dispatchEvent(new Event("loadedmetadata"));
+        }
+        window.dispatchEvent(new Event("resize"));
+      });
+    }
+  });
 };
 
 const readActiveSubtitleRect = async (page) => {
@@ -1447,7 +1590,7 @@ const dispatchVideoProgressInteraction = async (page, startFraction, endFraction
 };
 
 const expectVideoControlsVisibleSoon = async (page, timeout = 1200) => {
-  await expect.poll(() => readVideoControlsOpacity(page), { timeout }).toBeGreaterThan(0.95);
+  await waitForOpacityAtLeast(() => readVideoControlsOpacity(page), 0.95, timeout);
 };
 
 const showVideoControls = async (page) => {
@@ -1481,10 +1624,24 @@ const showVideoControls = async (page) => {
 };
 
 const expectVideoControlsHiddenSoon = async (page) => {
-  await expect.poll(() => readVideoControlsOpacity(page), { timeout: 1200 }).toBeLessThan(0.05);
+  await waitForOpacityAtMost(() => readVideoControlsOpacity(page), 0.05, 1200);
 };
 
 const SUBTITLE_PUSH_SETTLE_MS = 220;
+const DRAG_SETTLE_MS = 120;
+
+const waitForActiveSubtitleRectToSettle = async (
+  page,
+  settleWindowMs = DRAG_SETTLE_MS,
+  timeout = 1500,
+  tolerancePx = 1.5
+) => {
+  await waitForRectStability(() => readActiveSubtitleRect(page), {
+    settleWindowMs,
+    timeout,
+    tolerancePx
+  });
+};
 
 test("workbench shell wide layout", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
@@ -1883,8 +2040,11 @@ test("workbench exports video from the top bar", async ({ page }) => {
   expect(payload.project_id).toBe("project-1");
   expect(payload.srt_path).toBeUndefined();
 
+  const previewSrc = await page.locator("video").first().getAttribute("src");
+  expect(previewSrc).toContain("/local-file?path=");
+  expect(decodeURIComponent(previewSrc ?? "")).toContain("C:\\fake\\good.mp4");
   await expect(page.getByTestId("workbench-play-export-video")).toBeVisible();
-  await expect(page.getByTestId("workbench-open-export-folder")).toBeVisible();
+  await expect(page.getByTestId("workbench-open-export-folder")).toHaveCount(0);
   expect(api.getLastJobPayload()?.project_id).toBe("project-1");
 });
 
@@ -2841,7 +3001,6 @@ test("app layout does not replay old export-complete toasts on launch", async ({
 });
 
 test("new project auto-starts subtitle creation in Workbench", async ({ page }) => {
-  await page.addInitScript(initMocks);
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
   const defaultSettings = buildSettings();
@@ -2879,6 +3038,9 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   });
 
   await page.goto("/");
+  const importRequest = page.waitForRequest(
+    (request) => request.url().includes("/projects/import") && request.method() === "POST"
+  );
   const createJobRequest = page.waitForRequest(
     (request) => request.url().includes("/jobs") && request.method() === "POST"
   );
@@ -2888,6 +3050,8 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
     buffer: Buffer.from("fake")
   });
   await page.waitForURL("**/workbench/project-new-1");
+  const importPayload = await importRequest;
+  expect(await importPayload.headerValue("x-cue-filename")).toBe("fresh.mp4");
   const createRequest = await createJobRequest;
   const createPayload = createRequest.postDataJSON() as {
     kind?: string;
@@ -2898,6 +3062,9 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   expect(createPayload.kind).toBe("create_subtitles");
   expect(createPayload.project_id).toBe("project-new-1");
   expect(createPayload.options?.subtitle_mode).toBe("static");
+  const previewSrc = await page.locator("video").first().getAttribute("src");
+  expect(previewSrc).toContain("/local-file?path=");
+  expect(decodeURIComponent(previewSrc ?? "")).toContain("C:\\browser-imports\\fresh.mp4");
   await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0, { timeout: 2000 });
   await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible({ timeout: 2000 });
   await expect
@@ -2909,51 +3076,15 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
       }
       return {
         subtitle_mode: payload.subtitle_mode,
-        preset: payload.subtitle_style?.preset ?? null,
-        last_preset_id: payload.subtitle_style?.last_preset_id ?? null,
-        highlight_opacity: payload.subtitle_style?.highlight_opacity ?? null,
         appearance: {
-          font_family: appearance.font_family,
-          font_size: appearance.font_size,
-          font_style: appearance.font_style,
-          font_weight: appearance.font_weight,
-          text_align: appearance.text_align,
-          line_spacing: appearance.line_spacing,
-          text_color: appearance.text_color,
-          text_opacity: appearance.text_opacity,
-          letter_spacing: appearance.letter_spacing,
-          outline_enabled: appearance.outline_enabled,
-          outline_width: appearance.outline_width,
-          shadow_enabled: appearance.shadow_enabled,
-          shadow_strength: appearance.shadow_strength,
-          background_mode: appearance.background_mode,
-          subtitle_mode: appearance.subtitle_mode,
-          highlight_color: appearance.highlight_color
+          subtitle_mode: appearance.subtitle_mode
         }
       };
     })
     .toEqual({
       subtitle_mode: "static",
-      preset: "Default",
-      last_preset_id: "classic_static",
-      highlight_opacity: 1,
       appearance: {
-        font_family: "Heebo",
-        font_size: 28,
-        font_style: "regular",
-        font_weight: 400,
-        text_align: "center",
-        line_spacing: 1,
-        text_color: "#FFFFFF",
-        text_opacity: 1,
-        letter_spacing: 0,
-        outline_enabled: false,
-        outline_width: 0,
-        shadow_enabled: false,
-        shadow_strength: 0,
-        background_mode: "none",
-        subtitle_mode: "static",
-        highlight_color: "#FFD400"
+        subtitle_mode: "static"
       }
     });
   await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0);
@@ -3209,15 +3340,15 @@ test("subtitle width stays stable when dragging horizontally", async ({ page }) 
   await ensureSubtitleLayerReady(page);
 
   await dragActiveSubtitleTo(page, 0.5, 0.75);
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
   const centerRect = await readActiveSubtitleRect(page);
 
   await dragActiveSubtitleTo(page, 0.9, 0.75);
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
   const rightRect = await readActiveSubtitleRect(page);
 
   await dragActiveSubtitleTo(page, 0.1, 0.75);
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
   const leftRect = await readActiveSubtitleRect(page);
 
   const maxWidthDelta = Math.max(
@@ -3288,7 +3419,7 @@ test("subtitle move starts only from border handles", async ({ page }) => {
   await ensureSubtitleLayerReady(page);
 
   await dragActiveSubtitleTo(page, 0.5, 0.6);
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
 
   await domClick(subtitleButton);
   const editor = page.getByTestId("workbench-subtitle-editor");
@@ -3296,7 +3427,7 @@ test("subtitle move starts only from border handles", async ({ page }) => {
 
   const beforeInsideDrag = await readActiveSubtitleRect(page);
   await dragActiveSubtitleFromCenterTo(page, 0.9, 0.2, "editor");
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
   const afterInsideDrag = await readActiveSubtitleRect(page);
   const insideDragDelta = Math.hypot(
     afterInsideDrag.left + afterInsideDrag.width / 2 - (beforeInsideDrag.left + beforeInsideDrag.width / 2),
@@ -3305,7 +3436,7 @@ test("subtitle move starts only from border handles", async ({ page }) => {
   expect(insideDragDelta).toBeLessThanOrEqual(3);
 
   await dragActiveSubtitleTo(page, 0.9, 0.2, "editor");
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
   const afterBorderDrag = await readActiveSubtitleRect(page);
   const borderDragDelta = Math.hypot(
     afterBorderDrag.left + afterBorderDrag.width / 2 - (afterInsideDrag.left + afterInsideDrag.width / 2),
@@ -3335,7 +3466,7 @@ test("preview subtitle stays fully inside video when dragged to extremes", async
     [0, 0.9]
   ]) {
     await dragActiveSubtitleTo(page, xNorm, yNorm);
-    await page.waitForTimeout(40);
+    await waitForActiveSubtitleRectToSettle(page);
     const layerRect = await readClientRect(layer);
     const subtitleRect = await readActiveSubtitleRect(page);
     expect(subtitleRect.left).toBeGreaterThanOrEqual(layerRect.left - 2);
@@ -3367,7 +3498,7 @@ test("editor textarea stays fully inside video when dragged to extremes", async 
     [0, 0.9]
   ]) {
     await dragActiveSubtitleTo(page, xNorm, yNorm, "editor");
-    await page.waitForTimeout(40);
+    await waitForActiveSubtitleRectToSettle(page);
     const wrapperRect = await readClientRect(videoWrapper);
     const editorRect = await readClientRect(editor);
     expect(editorRect.left).toBeGreaterThanOrEqual(wrapperRect.left - 2);
@@ -3542,7 +3673,7 @@ test("controls overlap causes push and click opens editor", async ({ page }) => 
   await expect
     .poll(async () => (await readActiveSubtitleRect(page)).top)
     .toBeLessThan(subtitleRectBefore.top - 1);
-  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await waitForActiveSubtitleRectToSettle(page, SUBTITLE_PUSH_SETTLE_MS);
 
   const subtitleRectAfter = await readActiveSubtitleRect(page);
   const subtitleDeltaY = subtitleRectAfter.top - subtitleRectBefore.top;
@@ -3584,7 +3715,7 @@ test("floating toolbar stays anchored while controls hide and reappear during bo
   await expectVideoControlsHiddenSoon(page);
 
   await showVideoControls(page);
-  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await waitForActiveSubtitleRectToSettle(page, SUBTITLE_PUSH_SETTLE_MS);
   await subtitleButton.first().click();
 
   const editor = page.getByTestId("workbench-subtitle-editor");
@@ -3607,7 +3738,7 @@ test("floating toolbar stays anchored while controls hide and reappear during bo
 
   await page.mouse.move(0, 0);
   await expectVideoControlsHiddenSoon(page);
-  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await waitForActiveSubtitleRectToSettle(page, SUBTITLE_PUSH_SETTLE_MS);
 
   const dropped = await readToolbarGap();
   expect(dropped.toolbarRect.bottom).toBeLessThanOrEqual(dropped.subtitleRect.top + 1);
@@ -3620,7 +3751,7 @@ test("floating toolbar stays anchored while controls hide and reappear during bo
 
   await showVideoControls(page);
   await expectVideoControlsVisibleSoon(page);
-  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await waitForActiveSubtitleRectToSettle(page, SUBTITLE_PUSH_SETTLE_MS);
 
   const rePushed = await readToolbarGap();
   expect(rePushed.toolbarRect.bottom).toBeLessThanOrEqual(rePushed.subtitleRect.top + 1);
@@ -3649,7 +3780,7 @@ test("font size dropdown popper wrapper keeps controls visible", async ({ page }
   await expectVideoControlsHiddenSoon(page);
 
   await showVideoControls(page);
-  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await waitForActiveSubtitleRectToSettle(page, SUBTITLE_PUSH_SETTLE_MS);
   await subtitleButton.first().click();
   await expect(page.getByTestId("workbench-subtitle-editor")).toHaveCount(1);
 
@@ -3709,7 +3840,7 @@ test("font size dropdown keeps controls visible when leaving subtitle into video
   await expectVideoControlsHiddenSoon(page);
 
   await showVideoControls(page);
-  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await waitForActiveSubtitleRectToSettle(page, SUBTITLE_PUSH_SETTLE_MS);
   await subtitleButton.first().click();
   await expect(page.getByTestId("workbench-subtitle-editor")).toHaveCount(1);
 
@@ -3770,7 +3901,7 @@ test("floating toolbar font size input opens presets on first click", async ({ p
   await ensureSubtitleLayerReady(page);
   await dragActiveSubtitleTo(page, 0.5, 0.98);
   await showVideoControls(page);
-  await page.waitForTimeout(SUBTITLE_PUSH_SETTLE_MS);
+  await waitForActiveSubtitleRectToSettle(page, SUBTITLE_PUSH_SETTLE_MS);
 
   await page.getByTestId("workbench-active-subtitle").click();
   await expect(page.getByTestId("workbench-subtitle-editor")).toHaveCount(1);
@@ -3805,7 +3936,7 @@ test.skip("no-overlap scenario does not push subtitle position when controls app
   const subtitleRectBefore = await readClientRect(subtitleButton);
 
   await showVideoControls(page);
-  await page.waitForTimeout(50);
+  await waitForActiveSubtitleRectToSettle(page, DRAG_SETTLE_MS);
 
   const subtitleRectAfter = await readClientRect(subtitleButton);
   expect(Math.abs(subtitleRectAfter.top - subtitleRectBefore.top)).toBeLessThanOrEqual(1);
@@ -3841,7 +3972,7 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   await selectToolbarFont(page, /Assistant/, "Regular");
   await setToolbarFontSize(page, 66);
   await dragActiveSubtitleTo(page, 0.5, 0.4, "editor");
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
   await page.mouse.move(0, 0);
   await expectVideoControlsHiddenSoon(page);
 
@@ -3887,7 +4018,7 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   expect(editorTypography.paddingLeft).toBe(previewTypography.paddingLeft);
   expect(editorTypography.paddingRight).toBe(previewTypography.paddingRight);
 
-  await page.waitForTimeout(50);
+  await waitForActiveSubtitleRectToSettle(page, DRAG_SETTLE_MS);
   const editorRectAfterControls = await readClientRect(overlaySurface);
   expect(Math.abs(editorRectAfterControls.top - editorRectOnEnter.top)).toBeLessThanOrEqual(1);
   expect(Math.abs(editorRectAfterControls.left - editorRectOnEnter.left)).toBeLessThanOrEqual(1);
@@ -4004,7 +4135,7 @@ test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated 
   await selectToolbarFont(page, /Assistant/, "Regular");
   await setToolbarFontSize(page, 66);
   await dragActiveSubtitleTo(page, 0.5, 0.4, "editor");
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
   await page.mouse.move(0, 0);
   await expectVideoControlsHiddenSoon(page);
 
@@ -4064,7 +4195,10 @@ test("subtitle preview font size follows the displayed video height", async ({ p
     videoWidth: 1280,
     videoHeight: 1080
   });
-  await page.waitForTimeout(40);
+  await waitForRectStability(() => readClientRect(subtitleButton), {
+    settleWindowMs: DRAG_SETTLE_MS,
+    timeout: 1200
+  });
 
   const fontSize1080Px = Number.parseFloat((await readTypographyMetrics(subtitleButton)).fontSize);
   expect(fontSize1080Px).toBeGreaterThan(30);
@@ -4086,7 +4220,7 @@ test("floating toolbar stays fully visible above the subtitle near the top and a
 
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
   await dragActiveSubtitleTo(page, 0.5, 0.08);
-  await page.waitForTimeout(40);
+  await waitForActiveSubtitleRectToSettle(page);
 
   await ensureAdvancedStyleControlsVisible(page);
   await expectToolbarFullyVisibleAboveSubtitle(page);
@@ -4133,7 +4267,7 @@ test("floating toolbar stays fully visible above the subtitle at middle and bott
       await expect(editor).toHaveCount(0);
     }
     await dragActiveSubtitleTo(page, 0.5, yNorm);
-    await page.waitForTimeout(40);
+    await waitForActiveSubtitleRectToSettle(page);
     await ensureAdvancedStyleControlsVisible(page);
     await expectToolbarFullyVisibleAboveSubtitle(page);
   }

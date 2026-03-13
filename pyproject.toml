@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Cue desktop app — create subtitles for any video using AI"
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "GPL-3.0-only" }
 
 [tool.ruff]
 target-version = "py311"

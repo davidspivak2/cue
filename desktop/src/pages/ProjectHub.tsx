@@ -1,7 +1,7 @@
 import * as React from "react";
 import { LayoutGrid, List, Trash2, Upload, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -41,15 +41,17 @@ import {
   getPersistedRunningJob,
   type PersistedRunningJob
 } from "@/lib/runningJobPersistence";
-import { normalizeLocalPath } from "@/lib/normalizeLocalPath";
+import { resolveLocalFileUrl } from "@/lib/localFileUrl";
 import { cn } from "@/lib/utils";
 import {
   type ActiveTaskSummary,
   createProject,
+  createProjectFromFile,
   deleteProject,
   fetchProjects,
   type ProjectSummary,
-  relinkProject
+  relinkProject,
+  relinkProjectFromFile
 } from "@/projectsClient";
 import { useWorkbenchTabs } from "@/workbenchTabs";
 import {
@@ -69,8 +71,15 @@ type Banner = {
 
 type RelinkWarning = {
   project: ProjectSummary;
-  path: string;
+  selection: RelinkSelection;
   reasons: string[];
+};
+
+type RelinkSelection = {
+  file?: File;
+  fileName: string;
+  path?: string;
+  duration: number | null;
 };
 
 type ProjectHubLocationState = {
@@ -193,8 +202,7 @@ const getVideoDurationFromFile = (file: File): Promise<number | null> =>
 const getVideoDurationFromPath = (path: string, useTauri: boolean): Promise<number | null> =>
   new Promise((resolve) => {
     const video = document.createElement("video");
-    const normalizedPath = normalizeLocalPath(path);
-    const src = useTauri ? convertFileSrc(normalizedPath) : normalizedPath;
+    const src = resolveLocalFileUrl(path, useTauri);
 
     const cleanup = () => {
       video.removeAttribute("src");
@@ -260,11 +268,7 @@ const resolveStatusBadgeClassName = (project: ProjectSummary): string => {
 };
 
 const resolveThumbnailSrc = (path: string | null | undefined, useTauri: boolean) => {
-  if (!path) {
-    return "";
-  }
-  const normalizedPath = normalizeLocalPath(path);
-  return useTauri ? convertFileSrc(normalizedPath) : normalizedPath;
+  return resolveLocalFileUrl(path, useTauri);
 };
 
 const resolveTaskHeading = (project: ProjectSummary) => {
@@ -550,19 +554,51 @@ const ProjectHub = () => {
     [loadProjects, navigate, openOrActivateTab, showBanner]
   );
 
-  const handleFileSelected = (file: File) => {
-    const resolvedPath = resolveFilePath(file);
-    if (!resolvedPath) {
+  const handleCreateProjectFromBrowserFile = React.useCallback(
+    async (file: File) => {
+      setBanner(null);
+      setIsCreating(true);
+      try {
+        const createdProject = await createProjectFromFile(file);
+        await loadProjects();
+        openOrActivateTab({
+          projectId: createdProject.project_id,
+          title: resolveProjectTitle(createdProject),
+          path: createdProject.video_path ?? undefined,
+          thumbnail_path: createdProject.thumbnail_path ?? undefined
+        });
+        navigate(`/workbench/${encodeURIComponent(createdProject.project_id)}`, {
+          state: { autoStartSubtitles: true }
+        });
+      } catch (err) {
+        showBanner("error", err instanceof Error ? err.message : "Failed to create video.");
+      } finally {
+        setIsCreating(false);
+      }
+    },
+    [loadProjects, navigate, openOrActivateTab, showBanner]
+  );
+
+  const handleFileSelected = React.useCallback(
+    async (file: File) => {
+      const resolvedPath = resolveFilePath(file);
+      if (resolvedPath) {
+        await handleCreateProject(resolvedPath);
+        return;
+      }
+      if (!isTauriEnv) {
+        await handleCreateProjectFromBrowserFile(file);
+        return;
+      }
       showBanner("error", "Could not read this file path. Please try a different file.");
-      return;
-    }
-    handleCreateProject(resolvedPath);
-  };
+    },
+    [handleCreateProject, handleCreateProjectFromBrowserFile, isTauriEnv, showBanner]
+  );
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      handleFileSelected(file);
+      void handleFileSelected(file);
     }
     event.target.value = "";
   };
@@ -682,7 +718,7 @@ const ProjectHub = () => {
     setIsDragging(false);
     const file = event.dataTransfer.files?.[0];
     if (file) {
-      handleFileSelected(file);
+      void handleFileSelected(file);
     }
   };
 
@@ -715,11 +751,17 @@ const ProjectHub = () => {
   };
 
   const performRelink = React.useCallback(
-    async (project: ProjectSummary, videoPath: string) => {
+    async (project: ProjectSummary, selection: RelinkSelection) => {
       setBanner(null);
       setBusyProjectId(project.project_id);
       try {
-        await relinkProject(project.project_id, videoPath);
+        if (selection.path) {
+          await relinkProject(project.project_id, selection.path);
+        } else if (selection.file) {
+          await relinkProjectFromFile(project.project_id, selection.file);
+        } else {
+          throw new Error("video_path_required");
+        }
         await loadProjects();
         showBanner("info", "Video relinked.");
       } catch (err) {
@@ -734,20 +776,18 @@ const ProjectHub = () => {
   const handleRelinkSelection = React.useCallback(
     async (
       project: ProjectSummary,
-      selectedPath: string,
-      selectedFileName: string,
-      selectedDuration: number | null
+      selection: RelinkSelection
     ) => {
-      if (!isSupportedVideo(selectedFileName)) {
+      if (!isSupportedVideo(selection.fileName)) {
         showBanner("error", "Unsupported file type. Choose an MP4, MKV, MOV, or M4V file.");
         return;
       }
-      const warnings = buildRelinkWarnings(project, selectedFileName, selectedDuration);
+      const warnings = buildRelinkWarnings(project, selection.fileName, selection.duration);
       if (warnings.length > 0) {
-        setRelinkWarning({ project, path: selectedPath, reasons: warnings });
+        setRelinkWarning({ project, selection, reasons: warnings });
         return;
       }
-      await performRelink(project, selectedPath);
+      await performRelink(project, selection);
     },
     [performRelink, showBanner]
   );
@@ -774,8 +814,11 @@ const ProjectHub = () => {
           });
           if (typeof selected === "string" && selected) {
             const duration = await getVideoDurationFromPath(selected, isTauriEnv);
-            const selectedFileName = getFileName(selected);
-            await handleRelinkSelection(project, selected, selectedFileName, duration);
+            await handleRelinkSelection(project, {
+              path: selected,
+              fileName: getFileName(selected),
+              duration
+            });
           }
         } catch {
           // Fall back to file input when native dialog is unavailable (e.g. in e2e tests)
@@ -787,7 +830,7 @@ const ProjectHub = () => {
       setPendingRelinkProject(project);
       relinkInputRef.current?.click();
     },
-    [handleRelinkSelection, isBusyOperation, isTauriEnv, showBanner]
+    [handleRelinkSelection, isBusyOperation, isTauriEnv]
   );
 
   const handleRelinkInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -801,13 +844,14 @@ const ProjectHub = () => {
     if (!project) {
       return;
     }
-    const resolvedPath = resolveFilePath(file);
-    if (!resolvedPath) {
-      showBanner("error", "Could not read this file path. Please try a different file.");
-      return;
-    }
     const duration = await getVideoDurationFromFile(file);
-    await handleRelinkSelection(project, resolvedPath, file.name, duration);
+    const resolvedPath = resolveFilePath(file);
+    await handleRelinkSelection(project, {
+      file,
+      fileName: file.name,
+      path: resolvedPath || undefined,
+      duration
+    });
   };
 
   const openProjectTab = (project: ProjectSummary, inNewTab: boolean) => {
@@ -847,9 +891,9 @@ const ProjectHub = () => {
     if (!relinkWarning) {
       return;
     }
-    const { project, path } = relinkWarning;
+    const { project, selection } = relinkWarning;
     setRelinkWarning(null);
-    await performRelink(project, path);
+    await performRelink(project, selection);
   };
 
   const confirmDeleteProject = React.useCallback(async () => {
@@ -1061,7 +1105,9 @@ const ProjectHub = () => {
               className={cn(
                 "flex w-full max-w-2xl cursor-pointer flex-col items-center gap-6 rounded-lg border-2 border-dashed px-6 py-12 text-center transition",
                 isNewUser && "empty-state-reveal-upload",
-                isDragging ? "border-primary bg-accent/10" : "border-border bg-card hover:border-primary/60"
+                isDragging
+                  ? "border-primary bg-accent/10"
+                  : "border-border bg-background/95 hover:border-primary/60"
               )}
               onClick={() => {
                 if (!isCreating && !isBusyOperation) openFileDialog();
@@ -1101,6 +1147,7 @@ const ProjectHub = () => {
             const persistedJob = getPersistedRunningJob(project.project_id);
             const projectForCard = withPersistedActiveTask(project, persistedJob);
             const statusLabel = resolveStatusLabel(projectForCard);
+            const projectTitle = resolveProjectTitle(project);
             const effectiveActiveTask = projectForCard.active_task;
             const activeTaskPct =
               typeof effectiveActiveTask?.pct === "number"
@@ -1198,9 +1245,16 @@ const ProjectHub = () => {
                 </div>
                 <div className="mt-3 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                      {project.title || "Untitled video"}
-                    </p>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                          {projectTitle}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" collisionPadding={8}>
+                        {projectTitle}
+                      </TooltipContent>
+                    </Tooltip>
                     <Badge
                       variant="outline"
                       className={cn("shrink-0", resolveStatusBadgeClassName(projectForCard))}
@@ -1267,6 +1321,7 @@ const ProjectHub = () => {
                 const persistedJobList = getPersistedRunningJob(project.project_id);
                 const projectForList = withPersistedActiveTask(project, persistedJobList);
                 const statusLabel = resolveStatusLabel(projectForList);
+                const projectTitle = resolveProjectTitle(project);
                 const effectiveActiveTaskList = projectForList.active_task;
                 const activeTaskPct =
                   typeof effectiveActiveTaskList?.pct === "number"
@@ -1309,7 +1364,7 @@ const ProjectHub = () => {
                     )}
                   >
                     <TableCell className="min-w-0 overflow-hidden px-2">
-                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
                         <div
                           className="relative h-9 w-14 shrink-0 overflow-hidden rounded border border-border bg-muted"
                           style={{ aspectRatio: "16 / 9" }}
@@ -1326,25 +1381,38 @@ const ProjectHub = () => {
                             </div>
                           )}
                         </div>
-                        <p
-                          className="min-w-0 truncate text-sm font-medium text-foreground"
-                          title={resolveProjectTitle(project)}
-                        >
-                          {resolveProjectTitle(project)}
-                        </p>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <p className="min-w-0 truncate text-sm font-medium text-foreground">
+                              {projectTitle}
+                            </p>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" collisionPadding={8}>
+                            {projectTitle}
+                          </TooltipContent>
+                        </Tooltip>
                       </div>
                     </TableCell>
                     <TableCell className="min-w-0 pl-2 pr-6 tabular-nums text-muted-foreground">
                       {durationLabel || "—"}
                     </TableCell>
                     <TableCell className="min-w-0 overflow-hidden pl-6 pr-2">
-                      <Badge
-                        variant="outline"
-                        className={cn("max-w-full truncate", resolveStatusBadgeClassName(projectForList))}
-                        title={statusLabel}
-                      >
-                        <span className="truncate">{statusLabel}</span>
-                      </Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "max-w-full truncate",
+                              resolveStatusBadgeClassName(projectForList)
+                            )}
+                          >
+                            <span className="truncate">{statusLabel}</span>
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" collisionPadding={8}>
+                          {statusLabel}
+                        </TooltipContent>
+                      </Tooltip>
                     </TableCell>
                     <TableCell className="min-w-0 overflow-hidden px-2">
                       {effectiveActiveTaskList ? (

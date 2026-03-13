@@ -13,17 +13,17 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Home, Maximize2, Minus, Settings, Square, Video, X } from "lucide-react";
+import { Home, Minus, Settings, Square, Video, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "@tauri-apps/api/core";
 
 import { useSettings } from "@/contexts/SettingsContext";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useWindowWidth } from "@/hooks/useWindowWidth";
 import { readStoredInterfaceScale, subscribeToInterfaceScaleChanges } from "@/lib/interfaceScale";
-import { normalizeLocalPath } from "@/lib/normalizeLocalPath";
+import { resolveLocalFileUrl } from "@/lib/localFileUrl";
 import { truncatePathMiddle } from "@/lib/truncatePathMiddle";
 import { cn } from "@/lib/utils";
 import { HOME_TAB_ID, useWorkbenchTabs } from "@/workbenchTabs";
@@ -44,6 +44,25 @@ const TITLE_BAR_MEDIUM_TAB_MAX_PX = 64;
 /** Maximum tab width in "narrow" mode at 100% interface scale. */
 const TITLE_BAR_NARROW_TAB_MAX_PX = 56;
 type TabLayoutMode = "wide" | "medium" | "narrow";
+
+type IconProps = React.ComponentProps<"svg">;
+
+const WindowsRestoreIcon = ({ className, ...props }: IconProps) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    {...props}
+  >
+    <rect x="7" y="4" width="10" height="10" rx="0.75" />
+    <rect x="4" y="7" width="10" height="10" rx="0.75" fill="var(--background)" />
+  </svg>
+);
 
 function getTabLayoutMode(
   windowWidth: number,
@@ -118,7 +137,7 @@ function SortableTitleTab({
 
   const thumbnailSrc =
     isIconOnly && tab.thumbnail_path
-      ? convertFileSrc(normalizeLocalPath(tab.thumbnail_path))
+      ? resolveLocalFileUrl(tab.thumbnail_path, isTauri())
       : null;
   const title = tab.title || "Untitled";
   const tooltipText =
@@ -492,7 +511,7 @@ const TitleBar = () => {
               windowControl
             >
               {maximized ? (
-                <Maximize2 className="h-4 w-4" />
+                <WindowsRestoreIcon className="h-4 w-4" />
               ) : (
                 <Square className="h-3.5 w-4" strokeWidth={2} />
               )}

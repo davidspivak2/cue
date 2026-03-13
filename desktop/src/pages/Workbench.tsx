@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
+import { isTauri } from "@tauri-apps/api/core";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -58,6 +58,11 @@ import {
   getPersistedRunningJob,
   setPersistedRunningJob
 } from "@/lib/runningJobPersistence";
+import {
+  resolveHighlightWordIndexFromTimings,
+  type ProjectWordTimingCue
+} from "@/lib/workbenchPreviewTiming";
+import { buildLocalFileUrl, resolveLocalFileUrl } from "@/lib/localFileUrl";
 import { useWorkbenchTabs } from "@/workbenchTabs";
 import { parseSrt, serializeSrt, SrtCue } from "@/lib/srt";
 import { messageForBackendError } from "@/backendHealth";
@@ -399,18 +404,8 @@ const buildWorkbenchResetAllChange = (): WorkbenchEffectChange => ({
   highlightOpacity: 1
 });
 
-const ALL_WORKBENCH_EFFECT_IDS: WorkbenchEffectId[] = [
-  "outline",
-  "shadow",
-  "background",
-  "karaoke"
-];
-
 /** True if global state matches default (outline on default, others off). Used for header "Reset to default" visibility. */
-const isWorkbenchAtGlobalDefault = (
-  appearance: SubtitleStyleAppearance,
-  highlightOpacity: number
-): boolean => {
+const isWorkbenchAtGlobalDefault = (appearance: SubtitleStyleAppearance): boolean => {
   const d = DEFAULT_EFFECT_OUTLINE;
   if (
     !appearance.outline_enabled ||
@@ -979,89 +974,6 @@ const describeOpenError = (error: unknown): string => {
     }
   }
   return "No additional error details were provided.";
-};
-
-type ProjectWordTimingCue = ProjectWordTimingsDocument["cues"][number];
-
-const resolveHighlightWordIndexFromTimings = (
-  cue: SrtCue,
-  currentTimeSeconds: number,
-  cueTiming: ProjectWordTimingCue | undefined
-): number | null => {
-  if (!cueTiming || !Array.isArray(cueTiming.words) || cueTiming.words.length === 0) {
-    return null;
-  }
-
-  const cueDuration = Math.max(0, cue.endSeconds - cue.startSeconds);
-  const rawSpans = cueTiming.words
-    .map((word) => {
-      if (
-        typeof word.start !== "number" ||
-        !Number.isFinite(word.start) ||
-        typeof word.end !== "number" ||
-        !Number.isFinite(word.end)
-      ) {
-        return null;
-      }
-      return { startSeconds: word.start, endSeconds: word.end };
-    })
-    .filter(
-      (entry): entry is { startSeconds: number; endSeconds: number } => entry !== null
-    );
-
-  if (rawSpans.length === 0) {
-    return null;
-  }
-
-  // Alignment artifacts are normally absolute timeline seconds. Some artifacts can be cue-relative.
-  const looksCueRelative = rawSpans.every(
-    ({ startSeconds, endSeconds }) =>
-      startSeconds >= -0.25 && endSeconds <= cueDuration + 0.25 && endSeconds >= startSeconds
-  );
-
-  const entries = rawSpans
-    .map(({ startSeconds, endSeconds }) => {
-      const resolvedStart = looksCueRelative ? cue.startSeconds + startSeconds : startSeconds;
-      const resolvedEnd = looksCueRelative ? cue.startSeconds + endSeconds : endSeconds;
-      const clampedStart = Math.max(cue.startSeconds, resolvedStart);
-      const clampedEnd = Math.min(cue.endSeconds, resolvedEnd);
-      const start = clampedStart;
-      const end = clampedEnd;
-      if (endSeconds <= startSeconds) {
-        return null;
-      }
-      return { startSeconds: start, endSeconds: end };
-    })
-    .filter(
-      (entry): entry is { startSeconds: number; endSeconds: number } =>
-        entry !== null && entry.endSeconds > entry.startSeconds
-    )
-    .sort((a, b) =>
-      a.startSeconds === b.startSeconds ? a.endSeconds - b.endSeconds : a.startSeconds - b.startSeconds
-    );
-
-  if (entries.length === 0) {
-    return null;
-  }
-
-  const cueWordCount = (cue.text.match(/\S+/g) ?? []).length;
-  if (cueWordCount <= 0) {
-    return null;
-  }
-
-  if (currentTimeSeconds < entries[0].startSeconds) {
-    return null;
-  }
-
-  let activeTimingRank = 0;
-  for (let idx = 1; idx < entries.length; idx += 1) {
-    if (currentTimeSeconds >= entries[idx].startSeconds) {
-      activeTimingRank = idx;
-    } else {
-      break;
-    }
-  }
-  return Math.min(activeTimingRank, cueWordCount - 1);
 };
 
 type BrowserTimeout = number;
@@ -3091,7 +3003,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
   const title = resolveTitle(project);
   const videoPath = project?.video?.path ?? "";
-  const previewSrc = videoPath ? (isTauriEnv ? convertFileSrc(videoPath) : videoPath) : "";
+  const previewSrc = resolveLocalFileUrl(videoPath, isTauriEnv);
   const hasSubtitles = cues.length > 0;
   const latestOutputPath = exportOutputPath ?? project?.latest_export?.output_video_path ?? null;
   const hasStaleCompletedCreateFromApi =
@@ -3827,7 +3739,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (!subtitleOverlayPath) {
       return null;
     }
-    const base = isTauriEnv ? convertFileSrc(subtitleOverlayPath) : subtitleOverlayPath;
+    const base = resolveLocalFileUrl(subtitleOverlayPath, isTauriEnv);
     const sep = base.includes("?") ? "&" : "?";
     return `${base}${sep}v=${encodeURIComponent(effectiveAppearance.font_family)}`;
   }, [effectiveAppearance.font_family, isTauriEnv, subtitleOverlayPath]);
@@ -3938,6 +3850,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
     setOpenActionError(null);
+    if (!isTauriEnv) {
+      const browserUrl = buildLocalFileUrl(latestOutputPath);
+      const opened = window.open(browserUrl, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        setOpenActionError("Could not open video: The browser blocked the new tab.");
+      }
+      return;
+    }
     try {
       await openSystemPath(latestOutputPath);
     } catch (err) {
@@ -3945,7 +3865,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setOpenActionError(`Could not open video: ${detail}`);
       console.error("Failed to open exported video.", { path: latestOutputPath, error: err });
     }
-  }, [latestOutputPath, openSystemPath]);
+  }, [isTauriEnv, latestOutputPath, openSystemPath]);
 
   const openLatestOutputFolder = React.useCallback(async () => {
     if (!latestOutputPath) {
@@ -6022,8 +5942,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   );
 
   const hasAnyEffectChangedFromDefault = React.useMemo(
-    () => !isWorkbenchAtGlobalDefault(appearance, highlightOpacity),
-    [appearance, highlightOpacity]
+    () => !isWorkbenchAtGlobalDefault(appearance),
+    [appearance]
   );
   const { scrollAreaRef: effectsPanelScrollRef, scrolled: effectsPanelScrolled } =
     useScrollAreaShadow(hasSubtitles && !isNarrow);
@@ -6042,14 +5962,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           >
             Play
           </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            data-testid="workbench-open-export-folder"
-            onClick={() => void openLatestOutputFolder()}
-          >
-            Open folder
-          </Button>
+          {isTauriEnv && (
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="workbench-open-export-folder"
+              onClick={() => void openLatestOutputFolder()}
+            >
+              Open folder
+            </Button>
+          )}
         </>
       )}
       {isExporting && (
