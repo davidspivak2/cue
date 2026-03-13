@@ -22,7 +22,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 use zip::ZipArchive;
 
 const CALIBRATION_VIDEO_FILENAME: &str = "calibration_60s.mp4";
-const ENGINE_PAYLOAD_FILENAME: &str = "engine_payload.zip";
+const ENGINE_PAYLOAD_FILENAME: &str = "cue-local-engine.zip";
 const ENGINE_READY_SENTINEL: &str = ".extract-complete";
 const ENGINE_PAYLOAD_METADATA_FILENAME: &str = ".payload-metadata";
 

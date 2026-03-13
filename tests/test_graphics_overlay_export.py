@@ -85,5 +85,6 @@ def test_export_style_resolves_frame_height_before_supersampling() -> None:
     resolved = resolve_style_for_frame(style, 720)
     draw_style = _scale_style_for_supersampling(resolved, OVERLAY_RESOLUTION_SCALE)
 
-    assert draw_style.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(20.16 * 4, abs=0.2)
-    assert draw_style.outline_width == pytest.approx(0.72 * 4, abs=0.001)
+    assert draw_style.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(31.68 * 4, abs=0.2)
+    assert draw_style.outline_width == 0
+    assert draw_style.line_bg_padding_top == pytest.approx(5.76 * 4, abs=0.001)

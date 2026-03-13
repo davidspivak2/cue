@@ -86,12 +86,12 @@ type PresetStyleDefaults = {
 const PRESET_STYLE_DEFAULTS: Record<"Default" | "Large outline" | "Large outline + box", PresetStyleDefaults> =
   {
     Default: {
-      font_size: 34,
-      outline: 1.5,
-      shadow: 1,
+      font_size: 44,
+      outline: 0,
+      shadow: 0,
       margin_v: 28,
-      box_enabled: false,
-      box_opacity: 55,
+      box_enabled: true,
+      box_opacity: 70,
       box_padding: 8
     },
     "Large outline": {

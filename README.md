@@ -28,6 +28,10 @@ Cue is a desktop app that uses AI speech recognition to generate subtitles and b
 
 Download the latest installer from the [Releases](../../releases) page and run it.
 
+Windows releases currently ship x64 installers only.
+
+The NSIS `.exe` installer shows Cue's GPL license during setup and installs `THIRD_PARTY_NOTICES.md` with the app.
+
 ### macOS
 
 <!-- TODO: Add download link to the latest .dmg once macOS packaging is ready. -->
@@ -64,6 +68,8 @@ External contributors must sign Cue's contributor agreement before a pull reques
 Cue is licensed under [GPL-3.0-only](LICENSE).
 
 If someone distributes a modified version of Cue, they must also share the source code for that modified version under the same license.
+
+For redistributed third-party components in packaged Windows builds, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Acknowledgments
 

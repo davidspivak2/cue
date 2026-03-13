@@ -220,6 +220,10 @@ npm run tauri build
 
 Outputs `.msi` and `.exe` installers under `desktop/src-tauri/target/release/bundle/`.
 
+Windows installers are currently x64-only.
+
+The packaged Windows installer flow now includes Cue's GPL license file and ships `THIRD_PARTY_NOTICES.md` with the app bundle.
+
 ### macOS
 
 ```bash

@@ -199,7 +199,8 @@ const mockProjects = async (
   page,
   projects,
   initialSrtText = DEFAULT_SRT,
-  initialSettings = buildSettings()
+  initialSettings = buildSettings(),
+  generatedSubtitlesText = GENERATED_SRT
 ) => {
   let putCallCount = 0;
   let subtitlePutCallCount = 0;
@@ -653,7 +654,7 @@ const mockProjects = async (
       const reuseExistingSubtitles =
         lastJobPayload?.options?.reuse_existing_subtitles === true;
       if (!reuseExistingSubtitles) {
-        subtitlesByProject.set(payloadProjectId, GENERATED_SRT);
+        subtitlesByProject.set(payloadProjectId, generatedSubtitlesText);
       }
       const target = projects.find((entry) => entry.project_id === payloadProjectId);
       if (target) {
@@ -1660,6 +1661,7 @@ test("workbench shell wide layout", async ({ page }) => {
 });
 
 test("workbench shell narrow overlays", async ({ page }) => {
+  await page.addInitScript(initTauriRuntimeMock);
   await page.setViewportSize({ width: 900, height: 800 });
   const projects = buildProjects();
   await mockProjects(page, projects);
@@ -1676,6 +1678,20 @@ test("workbench shell narrow overlays", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Effects" })).toBeVisible();
   await expect(page.getByTestId("workbench-overlay-scrim")).toBeVisible();
 
+  const drawerBox = await page.getByTestId("workbench-right-drawer").boundingBox();
+  expect(drawerBox?.y).toBe(36);
+
+  const scrimBox = await page.getByTestId("workbench-overlay-scrim").boundingBox();
+  expect(scrimBox?.y).toBe(36);
+
+  await page
+    .getByTestId("workbench-right-drawer")
+    .getByRole("button", { name: "Close" })
+    .click();
+  await expect(page.getByTestId("workbench-right-drawer")).toHaveCount(0);
+
+  await page.getByTestId("workbench-open-effects").click();
+  await expect(page.getByTestId("workbench-right-drawer")).toBeVisible();
   await page.getByTestId("workbench-overlay-scrim").click();
   await expect(page.getByTestId("workbench-right-drawer")).toHaveCount(0);
 });
@@ -2279,7 +2295,7 @@ test("workbench checklist uses a wider, scroll-safe layout at 150% interface siz
 test("workbench music prompt stays below the checklist content", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 760 });
   const projects = buildProjects();
-  const startedAt = new Date(Date.now() - 30_000).toISOString();
+  const startedAt = new Date(Date.now() - 1_000).toISOString();
   const ts = new Date().toISOString();
   projects[0].active_task = {
     job_id: "job-music-prompt-layout",
@@ -2346,35 +2362,80 @@ test("workbench music prompt stays below the checklist content", async ({ page }
   await page.goto("/");
   await page.getByText("good.mp4").click();
   await page.waitForURL("**/workbench/project-1");
-  await page.waitForFunction(
-    () => Boolean(document.querySelector("[data-testid='workbench-elevator-music-row']")),
-    undefined,
-    { timeout: 3_000 }
-  );
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
 
-  const layout = await page.evaluate(() => {
+  const beforeLayout = await page.evaluate(() => {
     const state = document.querySelector("[data-testid='workbench-empty-state']");
     if (!(state instanceof HTMLElement)) {
       throw new Error("Missing music prompt layout");
     }
+    const musicShell = state.querySelector("[data-testid='workbench-elevator-music-shell']");
+    const checklist = state.querySelector("[data-testid='workbench-create-checklist']");
+    const cancelButton = state.querySelector("[data-testid='workbench-cancel-create-subtitles']");
+    const progressBar = state.querySelector("[role='progressbar']");
+    if (
+      !(musicShell instanceof HTMLElement) ||
+      !(checklist instanceof HTMLElement) ||
+      !(cancelButton instanceof HTMLElement) ||
+      !(progressBar instanceof HTMLElement)
+    ) {
+      throw new Error("Missing music prompt layout");
+    }
+    const checklistRect = checklist.getBoundingClientRect();
+    const cancelRect = cancelButton.getBoundingClientRect();
+    const progressRect = progressBar.getBoundingClientRect();
+    return {
+      cancelTop: cancelRect.top,
+      checklistTop: checklistRect.top,
+      musicVisible: Boolean(state.querySelector("[data-testid='workbench-elevator-music-row']")),
+      progressCenterX: (progressRect.left + progressRect.right) / 2
+    };
+  });
+
+  expect(beforeLayout.musicVisible).toBe(false);
+
+  await page.evaluate(() => {
+    const shell = document.querySelector("[data-testid='workbench-elevator-music-shell']");
+    if (!(shell instanceof HTMLElement)) {
+      throw new Error("Missing music prompt layout");
+    }
+    const musicRow = shell.firstElementChild;
+    if (!(musicRow instanceof HTMLElement)) {
+      throw new Error("Missing music prompt layout");
+    }
+    musicRow.classList.remove("invisible", "opacity-0");
+    musicRow.classList.add("opacity-100");
+    musicRow.dataset.testid = "workbench-elevator-music-row";
+    shell.setAttribute("aria-hidden", "false");
+  });
+  await page.waitForTimeout(50);
+
+  const afterLayout = await page.evaluate(() => {
+    const state = document.querySelector("[data-testid='workbench-empty-state']");
+    if (!(state instanceof HTMLElement)) {
+      throw new Error("Missing music prompt layout");
+    }
+    const checklist = state.querySelector("[data-testid='workbench-create-checklist']");
     const cancelButton = state.querySelector("[data-testid='workbench-cancel-create-subtitles']");
     const musicRow = state.querySelector("[data-testid='workbench-elevator-music-row']");
     const progressBar = state.querySelector("[role='progressbar']");
     if (
+      !(checklist instanceof HTMLElement) ||
       !(cancelButton instanceof HTMLElement) ||
       !(musicRow instanceof HTMLElement) ||
       !(progressBar instanceof HTMLElement)
     ) {
       throw new Error("Missing music prompt layout");
     }
+    const checklistRect = checklist.getBoundingClientRect();
     const cancelRect = cancelButton.getBoundingClientRect();
-    const musicContent =
-      musicRow.firstElementChild instanceof HTMLElement ? musicRow.firstElementChild : musicRow;
-    const musicRect = musicContent.getBoundingClientRect();
+    const musicRect = musicRow.getBoundingClientRect();
     const progressRect = progressBar.getBoundingClientRect();
     const stateRect = state.getBoundingClientRect();
     return {
       cancelBottom: cancelRect.bottom,
+      cancelTop: cancelRect.top,
+      checklistTop: checklistRect.top,
       musicText: musicRow.textContent ?? "",
       musicCenterX: (musicRect.left + musicRect.right) / 2,
       musicBottom: musicRect.bottom,
@@ -2384,11 +2445,13 @@ test("workbench music prompt stays below the checklist content", async ({ page }
     };
   });
 
-  expect(Math.abs(layout.musicCenterX - layout.progressCenterX)).toBeLessThanOrEqual(6);
-  expect(layout.musicText).toContain("Listen to some music while you wait?");
-  expect(layout.musicText).toContain("Play");
-  expect(layout.musicTop).toBeGreaterThanOrEqual(layout.cancelBottom);
-  expect(layout.stateBottom - layout.musicBottom).toBeLessThanOrEqual(32);
+  expect(Math.abs(afterLayout.checklistTop - beforeLayout.checklistTop)).toBeLessThanOrEqual(2);
+  expect(Math.abs(afterLayout.cancelTop - beforeLayout.cancelTop)).toBeLessThanOrEqual(2);
+  expect(Math.abs(afterLayout.musicCenterX - beforeLayout.progressCenterX)).toBeLessThanOrEqual(6);
+  expect(afterLayout.musicText).toContain("Listen to some music while you wait?");
+  expect(afterLayout.musicText).toContain("Play");
+  expect(afterLayout.musicTop).toBeGreaterThanOrEqual(afterLayout.cancelBottom);
+  expect(afterLayout.stateBottom - afterLayout.musicBottom).toBeLessThanOrEqual(32);
 });
 
 test("workbench falls back to project polling when resumed create stream attach fails", async ({
@@ -3061,7 +3124,7 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
 
   expect(createPayload.kind).toBe("create_subtitles");
   expect(createPayload.project_id).toBe("project-new-1");
-  expect(createPayload.options?.subtitle_mode).toBe("static");
+  expect(createPayload.options?.subtitle_mode).toBe("word_highlight");
   const previewSrc = await page.locator("video").first().getAttribute("src");
   expect(previewSrc).toContain("/local-file?path=");
   expect(decodeURIComponent(previewSrc ?? "")).toContain("C:\\browser-imports\\fresh.mp4");
@@ -3077,14 +3140,20 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
       return {
         subtitle_mode: payload.subtitle_mode,
         appearance: {
-          subtitle_mode: appearance.subtitle_mode
+          subtitle_mode: appearance.subtitle_mode,
+          font_size: appearance.font_size,
+          background_mode: appearance.background_mode,
+          highlight_color: appearance.highlight_color
         }
       };
     })
     .toEqual({
-      subtitle_mode: "static",
+      subtitle_mode: "word_highlight",
       appearance: {
-        subtitle_mode: "static"
+        subtitle_mode: "word_highlight",
+        font_size: 61,
+        background_mode: "word",
+        highlight_color: "#00FF99"
       }
     });
   await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0);
@@ -3107,6 +3176,43 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
       selectionEnd: 0,
       focused: true
     });
+});
+
+test("new project auto-seeks to the first generated subtitle before leaving auto-edit mode", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  const delayedGeneratedSrt =
+    "1\n00:00:05,000 --> 00:00:08,000\nGenerated subtitle line\n";
+  await mockProjects(page, projects, null, buildSettings(), delayedGeneratedSrt);
+
+  await page.goto("/");
+  await page.getByTestId("new-project-input").setInputFiles({
+    name: "fresh-delayed.mp4",
+    mimeType: "video/mp4",
+    buffer: Buffer.from("fake")
+  });
+  await page.waitForURL("**/workbench/project-new-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 0, durationSeconds: 65 });
+
+  await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible({ timeout: 2000 });
+  await expect.poll(() => readVideoCurrentTimeSeconds(page)).toBe(5);
+
+  const videoClickSurfaceRect = await page
+    .locator('[data-testid="workbench-center-panel-video-wrapper"] > div.absolute.cursor-default')
+    .first()
+    .boundingBox();
+  if (!videoClickSurfaceRect) {
+    throw new Error("Displayed video click surface not found");
+  }
+
+  await page.mouse.click(videoClickSurfaceRect.x + 40, videoClickSurfaceRect.y + 40);
+
+  await expect(page.getByTestId("workbench-subtitle-editor")).toHaveCount(0);
+  await expect(page.getByTestId("workbench-active-subtitle")).toBeVisible();
+  await expect.poll(() => readVideoCurrentTimeSeconds(page)).toBe(5);
 });
 
 test("toolbar controls change subtitle preview appearance", async ({ page }) => {
