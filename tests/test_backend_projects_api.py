@@ -78,6 +78,63 @@ def test_projects_endpoints(tmp_path: Path, monkeypatch) -> None:
         assert response.status_code == 200
 
 
+def test_project_import_endpoint_stores_browser_upload_and_serves_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    upload_bytes = b"browser-video"
+
+    with TestClient(backend_server.app) as client:
+        response = client.post(
+            "/projects/import",
+            headers={
+                "X-Cue-Filename": "browser%20clip.mp4",
+                "Content-Type": "video/mp4",
+            },
+            content=upload_bytes,
+        )
+        assert response.status_code == 200
+        project = response.json()
+        video_path = Path(project["video_path"])
+        assert video_path.exists()
+        assert video_path.read_bytes() == upload_bytes
+        assert video_path.name.endswith("browser_clip.mp4")
+
+        file_response = client.get("/local-file", params={"path": str(video_path)})
+        assert file_response.status_code == 200
+        assert file_response.content == upload_bytes
+
+
+def test_relink_import_endpoint_replaces_project_video_with_browser_upload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    original_video = tmp_path / "input.mp4"
+    original_video.write_bytes(b"original-video")
+
+    with TestClient(backend_server.app) as client:
+        create_response = client.post("/projects", json={"video_path": str(original_video)})
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+
+        relink_response = client.post(
+            f"/projects/{project_id}/relink-import",
+            headers={
+                "X-Cue-Filename": "replacement.mp4",
+                "Content-Type": "video/mp4",
+            },
+            content=b"replacement-video",
+        )
+        assert relink_response.status_code == 200
+        updated = relink_response.json()
+        updated_video_path = Path(updated["video_path"])
+        assert updated_video_path.exists()
+        assert updated_video_path.read_bytes() == b"replacement-video"
+        assert updated_video_path.name.endswith("replacement.mp4")
+
+
 def test_delete_project_endpoint(tmp_path: Path, monkeypatch) -> None:
     _setup_env(tmp_path, monkeypatch)
 

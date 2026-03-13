@@ -3,6 +3,7 @@ name = "cue-desktop"
 description = "Cue desktop app — create subtitles for any video using AI speech recognition"
 version = "0.1.0"
 edition = "2021"
+license = "GPL-3.0-only"
 
 [build-dependencies]
 tauri-build = { version = "2.0.0", features = [] }

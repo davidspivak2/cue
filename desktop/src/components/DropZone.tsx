@@ -84,7 +84,7 @@ const DropZone = ({
     <div
       className={cn(
         "flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-6 py-10 text-center transition",
-        isDragging ? "border-primary bg-accent/10" : "border-border bg-card",
+        isDragging ? "border-primary bg-accent/10" : "border-border bg-background/95",
         disabled ? "opacity-60" : "hover:border-primary/60",
         className
       )}

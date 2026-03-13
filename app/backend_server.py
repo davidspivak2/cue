@@ -18,13 +18,16 @@ from contextlib import asynccontextmanager
 import asyncio
 import json
 import logging
+import mimetypes
 import os
+import re
 import subprocess
 import signal
 import sys
 import tempfile
 import threading
 import time
+from urllib.parse import unquote
 import uuid
 import zipfile
 from dataclasses import dataclass, field
@@ -34,7 +37,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import project_store
@@ -64,6 +67,8 @@ PORT = DEFAULT_PORT
 PING_INTERVAL_SECONDS = 12.0
 RUNNER_CANCEL_TIMEOUT_SECONDS = 8.0
 PROJECT_DELETE_CANCEL_TIMEOUT_SECONDS = 3.0
+BROWSER_UPLOAD_FILENAME_HEADER = "x-cue-filename"
+SUPPORTED_BROWSER_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".m4v", ".webm"}
 
 logger = logging.getLogger(__name__)
 _startup_warmup_task: Optional[asyncio.Task[None]] = None
@@ -399,6 +404,65 @@ def _normalize_settings(raw: dict[str, Any]) -> dict[str, Any]:
 
     data["diagnostics"] = diagnostics
     return data
+
+
+def _browser_uploads_dir() -> Path:
+    path = get_app_data_dir() / "browser_uploads"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _decode_upload_filename(raw_value: Optional[str]) -> str:
+    decoded = unquote((raw_value or "").strip())
+    if not decoded:
+        raise HTTPException(status_code=422, detail="upload_filename_required")
+    return decoded
+
+
+def _sanitize_upload_filename(filename: str) -> str:
+    original = Path(filename).name.strip()
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(original).stem).strip("._")
+    suffix = Path(original).suffix.lower()
+    if suffix not in SUPPORTED_BROWSER_VIDEO_EXTENSIONS:
+        raise HTTPException(status_code=422, detail="unsupported_video_type")
+    return f"{stem or 'video'}{suffix}"
+
+
+async def _save_browser_upload(request: Request) -> str:
+    filename = _decode_upload_filename(request.headers.get(BROWSER_UPLOAD_FILENAME_HEADER))
+    safe_name = _sanitize_upload_filename(filename)
+    destination = _browser_uploads_dir() / f"{uuid.uuid4().hex}_{safe_name}"
+    total_bytes = 0
+    try:
+        with destination.open("wb") as handle:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                total_bytes += len(chunk)
+                handle.write(chunk)
+    except Exception as exc:  # noqa: BLE001
+        with contextlib.suppress(OSError):
+            destination.unlink()
+        raise HTTPException(status_code=500, detail="upload_write_failed") from exc
+    if total_bytes == 0:
+        with contextlib.suppress(OSError):
+            destination.unlink()
+        raise HTTPException(status_code=422, detail="upload_empty")
+    return str(destination)
+
+
+def _resolve_local_file(raw_path: str) -> Path:
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise HTTPException(status_code=422, detail="path_required")
+    try:
+        resolved = Path(raw_path).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="local_file_not_found") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail="local_file_invalid") from exc
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="local_file_not_found")
+    return resolved
 
 
 def _read_settings_file() -> dict[str, Any]:
@@ -1836,6 +1900,12 @@ def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
     return project_store.create_project(payload.video_path, style=payload.style)
 
 
+@app.post("/projects/import")
+async def create_project_from_browser_upload(request: Request) -> dict[str, Any]:
+    video_path = await _save_browser_upload(request)
+    return project_store.create_project(video_path)
+
+
 @app.get("/projects/{project_id}")
 def get_project(project_id: str) -> dict[str, Any]:
     payload = project_store.get_project(project_id)
@@ -1939,6 +2009,14 @@ def relink_project(project_id: str, payload: ProjectRelinkRequest) -> dict[str, 
     return project_store.relink_project(project_id, payload.video_path)
 
 
+@app.post("/projects/{project_id}/relink-import")
+async def relink_project_from_browser_upload(
+    project_id: str, request: Request
+) -> dict[str, Any]:
+    video_path = await _save_browser_upload(request)
+    return project_store.relink_project(project_id, video_path)
+
+
 @app.delete("/projects/{project_id}")
 async def delete_project(project_id: str) -> dict[str, Any]:
     cancelled_job_ids = await _cancel_jobs_for_project(project_id)
@@ -1954,6 +2032,13 @@ async def delete_project(project_id: str) -> dict[str, Any]:
 @app.get("/settings")
 def get_settings() -> dict[str, Any]:
     return _read_settings_file()
+
+
+@app.get("/local-file")
+def get_local_file(path: str) -> FileResponse:
+    local_path = _resolve_local_file(path)
+    media_type = mimetypes.guess_type(local_path.name)[0] or "application/octet-stream"
+    return FileResponse(local_path, media_type=media_type, filename=local_path.name)
 
 
 @app.get("/subtitle-fonts")

@@ -4,6 +4,8 @@ Thanks for helping improve Cue! This guide covers everything you need to get the
 
 For a high-level overview of how the codebase is organized, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+Before we merge a pull request from a non-maintainer, the contributor must sign Cue's contributor agreement. See [CLA_POLICY.md](CLA_POLICY.md).
+
 ---
 
 ## First-time contributor quick start
@@ -141,6 +143,24 @@ npm run tauri build
 - **Branching:** Create feature branches from `main`, e.g. `feature/short-description`.
 - **Commits:** Prefer clear, imperative messages (e.g., "Add settings validation").
 - **Pull requests:** Describe the change, include steps to test locally, and call out any UX changes.
+
+### Contributor agreement (CLA)
+
+A CLA is a short legal agreement that lets the maintainer keep the option to relicense future versions of Cue later.
+
+- Non-maintainer contributions require a signed CLA before merge.
+- The maintainer will provide the agreement during review until an automated signing flow is added.
+- See [CLA_POLICY.md](CLA_POLICY.md) for the current policy.
+
+### Workbench-heavy PR rules
+
+Treat a PR as Workbench-heavy if it changes `desktop/src/pages/Workbench.tsx`, preview/checklist state ownership, or `desktop/tests/e2e/workbench-shell.spec.ts`.
+
+- **Single writer per user-visible value:** If a PR changes a displayed value or status, name one canonical writer in the PR body. Frontend fallback logic is only for display-safe degradation, not competing ownership.
+- **Large Workbench edits need extraction:** If a PR changes more than 200 lines inside `desktop/src/pages/Workbench.tsx`, extract a hook, component, or pure helper in the same PR, or explain in the PR body why the change is intentionally localized and temporary.
+- **Prefer observable waits in Workbench E2E tests:** Do not add raw `waitForTimeout(...)` calls in new or edited Workbench coverage unless the wait is animation-only, uses a named constant, and includes a short reason comment.
+- **Document preview fallbacks:** Any preview-related PR must say how it behaves when timings are present, timings are missing or stale, and overlay rendering fails.
+- **Use the Workbench PR template fields:** For Workbench-heavy PRs, fill in the `State ownership map`, `Fallback matrix`, `Regression risk`, and `How tested` sections in the PR template.
 
 ## Running tests
 
