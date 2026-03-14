@@ -4,6 +4,7 @@ import pytest
 
 from app.subtitle_style import (
     MIN_RENDER_FONT_SIZE_PX,
+    PRESET_CUSTOM,
     PRESET_DEFAULT,
     QT_POINT_TO_PIXEL_RATIO,
     STYLE_REFERENCE_FRAME_HEIGHT,
@@ -18,7 +19,7 @@ from app.subtitle_style import (
 )
 
 
-def test_normalize_style_model_derives_font_weight_from_legacy_bold_style() -> None:
+def test_normalize_style_model_derives_font_weight_from_bold_style_when_missing() -> None:
     fallback = preset_defaults(PRESET_DEFAULT)
 
     style = normalize_style_model({"font_style": "bold"}, fallback)
@@ -101,6 +102,67 @@ def test_normalize_style_payload_returns_canonical_project_shape() -> None:
     assert appearance["font_weight"] == 700
     assert appearance["text_align"] == "right"
     assert appearance["line_spacing"] == 1.3
+
+
+def test_normalize_style_payload_rewrites_invalid_preset_to_default() -> None:
+    payload = normalize_style_payload(
+        {
+            "subtitle_mode": "static",
+            "subtitle_style": {
+                "preset": "unexpected",
+                "highlight_color": "#AABBCC",
+            },
+        }
+    )
+
+    appearance = payload["subtitle_style"]["appearance"]
+
+    assert payload["subtitle_style"]["preset"] == PRESET_DEFAULT
+    assert payload["subtitle_style"]["highlight_color"] == "#AABBCC"
+    assert appearance["font_size"] == 44
+    assert appearance["background_mode"] == "line"
+
+
+def test_normalize_style_payload_keeps_custom_preset_and_aligned_custom_seed() -> None:
+    payload = normalize_style_payload(
+        {
+            "subtitle_mode": "word_highlight",
+            "subtitle_style": {
+                "preset": PRESET_CUSTOM,
+                "highlight_color": "#00FF99",
+                "custom": {
+                    "font_size": 61.4,
+                    "outline": 3.6,
+                    "shadow": 2.2,
+                    "margin_v": 41.1,
+                    "box_enabled": False,
+                    "box_opacity": 65.9,
+                    "box_padding": 9.6,
+                },
+            },
+        }
+    )
+
+    subtitle_style = payload["subtitle_style"]
+    appearance = subtitle_style["appearance"]
+
+    assert subtitle_style["preset"] == PRESET_CUSTOM
+    assert subtitle_style["custom"] == {
+        "font_size": 61,
+        "outline": 4,
+        "shadow": 2,
+        "margin_v": 41,
+        "box_enabled": False,
+        "box_opacity": 66,
+        "box_padding": 10,
+    }
+    assert appearance["font_size"] == 61
+    assert appearance["outline_width"] == 4
+    assert appearance["shadow_strength"] == 2.0
+    assert appearance["vertical_offset"] == 41.0
+    assert appearance["background_mode"] == "none"
+    assert appearance["line_bg_padding_top"] == 10.0
+    assert appearance["line_bg_opacity"] == pytest.approx(0.66)
 
 
 def test_shadow_offset_polar_helpers_round_trip() -> None:

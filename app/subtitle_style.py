@@ -196,7 +196,7 @@ def _coerce_str(value: object, default: str) -> str:
     return value if isinstance(value, str) and value.strip() else default
 
 
-def _legacy_font_weight_for_style(font_style: str) -> int:
+def _font_weight_from_font_style(font_style: str) -> int:
     return 700 if font_style in {"bold", "bold_italic"} else DEFAULT_FONT_WEIGHT
 
 
@@ -226,6 +226,11 @@ def preset_style_defaults(name: str) -> PresetStyle:
     return _PRESET_STYLE_DEFAULTS.get(name, _DEFAULT_PRESET_STYLE)
 
 
+def normalize_preset_name(value: object, *, default: str = PRESET_DEFAULT) -> str:
+    fallback = default if default in PRESET_NAMES else PRESET_DEFAULT
+    return value if isinstance(value, str) and value in PRESET_NAMES else fallback
+
+
 def preset_style_from_custom_dict(
     custom: object, defaults: PresetStyle
 ) -> PresetStyle:
@@ -240,6 +245,18 @@ def preset_style_from_custom_dict(
         box_opacity=_coerce_int(custom.get("box_opacity"), defaults.box_opacity),
         box_padding=_coerce_int(custom.get("box_padding"), defaults.box_padding),
     )
+
+
+def resolve_effective_preset_style(
+    style_payload: object,
+    *,
+    default_preset: str = PRESET_DEFAULT,
+) -> tuple[str, PresetStyle]:
+    payload = style_payload if isinstance(style_payload, dict) else {}
+    preset = normalize_preset_name(payload.get("preset"), default=default_preset)
+    if preset == PRESET_CUSTOM:
+        return preset, preset_style_from_custom_dict(payload.get("custom"), _DEFAULT_PRESET_STYLE)
+    return preset, preset_style_defaults(preset)
 
 
 def style_model_from_preset(
@@ -383,12 +400,13 @@ def preset_defaults(
     subtitle_mode: str = DEFAULT_SUBTITLE_MODE,
     highlight_color: str = DEFAULT_HIGHLIGHT_COLOR,
 ) -> SubtitleStyle:
-    preset = preset_style_defaults(name)
+    preset_name = normalize_preset_name(name)
+    preset = preset_style_defaults(preset_name)
     return style_model_from_preset(
         preset,
         subtitle_mode=subtitle_mode,
         highlight_color=highlight_color,
-        preset_name=name,
+        preset_name=preset_name,
     )
 
 
@@ -398,7 +416,7 @@ def normalize_style_model(raw: object, fallback: SubtitleStyle) -> SubtitleStyle
     font_style = _coerce_enum(raw.get("font_style"), VALID_FONT_STYLES, fallback.font_style)
     if raw.get("font_weight") is None:
         font_weight = (
-            _legacy_font_weight_for_style(font_style)
+            _font_weight_from_font_style(font_style)
             if raw.get("font_style") is not None
             else fallback.font_weight
         )
@@ -598,13 +616,6 @@ def normalize_style_payload(
     if not isinstance(style_payload, dict):
         style_payload = {}
 
-    preset_value = style_payload.get("preset")
-    preset = (
-        preset_value
-        if isinstance(preset_value, str) and preset_value in PRESET_NAMES
-        else default_preset
-    )
-
     subtitle_mode = _coerce_enum(
         root.get("subtitle_mode"), VALID_SUBTITLE_MODES, default_subtitle_mode
     )
@@ -612,13 +623,9 @@ def normalize_style_payload(
         style_payload.get("highlight_color"),
         _coerce_color(root.get("highlight_color"), default_highlight_color),
     )
-    preset_defaults_style = _DEFAULT_PRESET_STYLE
-    preset_custom = preset_style_from_custom_dict(
-        style_payload.get("custom"),
-        preset_defaults_style,
-    )
-    preset_effective = (
-        preset_custom if preset == PRESET_CUSTOM else preset_style_defaults(preset)
+    preset, preset_effective = resolve_effective_preset_style(
+        style_payload,
+        default_preset=default_preset,
     )
     fallback_style = style_model_from_preset(
         preset_effective,
@@ -639,9 +646,11 @@ def normalize_style_payload(
         style_payload.get("highlight_opacity")
     )
     if isinstance(style_payload.get("custom"), dict):
-        normalized_custom = preset_style_from_custom_dict(
-            style_payload.get("custom"),
-            preset_defaults_style,
+        _, normalized_custom = resolve_effective_preset_style(
+            {
+                "preset": PRESET_CUSTOM,
+                "custom": style_payload.get("custom"),
+            }
         )
         normalized_subtitle_style["custom"] = {
             "font_size": normalized_custom.font_size,
