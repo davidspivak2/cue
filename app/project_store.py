@@ -113,54 +113,12 @@ def _read_json_file(path: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _legacy_store_path() -> Path:
-    return _projects_root().parent / "projects.json"
-
-
 def _ensure_store() -> None:
     root = _projects_root()
     root.mkdir(parents=True, exist_ok=True)
     index_path = _index_path()
-    if index_path.exists():
-        return
-    legacy_path = _legacy_store_path()
-    if legacy_path.exists():
-        _migrate_legacy_store(legacy_path)
     if not index_path.exists():
         _atomic_write_json(index_path, {"projects": []})
-
-
-def _migrate_legacy_store(legacy_path: Path) -> None:
-    data = _read_json_file(legacy_path)
-    records = data.get("projects")
-    if not isinstance(records, list):
-        return
-    summaries: list[dict[str, Any]] = []
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        project_id = str(record.get("project_id") or "").strip()
-        video_path = record.get("video_path")
-        if not project_id:
-            project_id = str(uuid.uuid4())
-        manifest_path = _manifest_path(project_id)
-        if manifest_path.exists():
-            continue
-        created_at = str(record.get("created_at") or _now_iso())
-        updated_at = str(record.get("updated_at") or created_at)
-        manifest = _build_manifest(
-            project_id=project_id,
-            video_path=str(video_path) if isinstance(video_path, str) else None,
-            created_at=created_at,
-            updated_at=updated_at,
-            status=None,
-            style=None,
-            latest_export=None,
-        )
-        _atomic_write_json(manifest_path, manifest)
-        summaries.append(_manifest_to_summary(manifest).model_dump())
-    if summaries:
-        _atomic_write_json(_index_path(), {"projects": summaries})
 
 
 def _build_manifest(
