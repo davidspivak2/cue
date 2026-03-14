@@ -17,5 +17,9 @@ export const resolveLocalFileUrl = (
     return "";
   }
   const normalizedPath = normalizeLocalPath(path);
-  return useTauri ? convertFileSrc(normalizedPath) : buildLocalFileUrl(normalizedPath);
+  if (useTauri) {
+    const pathForTauri = normalizedPath.replace(/\\/g, "/");
+    return convertFileSrc(pathForTauri);
+  }
+  return buildLocalFileUrl(normalizedPath);
 };

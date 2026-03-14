@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi import HTTPException
 
 from app import project_store
@@ -13,6 +14,22 @@ def _setup_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(project_store, "generate_thumbnail", lambda *args, **kwargs: None)
     monkeypatch.setattr(project_store, "get_media_duration", lambda *args, **kwargs: None)
+
+
+def _word_highlight_style() -> dict[str, object]:
+    return {
+        "subtitle_mode": "word_highlight",
+        "subtitle_style": {
+            "preset": "Default",
+            "highlight_color": "#00FF99",
+            "appearance": {
+                "font_size": 61,
+                "background_mode": "word",
+                "subtitle_mode": "word_highlight",
+                "highlight_color": "#00FF99",
+            },
+        },
+    }
 
 
 def test_create_list_relink_update(tmp_path: Path, monkeypatch) -> None:
@@ -108,8 +125,9 @@ def test_project_style_is_normalized_on_write_and_read(tmp_path: Path, monkeypat
     assert appearance["line_spacing"] == 1.5
 
 
+@pytest.mark.parametrize("omitted_style", [None, {}])
 def test_create_project_uses_built_in_default_style_instead_of_saved_settings(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, omitted_style: dict[str, object] | None
 ) -> None:
     _setup_env(tmp_path, monkeypatch)
 
@@ -136,7 +154,7 @@ def test_create_project_uses_built_in_default_style_instead_of_saved_settings(
     video_path = tmp_path / "seeded.mp4"
     video_path.write_text("video", encoding="utf-8")
 
-    summary = project_store.create_project(str(video_path))
+    summary = project_store.create_project(str(video_path), style=omitted_style)
     detail = project_store.get_project(summary["project_id"])
     appearance = detail["style"]["subtitle_style"]["appearance"]
 
@@ -150,32 +168,18 @@ def test_create_project_uses_built_in_default_style_instead_of_saved_settings(
     assert appearance["subtitle_mode"] == "static"
 
 
+@pytest.mark.parametrize("omitted_style", [None, {}])
 def test_create_project_does_not_clear_existing_style_when_style_is_omitted(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, omitted_style: dict[str, object] | None
 ) -> None:
     _setup_env(tmp_path, monkeypatch)
 
     video_path = tmp_path / "same-video.mp4"
     video_path.write_text("video", encoding="utf-8")
 
-    summary = project_store.create_project(
-        str(video_path),
-        style={
-            "subtitle_mode": "word_highlight",
-            "subtitle_style": {
-                "preset": "Default",
-                "highlight_color": "#00FF99",
-                "appearance": {
-                    "font_size": 61,
-                    "background_mode": "word",
-                    "subtitle_mode": "word_highlight",
-                    "highlight_color": "#00FF99",
-                },
-            },
-        },
-    )
+    summary = project_store.create_project(str(video_path), style=_word_highlight_style())
 
-    project_store.create_project(str(video_path))
+    project_store.create_project(str(video_path), style=omitted_style)
 
     detail = project_store.get_project(summary["project_id"])
     appearance = detail["style"]["subtitle_style"]["appearance"]
@@ -215,22 +219,7 @@ def test_delete_then_recreate_same_video_starts_from_fresh_default_style(
     video_path = tmp_path / "same-video.mp4"
     video_path.write_text("video", encoding="utf-8")
 
-    first_summary = project_store.create_project(
-        str(video_path),
-        style={
-            "subtitle_mode": "word_highlight",
-            "subtitle_style": {
-                "preset": "Default",
-                "highlight_color": "#00FF99",
-                "appearance": {
-                    "font_size": 61,
-                    "background_mode": "word",
-                    "subtitle_mode": "word_highlight",
-                    "highlight_color": "#00FF99",
-                },
-            },
-        },
-    )
+    first_summary = project_store.create_project(str(video_path), style=_word_highlight_style())
     project_store.delete_project(first_summary["project_id"])
 
     recreated_summary = project_store.create_project(str(video_path))

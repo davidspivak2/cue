@@ -6,9 +6,11 @@ from app.subtitle_style import (
     MIN_RENDER_FONT_SIZE_PX,
     PRESET_DEFAULT,
     QT_POINT_TO_PIXEL_RATIO,
+    STYLE_REFERENCE_FRAME_HEIGHT,
     normalize_style_model,
     normalize_style_payload,
     preset_defaults,
+    preset_style_defaults,
     resolve_style_for_frame,
     resolve_style_scale_for_frame,
     shadow_offset_from_polar,
@@ -26,11 +28,25 @@ def test_normalize_style_model_derives_font_weight_from_legacy_bold_style() -> N
     assert style.line_spacing == 1.0
 
 
+def test_default_preset_style_source_of_truth_enables_line_background() -> None:
+    preset = preset_style_defaults(PRESET_DEFAULT)
+
+    assert preset == preset_style_defaults("unexpected")
+    assert preset.font_size == 44
+    assert preset.outline == 0
+    assert preset.shadow == 0
+    assert preset.margin_v == 28
+    assert preset.box_enabled is True
+    assert preset.box_opacity == 70
+    assert preset.box_padding == 8
+
+
 def test_default_preset_starts_static_with_background_on_and_outline_off() -> None:
+    preset = preset_style_defaults(PRESET_DEFAULT)
     style = preset_defaults(PRESET_DEFAULT)
 
     assert style.font_family == "Assistant"
-    assert style.font_size == 44
+    assert style.font_size == preset.font_size
     assert style.font_style == "regular"
     assert style.text_color == "#FFFFFF"
     assert style.text_align == "center"
@@ -38,10 +54,13 @@ def test_default_preset_starts_static_with_background_on_and_outline_off() -> No
     assert style.text_opacity == 1.0
     assert style.letter_spacing == 0.0
     assert style.outline_enabled is False
-    assert style.outline_width == 0
+    assert style.outline_width == preset.outline
     assert style.shadow_enabled is False
-    assert style.shadow_strength == 0.0
+    assert style.shadow_strength == float(preset.shadow)
     assert style.background_mode == "line"
+    assert style.line_bg_opacity == pytest.approx(preset.box_opacity / 100.0)
+    assert style.line_bg_padding_top == float(preset.box_padding)
+    assert style.vertical_offset == float(preset.margin_v)
     assert style.subtitle_mode == "static"
 
 
@@ -95,29 +114,46 @@ def test_shadow_offset_polar_helpers_round_trip() -> None:
 
 
 def test_resolve_style_for_frame_scales_font_size_to_1080_height() -> None:
+    preset = preset_style_defaults(PRESET_DEFAULT)
     style = preset_defaults(PRESET_DEFAULT)
 
     resolved = resolve_style_for_frame(style, 1080)
+    expected_scale = 1080 / STYLE_REFERENCE_FRAME_HEIGHT
 
-    assert resolved.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(47.52, abs=0.05)
-    assert resolved.outline_width == 0
-    assert resolved.line_bg_padding_top == pytest.approx(8.64, abs=0.001)
+    assert resolved.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(
+        preset.font_size * expected_scale,
+        abs=0.05,
+    )
+    assert resolved.outline_width == pytest.approx(preset.outline * expected_scale, abs=0.001)
+    assert resolved.line_bg_padding_top == pytest.approx(
+        preset.box_padding * expected_scale,
+        abs=0.001,
+    )
 
 
 def test_resolve_style_for_frame_scales_font_size_to_720_height() -> None:
+    preset = preset_style_defaults(PRESET_DEFAULT)
     style = preset_defaults(PRESET_DEFAULT)
 
     resolved = resolve_style_for_frame(style, 720)
+    expected_scale = 720 / STYLE_REFERENCE_FRAME_HEIGHT
 
-    assert resolved.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(31.68, abs=0.05)
-    assert resolved.line_bg_padding_top == pytest.approx(5.76, abs=0.001)
+    assert resolved.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(
+        preset.font_size * expected_scale,
+        abs=0.05,
+    )
+    assert resolved.line_bg_padding_top == pytest.approx(
+        preset.box_padding * expected_scale,
+        abs=0.001,
+    )
 
 
 def test_resolve_style_for_frame_applies_minimum_font_floor() -> None:
+    preset = preset_style_defaults(PRESET_DEFAULT)
     style = preset_defaults(PRESET_DEFAULT)
 
     resolved = resolve_style_for_frame(style, 200)
-    expected_scale = MIN_RENDER_FONT_SIZE_PX / style.font_size
+    expected_scale = MIN_RENDER_FONT_SIZE_PX / preset.font_size
 
     assert resolve_style_scale_for_frame(style, 200) == pytest.approx(expected_scale, abs=0.0001)
     assert resolved.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(

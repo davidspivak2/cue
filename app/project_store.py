@@ -263,6 +263,12 @@ def _build_default_project_style() -> dict[str, Any]:
     )
 
 
+def _resolve_create_project_style(style: object) -> tuple[bool, dict[str, Any]]:
+    if not style:
+        return False, _build_default_project_style()
+    return True, normalize_style_payload(style)
+
+
 def _compute_status(manifest: dict[str, Any], *, allow_exporting: bool = False) -> str:
     video = manifest.get("video") if isinstance(manifest.get("video"), dict) else {}
     video_path = video.get("path")
@@ -489,28 +495,27 @@ def create_project(video_path: str, *, style: Optional[dict[str, Any]] = None) -
     with _STORE_LOCK:
         _ensure_store()
         canonical = _normalize_path(video_path)
-        provided_style = normalize_style_payload(style) if style else None
+        has_provided_style, project_style = _resolve_create_project_style(style)
         summaries = list_projects()
         for summary in summaries:
             if summary.video_path and _normalize_path(summary.video_path) == canonical:
                 manifest = _read_manifest(summary.project_id)
                 manifest["video"] = _build_video_info(video_path)
-                if provided_style is not None:
+                if has_provided_style:
                     style_path = _artifact_path(manifest, "style_path")
-                    _atomic_write_json(style_path, provided_style)
+                    _atomic_write_json(style_path, project_style)
                 _write_manifest(manifest)
                 _write_index(list_projects())
                 return _manifest_to_summary(manifest).model_dump()
         now = _now_iso()
         project_id = str(uuid.uuid4())
-        initial_style = provided_style if provided_style is not None else _build_default_project_style()
         manifest = _build_manifest(
             project_id=project_id,
             video_path=video_path,
             created_at=now,
             updated_at=now,
             status=None,
-            style=initial_style,
+            style=project_style,
             latest_export=None,
         )
         _atomic_write_json(_manifest_path(project_id), manifest)

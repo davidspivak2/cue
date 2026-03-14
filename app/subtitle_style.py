@@ -102,6 +102,48 @@ class SubtitleStyle:
     highlight_color: str
 
 
+_DEFAULT_PRESET_STYLE = PresetStyle(
+    font_size=44,
+    outline=0,
+    shadow=0,
+    margin_v=28,
+    box_enabled=True,
+    box_opacity=70,
+    box_padding=8,
+)
+
+_PRESET_STYLE_DEFAULTS = {
+    PRESET_DEFAULT: _DEFAULT_PRESET_STYLE,
+    PRESET_LARGE_OUTLINE: PresetStyle(
+        font_size=34,
+        outline=4,
+        shadow=2,
+        margin_v=30,
+        box_enabled=False,
+        box_opacity=70,
+        box_padding=10,
+    ),
+    PRESET_LARGE_OUTLINE_BOX: PresetStyle(
+        font_size=34,
+        outline=4,
+        shadow=2,
+        margin_v=30,
+        box_enabled=True,
+        box_opacity=70,
+        box_padding=10,
+    ),
+    PRESET_LIFT: PresetStyle(
+        font_size=28,
+        outline=2,
+        shadow=3,
+        margin_v=28,
+        box_enabled=False,
+        box_opacity=70,
+        box_padding=8,
+    ),
+}
+
+
 def _coerce_int(value: object, default: int) -> int:
     if isinstance(value, bool):
         return default
@@ -181,45 +223,7 @@ def shadow_offset_from_polar(distance: float, angle_degrees: float) -> tuple[flo
 
 
 def preset_style_defaults(name: str) -> PresetStyle:
-    if name == PRESET_LARGE_OUTLINE:
-        return PresetStyle(
-            font_size=34,
-            outline=4,
-            shadow=2,
-            margin_v=30,
-            box_enabled=False,
-            box_opacity=70,
-            box_padding=10,
-        )
-    if name == PRESET_LARGE_OUTLINE_BOX:
-        return PresetStyle(
-            font_size=34,
-            outline=4,
-            shadow=2,
-            margin_v=30,
-            box_enabled=True,
-            box_opacity=70,
-            box_padding=10,
-        )
-    if name == PRESET_LIFT:
-        return PresetStyle(
-            font_size=28,
-            outline=2,
-            shadow=3,
-            margin_v=28,
-            box_enabled=False,
-            box_opacity=70,
-            box_padding=8,
-        )
-    return PresetStyle(
-        font_size=44,
-        outline=0,
-        shadow=0,
-        margin_v=28,
-        box_enabled=True,
-        box_opacity=70,
-        box_padding=8,
-    )
+    return _PRESET_STYLE_DEFAULTS.get(name, _DEFAULT_PRESET_STYLE)
 
 
 def preset_style_from_custom_dict(
@@ -291,49 +295,14 @@ def style_model_from_preset(
         highlight_color=highlight_color,
     )
     if preset_name == PRESET_LIFT:
-        style = SubtitleStyle(
-            font_family=style.font_family,
-            font_size=style.font_size,
-            font_style=style.font_style,
-            font_weight=style.font_weight,
-            text_align=style.text_align,
-            line_spacing=style.line_spacing,
-            text_color=style.text_color,
-            text_opacity=style.text_opacity,
-            letter_spacing=style.letter_spacing,
-            outline_enabled=style.outline_enabled,
-            outline_width=style.outline_width,
-            outline_color=style.outline_color,
+        style = replace(
+            style,
             shadow_enabled=True,
             shadow_strength=2.5,
             shadow_offset_x=2.0,
             shadow_offset_y=2.0,
-            shadow_color=style.shadow_color,
             shadow_opacity=0.85,
             shadow_blur=8.0,
-            background_mode=style.background_mode,
-            line_bg_color=style.line_bg_color,
-            line_bg_opacity=style.line_bg_opacity,
-            line_bg_padding=style.line_bg_padding,
-            line_bg_padding_top=style.line_bg_padding_top,
-            line_bg_padding_right=style.line_bg_padding_right,
-            line_bg_padding_bottom=style.line_bg_padding_bottom,
-            line_bg_padding_left=style.line_bg_padding_left,
-            line_bg_radius=style.line_bg_radius,
-            word_bg_color=style.word_bg_color,
-            word_bg_opacity=style.word_bg_opacity,
-            word_bg_padding=style.word_bg_padding,
-            word_bg_padding_top=style.word_bg_padding_top,
-            word_bg_padding_right=style.word_bg_padding_right,
-            word_bg_padding_bottom=style.word_bg_padding_bottom,
-            word_bg_padding_left=style.word_bg_padding_left,
-            word_bg_radius=style.word_bg_radius,
-            vertical_anchor=style.vertical_anchor,
-            vertical_offset=style.vertical_offset,
-            position_x=style.position_x,
-            position_y=style.position_y,
-            subtitle_mode=style.subtitle_mode,
-            highlight_color=style.highlight_color,
         )
     return style
 
@@ -643,7 +612,7 @@ def normalize_style_payload(
         style_payload.get("highlight_color"),
         _coerce_color(root.get("highlight_color"), default_highlight_color),
     )
-    preset_defaults_style = preset_style_defaults(PRESET_DEFAULT)
+    preset_defaults_style = _DEFAULT_PRESET_STYLE
     preset_custom = preset_style_from_custom_dict(
         style_payload.get("custom"),
         preset_defaults_style,
