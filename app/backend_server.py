@@ -289,10 +289,16 @@ class ProjectCreateRequest(BaseModel):
     video_path: str
     style: dict[str, Any] = Field(default_factory=dict)
 
+    def to_project_store_kwargs(self) -> dict[str, Any]:
+        return self.model_dump()
+
 
 class ProjectUpdateRequest(BaseModel):
     subtitles_srt_text: Optional[str] = None
     style: Optional[dict[str, Any]] = None
+
+    def to_project_store_kwargs(self) -> dict[str, Any]:
+        return self.model_dump(exclude_unset=True)
 
 
 class ProjectRelinkRequest(BaseModel):
@@ -1897,7 +1903,7 @@ def list_projects() -> list[dict[str, Any]]:
 
 @app.post("/projects")
 def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
-    return project_store.create_project(payload.video_path, style=payload.style)
+    return project_store.create_project(**payload.to_project_store_kwargs())
 
 
 @app.post("/projects/import")
@@ -1997,11 +2003,7 @@ def get_project_word_timings(project_id: str) -> dict[str, Any]:
 
 @app.put("/projects/{project_id}")
 def update_project(project_id: str, payload: ProjectUpdateRequest) -> dict[str, Any]:
-    return project_store.update_project(
-        project_id,
-        subtitles_srt_text=payload.subtitles_srt_text,
-        style=payload.style,
-    )
+    return project_store.update_project(project_id, **payload.to_project_store_kwargs())
 
 
 @app.post("/projects/{project_id}/relink")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import sys
 
 import pytest
 
@@ -29,17 +28,13 @@ def _build_font(style):
     return font
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Qt font layout can be unstable headless on Windows.",
-)
 def test_build_text_layout_applies_text_alignment_and_line_spacing() -> None:
     pytest.importorskip("PySide6")
     style = preset_defaults(PRESET_DEFAULT)
     text = "Short\nA much longer subtitle line"
     font = _build_font(style)
 
-    _, lines_left, _ = _build_text_layout(
+    layout_left, lines_left, _ = _build_text_layout(
         text,
         font,
         width=640,
@@ -49,7 +44,7 @@ def test_build_text_layout_applies_text_alignment_and_line_spacing() -> None:
         text_align="left",
         line_spacing=1.0,
     )
-    _, lines_center, _ = _build_text_layout(
+    layout_center, lines_center, _ = _build_text_layout(
         text,
         font,
         width=640,
@@ -59,7 +54,7 @@ def test_build_text_layout_applies_text_alignment_and_line_spacing() -> None:
         text_align="center",
         line_spacing=1.0,
     )
-    _, lines_right, _ = _build_text_layout(
+    layout_right, lines_right, _ = _build_text_layout(
         text,
         font,
         width=640,
@@ -69,7 +64,7 @@ def test_build_text_layout_applies_text_alignment_and_line_spacing() -> None:
         text_align="right",
         line_spacing=1.0,
     )
-    _, lines_spaced, _ = _build_text_layout(
+    layout_spaced, lines_spaced, _ = _build_text_layout(
         text,
         font,
         width=640,
@@ -79,9 +74,17 @@ def test_build_text_layout_applies_text_alignment_and_line_spacing() -> None:
         text_align="center",
         line_spacing=1.5,
     )
+    _ = (layout_left, layout_center, layout_right, layout_spaced)
 
-    assert lines_left[0].position().x() < lines_center[0].position().x() < lines_right[0].position().x()
-    assert lines_spaced[1].position().y() > lines_center[1].position().y()
+    aligned_line_index = len(lines_center) - 1
+    assert (
+        lines_left[aligned_line_index].position().x()
+        < lines_center[aligned_line_index].position().x()
+        < lines_right[aligned_line_index].position().x()
+    )
+    centered_line_gap = lines_center[1].position().y() - lines_center[0].position().y()
+    spaced_line_gap = lines_spaced[1].position().y() - lines_spaced[0].position().y()
+    assert spaced_line_gap > centered_line_gap
 
 
 def test_build_preview_cache_key_changes_for_new_typography_fields() -> None:

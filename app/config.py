@@ -6,6 +6,7 @@ from app.subtitle_style import (
     PRESET_CUSTOM,
     PRESET_DEFAULT,
     PRESET_NAMES,
+    SubtitleStyle,
     normalize_style_model,
     preset_style_defaults,
     preset_style_from_custom_dict,
@@ -78,8 +79,43 @@ def _normalize_highlight_opacity(value: object) -> float:
     return DEFAULT_HIGHLIGHT_OPACITY
 
 
+def _normalize_preset_name(value: object) -> str:
+    if isinstance(value, str) and value in PRESET_NAMES:
+        return value
+    return PRESET_DEFAULT
+
+
 def _is_legacy_default_appearance(appearance: dict[str, object]) -> bool:
     return all(appearance.get(key) == value for key, value in _LEGACY_DEFAULT_APPEARANCE.items())
+
+
+def _resolve_preset_style(raw_style: dict[str, object], preset: str):
+    if preset != PRESET_CUSTOM:
+        return preset_style_defaults(preset)
+    return preset_style_from_custom_dict(
+        raw_style.get("custom"),
+        preset_style_defaults(PRESET_DEFAULT),
+    )
+
+
+def _normalize_style_appearance(
+    raw_style: dict[str, object],
+    *,
+    preset: str,
+    subtitle_mode: str,
+    highlight_color: str,
+) -> tuple[SubtitleStyle, dict[str, object]]:
+    fallback_style = style_model_from_preset(
+        _resolve_preset_style(raw_style, preset),
+        subtitle_mode=subtitle_mode,
+        highlight_color=highlight_color,
+        preset_name=preset,
+    )
+    style_model = normalize_style_model(raw_style.get("appearance"), fallback_style)
+    style_dict = style_model_to_dict(style_model)
+    if preset == PRESET_DEFAULT and _is_legacy_default_appearance(style_dict):
+        return fallback_style, style_model_to_dict(fallback_style)
+    return style_model, style_dict
 
 
 def apply_config_defaults(config: dict) -> dict:
@@ -95,28 +131,16 @@ def apply_config_defaults(config: dict) -> dict:
     raw_style["highlight_opacity"] = _normalize_highlight_opacity(
         raw_style.get("highlight_opacity")
     )
-    preset_value = raw_style.get("preset")
-    preset = preset_value if isinstance(preset_value, str) and preset_value in PRESET_NAMES else PRESET_DEFAULT
-    if preset_value != preset:
+    preset = _normalize_preset_name(raw_style.get("preset"))
+    if raw_style.get("preset") != preset:
         raw_style["preset"] = preset
-    preset_defaults_style = preset_style_defaults(PRESET_DEFAULT)
-    preset_custom = preset_style_from_custom_dict(
-        raw_style.get("custom"),
-        preset_defaults_style,
-    )
-    preset_effective = (
-        preset_custom if preset == PRESET_CUSTOM else preset_style_defaults(preset)
-    )
-    fallback_style = style_model_from_preset(
-        preset_effective,
+    style_model, style_dict = _normalize_style_appearance(
+        raw_style,
+        preset=preset,
         subtitle_mode=config["subtitle_mode"],
         highlight_color=highlight_color,
-        preset_name=preset,
     )
-    style_model = normalize_style_model(raw_style.get("appearance"), fallback_style)
-    if preset == PRESET_DEFAULT and _is_legacy_default_appearance(style_model_to_dict(style_model)):
-        style_model = fallback_style
-    raw_style["appearance"] = style_model_to_dict(style_model)
+    raw_style["appearance"] = style_dict
     config["subtitle_mode"] = style_model.subtitle_mode
     raw_style["highlight_color"] = style_model.highlight_color
     return config

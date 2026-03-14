@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import backend_server, project_store
@@ -16,6 +17,42 @@ def _setup_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(project_store, "generate_thumbnail", lambda *args, **kwargs: None)
     monkeypatch.setattr(project_store, "get_media_duration", lambda *args, **kwargs: None)
     backend_server.JOBS.clear()
+
+
+def _word_highlight_style() -> dict[str, object]:
+    return {
+        "subtitle_mode": "word_highlight",
+        "subtitle_style": {
+            "preset": "Default",
+            "highlight_color": "#00FF99",
+            "highlight_opacity": 0.35,
+            "appearance": {
+                "font_size": 61,
+                "background_mode": "word",
+                "subtitle_mode": "word_highlight",
+                "highlight_color": "#00FF99",
+            },
+        },
+    }
+
+
+def _get_project_style(client: TestClient, project_id: str) -> dict[str, object]:
+    response = client.get(f"/projects/{project_id}")
+    assert response.status_code == 200
+    return response.json()["style"]
+
+
+def _assert_built_in_default_project_style(style: dict[str, object]) -> None:
+    appearance = style["subtitle_style"]["appearance"]
+
+    assert style["subtitle_mode"] == "static"
+    assert style["subtitle_style"]["preset"] == "Default"
+    assert style["subtitle_style"]["highlight_color"] == "#FFD400"
+    assert style["subtitle_style"]["highlight_opacity"] == 1.0
+    assert appearance["font_size"] == 44
+    assert appearance["background_mode"] == "line"
+    assert appearance["outline_enabled"] is False
+    assert appearance["subtitle_mode"] == "static"
 
 
 def test_projects_endpoints(tmp_path: Path, monkeypatch) -> None:
@@ -114,22 +151,7 @@ def test_project_import_endpoint_uses_built_in_default_style(
     _setup_env(tmp_path, monkeypatch)
 
     get_config_path().write_text(
-        json.dumps(
-            {
-                "subtitle_mode": "word_highlight",
-                "subtitle_style": {
-                    "preset": "Default",
-                    "highlight_color": "#00FF99",
-                    "highlight_opacity": 0.35,
-                    "appearance": {
-                        "font_size": 61,
-                        "background_mode": "word",
-                        "subtitle_mode": "word_highlight",
-                        "highlight_color": "#00FF99",
-                    },
-                },
-            }
-        ),
+        json.dumps(_word_highlight_style()),
         encoding="utf-8",
     )
 
@@ -144,20 +166,115 @@ def test_project_import_endpoint_uses_built_in_default_style(
         )
         assert response.status_code == 200
         project_id = response.json()["project_id"]
+        _assert_built_in_default_project_style(_get_project_style(client, project_id))
 
-        detail_response = client.get(f"/projects/{project_id}")
-        assert detail_response.status_code == 200
-        style = detail_response.json()["style"]
-        appearance = style["subtitle_style"]["appearance"]
 
-        assert style["subtitle_mode"] == "static"
-        assert style["subtitle_style"]["preset"] == "Default"
-        assert style["subtitle_style"]["highlight_color"] == "#FFD400"
-        assert style["subtitle_style"]["highlight_opacity"] == 1.0
-        assert appearance["font_size"] == 44
-        assert appearance["background_mode"] == "line"
-        assert appearance["outline_enabled"] is False
-        assert appearance["subtitle_mode"] == "static"
+@pytest.mark.parametrize(
+    "style_payload",
+    [
+        pytest.param(None, id="omitted-style"),
+        pytest.param({}, id="empty-style"),
+    ],
+)
+def test_create_project_endpoint_uses_built_in_default_style_when_style_is_omitted_or_empty(
+    tmp_path: Path,
+    monkeypatch,
+    style_payload: dict[str, object] | None,
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "input.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    get_config_path().write_text(
+        json.dumps(_word_highlight_style()),
+        encoding="utf-8",
+    )
+
+    payload = {"video_path": str(video_path)}
+    if style_payload is not None:
+        payload["style"] = style_payload
+
+    with TestClient(backend_server.app) as client:
+        response = client.post("/projects", json=payload)
+        assert response.status_code == 200
+        _assert_built_in_default_project_style(
+            _get_project_style(client, response.json()["project_id"])
+        )
+
+
+@pytest.mark.parametrize(
+    "style_payload",
+    [
+        pytest.param(None, id="omitted-style"),
+        pytest.param({}, id="empty-style"),
+    ],
+)
+def test_create_project_endpoint_preserves_existing_style_when_style_is_omitted_or_empty(
+    tmp_path: Path,
+    monkeypatch,
+    style_payload: dict[str, object] | None,
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "input.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    with TestClient(backend_server.app) as client:
+        create_response = client.post(
+            "/projects",
+            json={"video_path": str(video_path), "style": _word_highlight_style()},
+        )
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+        saved_style = _get_project_style(client, project_id)
+
+        payload = {"video_path": str(video_path)}
+        if style_payload is not None:
+            payload["style"] = style_payload
+
+        recreate_response = client.post("/projects", json=payload)
+        assert recreate_response.status_code == 200
+        assert recreate_response.json()["project_id"] == project_id
+        assert _get_project_style(client, project_id) == saved_style
+
+
+def test_update_project_endpoint_preserves_style_when_omitted_and_clears_when_empty(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "input.mp4"
+    video_path.write_text("video", encoding="utf-8")
+    subtitles_text = "1\n00:00:00,000 --> 00:00:01,000\nHi\n"
+
+    with TestClient(backend_server.app) as client:
+        create_response = client.post(
+            "/projects",
+            json={"video_path": str(video_path), "style": _word_highlight_style()},
+        )
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+        saved_style = _get_project_style(client, project_id)
+
+        preserve_response = client.put(
+            f"/projects/{project_id}",
+            json={"subtitles_srt_text": subtitles_text},
+        )
+        assert preserve_response.status_code == 200
+        assert preserve_response.json()["style"] == saved_style
+
+        subtitles_response = client.get(f"/projects/{project_id}/subtitles")
+        assert subtitles_response.status_code == 200
+        assert subtitles_response.json()["subtitles_srt_text"] == subtitles_text
+
+        clear_response = client.put(
+            f"/projects/{project_id}",
+            json={"style": {}},
+        )
+        assert clear_response.status_code == 200
+        assert clear_response.json()["style"] == {}
+        assert _get_project_style(client, project_id) == {}
 
 
 def test_relink_import_endpoint_replaces_project_video_with_browser_upload(

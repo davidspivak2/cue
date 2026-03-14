@@ -59,6 +59,19 @@ Cue is a local desktop app for creating and burning subtitles into video. Stack:
 - **E2E:** Start backend and Vite (`cd desktop` then `npx vite --port 5173`), then `npm run test:e2e`. Specs in `desktop/tests/e2e/`.
 - **Lint:** See `docs/CONTRIBUTING.md` (ESLint, ruff, clippy).
 
+### Verification standard for agent chunks
+
+- Do not claim "nothing is broken" from a seam-only test command. That only proves the edited seam.
+- After every chunk, run the chunk's direct tests and the direct dependent tests for any shared module touched.
+- If a shared backend seam reaches API or project persistence code, also run at least one integration/API test file that exercises that path before declaring the chunk safe.
+- If earlier cleanup chunks are still uncommitted in the worktree, keep their test files in the regression command too. Do not verify only the newest file and ignore already-dirty related seams.
+- Always report skipped tests explicitly, especially Windows PySide6 skips, as remaining verification gaps.
+
+### Current cleanup-chain regression command
+
+- For the current config/subtitle-style/project-style cleanup chain, run this broader backend regression command in addition to the chunk-local pytest command:
+  - `C:\Cue_repo\.venv\Scripts\python.exe -m pytest C:\Cue_repo\tests\test_config_defaults.py C:\Cue_repo\tests\test_subtitle_style.py C:\Cue_repo\tests\test_graphics_overlay_export.py C:\Cue_repo\tests\test_graphics_preview_renderer.py C:\Cue_repo\tests\test_preview_playback_plan.py C:\Cue_repo\tests\test_project_store.py C:\Cue_repo\tests\test_backend_projects_api.py C:\Cue_repo\tests\test_backend_job_project_update.py C:\Cue_repo\tests\test_backend_server.py`
+
 ---
 
 ## What to avoid

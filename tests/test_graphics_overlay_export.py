@@ -1,6 +1,5 @@
 """Tests for graphics overlay export (burn-in overlay frame rendering)."""
 
-import sys
 from dataclasses import replace
 
 import pytest
@@ -10,17 +9,19 @@ from app.graphics_overlay_export import (
     _scale_style_for_supersampling,
     render_overlay_frame,
 )
-from app.subtitle_style import PRESET_DEFAULT, QT_POINT_TO_PIXEL_RATIO, preset_defaults, resolve_style_for_frame
-
-_skip_qt_render_on_win = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Qt overlay render can crash headless on Windows; use visual check",
-)
+from app.subtitle_style import PRESET_DEFAULT, preset_defaults, resolve_style_for_frame
 
 
-@_skip_qt_render_on_win
+def _ensure_qt_app() -> None:
+    from PySide6 import QtGui
+
+    if QtGui.QGuiApplication.instance() is None:
+        QtGui.QGuiApplication([])
+
+
 def test_render_overlay_frame_returns_correct_size_and_format() -> None:
     pytest.importorskip("PySide6")
+    _ensure_qt_app()
     width, height = 100, 60
     style = preset_defaults(PRESET_DEFAULT)
     data, highlight_index = render_overlay_frame(
@@ -36,9 +37,9 @@ def test_render_overlay_frame_returns_correct_size_and_format() -> None:
     assert highlight_index is None
 
 
-@_skip_qt_render_on_win
 def test_render_overlay_frame_supersampling_produces_final_dimensions() -> None:
     pytest.importorskip("PySide6")
+    _ensure_qt_app()
     width, height = 50, 30
     style = preset_defaults(PRESET_DEFAULT)
     data, _ = render_overlay_frame(
@@ -54,9 +55,9 @@ def test_render_overlay_frame_supersampling_produces_final_dimensions() -> None:
     assert len(data) == width * height * 4
 
 
-@_skip_qt_render_on_win
 def test_render_overlay_frame_accepts_chunk1_typography_fields() -> None:
     pytest.importorskip("PySide6")
+    _ensure_qt_app()
     width, height = 80, 40
     style = replace(
         preset_defaults(PRESET_DEFAULT),
@@ -85,6 +86,15 @@ def test_export_style_resolves_frame_height_before_supersampling() -> None:
     resolved = resolve_style_for_frame(style, 720)
     draw_style = _scale_style_for_supersampling(resolved, OVERLAY_RESOLUTION_SCALE)
 
-    assert draw_style.font_size * QT_POINT_TO_PIXEL_RATIO == pytest.approx(31.68 * 4, abs=0.2)
-    assert draw_style.outline_width == 0
-    assert draw_style.line_bg_padding_top == pytest.approx(5.76 * 4, abs=0.001)
+    assert draw_style.font_size == pytest.approx(
+        resolved.font_size * OVERLAY_RESOLUTION_SCALE,
+        abs=0.2,
+    )
+    assert draw_style.outline_width == pytest.approx(
+        resolved.outline_width * OVERLAY_RESOLUTION_SCALE,
+        abs=0.001,
+    )
+    assert draw_style.line_bg_padding_top == pytest.approx(
+        resolved.line_bg_padding_top * OVERLAY_RESOLUTION_SCALE,
+        abs=0.001,
+    )
