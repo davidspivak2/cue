@@ -92,6 +92,44 @@ def test_delete_project(tmp_path: Path, monkeypatch) -> None:
         raise AssertionError("Expected project_not_found after delete")
 
 
+def test_store_bootstrap_ignores_parent_projects_json(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    legacy_project_id = "legacy-project"
+    legacy_store_path = get_projects_dir().parent / "projects.json"
+    legacy_store_path.write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "project_id": legacy_project_id,
+                        "video_path": str(tmp_path / "legacy.mp4"),
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert project_store.list_projects() == []
+
+    index_path = get_projects_dir() / project_store.INDEX_FILENAME
+    assert json.loads(index_path.read_text(encoding="utf-8")) == {"projects": []}
+    assert not (get_projects_dir() / legacy_project_id).exists()
+
+    video_path = tmp_path / "current.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    summary = project_store.create_project(str(video_path))
+    assert summary["project_id"] != legacy_project_id
+
+    projects = project_store.list_projects()
+    assert [project.project_id for project in projects] == [summary["project_id"]]
+    assert not (get_projects_dir() / legacy_project_id).exists()
+
+
 def test_project_style_is_normalized_on_write_and_read(tmp_path: Path, monkeypatch) -> None:
     _setup_env(tmp_path, monkeypatch)
 
