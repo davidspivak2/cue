@@ -44,7 +44,7 @@ const TabHost = () => {
           homePanelRef.current = el;
           if (isHomeActive) activePanelRef.current = el;
         }}
-        className="flex min-h-0 flex-1 flex-col"
+        className="flex min-h-0 flex-1 flex-col outline-none"
         style={{ display: isHomeActive ? "flex" : "none" }}
         tabIndex={-1}
       >
@@ -63,7 +63,7 @@ const TabHost = () => {
                 panelRefsRef.current.delete(tab.projectId);
               }
             }}
-            className="flex min-h-0 flex-1 flex-col"
+            className="flex min-h-0 flex-1 flex-col outline-none"
             style={{ display: isActive ? "flex" : "none" }}
             tabIndex={-1}
           >
