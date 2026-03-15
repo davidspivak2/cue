@@ -35,7 +35,7 @@ Cue ships a packaged Python engine in `cue-local-engine.zip`. This section calls
 Additional note:
 
 - The packaged engine also contains transitive dependencies required by these components.
-- This file does not enumerate every transitive Python package bundled inside the engine payload.
+- This file does not enumerate every transitive Python package bundled inside the engine archive.
 
 ## Desktop and Runtime Components
 
@@ -80,7 +80,7 @@ License note:
 Cue also bundles Plus Jakarta Sans for parts of the desktop UI.
 
 - Package: `@fontsource/plus-jakarta-sans`
-- Current package version in this workspace: 5.2.8
+- Declared package version in this workspace: `^5.2.6`
 - Upstream: <https://fontsource.org/fonts/plus-jakarta-sans>
 - Reported license: OFL-1.1
 
@@ -90,3 +90,9 @@ These items are referenced by Cue but are not redistributed as packaged app asse
 
 - `Noto Color Emoji` is loaded from jsDelivr in `desktop/src/index.css`. It is not bundled in the packaged installer payload.
 - Microsoft WebView2 may be downloaded or updated by the Windows installer when needed, but it is not shipped as a Cue app resource.
+
+## Packaging Notes
+
+- The live Windows packaging flow ships `THIRD_PARTY_NOTICES.md` alongside the desktop app bundle.
+- The packaged local engine artifact is `desktop/src-tauri/cue-local-engine.zip`.
+- The retired mirrored `desktop/src-tauri/engine/` folder is not part of the active packaged Windows release path.

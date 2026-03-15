@@ -200,6 +200,16 @@ type ViewportSize = {
   height: number;
 };
 
+type WorkbenchBootstrapOptions = {
+  viewport?: ViewportSize;
+  projects?: ReturnType<typeof buildProjects>;
+  initialSrtText?: string | null;
+  initialSettings?: ReturnType<typeof buildSettings>;
+  generatedSubtitlesText?: string;
+  useTauriRuntimeMock?: boolean;
+  useFilePathMock?: boolean;
+};
+
 type ExistingProjectWorkbenchOptions = {
   viewport?: ViewportSize;
   projects?: ReturnType<typeof buildProjects>;
@@ -213,11 +223,7 @@ type ExistingProjectWorkbenchOptions = {
 type ImportProjectWorkbenchOptions = {
   viewport?: ViewportSize;
   projects?: ReturnType<typeof buildProjects>;
-  file: {
-    name: string;
-    mimeType: string;
-    buffer: Buffer;
-  };
+  file: ImportWorkbenchFile;
   initialSrtText?: string | null;
   initialSettings?: ReturnType<typeof buildSettings>;
   generatedSubtitlesText?: string;
@@ -225,7 +231,19 @@ type ImportProjectWorkbenchOptions = {
   useFilePathMock?: boolean;
 };
 
+type ImportWorkbenchFile = {
+  name: string;
+  mimeType: string;
+  buffer: Buffer;
+};
+
 const DEFAULT_WORKBENCH_VIEWPORT: ViewportSize = { width: 1300, height: 800 };
+
+const buildImportedVideoFile = (name: string): ImportWorkbenchFile => ({
+  name,
+  mimeType: "video/mp4",
+  buffer: Buffer.from("fake")
+});
 
 const mockProjects = async (
   page,
@@ -796,6 +814,36 @@ const mockProjects = async (
   };
 };
 
+const bootstrapWorkbenchPage = async (
+  page: Page,
+  {
+    viewport = DEFAULT_WORKBENCH_VIEWPORT,
+    projects = buildProjects(),
+    initialSrtText = DEFAULT_SRT,
+    initialSettings = buildSettings(),
+    generatedSubtitlesText = GENERATED_SRT,
+    useTauriRuntimeMock = false,
+    useFilePathMock = false
+  }: WorkbenchBootstrapOptions = {}
+) => {
+  if (useFilePathMock) {
+    await page.addInitScript(initMocks);
+  }
+  if (useTauriRuntimeMock) {
+    await page.addInitScript(initTauriRuntimeMock);
+  }
+  await page.setViewportSize(viewport);
+  const api = await mockProjects(
+    page,
+    projects,
+    initialSrtText,
+    initialSettings,
+    generatedSubtitlesText
+  );
+  await page.goto("/");
+  return { api, projects };
+};
+
 const openExistingProjectInWorkbench = async (
   page: Page,
   {
@@ -808,23 +856,19 @@ const openExistingProjectInWorkbench = async (
     useTauriRuntimeMock = false
   }: ExistingProjectWorkbenchOptions = {}
 ) => {
-  if (useTauriRuntimeMock) {
-    await page.addInitScript(initTauriRuntimeMock);
-  }
-  await page.setViewportSize(viewport);
-  const api = await mockProjects(
-    page,
+  const { api } = await bootstrapWorkbenchPage(page, {
+    viewport,
     projects,
     initialSrtText,
     initialSettings,
-    generatedSubtitlesText
-  );
+    generatedSubtitlesText,
+    useTauriRuntimeMock
+  });
   const titleToOpen = projectTitle ?? projects[0]?.title ?? "good.mp4";
   const project = projects.find((entry) => entry.title === titleToOpen);
   if (!project) {
     throw new Error(`Project not found for workbench open: ${titleToOpen}`);
   }
-  await page.goto("/");
   const workbenchUrl = page.waitForURL(`**/workbench/${project.project_id}`);
   await page.getByText(titleToOpen).click();
   await workbenchUrl;
@@ -844,21 +888,15 @@ const importProjectToWorkbench = async (
     useFilePathMock = false
   }: ImportProjectWorkbenchOptions
 ) => {
-  if (useFilePathMock) {
-    await page.addInitScript(initMocks);
-  }
-  if (useTauriRuntimeMock) {
-    await page.addInitScript(initTauriRuntimeMock);
-  }
-  await page.setViewportSize(viewport);
-  const api = await mockProjects(
-    page,
+  const { api } = await bootstrapWorkbenchPage(page, {
+    viewport,
     projects,
     initialSrtText,
     initialSettings,
-    generatedSubtitlesText
-  );
-  await page.goto("/");
+    generatedSubtitlesText,
+    useTauriRuntimeMock,
+    useFilePathMock
+  });
   const workbenchUrl = page.waitForURL("**/workbench/project-new-1");
   await page.getByTestId("new-project-input").setInputFiles(file);
   await workbenchUrl;
@@ -1557,6 +1595,33 @@ const readVideoControlsOpacity = async (page) =>
 const readVideoCurrentTimeSeconds = async (page) =>
   page.evaluate(() => Number(document.querySelector("video")?.currentTime ?? Number.NaN));
 
+const expectGeneratedSubtitleEditorReady = async (
+  page: Page,
+  expectedText = "Generated subtitle line"
+) => {
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  await expect(editor).toBeVisible({ timeout: 2000 });
+  await expect
+    .poll(async () =>
+      editor.evaluate((element) => {
+        const textarea = element as HTMLTextAreaElement;
+        return {
+          value: textarea.value,
+          selectionStart: textarea.selectionStart,
+          selectionEnd: textarea.selectionEnd,
+          focused: document.activeElement === textarea
+        };
+      })
+    )
+    .toEqual({
+      value: expectedText,
+      selectionStart: 0,
+      selectionEnd: 0,
+      focused: true
+    });
+  return editor;
+};
+
 const dispatchVideoProgressInteraction = async (page, startFraction, endFraction = null) => {
   await page.evaluate(
     ({ from, to }) => {
@@ -1724,11 +1789,16 @@ test("workbench shell narrow overlays", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Effects" })).toBeVisible();
   await expect(page.getByTestId("workbench-overlay-scrim")).toBeVisible();
 
+  const viewport = page.viewportSize();
   const drawerBox = await page.getByTestId("workbench-right-drawer").boundingBox();
-  expect(drawerBox?.y).toBe(36);
-
   const scrimBox = await page.getByTestId("workbench-overlay-scrim").boundingBox();
-  expect(scrimBox?.y).toBe(36);
+  if (!viewport || !drawerBox || !scrimBox) {
+    throw new Error("Expected overlay drawer, scrim, and viewport bounds to be available");
+  }
+  expect(drawerBox.y).toBe(36);
+  expect(scrimBox.y).toBe(36);
+  expect(Math.abs(drawerBox.y + drawerBox.height - viewport.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(scrimBox.y + scrimBox.height - viewport.height)).toBeLessThanOrEqual(1);
 
   await page
     .getByTestId("workbench-right-drawer")
@@ -2402,7 +2472,14 @@ test("workbench music prompt stays below the checklist content", async ({ page }
       interface_scale: 1.5
     }
   });
+  const emptyState = page.getByTestId("workbench-empty-state");
+  const musicShell = page.getByTestId("workbench-elevator-music-shell");
+  const musicRow = page.getByTestId("workbench-elevator-music-row");
+  await expect(emptyState).toBeVisible();
   await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  await expect(musicShell).toBeVisible();
+  await expect(musicRow).toHaveCount(1);
+  await expect(musicRow).toBeHidden();
 
   const beforeLayout = await page.evaluate(() => {
     const state = document.querySelector("[data-testid='workbench-empty-state']");
@@ -2410,11 +2487,13 @@ test("workbench music prompt stays below the checklist content", async ({ page }
       throw new Error("Missing music prompt layout");
     }
     const musicShell = state.querySelector("[data-testid='workbench-elevator-music-shell']");
+    const musicRow = state.querySelector("[data-testid='workbench-elevator-music-row']");
     const checklist = state.querySelector("[data-testid='workbench-create-checklist']");
     const cancelButton = state.querySelector("[data-testid='workbench-cancel-create-subtitles']");
     const progressBar = state.querySelector("[role='progressbar']");
     if (
       !(musicShell instanceof HTMLElement) ||
+      !(musicRow instanceof HTMLElement) ||
       !(checklist instanceof HTMLElement) ||
       !(cancelButton instanceof HTMLElement) ||
       !(progressBar instanceof HTMLElement)
@@ -2427,27 +2506,22 @@ test("workbench music prompt stays below the checklist content", async ({ page }
     return {
       cancelTop: cancelRect.top,
       checklistTop: checklistRect.top,
-      musicVisible: Boolean(state.querySelector("[data-testid='workbench-elevator-music-row']")),
       progressCenterX: (progressRect.left + progressRect.right) / 2
     };
   });
 
-  expect(beforeLayout.musicVisible).toBe(false);
-
   await page.evaluate(() => {
     const shell = document.querySelector("[data-testid='workbench-elevator-music-shell']");
-    if (!(shell instanceof HTMLElement)) {
-      throw new Error("Missing music prompt layout");
-    }
-    const musicRow = shell.firstElementChild;
-    if (!(musicRow instanceof HTMLElement)) {
+    const musicRow = document.querySelector("[data-testid='workbench-elevator-music-row']");
+    if (!(shell instanceof HTMLElement) || !(musicRow instanceof HTMLElement)) {
       throw new Error("Missing music prompt layout");
     }
     musicRow.classList.remove("invisible", "opacity-0");
     musicRow.classList.add("opacity-100");
-    musicRow.dataset.testid = "workbench-elevator-music-row";
+    musicRow.setAttribute("aria-hidden", "false");
     shell.setAttribute("aria-hidden", "false");
   });
+  await expect(musicRow).toBeVisible();
   await page.waitForTimeout(50);
 
   const afterLayout = await page.evaluate(() => {
@@ -3114,11 +3188,7 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   );
   const { api } = await importProjectToWorkbench(page, {
     projects,
-    file: {
-      name: "fresh.mp4",
-      mimeType: "video/mp4",
-      buffer: Buffer.from("fake")
-    },
+    file: buildImportedVideoFile("fresh.mp4"),
     initialSrtText: null,
     initialSettings: {
       ...defaultSettings,
@@ -3159,26 +3229,29 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
   const createPayload = createRequest.postDataJSON() as {
     kind?: string;
     project_id?: string;
-    options?: { subtitle_mode?: string };
+    options?: { subtitle_mode?: string; highlight_color?: string };
   };
 
   expect(createPayload.kind).toBe("create_subtitles");
   expect(createPayload.project_id).toBe("project-new-1");
   expect(createPayload.options?.subtitle_mode).toBe("word_highlight");
-  const previewSrc = await page.locator("video").first().getAttribute("src");
-  expect(previewSrc).toContain("/local-file?path=");
-  expect(decodeURIComponent(previewSrc ?? "")).toContain("C:\\browser-imports\\fresh.mp4");
+  expect(createPayload.options?.highlight_color).toBe("#00FF99");
   await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0, { timeout: 2000 });
-  await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible({ timeout: 2000 });
   await expect
     .poll(() => {
       const payload = api.getLastStylePutPayload()?.style;
-      const appearance = payload?.subtitle_style?.appearance;
-      if (!payload || !appearance) {
+      const subtitleStyle = payload?.subtitle_style;
+      const appearance = subtitleStyle?.appearance;
+      if (!payload || !subtitleStyle || !appearance) {
         return null;
       }
       return {
         subtitle_mode: payload.subtitle_mode,
+        subtitle_style: {
+          preset: subtitleStyle.preset,
+          last_preset_id: subtitleStyle.last_preset_id,
+          highlight_opacity: subtitleStyle.highlight_opacity
+        },
         appearance: {
           subtitle_mode: appearance.subtitle_mode,
           font_size: appearance.font_size,
@@ -3189,6 +3262,11 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
     })
     .toEqual({
       subtitle_mode: "word_highlight",
+      subtitle_style: {
+        preset: "Large outline",
+        last_preset_id: "bold_outline_static",
+        highlight_opacity: 0.35
+      },
       appearance: {
         subtitle_mode: "word_highlight",
         font_size: 61,
@@ -3197,25 +3275,10 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
       }
     });
   await expect(page.getByTestId("workbench-empty-state")).toHaveCount(0);
-  await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible();
-  await expect
-    .poll(async () =>
-      page.getByTestId("workbench-subtitle-editor").evaluate((element) => {
-        const editor = element as HTMLTextAreaElement;
-        return {
-          value: editor.value,
-          selectionStart: editor.selectionStart,
-          selectionEnd: editor.selectionEnd,
-          focused: document.activeElement === editor
-        };
-      })
-    )
-    .toEqual({
-      value: "Generated subtitle line",
-      selectionStart: 0,
-      selectionEnd: 0,
-      focused: true
-    });
+  await expectGeneratedSubtitleEditorReady(page);
+  const previewSrc = await page.locator("video").first().getAttribute("src");
+  expect(previewSrc).toContain("/local-file?path=");
+  expect(decodeURIComponent(previewSrc ?? "")).toContain("C:\\browser-imports\\fresh.mp4");
 });
 
 test("new project auto-seeks to the first generated subtitle before leaving auto-edit mode", async ({
@@ -3226,11 +3289,7 @@ test("new project auto-seeks to the first generated subtitle before leaving auto
     "1\n00:00:05,000 --> 00:00:08,000\nGenerated subtitle line\n";
   await importProjectToWorkbench(page, {
     projects,
-    file: {
-      name: "fresh-delayed.mp4",
-      mimeType: "video/mp4",
-      buffer: Buffer.from("fake")
-    },
+    file: buildImportedVideoFile("fresh-delayed.mp4"),
     initialSrtText: null,
     initialSettings: buildSettings(),
     generatedSubtitlesText: delayedGeneratedSrt
@@ -3238,7 +3297,7 @@ test("new project auto-seeks to the first generated subtitle before leaving auto
 
   await primeVideoState(page, { playing: false, currentTime: 0, durationSeconds: 65 });
 
-  await expect(page.getByTestId("workbench-subtitle-editor")).toBeVisible({ timeout: 2000 });
+  await expectGeneratedSubtitleEditorReady(page);
   await expect.poll(() => readVideoCurrentTimeSeconds(page)).toBe(5);
 
   const videoClickSurfaceRect = await page

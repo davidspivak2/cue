@@ -26,11 +26,13 @@ Cue is a desktop app that uses AI speech recognition to generate subtitles and b
 
 <!-- TODO: Add download link to the latest .msi or .exe installer once packaging is ready. -->
 
-Download the latest installer from the [Releases](../../releases) page and run it.
+Download the latest Windows installer from the [Releases](../../releases) page and run it.
 
-Windows releases currently ship x64 installers only.
+Windows releases currently ship packaged desktop app installers for x64 only.
 
-The NSIS `.exe` installer shows Cue's GPL license during setup and installs `THIRD_PARTY_NOTICES.md` with the app.
+The Windows installer bundle includes Cue's local engine archive (`cue-local-engine.zip`) and installs `THIRD_PARTY_NOTICES.md` with the app.
+
+The NSIS `.exe` installer shows Cue's GPL license during setup.
 
 ### macOS
 

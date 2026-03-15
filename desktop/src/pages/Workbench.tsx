@@ -70,7 +70,6 @@ import { messageForBackendError } from "@/backendHealth";
 import {
   fetchSettings,
   fetchSubtitleFonts,
-  previewOverlay,
   SettingsConfig,
   SubtitleFontMetadata,
   SubtitleStyleAppearance
@@ -635,6 +634,55 @@ const cloneStylePersistenceArgs = (
   appearance: cloneAppearance(snapshot.appearance)
 });
 
+const resolveStoredLastPresetId = (
+  resolvedPreset: string,
+  storedLastPresetId: unknown
+): string | null =>
+  isNamedPresetId(resolvedPreset)
+    ? resolvedPreset
+    : typeof storedLastPresetId === "string" && isNamedPresetId(storedLastPresetId)
+      ? storedLastPresetId
+      : null;
+
+const resolvePersistedSubtitleStyleState = ({
+  styleSection,
+  appearanceSource,
+  subtitleMode,
+  highlightColor
+}: {
+  styleSection: Record<string, unknown>;
+  appearanceSource: Record<string, unknown>;
+  subtitleMode?: unknown;
+  highlightColor?: unknown;
+}): StylePersistenceArgs => {
+  const appearance = migrateAppearancePadding({
+    ...DEFAULT_APPEARANCE,
+    ...(appearanceSource as unknown as SubtitleStyleAppearance),
+    subtitle_mode:
+      typeof subtitleMode === "string"
+        ? subtitleMode
+        : typeof appearanceSource.subtitle_mode === "string"
+          ? appearanceSource.subtitle_mode
+          : DEFAULT_APPEARANCE.subtitle_mode,
+    highlight_color:
+      typeof highlightColor === "string"
+        ? highlightColor
+        : typeof appearanceSource.highlight_color === "string"
+          ? appearanceSource.highlight_color
+          : DEFAULT_APPEARANCE.highlight_color
+  });
+  const preset = resolvePresetFromStored(
+    typeof styleSection.preset === "string" ? styleSection.preset : "Default"
+  );
+  return {
+    appearance,
+    preset,
+    lastPresetId: resolveStoredLastPresetId(preset, styleSection.last_preset_id),
+    highlightOpacity:
+      typeof styleSection.highlight_opacity === "number" ? styleSection.highlight_opacity : 1.0
+  };
+};
+
 const areAppearanceStatesEqual = (
   left: SubtitleStyleAppearance,
   right: SubtitleStyleAppearance
@@ -840,6 +888,12 @@ const clampOpacity = (value: number) => Math.max(0, Math.min(1, value));
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const clampNumber = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+const clampVideoSeekTime = (seconds: number, durationValue?: number) => {
+  const safeTime = Math.max(0, seconds);
+  return typeof durationValue === "number" && Number.isFinite(durationValue) && durationValue >= 0
+    ? Math.min(safeTime, durationValue)
+    : safeTime;
+};
 
 const clampSubtitleCenterToVisibleBounds = (
   x: number,
@@ -1047,7 +1101,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const width = useWindowWidth();
   const isNarrow = width < 1100;
   const isTauriEnv = isTauri();
-  const overlayViewportStyle = isTauriEnv ? { top: TITLE_BAR_HEIGHT, bottom: 0 } : undefined;
+  const effectsOverlayViewportStyle = isTauriEnv
+    ? { top: TITLE_BAR_HEIGHT, bottom: 0 }
+    : undefined;
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const activeSubtitleRef = React.useRef<HTMLTextAreaElement | null>(null);
   const subtitleOverlayPositionLayerRef = React.useRef<HTMLDivElement | null>(null);
@@ -1115,7 +1171,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     offsetY: 0,
     scale: 1
   });
-  const [subtitleOverlayPath, setSubtitleOverlayPath] = React.useState<string | null>(null);
   const [cues, setCues] = React.useState<SrtCue[]>([]);
   const [wordTimingsDoc, setWordTimingsDoc] = React.useState<ProjectWordTimingsDocument | null>(
     null
@@ -1144,7 +1199,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const subtitleUndoPersistPromiseRef = React.useRef<Promise<boolean>>(Promise.resolve(true));
   const stylePersistTimerRef = React.useRef<BrowserTimeout | null>(null);
   const stylePersistPendingArgsRef = React.useRef<StylePersistenceArgs | null>(null);
-  const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
+  const [effectsDrawerOpen, setEffectsDrawerOpen] = React.useState(false);
+  const closeEffectsDrawer = React.useCallback(() => {
+    setEffectsDrawerOpen(false);
+  }, []);
+  const openEffectsDrawer = React.useCallback(() => {
+    if (!isNarrow) {
+      return;
+    }
+    setEffectsDrawerOpen(true);
+  }, [isNarrow]);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
   const [isHoveringActiveSubtitle, setIsHoveringActiveSubtitle] = React.useState(false);
   const suppressVideoControlsUntilPointerMoveRef = React.useRef(false);
@@ -1220,7 +1284,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     null
   );
   const [createSubtitlesElapsedText, setCreateSubtitlesElapsedText] = React.useState("");
-  const [showElevatorMusicRow, setShowElevatorMusicRow] = React.useState(false);
+  const [isElevatorMusicPromptVisible, setIsElevatorMusicPromptVisible] = React.useState(false);
   const [elevatorMusicPlaying, setElevatorMusicPlaying] = React.useState(false);
   const elevatorMusicTimerRef = React.useRef<BrowserTimeout | null>(null);
   const elevatorAudioRef = React.useRef<HTMLAudioElement | null>(null);
@@ -1258,7 +1322,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [pendingAutoStartSubtitles, setPendingAutoStartSubtitles] = React.useState(false);
   const handledAutoStartKeyRef = React.useRef<string | null>(null);
   const styleBootstrapKeyRef = React.useRef<string | null>(null);
-  const overlayRequestKeyRef = React.useRef<string | null>(null);
   const autoEnterEditOnNextCueLoadRef = React.useRef(false);
   const pendingVideoSeekSecondsRef = React.useRef<number | null>(null);
   const pendingEditorSelectionRef = React.useRef<{
@@ -1284,12 +1347,56 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     stylePersistPendingArgsRef.current = null;
   }, [clearStylePersistTimer]);
 
+  const clearElevatorMusicPromptTimer = React.useCallback(() => {
+    if (elevatorMusicTimerRef.current === null) {
+      return;
+    }
+    clearTimeout(elevatorMusicTimerRef.current);
+    elevatorMusicTimerRef.current = null;
+  }, []);
+
+  const resetElevatorMusicPrompt = React.useCallback(() => {
+    clearElevatorMusicPromptTimer();
+    setIsElevatorMusicPromptVisible(false);
+    setElevatorMusicPlaying(false);
+    selectedElevatorTrackIndexRef.current = null;
+    elevatorAudioRef.current?.pause();
+  }, [clearElevatorMusicPromptTimer]);
+
   const clearPendingVideoControlsReveal = React.useCallback(() => {
     suppressVideoControlsUntilPointerMoveRef.current = false;
     suppressedVideoControlsPointerRef.current = null;
     const cleanup = pendingVideoControlsRevealCleanupRef.current;
     pendingVideoControlsRevealCleanupRef.current = null;
     cleanup?.();
+  }, []);
+
+  const clearPendingVideoSeek = React.useCallback(() => {
+    pendingVideoSeekSecondsRef.current = null;
+  }, []);
+
+  const consumePendingVideoSeek = React.useCallback(
+    (element: HTMLVideoElement) => {
+      const pendingSeekSeconds = pendingVideoSeekSecondsRef.current;
+      if (typeof pendingSeekSeconds !== "number") {
+        return;
+      }
+      element.currentTime = clampVideoSeekTime(pendingSeekSeconds, element.duration);
+      clearPendingVideoSeek();
+    },
+    [clearPendingVideoSeek]
+  );
+
+  const syncMediaTimingStateFromVideo = React.useCallback((element: HTMLVideoElement) => {
+    const durationValue = element.duration;
+    setCurrentTimeSeconds(element.currentTime || 0);
+    setDurationSeconds(Number.isFinite(durationValue) && durationValue >= 0 ? durationValue : 0);
+    setVolume(element.volume);
+    setIsMuted(element.muted);
+    setVideoNaturalSize({
+      width: Math.max(0, Math.round(element.videoWidth || 0)),
+      height: Math.max(0, Math.round(element.videoHeight || 0))
+    });
   }, []);
 
   const seekVideoToTime = React.useCallback((seconds: number) => {
@@ -1301,24 +1408,17 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
 
-    const applyTime = (durationValue?: number) => {
-      const clampedTime =
-        typeof durationValue === "number" && Number.isFinite(durationValue) && durationValue >= 0
-          ? Math.min(safeTime, durationValue)
-          : safeTime;
+    if (element.readyState >= 1 || (Number.isFinite(element.duration) && element.duration >= 0)) {
+      clearPendingVideoSeek();
+      const clampedTime = clampVideoSeekTime(safeTime, element.duration);
       element.currentTime = clampedTime;
       setCurrentTimeSeconds(clampedTime);
-    };
-
-    if (element.readyState >= 1 || (Number.isFinite(element.duration) && element.duration >= 0)) {
-      pendingVideoSeekSecondsRef.current = null;
-      applyTime(element.duration);
       return;
     }
 
     pendingVideoSeekSecondsRef.current = safeTime;
     setCurrentTimeSeconds(safeTime);
-  }, []);
+  }, [clearPendingVideoSeek]);
 
   const isFloatingToolbarPopoverWrapper = React.useCallback((element: Element | null) => {
     if (!(element instanceof Element)) {
@@ -1716,48 +1816,16 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       settings?.subtitle_style && typeof settings.subtitle_style === "object"
         ? (settings.subtitle_style as Record<string, unknown>)
         : {};
-    const rawAppearance =
+    const appearanceSource =
       styleSection.appearance && typeof styleSection.appearance === "object"
         ? (styleSection.appearance as Record<string, unknown>)
         : {};
-    const resolvedAppearance = migrateAppearancePadding({
-      ...DEFAULT_APPEARANCE,
-      ...(rawAppearance as unknown as SubtitleStyleAppearance),
-      subtitle_mode:
-        typeof settings?.subtitle_mode === "string"
-          ? settings.subtitle_mode
-          : typeof rawAppearance.subtitle_mode === "string"
-            ? rawAppearance.subtitle_mode
-            : DEFAULT_APPEARANCE.subtitle_mode,
-      highlight_color:
-        typeof styleSection.highlight_color === "string"
-          ? styleSection.highlight_color
-          : typeof rawAppearance.highlight_color === "string"
-            ? rawAppearance.highlight_color
-            : DEFAULT_APPEARANCE.highlight_color
+    return resolvePersistedSubtitleStyleState({
+      styleSection,
+      appearanceSource,
+      subtitleMode: settings?.subtitle_mode,
+      highlightColor: styleSection.highlight_color
     });
-    const storedPreset =
-      typeof styleSection.preset === "string" ? styleSection.preset : "Default";
-    const resolvedPreset = resolvePresetFromStored(storedPreset);
-    const storedLastPresetId =
-      typeof styleSection.last_preset_id === "string"
-        ? styleSection.last_preset_id
-        : undefined;
-    const lastPresetId = isNamedPresetId(resolvedPreset)
-      ? resolvedPreset
-      : storedLastPresetId && isNamedPresetId(storedLastPresetId)
-        ? storedLastPresetId
-        : null;
-    const highlightOpacity =
-      typeof styleSection.highlight_opacity === "number"
-        ? styleSection.highlight_opacity
-        : 1.0;
-    return {
-      appearance: resolvedAppearance,
-      preset: resolvedPreset,
-      lastPresetId,
-      highlightOpacity
-    };
   }, [settings]);
 
   const applyDefaultProjectStyle = React.useCallback(() => {
@@ -1782,58 +1850,31 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       root.subtitle_style && typeof root.subtitle_style === "object"
         ? (root.subtitle_style as Record<string, unknown>)
         : root;
-    const rawAppearance =
+    const appearanceSource =
       styleSection.appearance && typeof styleSection.appearance === "object"
         ? (styleSection.appearance as Record<string, unknown>)
         : styleSection;
-    if (!rawAppearance || Object.keys(rawAppearance).length === 0) {
+    if (Object.keys(appearanceSource).length === 0) {
       return false;
     }
 
-    const styleMode =
-      typeof root.subtitle_mode === "string"
-        ? root.subtitle_mode
-        : typeof rawAppearance.subtitle_mode === "string"
-          ? rawAppearance.subtitle_mode
-          : undefined;
     const highlightColor =
       typeof styleSection.highlight_color === "string"
         ? styleSection.highlight_color
-        : typeof root.highlight_color === "string"
-          ? root.highlight_color
-          : typeof rawAppearance.highlight_color === "string"
-            ? rawAppearance.highlight_color
-            : undefined;
-    const resolvedAppearance = migrateAppearancePadding({
-      ...DEFAULT_APPEARANCE,
-      ...(rawAppearance as unknown as SubtitleStyleAppearance),
-      subtitle_mode: styleMode ?? DEFAULT_APPEARANCE.subtitle_mode,
-      highlight_color: highlightColor ?? DEFAULT_APPEARANCE.highlight_color
+        : root.highlight_color;
+    const nextStyle = resolvePersistedSubtitleStyleState({
+      styleSection,
+      appearanceSource,
+      subtitleMode: root.subtitle_mode,
+      highlightColor
     });
-    const storedPreset =
-      typeof styleSection.preset === "string" ? styleSection.preset : "Default";
-    const resolvedPreset = resolvePresetFromStored(storedPreset);
-    const storedLastPresetId =
-      typeof styleSection.last_preset_id === "string"
-        ? styleSection.last_preset_id
-        : undefined;
-    const resolvedOpacity =
-      typeof styleSection.highlight_opacity === "number"
-        ? styleSection.highlight_opacity
-        : 1.0;
-    setAppearance(resolvedAppearance);
-    setPreset(resolvedPreset);
-    setLastPresetId(
-      isNamedPresetId(resolvedPreset)
-        ? resolvedPreset
-        : storedLastPresetId && isNamedPresetId(storedLastPresetId)
-          ? storedLastPresetId
-          : null
-    );
-    if (resolvedPreset === "Custom") {
-      customAppearanceRef.current = resolvedAppearance;
+    setAppearance(nextStyle.appearance);
+    setPreset(nextStyle.preset);
+    setLastPresetId(nextStyle.lastPresetId);
+    if (nextStyle.preset === "Custom") {
+      customAppearanceRef.current = nextStyle.appearance;
     }
-    setHighlightOpacity(resolvedOpacity);
+    setHighlightOpacity(nextStyle.highlightOpacity);
     return true;
   }, []);
 
@@ -1965,7 +2006,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (!projectId) {
       return;
     }
-    setRightOverlayOpen(false);
+    closeEffectsDrawer();
     setCurrentTimeSeconds(0);
     setEditError(null);
     setCreateSubtitlesError(null);
@@ -2014,18 +2055,18 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     exportJobStreamRef.current = null;
     setExportStreamHealthValue("idle");
     setExportOutputPath(null);
-    setSubtitleOverlayPath(null);
     setVideoNaturalSize({ width: 0, height: 0 });
     setDurationSeconds(0);
     setIsPlaying(false);
     autoEnterEditOnNextCueLoadRef.current = false;
-    pendingVideoSeekSecondsRef.current = null;
+    clearPendingVideoSeek();
     pendingEditorSelectionRef.current = null;
-    overlayRequestKeyRef.current = null;
     resetEditSessionState();
     clearUndoHistory();
     shouldResumePlaybackRef.current = false;
   }, [
+    clearPendingVideoSeek,
+    closeEffectsDrawer,
     clearUndoHistory,
     clearTimingFallbackProgress,
     projectId,
@@ -2065,9 +2106,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
   React.useEffect(() => {
     if (!isNarrow) {
-      setRightOverlayOpen(false);
+      closeEffectsDrawer();
     }
-  }, [isNarrow]);
+  }, [closeEffectsDrawer, isNarrow]);
 
   React.useEffect(() => {
     if (!isCreatingSubtitles || !createSubtitlesStartedAt) {
@@ -2085,11 +2126,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   }, [createSubtitlesStartedAt, isCreatingSubtitles]);
 
   React.useEffect(() => {
-    if (elevatorMusicTimerRef.current !== null) {
-      clearTimeout(elevatorMusicTimerRef.current);
-      elevatorMusicTimerRef.current = null;
-    }
-    if (!createSubtitlesStartedAt || !isCreatingSubtitles || showElevatorMusicRow) {
+    clearElevatorMusicPromptTimer();
+    if (!createSubtitlesStartedAt || !isCreatingSubtitles || isElevatorMusicPromptVisible) {
       return;
     }
     const startedAtMs = Date.parse(createSubtitlesStartedAt);
@@ -2099,25 +2137,22 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const delayMs = Math.max(0, 10_000 - elapsedMs);
     elevatorMusicTimerRef.current = window.setTimeout(() => {
       elevatorMusicTimerRef.current = null;
-      setShowElevatorMusicRow(true);
+      setIsElevatorMusicPromptVisible(true);
     }, delayMs);
-    return () => {
-      if (elevatorMusicTimerRef.current !== null) {
-        clearTimeout(elevatorMusicTimerRef.current);
-        elevatorMusicTimerRef.current = null;
-      }
-    };
-  }, [createSubtitlesStartedAt, isCreatingSubtitles, showElevatorMusicRow]);
+    return clearElevatorMusicPromptTimer;
+  }, [
+    clearElevatorMusicPromptTimer,
+    createSubtitlesStartedAt,
+    isCreatingSubtitles,
+    isElevatorMusicPromptVisible
+  ]);
 
   React.useEffect(() => {
     if (createSubtitlesStartedAt !== null) {
       return;
     }
-    setShowElevatorMusicRow(false);
-    setElevatorMusicPlaying(false);
-    selectedElevatorTrackIndexRef.current = null;
-    elevatorAudioRef.current?.pause();
-  }, [createSubtitlesStartedAt]);
+    resetElevatorMusicPrompt();
+  }, [createSubtitlesStartedAt, resetElevatorMusicPrompt]);
 
   React.useEffect(() => {
     if (!incomingState?.autoStartSubtitles) {
@@ -2740,14 +2775,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     preparingPreviewStartedAtRef.current = null;
     createSubtitlesUnregisterRef.current?.();
     createSubtitlesUnregisterRef.current = null;
-    if (elevatorMusicTimerRef.current) {
-      clearTimeout(elevatorMusicTimerRef.current);
-      elevatorMusicTimerRef.current = null;
-    }
-    setShowElevatorMusicRow(false);
-    setElevatorMusicPlaying(false);
-    elevatorAudioRef.current?.pause();
-    selectedElevatorTrackIndexRef.current = null;
+    resetElevatorMusicPrompt();
     const projectTitle = resolveTitle(project);
     navigate("/", {
       state: {
@@ -2770,7 +2798,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     clearPreparingPreviewTimers,
     navigate,
     project,
-    projectId
+    projectId,
+    resetElevatorMusicPrompt
   ]);
 
   const handleElevatorMusicToggle = React.useCallback(() => {
@@ -3025,7 +3054,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     !isExporting &&
     (!isCreatingSubtitles || !hasActiveCreateFromApi);
   const hasVideoPreview = Boolean(previewSrc);
-  const showScrim = isNarrow && hasSubtitles && rightOverlayOpen;
+  const showNarrowEffectsDrawer = hasSubtitles && isNarrow && effectsDrawerOpen;
+  const showEffectsDrawerScrim = showNarrowEffectsDrawer;
 
   const startExport = React.useCallback(async () => {
     if (!projectId || !project?.video?.path || isExporting) {
@@ -3469,10 +3499,10 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   ]);
 
   React.useEffect(() => {
-    if ((!hasSubtitles || (isNarrow && !rightOverlayOpen)) && hoveredEffectPreview !== null) {
+    if ((!hasSubtitles || (isNarrow && !showNarrowEffectsDrawer)) && hoveredEffectPreview !== null) {
       setHoveredEffectPreview(null);
     }
-  }, [hasSubtitles, hoveredEffectPreview, isNarrow, rightOverlayOpen]);
+  }, [hasSubtitles, hoveredEffectPreview, isNarrow, showNarrowEffectsDrawer]);
   const editingCue = React.useMemo(
     () => (editingCueId ? cues.find((cue) => cue.id === editingCueId) ?? null : null),
     [cues, editingCueId]
@@ -3696,93 +3726,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           pointerEvents: "none"
         }
       : {};
-  const subtitleOverlaySrc = React.useMemo(() => {
-    if (!subtitleOverlayPath) {
-      return null;
-    }
-    const base = resolveLocalFileUrl(subtitleOverlayPath, isTauriEnv);
-    const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}v=${encodeURIComponent(effectiveAppearance.font_family)}`;
-  }, [effectiveAppearance.font_family, isTauriEnv, subtitleOverlayPath]);
-  const SHOW_SUBTITLE_OVERLAY_IN_APP = false;
-  const shouldRenderOverlayImage = Boolean(subtitleOverlaySrc && activeCue && !isEditingActiveCue);
 
   React.useEffect(() => {
-    setSubtitleOverlayPath(null);
     setVideoNaturalSize({ width: 0, height: 0 });
     setDurationSeconds(0);
     setIsPlaying(false);
-    overlayRequestKeyRef.current = null;
   }, [videoPath]);
-
-  React.useEffect(() => {
-    if (
-      !isTauriEnv ||
-      !activeCue ||
-      isEditingActiveCue ||
-      videoNaturalSize.width <= 0 ||
-      videoNaturalSize.height <= 0
-    ) {
-      setSubtitleOverlayPath(null);
-      overlayRequestKeyRef.current = null;
-      return;
-    }
-
-    const resolvedAppearance = {
-      ...effectiveAppearance,
-      outline_color: resolveOutlineColor(
-        effectiveAppearance.outline_color,
-        effectiveAppearance.text_color
-      )
-    };
-    const requestPayload = {
-      width: videoNaturalSize.width,
-      height: videoNaturalSize.height,
-      subtitle_text: activeCue.text,
-      highlight_word_index: highlightedWordIndex,
-      subtitle_style: resolvedAppearance,
-      subtitle_mode: effectiveAppearance.subtitle_mode,
-      highlight_color: effectiveAppearance.highlight_color,
-      highlight_opacity: effectiveHighlightOpacity
-    };
-    const requestKey = JSON.stringify(requestPayload);
-    if (overlayRequestKeyRef.current === requestKey) {
-      return;
-    }
-    overlayRequestKeyRef.current = requestKey;
-
-    let cancelled = false;
-    void previewOverlay(requestPayload)
-      .then((result) => {
-        if (cancelled || overlayRequestKeyRef.current !== requestKey) {
-          return;
-        }
-        if (typeof result.overlay_path === "string" && result.overlay_path) {
-          setSubtitleOverlayPath(result.overlay_path);
-          return;
-        }
-        setSubtitleOverlayPath(null);
-      })
-      .catch((err) => {
-        if (cancelled || overlayRequestKeyRef.current !== requestKey) {
-          return;
-        }
-        setSubtitleOverlayPath(null);
-        console.error("Failed to render subtitle preview overlay.", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeCue,
-    effectiveAppearance,
-    effectiveHighlightOpacity,
-    highlightedWordIndex,
-    isEditingActiveCue,
-    isTauriEnv,
-    videoNaturalSize.height,
-    videoNaturalSize.width
-  ]);
 
   const openSystemPath = React.useCallback(
     async (rawPath: string) => {
@@ -4367,8 +4316,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (hasSubtitles) {
       return;
     }
-    setRightOverlayOpen(false);
-  }, [hasSubtitles]);
+    closeEffectsDrawer();
+  }, [closeEffectsDrawer, hasSubtitles]);
 
   const persistStyleSettings = React.useCallback(
     async (
@@ -5737,19 +5686,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [hasVideoPreview, showSeekFeedback]);
 
-  const openRightOverlay = () => {
-    if (!isNarrow) {
-      return;
-    }
-    setRightOverlayOpen(true);
-  };
-
-  const closeOverlays = React.useCallback(() => {
-    if (rightOverlayOpen) {
-      setRightOverlayOpen(false);
-    }
-  }, [rightOverlayOpen]);
-
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -5773,11 +5709,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         void flushAndExitEditMode();
         return;
       }
-      closeOverlays();
+      closeEffectsDrawer();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeOverlays, flushAndExitEditMode, handleUndoEdit, isEditingCue]);
+  }, [closeEffectsDrawer, flushAndExitEditMode, handleUndoEdit, isEditingCue]);
 
   React.useEffect(() => {
     if (!isEditingActiveCue) return;
@@ -5880,7 +5816,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const { scrollAreaRef: effectsPanelScrollRef, scrolled: effectsPanelScrolled } =
     useScrollAreaShadow(hasSubtitles && !isNarrow);
   const { scrollAreaRef: effectsDrawerScrollRef, scrolled: effectsDrawerScrolled } =
-    useScrollAreaShadow(hasSubtitles && isNarrow && rightOverlayOpen);
+    useScrollAreaShadow(showNarrowEffectsDrawer);
 
   const exportAreaTopBar = hasSubtitles && (
     <div className="flex flex-wrap items-center gap-2">
@@ -6029,7 +5965,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     !hasActiveCreateSubtitles &&
     !pendingAutoStartSubtitles &&
     !incomingState?.autoStartSubtitles;
-  const canShowCreateElevatorMusicPrompt =
+  const showCreateElevatorMusicPromptShell =
     hasActiveCreateSubtitles &&
     !(
       project?.active_task?.status === "queued" &&
@@ -6042,7 +5978,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       : "max-w-[min(100%,56rem)] flex-1 justify-center text-left"
   );
   const showCreateElevatorMusicPrompt =
-    showElevatorMusicRow && canShowCreateElevatorMusicPrompt;
+    isElevatorMusicPromptVisible && showCreateElevatorMusicPromptShell;
 
   return (
     <div data-testid="workbench" className="flex h-full min-h-0 flex-col gap-4">
@@ -6063,7 +5999,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           <Button
             variant="outline"
             size="sm"
-            onClick={openRightOverlay}
+            onClick={openEffectsDrawer}
             disabled={isExporting}
             data-testid="workbench-open-effects"
           >
@@ -6205,7 +6141,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
               );
             })()}
           </div>
-          {canShowCreateElevatorMusicPrompt && (
+          {showCreateElevatorMusicPromptShell && (
             <div
               className="mx-auto mt-auto flex w-full max-w-[min(100%,56rem)] justify-center pt-4"
               aria-hidden={!showCreateElevatorMusicPrompt}
@@ -6216,9 +6152,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                   "flex flex-col items-center gap-2 text-center text-sm text-muted-foreground transition-opacity duration-300 sm:flex-row sm:justify-center sm:gap-3",
                   showCreateElevatorMusicPrompt ? "opacity-100" : "invisible opacity-0"
                 )}
-                data-testid={
-                  showCreateElevatorMusicPrompt ? "workbench-elevator-music-row" : undefined
-                }
+                aria-hidden={!showCreateElevatorMusicPrompt}
+                data-testid="workbench-elevator-music-row"
               >
                 <span>Listen to some music while you wait?</span>
                 <Button
@@ -6286,26 +6221,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     onEnded={() => setIsPlaying(false)}
                     onLoadedMetadata={(event) => {
                       const element = event.currentTarget;
-                      const d = element.duration;
-                      const pendingSeekSeconds = pendingVideoSeekSecondsRef.current;
-                      if (typeof pendingSeekSeconds === "number") {
-                        const clampedTime =
-                          Number.isFinite(d) && d >= 0
-                            ? Math.min(Math.max(0, pendingSeekSeconds), d)
-                            : Math.max(0, pendingSeekSeconds);
-                        element.currentTime = clampedTime;
-                        pendingVideoSeekSecondsRef.current = null;
-                      }
-                      setCurrentTimeSeconds(element.currentTime || 0);
-                      setDurationSeconds(
-                        Number.isFinite(d) && d >= 0 ? d : 0
-                      );
-                      setVolume(element.volume);
-                      setIsMuted(element.muted);
-                      setVideoNaturalSize({
-                        width: Math.max(0, Math.round(element.videoWidth || 0)),
-                        height: Math.max(0, Math.round(element.videoHeight || 0))
-                      });
+                      consumePendingVideoSeek(element);
+                      syncMediaTimingStateFromVideo(element);
                     }}
                     onTimeUpdate={(event) =>
                       setCurrentTimeSeconds(event.currentTarget.currentTime || 0)
@@ -6361,15 +6278,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     className={cn("absolute", !isEditingActiveCue && !subtitleResizeDrag && !subtitlePositionDrag && "pointer-events-none")}
                     style={displayedVideoGeometryStyle}
                   >
-{SHOW_SUBTITLE_OVERLAY_IN_APP && shouldRenderOverlayImage && (
-                        <img
-                        className="pointer-events-none absolute inset-0 h-full w-full transition-transform duration-200"
-                        src={subtitleOverlaySrc ?? ""}
-                        alt="Subtitle preview overlay"
-                        data-testid="workbench-subtitle-overlay"
-                        style={subtitleControlsPushStyle}
-                      />
-                    )}
                     {activeCue && (
                       <div
                         ref={subtitleOverlayPositionLayerRef}
@@ -7164,21 +7072,21 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             )}
           </div>
 
-          {showScrim && (
+          {showEffectsDrawerScrim && (
             <div
               className="fixed inset-x-0 bottom-0 z-40 bg-overlay-soft"
-              style={overlayViewportStyle}
-              onClick={closeOverlays}
+              style={effectsOverlayViewportStyle}
+              onClick={closeEffectsDrawer}
               data-testid="workbench-overlay-scrim"
             />
           )}
 
           {subtitleEditorToolbarPortal}
 
-          {hasSubtitles && isNarrow && rightOverlayOpen && (
+          {showNarrowEffectsDrawer && (
             <aside
               className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,360px)] flex-col border-l border-border bg-card shadow"
-              style={overlayViewportStyle}
+              style={effectsOverlayViewportStyle}
               data-testid="workbench-right-drawer"
             >
               <div
@@ -7208,7 +7116,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     size="icon"
                     className="h-6 w-6"
                     aria-label="Close"
-                    onClick={() => setRightOverlayOpen(false)}
+                    onClick={closeEffectsDrawer}
                   >
                     <X className="size-4" />
                   </Button>

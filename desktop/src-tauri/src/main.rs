@@ -22,17 +22,17 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 use zip::ZipArchive;
 
 const CALIBRATION_VIDEO_FILENAME: &str = "calibration_60s.mp4";
-const ENGINE_PAYLOAD_FILENAME: &str = "cue-local-engine.zip";
+const ENGINE_ARCHIVE_FILENAME: &str = "cue-local-engine.zip";
 const ENGINE_READY_SENTINEL: &str = ".extract-complete";
-const ENGINE_PAYLOAD_METADATA_FILENAME: &str = ".payload-metadata";
+const ENGINE_ARCHIVE_METADATA_FILENAME: &str = ".archive-metadata";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct PayloadMetadata {
+struct EngineArchiveMetadata {
     len: u64,
     modified_unix_seconds: u64,
 }
 
-fn read_payload_metadata(path: &Path) -> Option<PayloadMetadata> {
+fn read_archive_metadata(path: &Path) -> Option<EngineArchiveMetadata> {
     let metadata = fs::metadata(path).ok()?;
     let modified_unix_seconds = metadata
         .modified()
@@ -40,13 +40,13 @@ fn read_payload_metadata(path: &Path) -> Option<PayloadMetadata> {
         .duration_since(UNIX_EPOCH)
         .ok()?
         .as_secs();
-    Some(PayloadMetadata {
+    Some(EngineArchiveMetadata {
         len: metadata.len(),
         modified_unix_seconds,
     })
 }
 
-fn parse_payload_metadata(raw: &str) -> Option<PayloadMetadata> {
+fn parse_archive_metadata(raw: &str) -> Option<EngineArchiveMetadata> {
     let mut len: Option<u64> = None;
     let mut modified_unix_seconds: Option<u64> = None;
     for line in raw.lines() {
@@ -56,18 +56,18 @@ fn parse_payload_metadata(raw: &str) -> Option<PayloadMetadata> {
             modified_unix_seconds = value.trim().parse::<u64>().ok();
         }
     }
-    Some(PayloadMetadata {
+    Some(EngineArchiveMetadata {
         len: len?,
         modified_unix_seconds: modified_unix_seconds?,
     })
 }
 
-fn read_cached_payload_metadata(path: &Path) -> Option<PayloadMetadata> {
+fn read_cached_archive_metadata(path: &Path) -> Option<EngineArchiveMetadata> {
     let raw = fs::read_to_string(path).ok()?;
-    parse_payload_metadata(&raw)
+    parse_archive_metadata(&raw)
 }
 
-fn write_cached_payload_metadata(path: &Path, metadata: PayloadMetadata) -> Result<(), String> {
+fn write_cached_archive_metadata(path: &Path, metadata: EngineArchiveMetadata) -> Result<(), String> {
     fs::write(
         path,
         format!(
@@ -75,7 +75,7 @@ fn write_cached_payload_metadata(path: &Path, metadata: PayloadMetadata) -> Resu
             metadata.len, metadata.modified_unix_seconds
         ),
     )
-    .map_err(|err| format!("Failed to write payload metadata file {path:?}: {err}"))
+    .map_err(|err| format!("Failed to write archive metadata file {path:?}: {err}"))
 }
 
 fn cue_root_dir() -> PathBuf {
@@ -108,9 +108,9 @@ fn cue_engine_root_dir() -> PathBuf {
 
 fn extract_zip_archive(zip_path: &Path, destination: &Path) -> Result<(), String> {
     let archive_file =
-        File::open(zip_path).map_err(|err| format!("Failed to open engine payload {zip_path:?}: {err}"))?;
+        File::open(zip_path).map_err(|err| format!("Failed to open engine archive {zip_path:?}: {err}"))?;
     let mut archive = ZipArchive::new(archive_file)
-        .map_err(|err| format!("Failed to read engine payload archive {zip_path:?}: {err}"))?;
+        .map_err(|err| format!("Failed to read engine archive {zip_path:?}: {err}"))?;
 
     for index in 0..archive.len() {
         let mut entry = archive
@@ -140,12 +140,12 @@ fn extract_zip_archive(zip_path: &Path, destination: &Path) -> Result<(), String
 }
 
 fn ensure_engine_extracted(app: &App) -> Result<PathBuf, String> {
-    let payload_path = app
+    let archive_path = app
         .path()
-        .resolve(ENGINE_PAYLOAD_FILENAME, BaseDirectory::Resource)
-        .map_err(|err| format!("Failed to resolve engine payload resource path: {err}"))?;
-    if !payload_path.exists() {
-        return Err(format!("Engine payload archive missing: {payload_path:?}"));
+        .resolve(ENGINE_ARCHIVE_FILENAME, BaseDirectory::Resource)
+        .map_err(|err| format!("Failed to resolve engine archive resource path: {err}"))?;
+    if !archive_path.exists() {
+        return Err(format!("Engine archive missing: {archive_path:?}"));
     }
 
     let engine_root = cue_engine_root_dir();
@@ -156,11 +156,11 @@ fn ensure_engine_extracted(app: &App) -> Result<PathBuf, String> {
     let extracted_engine_dir = engine_root.join(&version);
     let backend_path = extracted_engine_dir.join("CueBackend.exe");
     let ready_sentinel = extracted_engine_dir.join(ENGINE_READY_SENTINEL);
-    let metadata_path = extracted_engine_dir.join(ENGINE_PAYLOAD_METADATA_FILENAME);
-    let payload_metadata = read_payload_metadata(&payload_path);
-    let cached_payload_metadata = read_cached_payload_metadata(&metadata_path);
+    let metadata_path = extracted_engine_dir.join(ENGINE_ARCHIVE_METADATA_FILENAME);
+    let archive_metadata = read_archive_metadata(&archive_path);
+    let cached_archive_metadata = read_cached_archive_metadata(&metadata_path);
     let has_cached_engine = backend_path.exists() && ready_sentinel.exists();
-    if has_cached_engine && payload_metadata.is_some() && payload_metadata == cached_payload_metadata {
+    if has_cached_engine && archive_metadata.is_some() && archive_metadata == cached_archive_metadata {
         return Ok(backend_path);
     }
 
@@ -175,7 +175,7 @@ fn ensure_engine_extracted(app: &App) -> Result<PathBuf, String> {
     fs::create_dir_all(&temp_engine_dir)
         .map_err(|err| format!("Failed to create temp engine directory {temp_engine_dir:?}: {err}"))?;
 
-    if let Err(err) = extract_zip_archive(&payload_path, &temp_engine_dir) {
+    if let Err(err) = extract_zip_archive(&archive_path, &temp_engine_dir) {
         let _ = fs::remove_dir_all(&temp_engine_dir);
         return Err(err);
     }
@@ -184,11 +184,11 @@ fn ensure_engine_extracted(app: &App) -> Result<PathBuf, String> {
     if !extracted_backend_path.exists() {
         let _ = fs::remove_dir_all(&temp_engine_dir);
         return Err(format!(
-            "Engine payload did not contain CueBackend.exe at root: {payload_path:?}"
+            "Engine archive did not contain CueBackend.exe at root: {archive_path:?}"
         ));
     }
-    if let Some(metadata) = payload_metadata {
-        write_cached_payload_metadata(&temp_engine_dir.join(ENGINE_PAYLOAD_METADATA_FILENAME), metadata)?;
+    if let Some(metadata) = archive_metadata {
+        write_cached_archive_metadata(&temp_engine_dir.join(ENGINE_ARCHIVE_METADATA_FILENAME), metadata)?;
     }
     File::create(temp_engine_dir.join(ENGINE_READY_SENTINEL))
         .map_err(|err| format!("Failed to write engine extraction sentinel file: {err}"))?;
@@ -221,7 +221,7 @@ fn start_packaged_backend(app: &App) -> Option<Child> {
     let backend_path = match ensure_engine_extracted(app) {
         Ok(path) => path,
         Err(err) => {
-            eprintln!("Failed to prepare packaged engine payload: {err}");
+            eprintln!("Failed to prepare packaged engine archive: {err}");
             return None;
         }
     };
@@ -491,11 +491,9 @@ fn main() {
     let backend_child_for_setup = Arc::clone(&backend_child);
     let backend_child_for_run = Arc::clone(&backend_child);
 
-    let mut builder = tauri::Builder::default();
+    let builder = tauri::Builder::default();
     #[cfg(debug_assertions)]
-    {
-        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
-    }
+    let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     builder
         .setup(move |app| {
             app.manage(AllowCloseState::default());
