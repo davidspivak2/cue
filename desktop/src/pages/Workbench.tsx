@@ -31,7 +31,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
-  buildExportChecklist,
   buildGenerateChecklist,
   checklistStepIds
 } from "@/legacyCopy";
@@ -981,35 +980,6 @@ const buildPathCandidates = (value: string): string[] => {
   }
   return [...new Set(candidates)];
 };
-
-const describeOpenError = (error: unknown): string => {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  if (error && typeof error === "object") {
-    const details = error as Record<string, unknown>;
-    const messageKeys = ["message", "error", "reason", "details"];
-    for (const key of messageKeys) {
-      const value = details[key];
-      if (typeof value === "string" && value.trim()) {
-        return value;
-      }
-    }
-    try {
-      const serialized = JSON.stringify(error);
-      if (serialized && serialized !== "{}") {
-        return serialized;
-      }
-    } catch {
-      // Ignore serialization errors and use generic fallback.
-    }
-  }
-  return "No additional error details were provided.";
-};
-
 type BrowserTimeout = number;
 
 type FloatingSubtitleToolbarPosition = {
@@ -1174,7 +1144,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const subtitleUndoPersistPromiseRef = React.useRef<Promise<boolean>>(Promise.resolve(true));
   const stylePersistTimerRef = React.useRef<BrowserTimeout | null>(null);
   const stylePersistPendingArgsRef = React.useRef<StylePersistenceArgs | null>(null);
-  const [leftPanelOpen, setLeftPanelOpen] = React.useState(false);
   const [rightOverlayOpen, setRightOverlayOpen] = React.useState(false);
   const [showVideoControls, setShowVideoControls] = React.useState(false);
   const [isHoveringActiveSubtitle, setIsHoveringActiveSubtitle] = React.useState(false);
@@ -1233,7 +1202,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [createSubtitlesChecklist, setCreateSubtitlesChecklist] = React.useState<ChecklistItem[]>(
     []
   );
-  const [, setCreateSubtitlesJobStream] = React.useState<JobEventStream | null>(null);
   const createSubtitlesJobStreamRef = React.useRef<JobEventStream | null>(null);
   const [createSubtitlesStreamHealth, setCreateSubtitlesStreamHealth] =
     React.useState<StreamHealth>("idle");
@@ -1266,12 +1234,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   );
   const preparingPreviewCompletionScheduledRef = React.useRef(false);
   const [isExporting, setIsExporting] = React.useState(false);
-  const [, setExportError] = React.useState<string | null>(null);
-  const [, setExportHeading] = React.useState("Exporting video");
   const [exportProgressPct, setExportProgressPct] = React.useState(0);
   const [exportProgressMessage, setExportProgressMessage] = React.useState<string>("");
-  const [, setExportChecklist] = React.useState<ChecklistItem[]>([]);
-  const [, setExportJobStream] = React.useState<JobEventStream | null>(null);
   const exportJobStreamRef = React.useRef<JobEventStream | null>(null);
   const [exportStreamHealth, setExportStreamHealth] = React.useState<StreamHealth>("idle");
   const exportStreamHealthRef = React.useRef<StreamHealth>("idle");
@@ -1283,9 +1247,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const createSubtitlesUnregisterRef = React.useRef<(() => void) | null>(null);
   const exportUnregisterRef = React.useRef<(() => void) | null>(null);
   const [exportStartedAt, setExportStartedAt] = React.useState<string | null>(null);
-  const [, setExportElapsedText] = React.useState("");
   const [exportOutputPath, setExportOutputPath] = React.useState<string | null>(null);
-  const [, setOpenActionError] = React.useState<string | null>(null);
   const [projectReloadTick, setProjectReloadTick] = React.useState(0);
   const [subtitlesReloadTick, setSubtitlesReloadTick] = React.useState(0);
   const projectFetchSeqRef = React.useRef(0);
@@ -1303,8 +1265,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     start: number;
     end: number;
   } | null>(null);
-  const showSubtitlesOverlay = false;
-
   const clearSubtitleAutosaveTimer = React.useCallback(() => {
     if (subtitleAutosaveTimerRef.current !== null) {
       clearTimeout(subtitleAutosaveTimerRef.current);
@@ -2005,7 +1965,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (!projectId) {
       return;
     }
-    setLeftPanelOpen(false);
     setRightOverlayOpen(false);
     setCurrentTimeSeconds(0);
     setEditError(null);
@@ -2039,14 +1998,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     createSubtitlesStreamCooldownUntilRef.current = 0;
     createSubtitlesJobStreamRef.current?.close();
     createSubtitlesJobStreamRef.current = null;
-    setCreateSubtitlesJobStream(null);
     setCreateStreamHealthValue("idle");
-    setExportError(null);
-    setOpenActionError(null);
-    setExportHeading("Exporting video");
     setExportProgressPct(0);
     setExportProgressMessage("");
-    setExportChecklist([]);
     setIsExporting(false);
     setExportStartedAt(null);
     exportJobIdRef.current = null;
@@ -2058,7 +2012,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     exportStreamCooldownUntilRef.current = 0;
     exportJobStreamRef.current?.close();
     exportJobStreamRef.current = null;
-    setExportJobStream(null);
     setExportStreamHealthValue("idle");
     setExportOutputPath(null);
     setSubtitleOverlayPath(null);
@@ -2165,21 +2118,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     selectedElevatorTrackIndexRef.current = null;
     elevatorAudioRef.current?.pause();
   }, [createSubtitlesStartedAt]);
-
-  React.useEffect(() => {
-    if (!isExporting || !exportStartedAt) {
-      setExportElapsedText("");
-      return;
-    }
-    const tick = () => {
-      setExportElapsedText(formatElapsedSince(exportStartedAt));
-    };
-    tick();
-    const timer = window.setInterval(tick, 500);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [exportStartedAt, isExporting]);
 
   React.useEffect(() => {
     if (!incomingState?.autoStartSubtitles) {
@@ -2299,29 +2237,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     return undefined;
   }, []);
 
-  const updateExportChecklist = React.useCallback(
-    (stepId: string, stateValue: string, reason?: string) => {
-      const mappedState =
-        stateValue === "start"
-          ? "active"
-          : stateValue === "done"
-            ? "done"
-            : stateValue === "skipped"
-              ? "skipped"
-              : stateValue === "failed"
-                ? "failed"
-                : "pending";
-      setExportChecklist((prev) =>
-        prev.map((item) =>
-          item.id === stepId
-            ? { ...item, state: mappedState, detail: normalizeChecklistDetail(reason) ?? item.detail }
-            : item
-        )
-      );
-    },
-    []
-  );
-
   const clearPreparingPreviewTimers = React.useCallback(() => {
     if (preparingPreviewDelayTimerRef.current !== null) {
       clearTimeout(preparingPreviewDelayTimerRef.current);
@@ -2342,7 +2257,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         current.close();
       }
       createSubtitlesJobStreamRef.current = null;
-      setCreateSubtitlesJobStream(null);
       if (createSubtitlesStreamHealthRef.current !== "cooldown") {
         setCreateStreamHealthValue("idle");
       }
@@ -2358,7 +2272,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         current.close();
       }
       exportJobStreamRef.current = null;
-      setExportJobStream(null);
       if (exportStreamHealthRef.current !== "cooldown") {
         setExportStreamHealthValue("idle");
       }
@@ -2640,7 +2553,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       );
       createSubtitlesJobIdRef.current = jobId;
       createSubtitlesJobStreamRef.current = stream;
-      setCreateSubtitlesJobStream(stream);
       createSubtitlesUnregisterRef.current?.();
       createSubtitlesUnregisterRef.current = registerRunningJob({
         id: jobId,
@@ -2748,7 +2660,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       createSubtitlesJobIdRef.current = job.jobId;
       createSubtitlesJustStartedRef.current = false;
       createSubtitlesJobStreamRef.current = job;
-      setCreateSubtitlesJobStream(job);
       setPersistedRunningJob(projectId, {
         jobId: job.jobId,
         eventsUrl: job.eventsUrl,
@@ -2895,17 +2806,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     (event: JobEvent) => {
       noteExportLiveEventTimestamp(event);
       if (event.type === "started") {
-        setExportHeading(asNonEmptyString(event.heading) ?? "Exporting video");
         setExportStartedAt(asString(event.ts) ?? new Date().toISOString());
-        return;
-      }
-      if (event.type === "checklist") {
-        const stepId = asString(event.step_id);
-        const state = asString(event.state);
-        if (!stepId || !state) {
-          return;
-        }
-        updateExportChecklist(stepId, state, resolveChecklistReason(event));
         return;
       }
       if (event.type === "progress") {
@@ -2982,7 +2883,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         setIsExporting(false);
         setExportStartedAt(null);
         exportJobIdRef.current = null;
-        setExportError(null);
         if (exportStreamCooldownTimerRef.current !== null) {
           clearTimeout(exportStreamCooldownTimerRef.current);
           exportStreamCooldownTimerRef.current = null;
@@ -3000,7 +2900,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         setIsExporting(false);
         setExportStartedAt(null);
         exportJobIdRef.current = null;
-        setExportError(asNonEmptyString(event.message) ?? "Video export failed.");
         if (exportStreamCooldownTimerRef.current !== null) {
           clearTimeout(exportStreamCooldownTimerRef.current);
           exportStreamCooldownTimerRef.current = null;
@@ -3018,9 +2917,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       noteExportLiveEventTimestamp,
       projectId,
       pushToast,
-      resolveChecklistReason,
-      setExportStreamHealthValue,
-      updateExportChecklist
+      setExportStreamHealthValue
     ]
   );
 
@@ -3076,7 +2973,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       );
       exportJobIdRef.current = jobId;
       exportJobStreamRef.current = stream;
-      setExportJobStream(stream);
       exportUnregisterRef.current?.();
       exportUnregisterRef.current = registerRunningJob({
         id: jobId,
@@ -3129,10 +3025,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     !isExporting &&
     (!isCreatingSubtitles || !hasActiveCreateFromApi);
   const hasVideoPreview = Boolean(previewSrc);
-  const showLeftToggle = showSubtitlesOverlay && !leftPanelOpen;
-  const showScrim =
-    isNarrow &&
-    (hasSubtitles && ((showSubtitlesOverlay && leftPanelOpen) || rightOverlayOpen));
+  const showScrim = isNarrow && hasSubtitles && rightOverlayOpen;
 
   const startExport = React.useCallback(async () => {
     if (!projectId || !project?.video?.path || isExporting) {
@@ -3142,27 +3035,21 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       return;
     }
     if (!settings) {
-      setExportError("Settings are still loading. Please try again.");
       return;
     }
     if (isStyleLoading) {
-      setExportError("Subtitle effects are still loading. Please wait a moment.");
       return;
     }
     if (karaokeTimingNeedsSync) {
-      setExportError("Karaoke needs word timing sync before export. Click Sync karaoke timing first.");
       return;
     }
     if (
       appearance.subtitle_mode === "word_highlight" &&
       (project.status === "needs_subtitles" || project.status === "missing_file")
     ) {
-      setExportError(
-        "Word highlight export needs synced timings. Run Create subtitles again before exporting."
-      );
       return;
     }
-    const resolvedOutputDir = await resolveOutputDir(project.video.path, setExportError);
+    const resolvedOutputDir = await resolveOutputDir(project.video.path);
     if (!resolvedOutputDir) {
       return;
     }
@@ -3176,15 +3063,11 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           lastPresetId
         )
       });
-    } catch (err) {
-      setExportError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to save style before export."));
+    } catch {
       return;
     }
-    setExportError(null);
-    setExportHeading("Exporting video");
     setExportProgressPct(0);
     setExportProgressMessage("Starting...");
-    setExportChecklist(defaultChecklist(buildExportChecklist()));
     latestExportLiveEventAtMsRef.current = 0;
     if (exportStreamCooldownTimerRef.current !== null) {
       clearTimeout(exportStreamCooldownTimerRef.current);
@@ -3226,7 +3109,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       );
       exportJobIdRef.current = job.jobId;
       exportJobStreamRef.current = job;
-      setExportJobStream(job);
       exportUnregisterRef.current?.();
       exportUnregisterRef.current = registerRunningJob({
         id: job.jobId,
@@ -3236,7 +3118,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     } catch (err) {
       if (err instanceof JobConflictError) {
         if (err.conflict.kind === "create_video_with_subtitles") {
-          setExportError(null);
           setIsExporting(true);
           exportJobIdRef.current = err.conflict.job_id;
           openExportStream(err.conflict.job_id, err.conflict.events_url);
@@ -3247,14 +3128,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         closeExportStream("export_start_conflict");
         setExportStreamHealthValue("idle");
         setExportStartedAt(null);
-        setExportError("Subtitles are still being created for this video.");
         return;
       }
       setIsExporting(false);
       closeExportStream("export_start_failed");
       setExportStreamHealthValue("idle");
       setExportStartedAt(null);
-      setExportError(messageForBackendError(err, err instanceof Error ? err.message : "Failed to start video export."));
     }
   }, [
     buildProjectStylePayload,
@@ -3333,7 +3212,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         setCreateSubtitlesError(null);
         setIsExporting(false);
         setExportStartedAt(null);
-        setExportError(null);
         exportJobIdRef.current = null;
         closeExportStream("switch_to_create_subtitles");
         setExportStreamHealthValue("idle");
@@ -3402,16 +3280,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         setCreateStreamHealthValue("idle");
         clearTimingFallbackProgress();
         setIsExporting(true);
-        setExportError(null);
         if (shouldApplyExportSnapshot) {
-          setExportHeading(
-            activeTask.status === "queued" ? "Queued" : (activeTask.heading ?? "Exporting video")
-          );
           setExportProgressPct(pct);
           setExportProgressMessage(message);
-          if (checklist.length > 0) {
-            setExportChecklist(checklist);
-          }
           setExportStartedAt(startedAt);
         }
         exportJobIdRef.current = activeTask.job_id;
@@ -3442,7 +3313,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         setCreateSubtitlesError(null);
         setIsExporting(false);
         setExportStartedAt(null);
-        setExportError(null);
         exportJobIdRef.current = null;
         closeExportStream("resume_persisted_create");
         setExportStreamHealthValue("idle");
@@ -3515,10 +3385,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         taskNotice.status !== "completed" &&
         taskNotice.status !== "cancelled"
       ) {
-        setExportError(taskNotice.message);
         setExportProgressPct(0);
       } else {
-        setExportError(null);
         setExportProgressPct(taskNotice?.status === "cancelled" ? 0 : 100);
       }
     }
@@ -3942,20 +3810,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (!latestOutputPath) {
       return;
     }
-    setOpenActionError(null);
     if (!isTauriEnv) {
       const browserUrl = buildLocalFileUrl(latestOutputPath);
-      const opened = window.open(browserUrl, "_blank", "noopener,noreferrer");
-      if (!opened) {
-        setOpenActionError("Could not open video: The browser blocked the new tab.");
-      }
+      window.open(browserUrl, "_blank", "noopener,noreferrer");
       return;
     }
     try {
       await openSystemPath(latestOutputPath);
     } catch (err) {
-      const detail = describeOpenError(err);
-      setOpenActionError(`Could not open video: ${detail}`);
       console.error("Failed to open exported video.", { path: latestOutputPath, error: err });
     }
   }, [isTauriEnv, latestOutputPath, openSystemPath]);
@@ -3967,10 +3829,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     const normalizedOutputPath = normalizePathInput(latestOutputPath);
     const folderPath = getDirName(normalizedOutputPath);
     if (!folderPath) {
-      setOpenActionError("Could not open folder: Unable to determine the export folder path.");
       return;
     }
-    setOpenActionError(null);
     try {
       await openSystemPath(folderPath);
       return;
@@ -3980,8 +3840,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           await revealItemInDir(normalizedOutputPath);
           return;
         } catch (revealErr) {
-          const detail = describeOpenError(revealErr);
-          setOpenActionError(`Could not open folder: ${detail}`);
           console.error("Failed to reveal exported video in folder.", {
             outputPath: normalizedOutputPath,
             folderPath,
@@ -3990,8 +3848,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           return;
         }
       }
-      const detail = describeOpenError(openErr);
-      setOpenActionError(`Could not open folder: ${detail}`);
       console.error("Failed to open export folder.", {
         outputPath: normalizedOutputPath,
         folderPath,
@@ -4511,7 +4367,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     if (hasSubtitles) {
       return;
     }
-    setLeftPanelOpen(false);
     setRightOverlayOpen(false);
   }, [hasSubtitles]);
 
@@ -5882,36 +5737,18 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [hasVideoPreview, showSeekFeedback]);
 
-  const openLeftPanel = () => {
-    if (!showSubtitlesOverlay) {
-      return;
-    }
-    if (isNarrow) {
-      setRightOverlayOpen(false);
-    }
-    setLeftPanelOpen(true);
-  };
-
-  const closeLeftPanel = () => {
-    setLeftPanelOpen(false);
-  };
-
   const openRightOverlay = () => {
     if (!isNarrow) {
       return;
     }
-    setLeftPanelOpen(false);
     setRightOverlayOpen(true);
   };
 
   const closeOverlays = React.useCallback(() => {
-    if (showSubtitlesOverlay && leftPanelOpen) {
-      setLeftPanelOpen(false);
-    }
     if (rightOverlayOpen) {
       setRightOverlayOpen(false);
     }
-  }, [leftPanelOpen, rightOverlayOpen, showSubtitlesOverlay]);
+  }, [rightOverlayOpen]);
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -6414,20 +6251,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
 
       {!showCreateSubtitlesState && (
         <>
-          {hasSubtitles && showSubtitlesOverlay && showLeftToggle && (
-            <div className="relative z-50 flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={openLeftPanel}
-                disabled={isExporting}
-                data-testid="workbench-open-left"
-              >
-                All subtitles
-              </Button>
-            </div>
-          )}
-
           <div className={cn("flex min-h-0 flex-1 gap-4", isNarrow ? "flex-col" : "flex-row")}>
             <section
               className="flex min-h-[220px] min-w-0 flex-1 items-center justify-center overflow-hidden"
@@ -7351,26 +7174,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           )}
 
           {subtitleEditorToolbarPortal}
-
-          {hasSubtitles && showSubtitlesOverlay && leftPanelOpen && (
-            <aside
-              className="fixed inset-y-0 left-0 z-50 flex w-[min(90vw,360px)] flex-col border-r border-border bg-card shadow"
-              style={overlayViewportStyle}
-              data-testid="workbench-left-drawer"
-            >
-              <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                <h2 className="text-sm font-semibold">All subtitles</h2>
-                <Button variant="ghost" size="sm" onClick={closeLeftPanel}>
-                  Close
-                </Button>
-              </div>
-              <ScrollArea className="min-h-0 flex-1 px-4 py-3">
-                <p className="text-xs text-muted-foreground">
-                  Placeholder - subtitles list will live here.
-                </p>
-              </ScrollArea>
-            </aside>
-          )}
 
           {hasSubtitles && isNarrow && rightOverlayOpen && (
             <aside
