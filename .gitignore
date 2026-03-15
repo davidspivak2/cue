@@ -27,8 +27,6 @@ desktop/node_modules/
 # Tauri (Rust)
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
-desktop/src-tauri/engine/*
-!desktop/src-tauri/engine/.gitkeep
 desktop/src-tauri/cue-local-engine.zip
 
 # Cursor IDE debug artifacts and logs (debug.log, debug-*.log, etc.)

@@ -77,7 +77,9 @@ $engineSpec = Join-Path $repo "CueEngine.spec"
 $engineBuildDir = Join-Path $repo "build\CueEngine"
 $engineDistDir = Join-Path $repo "dist\CueEngine"
 $engineTemplate = Join-Path $repo "tools\pyinstaller.engine.spec.in"
-$enginePayloadArchive = Join-Path $repo "desktop\src-tauri\cue-local-engine.zip"
+$engineArchiveFileName = "cue-local-engine.zip"
+$engineArchivePath = Join-Path $repo (Join-Path "desktop\src-tauri" $engineArchiveFileName)
+$engineArchiveDirectory = Split-Path $engineArchivePath -Parent
 
 if (Test-Path $engineSpec) {
     Remove-Item -Force $engineSpec
@@ -127,20 +129,20 @@ if ($openMpSource) {
     Write-Host "[INFO] Normalized OpenMP runtime to $openMpTarget"
 }
 
-if (-not (Test-Path (Join-Path $repo "desktop\src-tauri"))) {
-    throw "desktop\src-tauri folder is missing."
+if (-not (Test-Path $engineArchiveDirectory)) {
+    throw "Engine archive directory is missing at $engineArchiveDirectory"
 }
 
-if (Test-Path $enginePayloadArchive) {
-    Remove-Item -Force $enginePayloadArchive
+if (Test-Path $engineArchivePath) {
+    Remove-Item -Force $engineArchivePath
 }
-Write-Host "[INFO] Creating engine archive at $enginePayloadArchive"
-Compress-Archive -Path (Join-Path $engineDistDir "*") -DestinationPath $enginePayloadArchive -CompressionLevel Optimal
-if (-not (Test-Path $enginePayloadArchive)) {
-    throw "Engine archive was not created: $enginePayloadArchive"
+Write-Host "[INFO] Creating engine archive at $engineArchivePath"
+Compress-Archive -Path (Join-Path $engineDistDir "*") -DestinationPath $engineArchivePath -CompressionLevel Optimal
+if (-not (Test-Path $engineArchivePath)) {
+    throw "Engine archive was not created: $engineArchivePath"
 }
-$archiveSizeBytes = (Get-Item $enginePayloadArchive).Length
+$archiveSizeBytes = (Get-Item $engineArchivePath).Length
 Write-Host ("[INFO] Engine archive size: {0:N0} bytes ({1:N2} MB)" -f $archiveSizeBytes, ($archiveSizeBytes / 1MB))
 
 Write-Host "[OK] Engine build complete."
-Write-Host "[OK] Engine archive: $enginePayloadArchive"
+Write-Host "[OK] Engine archive: $engineArchivePath"

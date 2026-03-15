@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 from PyInstaller.utils.hooks import (
     collect_all,
@@ -14,6 +15,7 @@ block_cipher = None
 project_dir = os.path.abspath(".")
 EXCLUDED_PACKAGE_EXTENSIONS = {
     ".a",
+    ".c",
     ".cuh",
     ".cpp",
     ".exp",
@@ -22,37 +24,72 @@ EXCLUDED_PACKAGE_EXTENSIONS = {
     ".ilk",
     ".lib",
     ".pdb",
+    ".pxd",
+    ".pxi",
     ".pyi",
+    ".pyx",
+    ".tp",
+}
+EXCLUDED_PACKAGE_FILE_NAMES = {"meson.build", "readme", "readme.md", "readme.txt"}
+EXCLUDED_PACKAGE_PATH_PARTS = {"tests", "testing"}
+EXCLUDED_PACKAGE_PATH_SNIPPETS = {
+    "sklearn/datasets/data/",
+    "sklearn/datasets/descr/",
+    "sklearn/datasets/images/",
+    "sklearn/svm/src/",
 }
 
 
-def safe_collect_all(package_name: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[str]]:
+def collect_or_empty(collector: Callable[[str], object], package_name: str, fallback: object) -> object:
     try:
-        return collect_all(package_name)
+        return collector(package_name)
     except Exception:
-        return ([], [], [])
+        return fallback
 
 
-def safe_collect_dynamic_libs(package_name: str) -> list[tuple[str, str]]:
-    try:
-        return collect_dynamic_libs(package_name)
-    except Exception:
-        return []
+def packaged_entry_path(entry: tuple[str, ...]) -> str:
+    return str(entry[0])
 
 
-def safe_collect_submodules(package_name: str) -> list[str]:
-    try:
-        return collect_submodules(package_name)
-    except Exception:
-        return []
+def packaged_path_parts(path: str) -> list[str]:
+    return [part.lower() for part in path.replace("\\", "/").split("/") if part]
 
 
-def should_keep_packaged_entry(path: str) -> bool:
-    return os.path.splitext(path)[1].lower() not in EXCLUDED_PACKAGE_EXTENSIONS
+def is_runtime_packaged_path(path: str) -> bool:
+    normalized_path = "/".join(packaged_path_parts(path))
+    file_name = os.path.basename(path).lower()
+    if os.path.splitext(path)[1].lower() in EXCLUDED_PACKAGE_EXTENSIONS:
+        return False
+    if file_name in EXCLUDED_PACKAGE_FILE_NAMES:
+        return False
+    if any(part in EXCLUDED_PACKAGE_PATH_PARTS for part in packaged_path_parts(path)):
+        return False
+    return not any(snippet in normalized_path for snippet in EXCLUDED_PACKAGE_PATH_SNIPPETS)
 
 
-def filter_packaged_entries(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    return [entry for entry in entries if should_keep_packaged_entry(entry[0])]
+def is_runtime_packaged_entry(entry: tuple[str, ...]) -> bool:
+    return is_runtime_packaged_path(packaged_entry_path(entry))
+
+
+def filter_packaged_entries(entries: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
+    return [entry for entry in entries if is_runtime_packaged_entry(entry)]
+
+
+def collect_package_payload(package_name: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[str]]:
+    pkg_datas, pkg_binaries, pkg_hidden = collect_or_empty(collect_all, package_name, ([], [], []))
+    return (
+        filter_packaged_entries(pkg_datas),
+        filter_packaged_entries(pkg_binaries),
+        pkg_hidden,
+    )
+
+
+def collect_package_dynamic_libs(package_name: str) -> list[tuple[str, str]]:
+    return filter_packaged_entries(collect_or_empty(collect_dynamic_libs, package_name, []))
+
+
+def collect_package_submodules(package_name: str) -> list[str]:
+    return collect_or_empty(collect_submodules, package_name, [])
 
 
 binaries: list[tuple[str, str]] = []
@@ -75,17 +112,17 @@ for package_name in (
     "torch",
     "torchaudio",
 ):
-    pkg_datas, pkg_binaries, pkg_hidden = safe_collect_all(package_name)
-    datas += filter_packaged_entries(pkg_datas)
-    binaries += filter_packaged_entries(pkg_binaries)
+    pkg_datas, pkg_binaries, pkg_hidden = collect_package_payload(package_name)
+    datas += pkg_datas
+    binaries += pkg_binaries
     hiddenimports += pkg_hidden
 
-binaries += safe_collect_dynamic_libs("av")
+binaries += collect_package_dynamic_libs("av")
 
-hiddenimports += safe_collect_submodules("av")
-hiddenimports += safe_collect_submodules("whisperx")
-hiddenimports += safe_collect_submodules("torch")
-hiddenimports += safe_collect_submodules("torchaudio")
+hiddenimports += collect_package_submodules("av")
+hiddenimports += collect_package_submodules("whisperx")
+hiddenimports += collect_package_submodules("torch")
+hiddenimports += collect_package_submodules("torchaudio")
 
 runtime_hooks = [os.path.join("runtime_hooks", "runtime_env_setup.py")]
 
@@ -115,6 +152,8 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+a.datas = filter_packaged_entries(a.datas)
+a.binaries = filter_packaged_entries(a.binaries)
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

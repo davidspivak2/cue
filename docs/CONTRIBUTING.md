@@ -136,6 +136,9 @@ npm run tauri dev
 npm run tauri build
 ```
 
+This desktop-only build uses the current Tauri bundle config in `desktop/src-tauri/tauri.conf.json`.
+For packaged Windows installers, that config expects `desktop/src-tauri/cue-local-engine.zip` to exist.
+
 ---
 
 ## Development workflow
@@ -213,6 +216,16 @@ There is no CI pipeline configured yet. Run tests and lint locally before openin
 
 ### Windows (Tauri installer)
 
+For the full Windows release flow from the repo root:
+
+```bat
+scripts\build_release.cmd
+```
+
+That script rebuilds `desktop/src-tauri/cue-local-engine.zip` first, then runs the Tauri installer build.
+
+If you only need to rebuild the Tauri installers and the engine archive is already current:
+
 ```bash
 cd desktop
 npm run tauri build
@@ -223,6 +236,8 @@ Outputs `.msi` and `.exe` installers under `desktop/src-tauri/target/release/bun
 Windows installers are currently x64-only.
 
 The packaged Windows installer flow now includes Cue's GPL license file and ships `THIRD_PARTY_NOTICES.md` with the app bundle.
+
+The live Windows packaging flow uses the archive resource `desktop/src-tauri/cue-local-engine.zip`. The old mirrored `desktop/src-tauri/engine/` folder is not part of the active release path.
 
 ### macOS
 
