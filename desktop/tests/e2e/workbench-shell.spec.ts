@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   waitForOpacityAtLeast,
@@ -195,6 +195,38 @@ const buildSettings = () => ({
   }
 });
 
+type ViewportSize = {
+  width: number;
+  height: number;
+};
+
+type ExistingProjectWorkbenchOptions = {
+  viewport?: ViewportSize;
+  projects?: ReturnType<typeof buildProjects>;
+  projectTitle?: string;
+  initialSrtText?: string | null;
+  initialSettings?: ReturnType<typeof buildSettings>;
+  generatedSubtitlesText?: string;
+  useTauriRuntimeMock?: boolean;
+};
+
+type ImportProjectWorkbenchOptions = {
+  viewport?: ViewportSize;
+  projects?: ReturnType<typeof buildProjects>;
+  file: {
+    name: string;
+    mimeType: string;
+    buffer: Buffer;
+  };
+  initialSrtText?: string | null;
+  initialSettings?: ReturnType<typeof buildSettings>;
+  generatedSubtitlesText?: string;
+  useTauriRuntimeMock?: boolean;
+  useFilePathMock?: boolean;
+};
+
+const DEFAULT_WORKBENCH_VIEWPORT: ViewportSize = { width: 1300, height: 800 };
+
 const mockProjects = async (
   page,
   projects,
@@ -227,6 +259,27 @@ const mockProjects = async (
   const eventFailureByJob = new Map();
   const projectGetCounts = new Map();
   const subtitlePutFailureQueue = [];
+  const createImportedProject = (rawFileName: string) => {
+    createdProjectCount += 1;
+    const decodedFileName = decodeURIComponent(rawFileName || `created_${createdProjectCount}.mp4`);
+    const fileName = decodedFileName.split(/[/\\]/).pop() || `created_${createdProjectCount}.mp4`;
+    const videoPath = `C:\\browser-imports\\${fileName}`;
+    const now = "2026-02-09T00:00:00Z";
+    const createdProject = {
+      project_id: `project-new-${createdProjectCount}`,
+      title: fileName,
+      video_path: videoPath,
+      missing_video: false,
+      status: "needs_subtitles",
+      created_at: now,
+      updated_at: now,
+      duration_seconds: 65,
+      thumbnail_path: "",
+      style: {}
+    };
+    projects = [createdProject, ...projects];
+    return createdProject;
+  };
 
   await page.route("**://127.0.0.1:8765/health", async (route) => {
     const request = route.request();
@@ -316,49 +369,6 @@ const mockProjects = async (
       status: 200,
       contentType: "application/octet-stream",
       body: ""
-    });
-  });
-
-  await page.route("**://127.0.0.1:8765/projects/import", async (route) => {
-    const request = route.request();
-    if (request.method() === "OPTIONS") {
-      await route.fulfill({
-        status: 204,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, X-Cue-Filename"
-        }
-      });
-      return;
-    }
-    if (request.method() !== "POST") {
-      await route.continue();
-      return;
-    }
-    createdProjectCount += 1;
-    const rawFileName = (await request.headerValue("x-cue-filename")) ?? "";
-    const decodedFileName = decodeURIComponent(rawFileName || `created_${createdProjectCount}.mp4`);
-    const fileName = decodedFileName.split(/[/\\]/).pop() || `created_${createdProjectCount}.mp4`;
-    const videoPath = `C:\\browser-imports\\${fileName}`;
-    const now = "2026-02-09T00:00:00Z";
-    const createdProject = {
-      project_id: `project-new-${createdProjectCount}`,
-      title: fileName,
-      video_path: videoPath,
-      missing_video: false,
-      status: "needs_subtitles",
-      created_at: now,
-      updated_at: now,
-      duration_seconds: 65,
-      thumbnail_path: "",
-      style: {}
-    };
-    projects = [createdProject, ...projects];
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(createdProject)
     });
   });
 
@@ -561,25 +571,8 @@ const mockProjects = async (
       await route.continue();
       return;
     }
-    createdProjectCount += 1;
     const rawFileName = (await request.headerValue("x-cue-filename")) ?? "";
-    const decodedFileName = decodeURIComponent(rawFileName || `created_${createdProjectCount}.mp4`);
-    const fileName = decodedFileName.split(/[/\\]/).pop() || `created_${createdProjectCount}.mp4`;
-    const videoPath = `C:\\browser-imports\\${fileName}`;
-    const now = "2026-02-09T00:00:00Z";
-    const createdProject = {
-      project_id: `project-new-${createdProjectCount}`,
-      title: fileName,
-      video_path: videoPath,
-      missing_video: false,
-      status: "needs_subtitles",
-      created_at: now,
-      updated_at: now,
-      duration_seconds: 65,
-      thumbnail_path: "",
-      style: {}
-    };
-    projects = [createdProject, ...projects];
+    const createdProject = createImportedProject(rawFileName);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -801,6 +794,75 @@ const mockProjects = async (
     },
     getJobEventsRequestCount: (jobId) => eventRequestCounts.get(jobId) ?? 0
   };
+};
+
+const openExistingProjectInWorkbench = async (
+  page: Page,
+  {
+    viewport = DEFAULT_WORKBENCH_VIEWPORT,
+    projects = buildProjects(),
+    projectTitle,
+    initialSrtText = DEFAULT_SRT,
+    initialSettings = buildSettings(),
+    generatedSubtitlesText = GENERATED_SRT,
+    useTauriRuntimeMock = false
+  }: ExistingProjectWorkbenchOptions = {}
+) => {
+  if (useTauriRuntimeMock) {
+    await page.addInitScript(initTauriRuntimeMock);
+  }
+  await page.setViewportSize(viewport);
+  const api = await mockProjects(
+    page,
+    projects,
+    initialSrtText,
+    initialSettings,
+    generatedSubtitlesText
+  );
+  const titleToOpen = projectTitle ?? projects[0]?.title ?? "good.mp4";
+  const project = projects.find((entry) => entry.title === titleToOpen);
+  if (!project) {
+    throw new Error(`Project not found for workbench open: ${titleToOpen}`);
+  }
+  await page.goto("/");
+  const workbenchUrl = page.waitForURL(`**/workbench/${project.project_id}`);
+  await page.getByText(titleToOpen).click();
+  await workbenchUrl;
+  return { api, project, projects };
+};
+
+const importProjectToWorkbench = async (
+  page: Page,
+  {
+    viewport = DEFAULT_WORKBENCH_VIEWPORT,
+    projects = buildProjects(),
+    file,
+    initialSrtText = DEFAULT_SRT,
+    initialSettings = buildSettings(),
+    generatedSubtitlesText = GENERATED_SRT,
+    useTauriRuntimeMock = false,
+    useFilePathMock = false
+  }: ImportProjectWorkbenchOptions
+) => {
+  if (useFilePathMock) {
+    await page.addInitScript(initMocks);
+  }
+  if (useTauriRuntimeMock) {
+    await page.addInitScript(initTauriRuntimeMock);
+  }
+  await page.setViewportSize(viewport);
+  const api = await mockProjects(
+    page,
+    projects,
+    initialSrtText,
+    initialSettings,
+    generatedSubtitlesText
+  );
+  await page.goto("/");
+  const workbenchUrl = page.waitForURL("**/workbench/project-new-1");
+  await page.getByTestId("new-project-input").setInputFiles(file);
+  await workbenchUrl;
+  return { api, importedProjectId: "project-new-1" };
 };
 
 const primeVideoState = async (
@@ -1478,12 +1540,6 @@ const setToolbarFontSize = async (page, value) => {
   await sizeInput.press("Enter");
 };
 
-/** No-op: vertical position is now set by dragging the subtitle on the video. */
-const setVerticalAnchor = async (_page, _anchorLabel: "Top" | "Middle" | "Bottom") => {};
-
-/** No-op: vertical position is now set by dragging the subtitle on the video. */
-const setVerticalOffset = async (_page, _value: string) => {};
-
 const domClick = async (locator) => {
   await locator.evaluate((element) => {
     if (element instanceof HTMLElement) {
@@ -1645,13 +1701,7 @@ const waitForActiveSubtitleRectToSettle = async (
 };
 
 test("workbench shell wide layout", async ({ page }) => {
-  await page.setViewportSize({ width: 1300, height: 800 });
-  const projects = buildProjects();
-  await mockProjects(page, projects);
-
-  await page.goto("/");
-  await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
+  await openExistingProjectInWorkbench(page);
 
   await expect(page.getByTestId("workbench-center-panel")).toBeVisible();
   await expect(page.getByTestId("workbench-right-panel")).toBeVisible();
@@ -1661,14 +1711,10 @@ test("workbench shell wide layout", async ({ page }) => {
 });
 
 test("workbench shell narrow overlays", async ({ page }) => {
-  await page.addInitScript(initTauriRuntimeMock);
-  await page.setViewportSize({ width: 900, height: 800 });
-  const projects = buildProjects();
-  await mockProjects(page, projects);
-
-  await page.goto("/");
-  await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
+  await openExistingProjectInWorkbench(page, {
+    viewport: { width: 900, height: 800 },
+    useTauriRuntimeMock: true
+  });
 
   await expect(page.getByTestId("workbench-right-panel")).toHaveCount(0);
   await expect(page.getByTestId("workbench-open-effects")).toBeVisible();
@@ -1697,8 +1743,6 @@ test("workbench shell narrow overlays", async ({ page }) => {
 });
 
 test("title bar: switch between Home and video tab", async ({ page }) => {
-  await page.addInitScript(initTauriRuntimeMock);
-  await page.setViewportSize({ width: 900, height: 800 });
   const projects = buildProjects();
   projects[0].status = "ready";
   projects.push({
@@ -1708,11 +1752,11 @@ test("title bar: switch between Home and video tab", async ({ page }) => {
     video_path: "C:\\fake\\other.mp4",
     status: "ready"
   });
-  await mockProjects(page, projects);
-
-  await page.goto("/");
-  await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
+  await openExistingProjectInWorkbench(page, {
+    viewport: { width: 900, height: 800 },
+    projects,
+    useTauriRuntimeMock: true
+  });
   await expect(getVisibleWorkbenchHeading(page)).toBeVisible();
   await expect(page.getByTestId("title-bar-tab-project-1")).toBeVisible();
 
@@ -1734,8 +1778,6 @@ test("title bar: switch between Home and video tab", async ({ page }) => {
 test("title bar: single tab label stays untruncated at 150% interface size", async ({
   page
 }) => {
-  await page.addInitScript(initTauriRuntimeMock);
-  await page.setViewportSize({ width: 1200, height: 800 });
   const projects = [
     {
       ...buildProjects()[0],
@@ -1744,14 +1786,16 @@ test("title bar: single tab label stays untruncated at 150% interface size", asy
       status: "ready"
     }
   ];
-  await mockProjects(page, projects, DEFAULT_SRT, {
-    ...buildSettings(),
-    interface_scale: 1.5
+  await openExistingProjectInWorkbench(page, {
+    viewport: { width: 1200, height: 800 },
+    projects,
+    initialSettings: {
+      ...buildSettings(),
+      interface_scale: 1.5
+    },
+    projectTitle: "test_30s.mp4",
+    useTauriRuntimeMock: true
   });
-
-  await page.goto("/");
-  await page.getByText("test_30s.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
 
   const tabTitle = page.getByTestId("title-bar-tab-project-1").locator("button span").first();
   await expect(tabTitle).toHaveText("test_30s.mp4");
@@ -1763,8 +1807,6 @@ test("title bar: single tab label stays untruncated at 150% interface size", asy
 });
 
 test("title bar: shorter labels stay compact at 150% interface size", async ({ page }) => {
-  await page.addInitScript(initTauriRuntimeMock);
-  await page.setViewportSize({ width: 1400, height: 800 });
   const seedProject = buildProjects()[0];
   const projects = [
     {
@@ -1781,14 +1823,16 @@ test("title bar: shorter labels stay compact at 150% interface size", async ({ p
       status: "ready"
     }
   ];
-  await mockProjects(page, projects, DEFAULT_SRT, {
-    ...buildSettings(),
-    interface_scale: 1.5
+  await openExistingProjectInWorkbench(page, {
+    viewport: { width: 1400, height: 800 },
+    projects,
+    initialSettings: {
+      ...buildSettings(),
+      interface_scale: 1.5
+    },
+    projectTitle: "calibration_60s.mp4",
+    useTauriRuntimeMock: true
   });
-
-  await page.goto("/");
-  await page.getByText("calibration_60s.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
   await page.getByTestId("title-bar-home").click();
   await expect(page).toHaveURL(/\/$/);
   await page.getByText("test.mp4").click();
@@ -1809,8 +1853,6 @@ test("title bar: shorter labels stay compact at 150% interface size", async ({ p
 test("title bar: small 150% window with a few tabs still shows tab labels", async ({
   page
 }) => {
-  await page.addInitScript(initTauriRuntimeMock);
-  await page.setViewportSize({ width: 760, height: 800 });
   const seedProject = buildProjects()[0];
   const projects = [
     {
@@ -1834,14 +1876,16 @@ test("title bar: small 150% window with a few tabs still shows tab labels", asyn
       status: "ready"
     }
   ];
-  await mockProjects(page, projects, DEFAULT_SRT, {
-    ...buildSettings(),
-    interface_scale: 1.5
+  await openExistingProjectInWorkbench(page, {
+    viewport: { width: 760, height: 800 },
+    projects,
+    initialSettings: {
+      ...buildSettings(),
+      interface_scale: 1.5
+    },
+    projectTitle: "alpha.mp4",
+    useTauriRuntimeMock: true
   });
-
-  await page.goto("/");
-  await page.getByText("alpha.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
   await page.getByTestId("title-bar-home").click();
   await expect(page).toHaveURL(/\/$/);
   await page.getByText("beta.mp4").click();
@@ -1881,8 +1925,6 @@ test("navigation without sidebar: Projects to Editor to Home via title bar", asy
 });
 
 test("title bar: close active tab switches to adjacent or Home", async ({ page }) => {
-  await page.addInitScript(initTauriRuntimeMock);
-  await page.setViewportSize({ width: 900, height: 800 });
   const projects = buildProjects();
   projects[0].status = "ready";
   projects.push({
@@ -1892,11 +1934,11 @@ test("title bar: close active tab switches to adjacent or Home", async ({ page }
     video_path: "C:\\fake\\other.mp4",
     status: "ready"
   });
-  await mockProjects(page, projects);
-
-  await page.goto("/");
-  await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
+  await openExistingProjectInWorkbench(page, {
+    viewport: { width: 900, height: 800 },
+    projects,
+    useTauriRuntimeMock: true
+  });
   await page.getByTestId("title-bar-home").click();
   await expect(page).toHaveURL(/\/$/);
   await page.getByText("other.mp4").click();
@@ -1916,8 +1958,6 @@ test("title bar: close active tab switches to adjacent or Home", async ({ page }
 test("title bar: close non-active tab removes tab without navigation", async ({
   page
 }) => {
-  await page.addInitScript(initTauriRuntimeMock);
-  await page.setViewportSize({ width: 900, height: 800 });
   const projects = buildProjects();
   projects[0].status = "ready";
   projects.push({
@@ -1927,11 +1967,11 @@ test("title bar: close non-active tab removes tab without navigation", async ({
     video_path: "C:\\fake\\other.mp4",
     status: "ready"
   });
-  await mockProjects(page, projects);
-
-  await page.goto("/");
-  await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
+  await openExistingProjectInWorkbench(page, {
+    viewport: { width: 900, height: 800 },
+    projects,
+    useTauriRuntimeMock: true
+  });
   await page.getByTestId("title-bar-home").click();
   await expect(page).toHaveURL(/\/$/);
   await page.getByText("other.mp4").click();
@@ -2293,7 +2333,6 @@ test("workbench checklist uses a wider, scroll-safe layout at 150% interface siz
 });
 
 test("workbench music prompt stays below the checklist content", async ({ page }) => {
-  await page.setViewportSize({ width: 1300, height: 760 });
   const projects = buildProjects();
   const startedAt = new Date(Date.now() - 1_000).toISOString();
   const ts = new Date().toISOString();
@@ -2354,14 +2393,15 @@ test("workbench music prompt stays below the checklist content", async ({ page }
       }
     ]
   };
-  await mockProjects(page, projects, null, {
-    ...buildSettings(),
-    interface_scale: 1.5
+  await openExistingProjectInWorkbench(page, {
+    viewport: { width: 1300, height: 760 },
+    projects,
+    initialSrtText: null,
+    initialSettings: {
+      ...buildSettings(),
+      interface_scale: 1.5
+    }
   });
-
-  await page.goto("/");
-  await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
   await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
 
   const beforeLayout = await page.evaluate(() => {
@@ -3064,55 +3104,55 @@ test("app layout does not replay old export-complete toasts on launch", async ({
 });
 
 test("new project auto-starts subtitle creation in Workbench", async ({ page }) => {
-  await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
   const defaultSettings = buildSettings();
-  const api = await mockProjects(page, projects, null, {
-    ...defaultSettings,
-    subtitle_mode: "word_highlight",
-    subtitle_style: {
-      ...defaultSettings.subtitle_style,
-      preset: "Large outline",
-      highlight_color: "#00FF99",
-      highlight_opacity: 0.35,
-      appearance: {
-        ...defaultSettings.subtitle_style.appearance,
-        font_family: "Assistant",
-        font_size: 61,
-        text_align: "left",
-        line_spacing: 1.7,
-        text_color: "#00FF99",
-        text_opacity: 0.55,
-        letter_spacing: 2.5,
-        outline_enabled: true,
-        outline_width: 5,
-        outline_color: "#111111",
-        shadow_enabled: true,
-        shadow_strength: 8,
-        shadow_offset_x: 3,
-        shadow_offset_y: 4,
-        shadow_color: "#222222",
-        shadow_opacity: 0.8,
-        background_mode: "word",
-        subtitle_mode: "word_highlight",
-        highlight_color: "#00FF99"
-      }
-    }
-  });
-
-  await page.goto("/");
   const importRequest = page.waitForRequest(
     (request) => request.url().includes("/projects/import") && request.method() === "POST"
   );
   const createJobRequest = page.waitForRequest(
     (request) => request.url().includes("/jobs") && request.method() === "POST"
   );
-  await page.getByTestId("new-project-input").setInputFiles({
-    name: "fresh.mp4",
-    mimeType: "video/mp4",
-    buffer: Buffer.from("fake")
+  const { api } = await importProjectToWorkbench(page, {
+    projects,
+    file: {
+      name: "fresh.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("fake")
+    },
+    initialSrtText: null,
+    initialSettings: {
+      ...defaultSettings,
+      subtitle_mode: "word_highlight",
+      subtitle_style: {
+        ...defaultSettings.subtitle_style,
+        preset: "Large outline",
+        highlight_color: "#00FF99",
+        highlight_opacity: 0.35,
+        appearance: {
+          ...defaultSettings.subtitle_style.appearance,
+          font_family: "Assistant",
+          font_size: 61,
+          text_align: "left",
+          line_spacing: 1.7,
+          text_color: "#00FF99",
+          text_opacity: 0.55,
+          letter_spacing: 2.5,
+          outline_enabled: true,
+          outline_width: 5,
+          outline_color: "#111111",
+          shadow_enabled: true,
+          shadow_strength: 8,
+          shadow_offset_x: 3,
+          shadow_offset_y: 4,
+          shadow_color: "#222222",
+          shadow_opacity: 0.8,
+          background_mode: "word",
+          subtitle_mode: "word_highlight",
+          highlight_color: "#00FF99"
+        }
+      }
+    }
   });
-  await page.waitForURL("**/workbench/project-new-1");
   const importPayload = await importRequest;
   expect(await importPayload.headerValue("x-cue-filename")).toBe("fresh.mp4");
   const createRequest = await createJobRequest;
@@ -3181,19 +3221,20 @@ test("new project auto-starts subtitle creation in Workbench", async ({ page }) 
 test("new project auto-seeks to the first generated subtitle before leaving auto-edit mode", async ({
   page
 }) => {
-  await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
   const delayedGeneratedSrt =
     "1\n00:00:05,000 --> 00:00:08,000\nGenerated subtitle line\n";
-  await mockProjects(page, projects, null, buildSettings(), delayedGeneratedSrt);
-
-  await page.goto("/");
-  await page.getByTestId("new-project-input").setInputFiles({
-    name: "fresh-delayed.mp4",
-    mimeType: "video/mp4",
-    buffer: Buffer.from("fake")
+  await importProjectToWorkbench(page, {
+    projects,
+    file: {
+      name: "fresh-delayed.mp4",
+      mimeType: "video/mp4",
+      buffer: Buffer.from("fake")
+    },
+    initialSrtText: null,
+    initialSettings: buildSettings(),
+    generatedSubtitlesText: delayedGeneratedSrt
   });
-  await page.waitForURL("**/workbench/project-new-1");
 
   await primeVideoState(page, { playing: false, currentTime: 0, durationSeconds: 65 });
 
@@ -3671,54 +3712,6 @@ test("off-screen saved subtitle position is auto-corrected and persisted", async
     .toBeGreaterThan(0);
 });
 
-test.skip("vertical anchor middle offset matches overlay direction in wide and narrow layouts", async ({ page }) => {
-  // Position is now set by dragging on the video; Effects pane Position controls removed.
-  const projects = buildProjects();
-  await mockProjects(page, projects);
-
-  const getSubtitleTop = async () =>
-    page.evaluate(() => {
-      const subtitle = document.querySelector("[data-testid='workbench-active-subtitle']");
-      if (!(subtitle instanceof HTMLElement)) {
-        return null;
-      }
-      return subtitle.getBoundingClientRect().top;
-    });
-
-  for (const viewport of [
-    { width: 1300, height: 800 },
-    { width: 900, height: 800 }
-  ]) {
-    await page.setViewportSize(viewport);
-    await page.goto("/");
-    await page.getByText("good.mp4").click();
-    await page.waitForURL("**/workbench/project-1");
-    await primeVideoState(page, { playing: false, currentTime: 1.2 });
-    await expect(page.getByTestId("workbench-active-subtitle")).toHaveCount(1);
-
-    await setVerticalAnchor(page, "Middle");
-    await setVerticalOffset(page, "20");
-    const middleTopAt20 = await getSubtitleTop();
-    expect(middleTopAt20).not.toBeNull();
-
-    await setVerticalOffset(page, "80");
-    const middleTopAt80 = await getSubtitleTop();
-    expect(middleTopAt80).not.toBeNull();
-    expect(middleTopAt80 ?? 0).toBeLessThan(middleTopAt20 ?? 0);
-
-    await setVerticalAnchor(page, "Top");
-    await setVerticalOffset(page, "24");
-    const topAnchorTop = await getSubtitleTop();
-    expect(topAnchorTop).not.toBeNull();
-
-    await setVerticalAnchor(page, "Bottom");
-    await setVerticalOffset(page, "24");
-    const bottomAnchorTop = await getSubtitleTop();
-    expect(bottomAnchorTop).not.toBeNull();
-    expect(bottomAnchorTop ?? 0).toBeGreaterThan(topAnchorTop ?? 0);
-  }
-});
-
 test("subtitle drag release keeps controls hidden until the pointer moves again", async ({ page }) => {
   await page.addInitScript(initTauriRuntimeMock);
   await page.setViewportSize({ width: 1300, height: 800 });
@@ -4023,31 +4016,6 @@ test("floating toolbar font size input opens presets on first click", async ({ p
   await expect(fontSizeTrigger).toBeFocused();
 });
 
-test.skip("no-overlap scenario does not push subtitle position when controls appear", async ({ page }) => {
-  // Position is now set by dragging; test required Top/24 from removed Position UI.
-  await page.setViewportSize({ width: 1300, height: 800 });
-  const projects = buildProjects();
-  await mockProjects(page, projects);
-
-  await page.goto("/");
-  await page.getByText("good.mp4").click();
-  await page.waitForURL("**/workbench/project-1");
-
-  await primeVideoState(page, { playing: false, currentTime: 1.2 });
-  await setVerticalAnchor(page, "Top");
-  await setVerticalOffset(page, "24");
-
-  const subtitleButton = page.getByTestId("workbench-active-subtitle");
-  await expect(subtitleButton).toHaveCount(1);
-  const subtitleRectBefore = await readClientRect(subtitleButton);
-
-  await showVideoControls(page);
-  await waitForActiveSubtitleRectToSettle(page, DRAG_SETTLE_MS);
-
-  const subtitleRectAfter = await readClientRect(subtitleButton);
-  expect(Math.abs(subtitleRectAfter.top - subtitleRectBefore.top)).toBeLessThanOrEqual(1);
-});
-
 test("video controls hide immediately on mouse leave", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();
@@ -4073,8 +4041,6 @@ test("edit overlay geometry matches preview subtitle and controls do not shift e
   await page.waitForURL("**/workbench/project-1");
 
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
-  await setVerticalAnchor(page, "Bottom");
-  await setVerticalOffset(page, "63");
   await selectToolbarFont(page, /Assistant/, "Regular");
   await setToolbarFontSize(page, 66);
   await dragActiveSubtitleTo(page, 0.5, 0.4, "editor");
@@ -4235,9 +4201,6 @@ test("tauri subtitle editor geometry aligns with preview and uses Qt-calibrated 
   await page.waitForURL("**/workbench/project-1");
 
   await primeVideoState(page, { playing: false, currentTime: 1.2 });
-  await setVerticalAnchor(page, "Bottom");
-  await setVerticalOffset(page, "63");
-
   await selectToolbarFont(page, /Assistant/, "Regular");
   await setToolbarFontSize(page, 66);
   await dragActiveSubtitleTo(page, 0.5, 0.4, "editor");
