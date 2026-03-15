@@ -1,6 +1,30 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 3
 
+function Remove-EngineRuntimeLibFiles {
+    param([string]$RootPath)
+
+    if (-not (Test-Path $RootPath)) {
+        return @()
+    }
+
+    $libFiles = Get-ChildItem -Path $RootPath -Recurse -Filter "*.lib" -File -ErrorAction SilentlyContinue
+    foreach ($file in $libFiles) {
+        Remove-Item -Force $file.FullName
+    }
+    return $libFiles
+}
+
+function Assert-NoEngineRuntimeLibFiles {
+    param([string]$RootPath)
+
+    $remaining = Get-ChildItem -Path $RootPath -Recurse -Filter "*.lib" -File -ErrorAction SilentlyContinue
+    if ($remaining) {
+        $samplePaths = $remaining | Select-Object -First 20 -ExpandProperty FullName
+        throw "Packaged engine still contains .lib runtime files:`n$($samplePaths -join "`n")"
+    }
+}
+
 $repo = Split-Path $PSScriptRoot -Parent
 Set-Location $repo
 
@@ -44,27 +68,8 @@ if (-not (Test-Path $binDir)) {
 $ffmpegTarget = Join-Path $binDir "ffmpeg.exe"
 $ffprobeTarget = Join-Path $binDir "ffprobe.exe"
 
-if (-not (Test-Path $ffmpegTarget)) {
-    $ffmpegCommand = Get-Command ffmpeg -ErrorAction SilentlyContinue
-    if ($ffmpegCommand) {
-        Copy-Item -Force $ffmpegCommand.Source $ffmpegTarget
-    }
-}
-
-if (-not (Test-Path $ffprobeTarget)) {
-    $ffprobeCommand = Get-Command ffprobe -ErrorAction SilentlyContinue
-    if ($ffprobeCommand) {
-        Copy-Item -Force $ffprobeCommand.Source $ffprobeTarget
-    }
-}
-
-if (-not (Test-Path $ffmpegTarget) -or -not (Test-Path $ffprobeTarget)) {
-    Write-Host "[INFO] Downloading FFmpeg binaries..."
-    & (Join-Path $repo "scripts\download_ffmpeg.bat")
-    if ($LASTEXITCODE -ne 0) {
-        throw "download_ffmpeg.bat failed."
-    }
-}
+Write-Host "[INFO] Syncing pinned FFmpeg binaries..."
+& (Join-Path $repo "scripts\download_ffmpeg.ps1")
 
 if (-not (Test-Path $ffmpegTarget)) {
     throw "FFmpeg is missing at $ffmpegTarget"
@@ -128,6 +133,13 @@ if ($openMpSource) {
     }
     Write-Host "[INFO] Normalized OpenMP runtime to $openMpTarget"
 }
+
+$removedLibFiles = @(Remove-EngineRuntimeLibFiles -RootPath $internalRoot)
+if ($removedLibFiles.Count -gt 0) {
+    Write-Host "[INFO] Removed $($removedLibFiles.Count) packaged .lib files from engine runtime payload."
+}
+Assert-NoEngineRuntimeLibFiles -RootPath $internalRoot
+Write-Host "[INFO] Verified packaged engine contains no .lib runtime files."
 
 if (-not (Test-Path $engineArchiveDirectory)) {
     throw "Engine archive directory is missing at $engineArchiveDirectory"

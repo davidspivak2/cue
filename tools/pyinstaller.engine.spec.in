@@ -47,8 +47,13 @@ def collect_or_empty(collector: Callable[[str], object], package_name: str, fall
         return fallback
 
 
-def packaged_entry_path(entry: tuple[str, ...]) -> str:
-    return str(entry[0])
+def packaged_entry_path(entry: object) -> str:
+    name = getattr(entry, "name", None)
+    if name:
+        return str(name)
+    if isinstance(entry, tuple) and entry:
+        return str(entry[0])
+    return str(entry)
 
 
 def packaged_path_parts(path: str) -> list[str]:

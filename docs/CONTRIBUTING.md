@@ -61,6 +61,8 @@ winget install -e --id Gyan.FFmpeg
 
 The app looks for `bin\ffmpeg.exe` / `bin\ffprobe.exe` first, then falls back to the system PATH.
 
+For Windows release packaging, `scripts\build_engine.ps1` now provisions a pinned Gyan `8.0.1` essentials build into `bin\` instead of copying a machine-local FFmpeg from `PATH`. You can override the download source for packaging with `CUE_FFMPEG_URL` if you intentionally need a different archive.
+
 ### Running the app (Windows)
 
 The preferred one-command entrypoint:
@@ -223,6 +225,7 @@ scripts\build_release.cmd
 ```
 
 That script rebuilds `desktop/src-tauri/cue-local-engine.zip` first, then runs the Tauri installer build.
+The engine rebuild step also refreshes the pinned FFmpeg package used for the packaged backend, so installer size is not affected by whichever FFmpeg happens to be installed on the build machine.
 
 If you only need to rebuild the Tauri installers and the engine archive is already current:
 
