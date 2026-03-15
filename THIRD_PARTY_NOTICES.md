@@ -9,14 +9,15 @@ It is intentionally curated. It is not a full transitive dependency inventory, s
 Cue redistributes `ffmpeg.exe` and `ffprobe.exe` for local audio/video processing.
 
 - Source used by this repo: Gyan Windows builds, downloaded by `scripts\download_ffmpeg.ps1`
+- Pinned packaged artifact: `https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.0.1-essentials_build.zip`
 - Upstream project: <https://ffmpeg.org/>
 - Build provider: <https://www.gyan.dev/ffmpeg/builds/>
-- Current bundled binary report: `ffmpeg version 8.0.1-full_build-www.gyan.dev`
+- Current bundled binary report: `ffmpeg version 8.0.1-essentials_build-www.gyan.dev`
 - Current bundled binary configuration includes: `--enable-gpl --enable-version3`
 
 Important note:
 
-- The Gyan "full build" enables many optional codec and library features.
+- Cue's packaged Windows build uses the pinned Gyan "essentials" build for reproducible installer size.
 - This notice file does not attempt to reproduce a full per-library audit of every FFmpeg build flag.
 - For full FFmpeg licensing guidance, see <https://ffmpeg.org/legal.html>.
 

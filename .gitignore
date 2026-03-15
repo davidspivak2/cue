@@ -8,6 +8,7 @@ HebrewSubtitleGUI.spec
 CueEngine.spec
 bin/ffmpeg.exe
 bin/ffprobe.exe
+bin/ffmpeg-source.json
 debug_punct_matrix.py
 debug_raw_segments.py
 docs/handoffs
