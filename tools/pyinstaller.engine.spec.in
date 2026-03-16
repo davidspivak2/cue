@@ -32,11 +32,40 @@ EXCLUDED_PACKAGE_EXTENSIONS = {
 }
 EXCLUDED_PACKAGE_FILE_NAMES = {"meson.build", "readme", "readme.md", "readme.txt"}
 EXCLUDED_PACKAGE_PATH_PARTS = {"tests", "testing"}
+EXCLUDED_TOP_LEVEL_PACKAGES = {"matplotlib", "scipy", "sklearn"}
 EXCLUDED_PACKAGE_PATH_SNIPPETS = {
     "sklearn/datasets/data/",
     "sklearn/datasets/descr/",
     "sklearn/datasets/images/",
     "sklearn/svm/src/",
+}
+EXCLUDED_PACKAGE_PATH_PREFIXES = {
+    "torch/_inductor/",
+    "torch/_dynamo/",
+    "torch/onnx/",
+    "transformers/data/",
+    "transformers/distributed/",
+    "transformers/generation/",
+    "transformers/image_",
+    "transformers/integrations/",
+    "transformers/kernels/",
+    "transformers/loss/",
+    "transformers/onnx/",
+    "transformers/pipelines/",
+    "transformers/quantizers/",
+    "transformers/trainer",
+    "transformers/training_args",
+    "transformers/video_",
+}
+ALLOWED_TRANSFORMERS_MODEL_PREFIXES = {
+    "transformers/models/auto/",
+    "transformers/models/wav2vec2/",
+    "transformers/models/wav2vec2_bert/",
+}
+ALLOWED_TRANSFORMERS_PIPELINE_PATHS = {
+    "transformers/pipelines/__init__.py",
+    "transformers/pipelines/base.py",
+    "transformers/pipelines/pt_utils.py",
 }
 
 
@@ -62,12 +91,23 @@ def packaged_path_parts(path: str) -> list[str]:
 
 def is_runtime_packaged_path(path: str) -> bool:
     normalized_path = "/".join(packaged_path_parts(path))
+    path_parts = packaged_path_parts(path)
     file_name = os.path.basename(path).lower()
     if os.path.splitext(path)[1].lower() in EXCLUDED_PACKAGE_EXTENSIONS:
         return False
     if file_name in EXCLUDED_PACKAGE_FILE_NAMES:
         return False
-    if any(part in EXCLUDED_PACKAGE_PATH_PARTS for part in packaged_path_parts(path)):
+    if path_parts and path_parts[0] in EXCLUDED_TOP_LEVEL_PACKAGES:
+        return False
+    if any(part in EXCLUDED_PACKAGE_PATH_PARTS for part in path_parts):
+        return False
+    if normalized_path.startswith("transformers/pipelines/"):
+        return normalized_path in ALLOWED_TRANSFORMERS_PIPELINE_PATHS
+    if any(normalized_path.startswith(prefix) for prefix in EXCLUDED_PACKAGE_PATH_PREFIXES):
+        return False
+    if normalized_path.startswith("transformers/models/") and not any(
+        normalized_path.startswith(prefix) for prefix in ALLOWED_TRANSFORMERS_MODEL_PREFIXES
+    ):
         return False
     return not any(snippet in normalized_path for snippet in EXCLUDED_PACKAGE_PATH_SNIPPETS)
 
@@ -97,6 +137,21 @@ def collect_package_submodules(package_name: str) -> list[str]:
     return collect_or_empty(collect_submodules, package_name, [])
 
 
+def collect_package_payload_without_hiddenimports(
+    package_name: str,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    pkg_datas, pkg_binaries, _pkg_hidden = collect_package_payload(package_name)
+    return pkg_datas, pkg_binaries
+
+
+def collect_selected_submodules(package_names: tuple[str, ...]) -> list[str]:
+    hidden: list[str] = []
+    for package_name in package_names:
+        hidden.append(package_name)
+        hidden += collect_package_submodules(package_name)
+    return list(dict.fromkeys(hidden))
+
+
 binaries: list[tuple[str, str]] = []
 ffmpeg_path = os.path.join(project_dir, "bin", "ffmpeg.exe")
 ffprobe_path = os.path.join(project_dir, "bin", "ffprobe.exe")
@@ -117,17 +172,60 @@ for package_name in (
     "torch",
     "torchaudio",
 ):
-    pkg_datas, pkg_binaries, pkg_hidden = collect_package_payload(package_name)
+    pkg_datas, pkg_binaries = collect_package_payload_without_hiddenimports(package_name)
     datas += pkg_datas
     binaries += pkg_binaries
-    hiddenimports += pkg_hidden
 
 binaries += collect_package_dynamic_libs("av")
 
-hiddenimports += collect_package_submodules("av")
-hiddenimports += collect_package_submodules("whisperx")
-hiddenimports += collect_package_submodules("torch")
-hiddenimports += collect_package_submodules("torchaudio")
+hiddenimports += collect_selected_submodules(
+    (
+        "av",
+        "faster_whisper",
+        "faster_whisper.audio",
+        "faster_whisper.feature_extractor",
+        "faster_whisper.tokenizer",
+        "faster_whisper.transcribe",
+        "faster_whisper.utils",
+        "faster_whisper.vad",
+        "whisperx",
+        "whisperx.alignment",
+        "whisperx.asr",
+        "whisperx.audio",
+        "whisperx.schema",
+        "whisperx.utils",
+        "whisperx.vads",
+        "whisperx.vads.silero",
+        "whisperx.vads.vad",
+        "torch.cuda",
+        "torch.nn",
+        "torch.nn.functional",
+        "torch.utils.data",
+        "torchaudio.functional",
+        "torchaudio.pipelines",
+        "torchaudio.transforms",
+    )
+)
+hiddenimports += [
+    "ctranslate2",
+    "tokenizers",
+    "torch",
+    "torchaudio",
+    "transformers",
+    "transformers.configuration_utils",
+    "transformers.feature_extraction_utils",
+    "transformers.modeling_utils",
+    "transformers.models.auto",
+    "transformers.models.wav2vec2",
+    "transformers.models.wav2vec2_bert",
+    "transformers.pipelines",
+    "transformers.processing_utils",
+    "transformers.pipelines.base",
+    "transformers.pipelines.pt_utils",
+    "transformers.tokenization_utils",
+    "transformers.tokenization_utils_base",
+]
+hiddenimports = list(dict.fromkeys(hiddenimports))
 
 runtime_hooks = [os.path.join("runtime_hooks", "runtime_env_setup.py")]
 
@@ -151,7 +249,22 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=runtime_hooks,
-    excludes=[],
+    excludes=[
+        "matplotlib",
+        "scipy",
+        "sklearn",
+        "torch._inductor",
+        "torch._dynamo",
+        "torch.onnx",
+        "transformers.integrations",
+        "transformers.onnx",
+        "transformers.trainer",
+        "transformers.trainer_callback",
+        "transformers.trainer_pt_utils",
+        "transformers.trainer_seq2seq",
+        "transformers.training_args",
+        "transformers.training_args_seq2seq",
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
