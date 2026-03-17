@@ -1019,6 +1019,7 @@ class Worker(QtCore.QObject):
             width=stream_info.width,
             height=stream_info.height,
             fps=stream_info.fps,
+            fps_arg=stream_info.fps_arg,
             video_bitrate=stream_info.video_bitrate,
             raw_path=None,
         )
@@ -1081,6 +1082,7 @@ class Worker(QtCore.QObject):
             segments,
             duration_seconds,
             plan.fps,
+            total_frames_override=stream_info.frame_count,
         )
         self.signals.log.emit(
             f"Overlay frames: total={total_frames} segments={len(frame_segments)}",
@@ -1403,16 +1405,32 @@ class Worker(QtCore.QObject):
         segments: list[OverlaySegment],
         duration_seconds: float,
         fps: float,
+        total_frames_override: Optional[int] = None,
     ) -> tuple[list[tuple[str, Optional[int], int]], int]:
-        total_frames = max(0, int(math.ceil(duration_seconds * fps)))
+        if total_frames_override is not None:
+            total_frames = max(0, int(total_frames_override))
+        else:
+            total_frames = max(0, int(math.ceil(duration_seconds * fps)))
         frame_segments: list[tuple[str, Optional[int], int]] = []
         frame_cursor = 0
         for segment in segments:
             if segment.start_seconds >= duration_seconds:
                 break
+            if frame_cursor >= total_frames:
+                break
             start_frame = int(round(segment.start_seconds * fps))
             end_frame = int(round(min(segment.end_seconds, duration_seconds) * fps))
             start_frame = max(frame_cursor, start_frame)
+            start_frame = min(start_frame, total_frames)
+            end_frame = min(end_frame, total_frames)
+            if (
+                segment.text.strip()
+                and segment.highlight_word_index is not None
+                and segment.end_seconds > segment.start_seconds
+                and end_frame <= start_frame
+                and start_frame < total_frames
+            ):
+                end_frame = start_frame + 1
             if start_frame > frame_cursor:
                 frame_segments.append(("", None, start_frame - frame_cursor))
             if end_frame > start_frame:
