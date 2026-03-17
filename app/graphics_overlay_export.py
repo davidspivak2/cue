@@ -21,7 +21,9 @@ class VideoStreamInfo:
     width: int
     height: int
     fps: float
+    fps_arg: str
     video_bitrate: Optional[int] = None
+    frame_count: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class GraphicsOverlayPlan:
     width: int
     height: int
     fps: float
+    fps_arg: str
     phase1_command: Optional[list[str]] = None
     phase2_command: Optional[list[str]] = None
     phase2_aac_command: Optional[list[str]] = None
@@ -87,11 +90,26 @@ def resolve_video_stream_info(video_path: Path) -> VideoStreamInfo:
     height = video_stream.get("height")
     if not width or not height:
         raise ValueError("Video size unavailable for overlay export")
-    frame_rate = _parse_frame_rate(video_stream.get("avg_frame_rate"))
+    avg_frame_rate_raw = video_stream.get("avg_frame_rate")
+    r_frame_rate_raw = video_stream.get("r_frame_rate")
+    frame_rate = _parse_frame_rate(avg_frame_rate_raw)
+    frame_rate_arg = avg_frame_rate_raw if frame_rate else None
     if not frame_rate:
-        frame_rate = _parse_frame_rate(video_stream.get("r_frame_rate"))
+        frame_rate = _parse_frame_rate(r_frame_rate_raw)
+        if frame_rate:
+            frame_rate_arg = r_frame_rate_raw
     if not frame_rate or frame_rate <= 0:
         frame_rate = 30.0
+        frame_rate_arg = "30"
+    raw_nb_frames = video_stream.get("nb_frames")
+    frame_count: Optional[int] = None
+    if raw_nb_frames not in (None, "N/A"):
+        try:
+            parsed_frame_count = int(raw_nb_frames)
+        except (TypeError, ValueError):
+            parsed_frame_count = 0
+        if parsed_frame_count > 0:
+            frame_count = parsed_frame_count
     raw_bitrate = video_stream.get("bit_rate")
     video_bitrate: Optional[int] = None
     if raw_bitrate is not None:
@@ -112,7 +130,9 @@ def resolve_video_stream_info(video_path: Path) -> VideoStreamInfo:
         width=int(width),
         height=int(height),
         fps=float(frame_rate),
+        fps_arg=str(frame_rate_arg),
         video_bitrate=video_bitrate,
+        frame_count=frame_count,
     )
 
 
@@ -124,6 +144,7 @@ def build_graphics_overlay_plan(
     width: int,
     height: int,
     fps: float,
+    fps_arg: str,
     video_bitrate: Optional[int] = None,
     raw_path: Optional[Path] = None,
 ) -> GraphicsOverlayPlan:
@@ -144,7 +165,7 @@ def build_graphics_overlay_plan(
             "-s",
             f"{width}x{height}",
             "-r",
-            f"{fps:.3f}",
+            fps_arg,
             "-i",
             "pipe:0",
             "-progress",
@@ -176,7 +197,7 @@ def build_graphics_overlay_plan(
             "-s",
             f"{width}x{height}",
             "-r",
-            f"{fps:.3f}",
+            fps_arg,
             "-i",
             "pipe:0",
             "-i",
@@ -269,7 +290,7 @@ def build_graphics_overlay_plan(
         "-s",
         f"{width}x{height}",
         "-r",
-        f"{fps:.3f}",
+        fps_arg,
         "-i",
         "pipe:0",
         "-progress",
@@ -314,7 +335,7 @@ def build_graphics_overlay_plan(
             "-s",
             f"{width}x{height}",
             "-r",
-            f"{fps:.3f}",
+            fps_arg,
             "-i",
             "pipe:0",
             "-progress",
@@ -379,6 +400,7 @@ def build_graphics_overlay_plan(
         width=width,
         height=height,
         fps=fps,
+        fps_arg=fps_arg,
         phase1_command=phase1_command,
         phase2_command=phase2_command,
         phase2_aac_command=phase2_aac_command,

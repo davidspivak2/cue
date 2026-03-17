@@ -1,8 +1,6 @@
 import * as React from "react";
 
 import { Info, Link, Unlink } from "lucide-react";
-import horizontalPaddingIconUrl from "./icons/padding-horizontal.svg";
-import verticalPaddingIconUrl from "./icons/padding-vertical.svg";
 
 import { ColorRow } from "./ColorPopover";
 import {
@@ -153,9 +151,9 @@ const buildStaticCardPreviewPayload = (
   );
 
 const effectOrder: WorkbenchEffectId[] = [
+  "background",
   "outline",
   "shadow",
-  "background",
   "karaoke"
 ];
 
@@ -399,46 +397,59 @@ const OpacityRow = ({
   </div>
 );
 
-const paddingAxisIconMaskStyle = (iconUrl: string): React.CSSProperties => ({
-  WebkitMaskImage: `url(${iconUrl})`,
-  maskImage: `url(${iconUrl})`,
-  WebkitMaskPosition: "center",
-  maskPosition: "center",
-  WebkitMaskRepeat: "no-repeat",
-  maskRepeat: "no-repeat",
-  WebkitMaskSize: "contain",
-  maskSize: "contain"
-});
-
-const PaddingAxisIcon = ({
-  iconUrl
-}: {
-  iconUrl: string;
-}) => (
+const PaddingHorizontalIcon = () => (
   <span
     aria-hidden="true"
     className="flex h-8 w-5 shrink-0 items-center justify-center text-muted-foreground"
   >
-    <span
-      className="block h-4 w-4 bg-current"
-      style={paddingAxisIconMaskStyle(iconUrl)}
-    />
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+    >
+      <rect x={2} y={2} width={20} height={20} rx={2} />
+      <path d="M6 6v12" />
+      <path d="M18 6v12" />
+    </svg>
+  </span>
+);
+
+const PaddingVerticalIcon = () => (
+  <span
+    aria-hidden="true"
+    className="flex h-8 w-5 shrink-0 items-center justify-center text-muted-foreground"
+  >
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+    >
+      <rect x={2} y={2} width={20} height={20} rx={2} />
+      <path d="M6 6h12" />
+      <path d="M6 18h12" />
+    </svg>
   </span>
 );
 
 const PaddingAxisRow = ({
-  iconUrl,
+  icon,
   label,
   value,
   onChange
 }: {
-  iconUrl: string;
+  icon: React.ReactNode;
   label: string;
   value: number;
   onChange: (value: number) => void;
 }) => (
   <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-    <PaddingAxisIcon iconUrl={iconUrl} />
+    {icon}
     <Slider
       min={PADDING_MIN}
       max={PADDING_MAX}
@@ -529,13 +540,13 @@ const PaddingRow = ({
       </div>
       <div className="space-y-2">
         <PaddingAxisRow
-          iconUrl={horizontalPaddingIconUrl}
+          icon={<PaddingHorizontalIcon />}
           label="Horizontal padding"
           value={horizontal}
           onChange={handleHorizontalChange}
         />
         <PaddingAxisRow
-          iconUrl={verticalPaddingIconUrl}
+          icon={<PaddingVerticalIcon />}
           label="Vertical padding"
           value={vertical}
           onChange={handleVerticalChange}
@@ -1008,9 +1019,12 @@ const WorkbenchEffectsPanel = ({
               </ToggleGroupItem>
             </ToggleGroup>
             {!karaokeActive && (
-              <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Info className="h-3 w-3 shrink-0 self-center" aria-hidden />
-                Selecting Around spoken word turns on Karaoke.
+              <p className="flex items-start gap-1 text-xs text-muted-foreground">
+                <Info
+                  className="mt-0.5 h-3 w-3 shrink-0"
+                  aria-hidden
+                />
+                Selecting "Around spoken word" turns on Karaoke effect.
               </p>
             )}
           </div>

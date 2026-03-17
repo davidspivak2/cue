@@ -85,4 +85,35 @@ test.describe("workbench preview timing helper", () => {
 
     expect(resolveHighlightWordIndexFromTimings(cue, 11.6, cueTiming)).toBe(1);
   });
+
+  test("keeps a clipped last word addressable until the cue ends", () => {
+    const cue = buildCue({
+      startSeconds: 49.94,
+      endSeconds: 56.1,
+      text: "in a rate of growth more than three times that of our population as"
+    });
+    const cueTiming = buildCueTiming({
+      cue_start: 49.94,
+      cue_end: 56.1,
+      cue_text: cue.text,
+      words: [
+        { text: "in", start: 49.94, end: 51.228, confidence: 0.7 },
+        { text: "a", start: 51.309, end: 51.349, confidence: 0.9 },
+        { text: "rate", start: 51.43, end: 51.631, confidence: 0.8 },
+        { text: "of", start: 51.671, end: 51.712, confidence: 0.9 },
+        { text: "growth", start: 51.772, end: 52.094, confidence: 0.8 },
+        { text: "more", start: 53.181, end: 53.342, confidence: 0.8 },
+        { text: "than", start: 53.382, end: 53.503, confidence: 0.9 },
+        { text: "three", start: 53.564, end: 53.785, confidence: 0.8 },
+        { text: "times", start: 53.845, end: 54.188, confidence: 0.7 },
+        { text: "that", start: 54.228, end: 54.49, confidence: 0.7 },
+        { text: "of", start: 55.214, end: 55.275, confidence: 0.9 },
+        { text: "our", start: 55.355, end: 55.456, confidence: 0.9 },
+        { text: "population", start: 55.496, end: 56.06, confidence: 0.6 },
+        { text: "as", start: 56.08, end: 56.12, confidence: 0.01 }
+      ]
+    });
+
+    expect(resolveHighlightWordIndexFromTimings(cue, 56.09, cueTiming)).toBe(13);
+  });
 });

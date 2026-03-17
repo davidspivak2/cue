@@ -1158,6 +1158,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [currentTimeSeconds, setCurrentTimeSeconds] = React.useState(0);
   const [durationSeconds, setDurationSeconds] = React.useState(0);
   const [isPlaying, setIsPlaying] = React.useState(false);
+  const playbackSyncFrameRef = React.useRef<number | null>(null);
   const [playPauseFeedback, setPlayPauseFeedback] = React.useState<"play" | "pause" | null>(null);
   const [playPauseFeedbackVisible, setPlayPauseFeedbackVisible] = React.useState(false);
   const playPauseFeedbackTimeoutsRef = React.useRef<BrowserTimeout[]>([]);
@@ -1398,6 +1399,45 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       height: Math.max(0, Math.round(element.videoHeight || 0))
     });
   }, []);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+    if (!isPlaying) {
+      if (playbackSyncFrameRef.current !== null) {
+        window.cancelAnimationFrame(playbackSyncFrameRef.current);
+        playbackSyncFrameRef.current = null;
+      }
+      return undefined;
+    }
+
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) {
+        return;
+      }
+      const element = videoRef.current;
+      if (!element || element.paused || element.ended) {
+        playbackSyncFrameRef.current = null;
+        return;
+      }
+      setCurrentTimeSeconds((previous) => {
+        const next = element.currentTime || 0;
+        return Math.abs(previous - next) >= 0.001 ? next : previous;
+      });
+      playbackSyncFrameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    playbackSyncFrameRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      if (playbackSyncFrameRef.current !== null) {
+        window.cancelAnimationFrame(playbackSyncFrameRef.current);
+        playbackSyncFrameRef.current = null;
+      }
+    };
+  }, [isPlaying]);
 
   const seekVideoToTime = React.useCallback((seconds: number) => {
     const safeTime = Math.max(0, seconds);

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.graphics_overlay_export import OverlaySegment
 import app.workers as workers_module
 from app.progress import ChecklistStep, ProgressStep, StepState
 
@@ -180,7 +181,7 @@ def test_alignment_uses_derived_result_path_when_timings_are_already_present(
     )
 
     assert state == StepState.SKIPPED
-    assert reason == "already timed"
+    assert reason == "Already timed"
     assert worker._word_timings_path == derived_path
 
 
@@ -270,3 +271,73 @@ def test_generate_srt_runs_alignment_even_in_static_mode(
         and detail == "Matching complete"
         for step_id, state, detail in checklist_events
     )
+
+
+def test_build_overlay_frame_segments_uses_source_frame_count_override(
+    tmp_path: Path,
+) -> None:
+    worker = workers_module.Worker(
+        task_type=workers_module.TaskType.GENERATE_SRT,
+        video_path=tmp_path / "video.mp4",
+        output_dir=tmp_path,
+    )
+
+    frame_segments, total_frames = worker._build_overlay_frame_segments(
+        [
+            OverlaySegment(
+                start_seconds=0.0,
+                end_seconds=0.2,
+                text="hello",
+                highlight_word_index=0,
+            )
+        ],
+        duration_seconds=0.2,
+        fps=24.0,
+        total_frames_override=4,
+    )
+
+    assert total_frames == 4
+    assert frame_segments == [("hello", 0, 4)]
+
+
+def test_build_overlay_frame_segments_keeps_short_highlighted_word_visible(
+    tmp_path: Path,
+) -> None:
+    worker = workers_module.Worker(
+        task_type=workers_module.TaskType.GENERATE_SRT,
+        video_path=tmp_path / "video.mp4",
+        output_dir=tmp_path,
+    )
+
+    frame_segments, total_frames = worker._build_overlay_frame_segments(
+        [
+            OverlaySegment(
+                start_seconds=0.0,
+                end_seconds=0.50,
+                text="first second",
+                highlight_word_index=0,
+            ),
+            OverlaySegment(
+                start_seconds=0.50,
+                end_seconds=0.52,
+                text="first second",
+                highlight_word_index=1,
+            ),
+            OverlaySegment(
+                start_seconds=0.52,
+                end_seconds=0.72,
+                text="next cue",
+                highlight_word_index=0,
+            ),
+        ],
+        duration_seconds=0.72,
+        fps=24.0,
+        total_frames_override=17,
+    )
+
+    assert total_frames == 17
+    assert frame_segments == [
+        ("first second", 0, 12),
+        ("first second", 1, 1),
+        ("next cue", 0, 4),
+    ]

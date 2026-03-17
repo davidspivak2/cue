@@ -8,6 +8,7 @@ from app.graphics_overlay_export import (
     OVERLAY_RESOLUTION_SCALE,
     _scale_style_for_supersampling,
     render_overlay_frame,
+    resolve_video_stream_info,
 )
 from app.subtitle_style import PRESET_DEFAULT, preset_defaults, resolve_style_for_frame
 
@@ -98,3 +99,34 @@ def test_export_style_resolves_frame_height_before_supersampling() -> None:
         resolved.line_bg_padding_top * OVERLAY_RESOLUTION_SCALE,
         abs=0.001,
     )
+
+
+def test_resolve_video_stream_info_preserves_exact_fps_and_frame_count(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        "app.graphics_overlay_export.get_ffprobe_json",
+        lambda _path: {
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "width": 640,
+                    "height": 480,
+                    "avg_frame_rate": "24000/1001",
+                    "r_frame_rate": "24000/1001",
+                    "bit_rate": "432581",
+                    "nb_frames": "1439",
+                }
+            ]
+        },
+    )
+
+    info = resolve_video_stream_info(tmp_path / "video.mp4")
+
+    assert info.width == 640
+    assert info.height == 480
+    assert info.fps == pytest.approx(24000 / 1001)
+    assert info.fps_arg == "24000/1001"
+    assert info.video_bitrate == 432581
+    assert info.frame_count == 1439
