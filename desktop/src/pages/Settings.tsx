@@ -1,9 +1,24 @@
 import * as React from "react";
 import { useTheme } from "next-themes";
 import { Laptop, Moon, Sun, Rabbit, Crosshair } from "lucide-react";
+import { isTauri } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import packageJson from "../../package.json";
 
 import EngineSkeletonLoader from "@/components/EngineSkeletonLoader";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -36,6 +51,12 @@ import {
   setLocalInterfaceScale,
   subscribeToInterfaceScaleChanges
 } from "@/lib/interfaceScale";
+import { CUE_CONTACT_EMAIL } from "@/lib/legalLinks";
+import {
+  LEGAL_DOC_BODY,
+  LEGAL_DOC_TITLES,
+  type LegalDocKey
+} from "@/lib/legalDocSources";
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends Record<string, unknown> ? DeepPartial<T[K]> : T[K];
@@ -222,6 +243,7 @@ const Settings = () => {
   const [pendingInterfaceScale, setPendingInterfaceScale] = React.useState<number | null>(
     null
   );
+  const [legalDocOpen, setLegalDocOpen] = React.useState<LegalDocKey | null>(null);
   const deviceInfo = useDeviceInfo();
   const isDeviceInfoLoading = useDeviceInfoLoading();
   const { isCalibrating, calibrationPct } = useCalibration();
@@ -258,6 +280,17 @@ const Settings = () => {
   const savePolicy = settings?.save_policy ?? "same_folder";
   const saveFolderValue = settings?.save_folder ?? "";
   const storedInterfaceScale = settings?.interface_scale ?? DEFAULT_INTERFACE_SCALE;
+  const isTauriEnv = isTauri();
+  const openExternalLink = React.useCallback(
+    async (url: string) => {
+      if (!isTauriEnv) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      await openUrl(url);
+    },
+    [isTauriEnv]
+  );
   const interfaceScale = pendingInterfaceScale ?? normalizeInterfaceScale(storedInterfaceScale);
   const interfaceScaleIndex = getInterfaceScaleIndex(interfaceScale);
   const showTranscriptionQualitySkeleton = deviceInfo === null && isDeviceInfoLoading;
@@ -1001,6 +1034,71 @@ const Settings = () => {
           </SettingsSection>
         </div>
       )}
+
+      <footer className="text-[0.7rem] text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:justify-start">
+          <span>{`v${packageJson.version}`}</span>
+          <span aria-hidden>•</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0 text-[0.7rem] font-normal text-primary underline-offset-4 hover:underline"
+              >
+                Legal
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-[12rem]">
+              <DropdownMenuItem onSelect={() => setLegalDocOpen("terms")}>
+                Terms
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setLegalDocOpen("privacy")}>
+                Privacy
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setLegalDocOpen("license")}>
+                License
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setLegalDocOpen("thirdPartyNotices")}>
+                Third-party notices
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div className="mt-3 text-center sm:text-left">
+          <span>Questions or feedback? </span>
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto inline p-0 text-[0.7rem] font-normal text-primary underline-offset-4 hover:underline"
+            onClick={() => void openExternalLink(`mailto:${CUE_CONTACT_EMAIL}`)}
+          >
+            {CUE_CONTACT_EMAIL}
+          </Button>
+        </div>
+      </footer>
+
+      <Dialog
+        open={legalDocOpen !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLegalDocOpen(null);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[80vh] max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {legalDocOpen ? LEGAL_DOC_TITLES[legalDocOpen] : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="overflow-hidden rounded-md border border-border/60 bg-muted/20">
+            <pre className="max-h-[55vh] overflow-y-auto whitespace-pre-wrap px-4 py-3 text-xs leading-5 text-muted-foreground">
+              {legalDocOpen ? LEGAL_DOC_BODY[legalDocOpen] : ""}
+            </pre>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -238,7 +238,7 @@ Outputs `.msi` and `.exe` installers under `desktop/src-tauri/target/release/bun
 
 Windows installers are currently x64-only.
 
-The packaged Windows installer flow now includes Cue's GPL license file and ships `THIRD_PARTY_NOTICES.md` with the app bundle.
+The packaged Windows installer flow shows Cue's installer terms during setup and ships `TERMS.md`, `PRIVACY.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md` with the app bundle.
 
 The live Windows packaging flow uses the archive resource `desktop/src-tauri/cue-local-engine.zip`. The old mirrored `desktop/src-tauri/engine/` folder is not part of the active release path.
 

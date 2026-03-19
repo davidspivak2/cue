@@ -32,6 +32,32 @@ def _word_highlight_style() -> dict[str, object]:
     }
 
 
+def test_create_project_rejects_unsupported_extension(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    bad_path = tmp_path / "song.mp3"
+    bad_path.write_bytes(b"x")
+    with pytest.raises(HTTPException) as exc_info:
+        project_store.create_project(str(bad_path))
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "unsupported_video_type"
+
+
+def test_relink_project_rejects_unsupported_extension(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    good_path = tmp_path / "video.mp4"
+    good_path.write_text("video", encoding="utf-8")
+    summary = project_store.create_project(str(good_path))
+    project_id = summary["project_id"]
+    bad_path = tmp_path / "song.mp3"
+    bad_path.write_bytes(b"x")
+    with pytest.raises(HTTPException) as exc_info:
+        project_store.relink_project(project_id, str(bad_path))
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "unsupported_video_type"
+
+
 def test_create_list_relink_update(tmp_path: Path, monkeypatch) -> None:
     _setup_env(tmp_path, monkeypatch)
 

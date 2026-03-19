@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from app.config import read_diagnostics_enabled
 from app.progress import ProgressController
 
 
@@ -41,19 +42,22 @@ class RunnerSettings:
     highlight_color: str
 
 
-def _configure_logging() -> tuple[logging.Logger, Path, logging.FileHandler]:
-    from app.paths import get_logs_dir
-
-    log_dir = get_logs_dir()
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = log_dir / f"cue_{timestamp}.log"
-
+def _configure_logging() -> tuple[logging.Logger, Optional[Path], logging.Handler]:
     logger = logging.getLogger("cue")
     logger.setLevel(logging.INFO)
-    handler = logging.FileHandler(log_path, encoding="utf-8")
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-    handler.setFormatter(formatter)
     logger.handlers.clear()
+    log_path: Optional[Path] = None
+    if read_diagnostics_enabled():
+        from app.paths import get_logs_dir
+
+        log_dir = get_logs_dir()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = log_dir / f"cue_{timestamp}.log"
+        handler: logging.Handler = logging.FileHandler(log_path, encoding="utf-8")
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        handler.setFormatter(formatter)
+    else:
+        handler = logging.NullHandler()
     logger.addHandler(handler)
     logger.propagate = False
     return logger, log_path, handler
@@ -197,8 +201,9 @@ def main() -> int:
     )
     heartbeat_thread.start()
 
-    # Configure logging early so the first event can include log_path.
+    # Configure logging early so the first event can include log_path when enabled.
     logger, log_path, handler = _configure_logging()
+    log_path_text = str(log_path) if log_path is not None else None
 
     # Minimal validation and early emit so the frontend gets feedback before heavy imports.
     output_dir = Path(args.output_dir)
@@ -206,23 +211,25 @@ def main() -> int:
     video_path = Path(args.video_path)
     if args.task == "generate_srt":
         if not video_path.exists():
-            emitter.emit(
-                "error",
-                status="error",
-                message=f"Input path does not exist: {video_path}",
-                log_path=str(log_path),
-            )
+            payload = {
+                "status": "error",
+                "message": f"Input path does not exist: {video_path}",
+            }
+            if log_path_text is not None:
+                payload["log_path"] = log_path_text
+            emitter.emit("error", **payload)
             stop_heartbeat.set()
             return 1
     elif args.task == "burn_in":
         srt_path = Path(args.srt_path) if args.srt_path else None
         if srt_path is None or not srt_path.exists():
-            emitter.emit(
-                "error",
-                status="error",
-                message="Missing or invalid srt_path for burn_in task.",
-                log_path=str(log_path),
-            )
+            payload = {
+                "status": "error",
+                "message": "Missing or invalid srt_path for burn_in task.",
+            }
+            if log_path_text is not None:
+                payload["log_path"] = log_path_text
+            emitter.emit("error", **payload)
             stop_heartbeat.set()
             return 1
 
@@ -231,13 +238,14 @@ def main() -> int:
         if args.task == "generate_srt"
         else "Creating video with subtitles"
     )
-    emitter.emit(
-        "started",
-        heading=heading,
-        message="Preparing...",
-        log_path=str(log_path),
-        task=args.task,
-    )
+    started_payload = {
+        "heading": heading,
+        "message": "Preparing...",
+        "task": args.task,
+    }
+    if log_path_text is not None:
+        started_payload["log_path"] = log_path_text
+    emitter.emit("started", **started_payload)
     emitter.emit("progress", pct=0, message="Preparing...")
 
     try:
@@ -250,7 +258,8 @@ def main() -> int:
     app = QtWidgets.QApplication(sys.argv)
     _ = app
 
-    logger.info("Log file: %s", log_path)
+    if log_path_text is not None:
+        logger.info("Log file: %s", log_path_text)
 
     options = _parse_options(args.options_json)
     settings = _resolve_settings(options)
@@ -261,12 +270,13 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not video_path.exists():
-        emitter.emit(
-            "error",
-            status="error",
-            message=f"Input path does not exist: {video_path}",
-            log_path=str(log_path),
-        )
+        payload = {
+            "status": "error",
+            "message": f"Input path does not exist: {video_path}",
+        }
+        if log_path_text is not None:
+            payload["log_path"] = log_path_text
+        emitter.emit("error", **payload)
         stop_heartbeat.set()
         return 1
 
@@ -274,12 +284,13 @@ def main() -> int:
     word_timings_path = Path(args.word_timings_path) if args.word_timings_path else None
     style_path = Path(args.style_path) if args.style_path else None
     if args.task == "burn_in" and (srt_path is None or not srt_path.exists()):
-        emitter.emit(
-            "error",
-            status="error",
-            message="Missing or invalid srt_path for burn_in task.",
-            log_path=str(log_path),
-        )
+        payload = {
+            "status": "error",
+            "message": "Missing or invalid srt_path for burn_in task.",
+        }
+        if log_path_text is not None:
+            payload["log_path"] = log_path_text
+        emitter.emit("error", **payload)
         stop_heartbeat.set()
         return 1
 
@@ -321,10 +332,12 @@ def main() -> int:
         )
         emitter.emit(
             "started",
-            heading=heading,
-            message=message,
-            log_path=str(log_path),
-            task=args.task,
+            **({
+                "heading": heading,
+                "message": message,
+                "task": args.task,
+                **({"log_path": log_path_text} if log_path_text is not None else {}),
+            }),
         )
 
     def _on_progress(step_id: str, step_progress: object, label: str) -> None:
@@ -351,12 +364,10 @@ def main() -> int:
         )
 
     def _emit_terminal(event_type: str, message: str) -> None:
-        emitter.emit(
-            event_type,
-            status=event_type,
-            message=message,
-            log_path=str(log_path),
-        )
+        payload = {"status": event_type, "message": message}
+        if log_path_text is not None:
+            payload["log_path"] = log_path_text
+        emitter.emit(event_type, **payload)
 
     def _on_finished(success: bool, message: str, payload: dict) -> None:
         if finished_emitted.is_set():
@@ -364,7 +375,8 @@ def main() -> int:
         finished_emitted.set()
         if success:
             result_payload = dict(payload or {})
-            result_payload["log_path"] = str(log_path)
+            if log_path_text is not None:
+                result_payload["log_path"] = log_path_text
             emitter.emit("result", payload=result_payload)
             _emit_terminal("completed", message)
             return

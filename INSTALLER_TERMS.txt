@@ -1,0 +1,56 @@
+Cue Terms of Use
+Last updated: March 17, 2026
+
+These Terms of Use apply to the Cue desktop app and related releases published by David Spivak.
+
+1. Using Cue
+
+Cue is a desktop app for creating, editing, styling, and exporting subtitles for video files.
+You may use Cue only in a way that complies with applicable law and these terms.
+
+2. License to use the app
+
+Cue is made available to you under the app's open-source license and any notices included with the app.
+These terms describe how the released app is provided to end users. They do not replace the open-source license text that also ships with Cue.
+
+3. Your content and responsibility
+
+You are responsible for the videos, audio, subtitle files, fonts, and other content you use with Cue.
+You must have the necessary rights and permissions to process, edit, subtitle, export, copy, or distribute that content.
+You are responsible for reviewing exported files before sharing or publishing them.
+
+4. Backups and safe use
+
+Cue is a local desktop tool and may read, write, overwrite, or create files during normal use.
+You are responsible for keeping backups of important files and using the app carefully, especially before processing important or irreplaceable media.
+
+5. Acceptable use
+
+You may not use Cue in a way that violates law or another person's rights, attempts to bypass technical protections or access systems you do not control, distributes malware or other harmful content, or misrepresents ownership or authorization for the media you process.
+
+6. The app is provided as-is
+
+Cue is provided on an "as is" and "as available" basis.
+To the maximum extent allowed by law, David Spivak disclaims warranties of any kind, whether express, implied, or statutory, including implied warranties of merchantability, fitness for a particular purpose, title, non-infringement, accuracy, and uninterrupted operation.
+No promise is made that Cue will be error-free, secure, compatible with your system, or suitable for your specific workflow.
+
+7. Limitation of liability
+
+To the maximum extent allowed by law, David Spivak will not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or for any loss of data, profits, revenue, business, goodwill, or use arising out of or related to Cue.
+To the maximum extent allowed by law, if liability is found at all, the total liability related to Cue will be limited to the amount you paid for Cue, if any.
+
+8. Open-source and third-party software
+
+Cue includes or depends on open-source and other third-party software components.
+Their separate license terms, notices, and attribution requirements continue to apply where required.
+See the LICENSE file and THIRD_PARTY_NOTICES.md included with Cue for more information.
+
+9. Changes
+
+These terms may change in future releases of Cue.
+The version published with a given release applies to that release.
+
+10. Contact
+
+If you need to contact the publisher of Cue about these terms, email:
+davidspivak2@gmail.com

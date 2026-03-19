@@ -97,6 +97,8 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "mov", "m4v", "webm"]);
+const UNSUPPORTED_VIDEO_TYPE_MESSAGE =
+  "Unsupported file type. Choose MP4, MKV, MOV, M4V, or WEBM.";
 const MAX_DURATION_DIFF_SECONDS = 3;
 const HAS_HAD_VIDEOS_KEY = "cue_has_had_videos";
 const PROJECT_HUB_VIEW_KEY = "cue_project_hub_view";
@@ -531,6 +533,10 @@ const ProjectHub = () => {
         showBanner("error", "Could not read this file path. Please try a different file.");
         return;
       }
+      if (!isSupportedVideo(videoPath)) {
+        showBanner("error", UNSUPPORTED_VIDEO_TYPE_MESSAGE);
+        return;
+      }
       setBanner(null);
       setIsCreating(true);
       try {
@@ -779,7 +785,7 @@ const ProjectHub = () => {
       selection: RelinkSelection
     ) => {
       if (!isSupportedVideo(selection.fileName)) {
-        showBanner("error", "Unsupported file type. Choose an MP4, MKV, MOV, or M4V file.");
+        showBanner("error", UNSUPPORTED_VIDEO_TYPE_MESSAGE);
         return;
       }
       const warnings = buildRelinkWarnings(project, selection.fileName, selection.duration);

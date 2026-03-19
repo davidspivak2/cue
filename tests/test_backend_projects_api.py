@@ -117,6 +117,39 @@ def test_projects_endpoints(tmp_path: Path, monkeypatch) -> None:
         assert response.status_code == 200
 
 
+def test_create_project_rejects_unsupported_extension(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    bad_path = tmp_path / "audio.mp3"
+    bad_path.write_bytes(b"x")
+
+    with TestClient(backend_server.app) as client:
+        response = client.post("/projects", json={"video_path": str(bad_path)})
+        assert response.status_code == 422
+        assert response.json().get("detail") == "unsupported_video_type"
+
+
+def test_relink_project_rejects_unsupported_extension(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    good_path = tmp_path / "input.mp4"
+    good_path.write_text("video", encoding="utf-8")
+    bad_path = tmp_path / "audio.mp3"
+    bad_path.write_bytes(b"x")
+
+    with TestClient(backend_server.app) as client:
+        create_response = client.post("/projects", json={"video_path": str(good_path)})
+        assert create_response.status_code == 200
+        project_id = create_response.json()["project_id"]
+
+        relink_response = client.post(
+            f"/projects/{project_id}/relink",
+            json={"video_path": str(bad_path)},
+        )
+        assert relink_response.status_code == 422
+        assert relink_response.json().get("detail") == "unsupported_video_type"
+
+
 def test_project_import_endpoint_stores_browser_upload_and_serves_it(
     tmp_path: Path, monkeypatch
 ) -> None:
