@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
+from typing import Any
 
+from app.paths import get_config_path
 from app.subtitle_style import (
     normalize_style_model,
     resolve_effective_preset_style,
@@ -36,6 +39,24 @@ def _normalize_highlight_opacity(value: object) -> float:
         if 0.0 <= opacity <= 1.0:
             return opacity
     return DEFAULT_HIGHLIGHT_OPACITY
+
+
+def diagnostics_enabled(config: dict[str, Any] | Any) -> bool:
+    if not isinstance(config, dict):
+        return False
+    raw_diagnostics = config.get("diagnostics")
+    return isinstance(raw_diagnostics, dict) and raw_diagnostics.get("enabled") is True
+
+
+def read_diagnostics_enabled() -> bool:
+    config_path = get_config_path()
+    if not config_path.exists():
+        return False
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return diagnostics_enabled(raw)
 
 
 def apply_config_defaults(config: dict) -> dict:

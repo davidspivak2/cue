@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from app.config import read_diagnostics_enabled
+
 logger = logging.getLogger("cue")
 
 
@@ -110,14 +112,15 @@ def run_worker_inprocess(
     )
 
     log_path: Optional[Path] = None
-    try:
-        from app.paths import get_logs_dir
-        import datetime as _dt
-        log_dir = get_logs_dir()
-        ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = log_dir / f"cue_inprocess_{ts}.log"
-    except Exception:
-        pass
+    if read_diagnostics_enabled():
+        try:
+            from app.paths import get_logs_dir
+            import datetime as _dt
+            log_dir = get_logs_dir()
+            ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_path = log_dir / f"cue_inprocess_{ts}.log"
+        except Exception:
+            pass
 
     finished_emitted = False
 

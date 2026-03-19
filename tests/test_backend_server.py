@@ -521,6 +521,36 @@ def test_normalize_settings_keeps_ultra_when_ultra_available(
     assert normalized["transcription_quality"] == "ultra"
 
 
+def test_create_demo_job_does_not_create_trace_path_when_diagnostics_disabled(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    with TestClient(backend_server.app) as client:
+        response = client.post("/jobs", json={"kind": "demo"})
+
+    assert response.status_code == 201
+    job = backend_server.JOBS[response.json()["job_id"]]
+    assert job.trace_path is None
+
+
+def test_create_demo_job_creates_trace_path_when_diagnostics_enabled(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    settings = backend_server._read_settings_file()
+    settings["diagnostics"]["enabled"] = True
+    backend_server._write_settings_file(settings)
+
+    with TestClient(backend_server.app) as client:
+        response = client.post("/jobs", json={"kind": "demo"})
+
+    assert response.status_code == 201
+    job = backend_server.JOBS[response.json()["job_id"]]
+    assert job.trace_path is not None
+    assert job.trace_path.parent == get_logs_dir()
+
+
 def test_settings_put_accepts_ultra_when_available(tmp_path: Path, monkeypatch) -> None:
     _setup_env(tmp_path, monkeypatch)
     monkeypatch.setattr(backend_server, "ultra_available", lambda: True)

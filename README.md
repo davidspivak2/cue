@@ -30,9 +30,9 @@ Download the latest Windows installer from the [Releases](../../releases) page a
 
 Windows releases currently ship packaged desktop app installers for x64 only.
 
-The Windows installer bundle includes Cue's local engine archive (`cue-local-engine.zip`) and installs `THIRD_PARTY_NOTICES.md` with the app.
+The Windows installer bundle includes Cue's local engine archive (`cue-local-engine.zip`) and installs `TERMS.md`, `PRIVACY.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md` with the app.
 
-The NSIS `.exe` installer shows Cue's GPL license during setup.
+The NSIS `.exe` installer shows Cue's end-user terms during setup.
 
 ### macOS
 
@@ -72,6 +72,8 @@ Cue is licensed under [GPL-3.0-only](LICENSE).
 If someone distributes a modified version of Cue, they must also share the source code for that modified version under the same license.
 
 For redistributed third-party components in packaged Windows builds, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+For end-user legal terms and privacy details, see [TERMS.md](TERMS.md) and [PRIVACY.md](PRIVACY.md).
 
 ## Acknowledgments
 

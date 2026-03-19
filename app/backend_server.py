@@ -41,7 +41,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import project_store
-from app.config import apply_config_defaults
+from app.config import apply_config_defaults, diagnostics_enabled
 from app.ffmpeg_utils import ensure_ffmpeg_available, get_subprocess_kwargs
 from app.paths import (
     get_app_data_dir,
@@ -58,6 +58,7 @@ from app.transcription_device import (
     ultra_available,
     ultra_device,
 )
+from app.media_formats import SUPPORTED_BROWSER_VIDEO_EXTENSIONS
 from app.transcription_rtf import get_rtf_est, get_rtf_est_for_device
 
 
@@ -68,7 +69,6 @@ PING_INTERVAL_SECONDS = 12.0
 RUNNER_CANCEL_TIMEOUT_SECONDS = 8.0
 PROJECT_DELETE_CANCEL_TIMEOUT_SECONDS = 3.0
 BROWSER_UPLOAD_FILENAME_HEADER = "x-cue-filename"
-SUPPORTED_BROWSER_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".m4v", ".webm"}
 
 logger = logging.getLogger(__name__)
 _startup_warmup_task: Optional[asyncio.Task[None]] = None
@@ -1693,11 +1693,12 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
 
     job_id = str(uuid.uuid4())
     trace_path: Optional[Path] = None
-    try:
-        trace_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        trace_path = get_logs_dir() / f"job_trace_{job_id}_{trace_timestamp}.jsonl"
-    except Exception:  # noqa: BLE001
-        trace_path = None
+    if diagnostics_enabled(_read_settings_file()):
+        try:
+            trace_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            trace_path = get_logs_dir() / f"job_trace_{job_id}_{trace_timestamp}.jsonl"
+        except Exception:  # noqa: BLE001
+            trace_path = None
     job = JobState(
         job_id=job_id,
         status="queued",

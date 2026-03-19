@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from .ffmpeg_utils import generate_thumbnail, get_media_duration
+from .media_formats import require_supported_video_extension
 from .paths import get_projects_dir
 from .subtitle_style import normalize_style_payload
 
@@ -450,6 +451,7 @@ def delete_project(project_id: str) -> None:
 def create_project(video_path: str, *, style: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     if not isinstance(video_path, str) or not video_path.strip():
         raise HTTPException(status_code=422, detail="video_path_required")
+    require_supported_video_extension(video_path)
     with _STORE_LOCK:
         _ensure_store()
         canonical = _normalize_path(video_path)
@@ -486,6 +488,7 @@ def create_project(video_path: str, *, style: Optional[dict[str, Any]] = None) -
 def relink_project(project_id: str, video_path: str) -> dict[str, Any]:
     if not isinstance(video_path, str) or not video_path.strip():
         raise HTTPException(status_code=422, detail="video_path_required")
+    require_supported_video_extension(video_path)
     with _STORE_LOCK:
         _ensure_store()
         manifest = _read_manifest(project_id)

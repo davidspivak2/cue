@@ -42,8 +42,11 @@
       "nsis",
       "msi"
     ],
-    "licenseFile": "../../LICENSE",
+    "licenseFile": "../../INSTALLER_TERMS.txt",
     "resources": {
+      "../../LICENSE": "LICENSE",
+      "../../TERMS.md": "TERMS.md",
+      "../../PRIVACY.md": "PRIVACY.md",
       "cue-local-engine.zip": "cue-local-engine.zip",
       "icons/light-32.png": "icons/light-32.png",
       "icons/dark-32.png": "icons/dark-32.png",

@@ -31,6 +31,8 @@
         { "path": "$APPLOCALDATA/**" }
       ]
     },
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
     "opener:allow-reveal-item-in-dir",
     "mcp-bridge:default"
   ]
