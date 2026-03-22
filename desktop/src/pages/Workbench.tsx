@@ -6021,7 +6021,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     isElevatorMusicPromptVisible && showCreateElevatorMusicPromptShell;
 
   return (
-    <div data-testid="workbench" className="flex h-full min-h-0 flex-col gap-4">
+    <div data-testid="workbench" className="flex h-full min-h-0 flex-col gap-4 py-6 pr-6">
       <header
         className="flex items-center gap-2 pb-2"
         data-testid="workbench-top-bar"

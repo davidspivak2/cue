@@ -13,7 +13,7 @@ export function WorkbenchSkeleton({
   return (
     <div
       data-testid="workbench"
-      className={cn("flex h-full min-h-0 flex-col gap-4", className)}
+      className={cn("flex h-full min-h-0 flex-col gap-4 py-6 pr-6", className)}
       aria-busy="true"
       aria-label="Loading workbench"
     >

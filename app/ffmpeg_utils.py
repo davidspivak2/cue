@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 BIN_DIR_NAME = "bin"
 MISSING_FFMPEG_MESSAGE = (
@@ -160,6 +160,44 @@ def get_ffprobe_json(path: Path) -> Optional[dict[str, Any]]:
         return json.loads(result.stdout)
     except json.JSONDecodeError:
         return None
+
+
+def media_has_audio_stream(path: Path) -> Optional[bool]:
+    """
+    True if ffprobe reports at least one audio stream, False if none.
+    None if the file could not be probed (missing ffprobe, unreadable file, etc.).
+    """
+    data = get_ffprobe_json(path)
+    if not data:
+        return None
+    streams = data.get("streams")
+    if not isinstance(streams, list):
+        return False
+    for stream in streams:
+        if isinstance(stream, dict) and stream.get("codec_type") == "audio":
+            return True
+    return False
+
+
+def format_ffmpeg_failure_message(stderr_lines: Iterable[str]) -> str:
+    """
+    Turn ffmpeg stderr into a short explanation plus the original log for support.
+    """
+    tail_text = "\n".join(line for line in stderr_lines if line)
+    lower = tail_text.lower()
+    if "does not contain any stream" in lower and "output" in lower:
+        return (
+            "This video has no audio track, so subtitles cannot be generated from it.\n\n"
+            "Technical details (ffmpeg):\n"
+            + tail_text
+        )
+    if "no audio streams" in lower:
+        return (
+            "This video has no audio track, so subtitles cannot be generated from it.\n\n"
+            "Technical details (ffmpeg):\n"
+            + tail_text
+        )
+    return "Video processing failed.\n\nTechnical details (ffmpeg):\n" + tail_text
 
 
 def escape_ffmpeg_filter_path(path: os.PathLike | str) -> str:

@@ -282,7 +282,7 @@ const AppLayout = () => {
             style={{ paddingTop: TITLE_BAR_HEIGHT_PX } as React.CSSProperties}
           >
             {createPortal(<TitleBar />, document.body)}
-            <main className="flex min-h-0 flex-1 flex-col px-6 py-6">
+            <main className="flex min-h-0 flex-1 flex-col pl-6 pr-0">
               <TabHost />
             </main>
         <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>

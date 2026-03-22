@@ -28,10 +28,12 @@ from .config import (
 from .ffmpeg_utils import (
     ensure_ffmpeg_available,
     extract_raw_frame,
+    format_ffmpeg_failure_message,
     get_ffprobe_json,
     get_media_duration,
     get_runtime_mode,
     get_subprocess_kwargs,
+    media_has_audio_stream,
     resolve_ffmpeg_paths,
 )
 from .subtitle_style import (
@@ -756,6 +758,12 @@ class Worker(QtCore.QObject):
     def _extract_audio(self, audio_path: Path, apply_filter: bool, duration_seconds: Optional[float]) -> None:
         ffmpeg_path, _, _ = ensure_ffmpeg_available()
 
+        has_audio = media_has_audio_stream(self.video_path)
+        if has_audio is False:
+            raise RuntimeError(
+                "This video has no audio track, so subtitles cannot be generated from it."
+            )
+
         def _build_command(use_filter: bool) -> list[str]:
             command = [
                 str(ffmpeg_path),
@@ -1474,8 +1482,7 @@ class Worker(QtCore.QObject):
             raise CancelledError("Operation cancelled.")
 
         if return_code != 0:
-            tail_text = "\n".join(stderr_tail)
-            raise RuntimeError("Video processing failed. Details:\n" + tail_text)
+            raise RuntimeError(format_ffmpeg_failure_message(stderr_tail))
 
     def _run_ffmpeg_with_progress(
         self,
@@ -1605,8 +1612,7 @@ class Worker(QtCore.QObject):
         self._stop_smooth_progress()
 
         if return_code != 0:
-            tail_text = "\n".join(stderr_tail)
-            raise RuntimeError("Video processing failed. Details:\n" + tail_text)
+            raise RuntimeError(format_ffmpeg_failure_message(stderr_tail))
         if watchdog_triggered:
             raise RuntimeError("Video tool stalled while processing audio.")
 
@@ -1755,10 +1761,10 @@ class Worker(QtCore.QObject):
         self._stop_smooth_progress()
 
         if return_code != 0:
-            tail_text = "\n".join(stderr_tail)
+            lines = list(stderr_tail)
             if writer_error:
-                tail_text = f"{tail_text}\nOverlay writer error: {writer_error}"
-            raise RuntimeError("Video processing failed. Details:\n" + tail_text)
+                lines.append(f"Overlay writer error: {writer_error}")
+            raise RuntimeError(format_ffmpeg_failure_message(lines))
 
     def _run_ffmpeg_two_pass_single_pipeline(
         self,
@@ -1994,10 +2000,10 @@ class Worker(QtCore.QObject):
             )
         self._stop_smooth_progress()
         if return_code != 0:
-            tail_text = "\n".join(stderr_tail)
+            lines = list(stderr_tail)
             if writer_error:
-                tail_text = f"{tail_text}\nOverlay writer error: {writer_error}"
-            raise RuntimeError("Video processing failed. Details:\n" + tail_text)
+                lines.append(f"Overlay writer error: {writer_error}")
+            raise RuntimeError(format_ffmpeg_failure_message(lines))
         if writer_error:
             raise RuntimeError(f"Overlay writer failed: {writer_error}")
 

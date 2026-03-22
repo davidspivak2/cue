@@ -31,7 +31,11 @@ from .srt_splitter import (
     SplitterStats,
     split_segments_into_cues,
 )
-from .ffmpeg_utils import ensure_ffmpeg_available, get_subprocess_kwargs
+from .ffmpeg_utils import (
+    ensure_ffmpeg_available,
+    format_ffmpeg_failure_message,
+    get_subprocess_kwargs,
+)
 from .paths import get_models_dir
 from .transcription_config import build_transcription_config
 
@@ -404,8 +408,8 @@ def _extract_gap_wav(
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
-        detail = stderr or stdout or "ffmpeg failed"
-        raise RuntimeError(detail)
+        raw = stderr or stdout or "ffmpeg failed"
+        raise RuntimeError(format_ffmpeg_failure_message(raw.splitlines()))
 
 
 def _apply_vad_gap_rescue(
