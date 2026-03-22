@@ -31,9 +31,11 @@ debug_raw_segments.py
 logs/
 debug-*.log
 
-# IDE & agent tooling
+# Cursor / Codex — agent skills, rules, local project instructions
 .cursor/
 .codex/
+AGENTS.md
+.cursorrules
 
 # Local docs (not for repo)
 docs/handoffs
