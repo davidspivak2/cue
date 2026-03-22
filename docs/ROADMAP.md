@@ -1,137 +1,64 @@
 # Roadmap
 
-What we plan to ship and in what order. One-off migration notes sometimes stay in local `docs/internal/` and never hit GitHub.
-In the app, the project list is titled **Home** (your videos). Older write-ups here may still say “Projects” or “Project Hub.”
+What we plan to ship, in order. Notes that never leave the machine stay under `docs/internal/`. The project list in the app is **Home** (your videos); older docs may still say "Projects" or "Project Hub."
 
 ## Rules
-- Use this file for what ships next and in what order.
-- Detailed bug write-ups, repro steps, and issue-level validation notes live in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
-- If work is not listed here, it is not scheduled.
-- This file defines implementation order and acceptance criteria.
-- Each work item must include: Status, Deliverable, and Acceptance criteria.
 
-## Planned changes / additions
-- Diagnostics leftovers cleanup so diagnostics-only SRT and `word_timings.json` are not retained when diagnostics are disabled.
+- Scheduling lives here; bug write-ups and repro steps live in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
+- Anything not listed here is not scheduled.
+- Each item needs a status, deliverable, and acceptance criteria.
 
-## Now / Next (Queue)
-(Use a numbered list. Status tags must be one of: NEXT, IN PROGRESS, BLOCKED, DONE.)
+## Queue
 
-1. [NEXT] Support UX (error details + copy diagnostics + hosted send logs)
-   - Deliverable:
-     - Error UI includes a details drawer and a “Copy diagnostics” action.
-     - Settings support surface includes hosted “Send logs” with explicit user consent.
-     - Diagnostics tools remain in Settings only (error UI may show details, not tools).
-   - Acceptance criteria:
-     - Trigger an error: user can open details drawer and copy diagnostics text.
-     - User can send logs via a hosted receiver after seeing a clear consent summary of what will be shared.
-     - Log payload excludes rendered video output and redacts sensitive local-path data where possible.
-     - If upload fails, user still has a visible fallback path (`Copy diagnostics`).
+Statuses: NEXT, IN PROGRESS, BLOCKED, DONE.
 
-2. [NEXT] Export optimization: cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
-   - Deliverable:
-     - Video stream info cached earlier; export path uses cheap revalidation.
-     - “Getting video info” checklist row removed or adjusted if no longer accurate.
-   - Acceptance criteria:
-     - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
+1. **[NEXT] Support UX** (error details, copy diagnostics, hosted send logs)
+   - **Deliverable:** Error UI: details drawer and Copy diagnostics. Settings: hosted Send logs with explicit consent. Diagnostics tools only in Settings (errors may show details, not the full diagnostics toolkit).
+   - **Acceptance:** User can open details and copy diagnostics from an error. Send logs only after a clear consent summary; payload excludes rendered video and redacts sensitive paths where possible. Upload failure still leaves Copy diagnostics available. No diagnostics tools outside Settings.
 
-3. [NEXT] Diagnostics leftovers cleanup (diagnostics disabled)
-   - Deliverable:
-      - When diagnostics are disabled, diagnostics-only retention of SRT and `word_timings.json` is removed.
-      - Project artifacts required for normal editing/export may still be present.
-      - No diagnostics-only code path creates or keeps extra copies of subtitle timing artifacts when diagnostics are disabled.
-   - Acceptance criteria:
-      - With diagnostics disabled in Settings, processing a project does not create or retain diagnostics-only SRT/`word_timings.json` leftovers.
-      - Editing/export-required project artifacts remain available and functional.
-      - Diagnostics-only retention paths are confirmed disabled by code review and validation checks.
+2. **[NEXT] Export optimization**
+   - **Deliverable:** Cache video stream info earlier; export path revalidates cheaply. Remove or relabel the "Getting video info" checklist row if it no longer matches real work.
+   - **Acceptance:** Export uses cached stream info with a fast revalidation pass; checklist text matches what runs.
 
-## Milestones (Ordered to Completion)
+3. **[NEXT] Diagnostics leftovers** (diagnostics disabled)
+   - **Deliverable:** With diagnostics off, do not retain diagnostics-only SRT or `word_timings.json`. Editing and export can keep whatever they legitimately need. No diagnostics-only path should create or keep extra timing-file copies.
+   - **Acceptance:** With diagnostics disabled in Settings, processing does not leave diagnostics-only SRT/`word_timings.json` clutter. Edit and export still work. Confirm with code review and validation.
 
-### Milestone 0: Stabilization (remaining)
-0.1 Support UX (error details + copy diagnostics + hosted send logs)
-- Deliverable:
-  - Error UI includes a details drawer and a “Copy diagnostics” action.
-  - Settings provides a hosted “Send logs” support action with explicit consent and redaction summary.
-  - Diagnostics tools remain in Settings only.
-- Acceptance criteria:
-  - Trigger an error: user can open details drawer and copy diagnostics text.
-  - User can submit logs to hosted support without attaching video outputs.
-  - Upload failure path keeps a clear fallback (`Copy diagnostics`) visible.
-  - No diagnostics tools appear outside Settings.
+## Milestones (deferred / remaining)
 
-0.2 Export optimization: cache video stream info earlier + cheap revalidate; adjust “Getting video info” checklist row if appropriate
-- Deliverable:
-  - Video stream info cached earlier; export path uses cheap revalidation.
-  - “Getting video info” checklist row removed or adjusted if no longer accurate.
-- Acceptance criteria:
-  - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
+### Editor shell: left panel (deferred)
 
-Definition of done (Milestone 0):
-- Remaining stabilization items above are complete.
+The left panel is hidden/paused. When it ships: collapsed by default; docked and resizable at wide widths; under 1100px, overlay drawer with scrim and Esc; only one overlay open (left vs right). **Acceptance:** Dock/overlay behavior holds across resize once the panel is enabled again.
 
-### Milestone 3: Editor shell (deferred item)
-3.2 Left panel responsive behavior
-Status: Deferred while left panel remains hidden/paused.
-- Deliverable:
-  - Collapsed by default
-  - Docked at wide widths, resizable, per-project persisted width
-  - Overlay drawer under 1100px with scrim + Esc closes
-  - Only one overlay open at a time (left vs right)
-- Acceptance criteria:
-  - Resize window around threshold: dock/overlay rules work exactly once left panel is re-enabled.
+### In-app editing: left subtitle list
 
-### Milestone 4: In-app subtitle text editing (remaining)
-4.1 Left list editing
-- Deliverable:
-  - Each row shows timestamps (read-only) + editable text
-  - Clicking row seeks video + selects subtitle
-- Acceptance criteria:
-  - Edit text, seek + selection sync works.
+Rows show read-only timestamps plus editable text; clicking a row seeks the video and selects that cue. **Acceptance:** Text edits, seek, and selection stay in sync.
 
-## Requested additions coverage map (2026-02-11)
+## Gaps vs queue
 
-| Requested area | Existing coverage | Scheduled in roadmap |
+| Area | Status | Where |
 | --- | --- | --- |
-| Replace diagnostics-heavy settings UI with easy support path | Partial | Queue item 1, Milestone 0.1 |
-| Diagnostics leftovers (no diagnostics-only retention when disabled) | Gap | Queue item 3 |
-| Export optimization / “Getting video info” row | Gap | Queue item 2, Milestone 0.2 |
+| Easier support path vs diagnostics-heavy settings | Partial | Queue 1 |
+| No diagnostics-only file retention when diagnostics off | Gap | Queue 3 |
+| Export stream cache / "Getting video info" row | Gap | Queue 2 |
 
-## Cross-cutting safeguards, validation, and analytics
+## Safeguards and regression checks
 
-- Safeguards:
-  - Keep export/rendering behavior unchanged unless explicitly called out by milestone acceptance criteria.
-  - Send Logs must be opt-in, redact sensitive local data where possible, and exclude rendered output video by default.
-  - If hosted log upload fails, keep local fallback actions (`Copy diagnostics`) available.
-- Regression tests (minimum):
-  - Projects -> Editor -> Settings -> Back navigation without sidebar.
-  - Create subtitles -> Back while running -> confirm background progress remains visible -> reopen project.
-  - Export success state -> click `Play` and `Open folder` -> verify open succeeds (or explicit error message appears).
-  - Preview/export parity check on golden clip for font family, font size, shadow, and relative subtitle placement.
-  - Resize Editor window -> verify subtitle overlay scales proportionally with video viewport.
-  - Preview word highlight sync check using known timing clip; confirm no obvious spoken-word drift.
-  - Inline edit multi-line check: 3-line cue remains fully visible/editable.
-  - RTL textarea check (Hebrew): punctuation placement and arrow-key behavior stay intuitive in edit mode.
-  - While inline edit is active, click Play -> verify auto-save + exit edit mode + immediate playback resume.
-  - Delete project -> transient toast appears -> no persistent banner remains (E2E: `project-hub.spec.ts` asserts toast and no inline banner).
-  - Settings clarity checks for transcription quality, save policy/path grouping, and theme toggle.
-  - Style pane checks for font list, color presets/picker behavior, default-color sanity, overlay `X` close affordance, collapsed-strip entry, and thin scrollbar usability.
-- Lightweight analytics (privacy-preserving):
-  - Export success actions click/success/failure counts (`Play`, `Open folder`), without collecting opened paths.
-  - Preview/export parity mismatch report count (manual QA flag or lightweight telemetry event).
-  - Preview highlight drift report count (no subtitle text payloads).
-  - Inline edit auto-save-on-play usage count and failure count.
-  - Transcription-quality option selection distribution.
-  - Send Logs attempt/success/failure counts (no payload contents).
-  - Create-subtitles cancel rate and cancel stage.
-  - Back-during-active-task frequency and completion outcomes.
+- Do not change export or rendering behavior unless a queue item says so.
+- Send Logs: opt-in; redact sensitive paths; exclude rendered output video by default. If upload fails, Copy diagnostics remains.
+- Worth exercising: Projects to Editor to Settings and back; create subtitles, leave Editor, confirm background progress; after export success, Play and Open folder; golden clip preview vs export (font, size, shadow, placement); resize window and confirm subtitles scale with video; word-highlight sync on a known clip; 3-line cue in edit; RTL edit textarea; Play during edit saves and exits edit; delete project yields a toast, not a sticky banner; settings (transcription, save path, theme); style pane (fonts, colors, overlay close, strip entry, scrollbar).
 
-## Backlog (Unscheduled)
-- Keep this short; ideas go here only if they are explicitly not scheduled.
+## Analytics (privacy-preserving)
+
+Clicks and outcomes for Play / Open folder (no paths). Preview parity and highlight drift signals (no subtitle text). Inline edit save-on-play usage and failures. Transcription preset distribution. Send Logs attempts and outcomes. Create-subtitles cancel rate and stage. Back-during-active-task frequency and outcomes.
+
+## Backlog
+
+Unscheduled ideas only; keep it short.
 
 ## Decision log
-- Date + short note for any decision that changes scope/order.
-- 2026-02-11: Added `KNOWN_ISSUES.md` as the detailed issue tracker; `ROADMAP.md` remains the scheduling source of truth.
-- 2026-02-11: Reprioritized queue to address: export success action reliability, preview truthfulness (style parity + resize scaling), preview-only word-highlight sync, and inline edit reliability (3-line visibility + RTL textarea + Play auto-save).
-- 2026-02-11: Editor tab visuals should follow browser/Figma-style attached tabs; style overlay close affordance should use icon-only `X`.
-- 2026-02-11: Reprioritized queue to: packaging gate first, then Support UX, Clarity pass, sidebar removal, progress continuity, settings clarity, style modernization, and micro-interaction polish.
-- 2026-02-10: User-facing label updated from "Project Hub" to "Projects"; no route/model change.
-- 2026-02-08: Milestone 1 backend completed (projects storage + `/projects` API + job linkage) ahead of Project Hub UI.
+
+- 2026-02-11: `KNOWN_ISSUES.md` holds issue detail; this file holds schedule.
+- 2026-02-11: Queue bumped export opens, preview parity and resize, word-highlight preview sync, and inline edit (3-line, RTL, Play-to-save). Later the same day: packaging first, then Support UX, clarity pass, sidebar removal, progress continuity, settings clarity, style pass, micro-interactions. Editor tabs: browser-style attached tabs; style overlay close is icon-only X.
+- 2026-02-10: User-facing name "Project Hub" to "Projects" (routes unchanged).
+- 2026-02-08: Milestone 1 backend shipped (projects storage, `/projects` API, job linkage) before Hub UI.
