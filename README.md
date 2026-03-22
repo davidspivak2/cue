@@ -6,17 +6,11 @@ Cue uses speech recognition to build subtitles and burn them into the video. Eve
 
 ## Screenshots
 
-### Home (empty)
-
-![Home — empty state](docs/images/readme-home-empty.png)
-
-### Home (with videos)
-
-![Home — project list](docs/images/readme-home-full.png)
-
-### Workbench
-
-![Workbench — review and style](docs/images/readme-workbench.png)
+<p align="center">
+  <img src="docs/images/readme-home-empty.png" width="32%" alt="Cue home screen with empty drop zone" />
+  <img src="docs/images/readme-home-full.png" width="32%" alt="Cue home screen with video cards" />
+  <img src="docs/images/readme-workbench.png" width="32%" alt="Cue workbench with video preview and subtitles" />
+</p>
 
 ## Features
 
