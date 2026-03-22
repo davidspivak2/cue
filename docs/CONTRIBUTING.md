@@ -20,6 +20,8 @@ Before we merge a pull request from a non-maintainer, the contributor must sign 
 
 That's it for the basics. The rest of this guide covers setup details for each platform.
 
+If you keep personal or machine-only helper scripts, put them in `scripts/local/` — that folder is gitignored and is not part of the shared workflow.
+
 ---
 
 ## Windows setup (primary platform)

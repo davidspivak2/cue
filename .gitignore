@@ -44,6 +44,9 @@ docs/internal/
 # Playwright
 .playwright-cli/
 
+# Scripts — personal / machine-only helpers (shared scripts stay in scripts/)
+scripts/local/
+
 # Desktop — frontend (Node)
 desktop/node_modules/
 desktop/.vite/
