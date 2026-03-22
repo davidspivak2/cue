@@ -31,27 +31,27 @@ debug_raw_segments.py
 logs/
 debug-*.log
 
-# Cursor / Codex — agent skills, rules, local project instructions
+# Cursor / Codex: agent skills, rules, local project instructions
 .cursor/
 .codex/
 AGENTS.md
 .cursorrules
 
-# Local-only documentation (handoffs, internal planning — not published)
+# Local-only documentation (handoffs, internal planning; not published)
 docs/handoffs/
 docs/internal/
 
 # Playwright
 .playwright-cli/
 
-# Scripts — personal / machine-only helpers (entire folder not tracked)
+# Scripts: personal / machine-only helpers (entire folder not tracked)
 scripts/local/
 
-# Desktop — frontend (Node)
+# Desktop: frontend (Node)
 desktop/node_modules/
 desktop/.vite/
 
-# Desktop — Tauri / Rust
+# Desktop: Tauri / Rust
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 

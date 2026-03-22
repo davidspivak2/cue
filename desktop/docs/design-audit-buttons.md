@@ -13,7 +13,7 @@
 |--------|----------|
 | **primary / default** | Main CTA per section (Create subtitles, Export, Add video, Save). |
 | **secondary** | Supporting actions: Cancel in flow, Play, Open folder, Browse…, Reset. |
-| **tertiary / ghost** | Low emphasis — dismiss, back, nav (Cancel in dialogs, Close, Back). |
+| **tertiary / ghost** | Low emphasis: dismiss, back, nav (Cancel in dialogs, Close, Back). |
 | **outline** | Bordered alternate (e.g. Style, view toggle). |
 | **overlay** | On dark overlays (e.g. video bar); white text, transparent. |
 | **destructive** | Danger actions (Delete, Exit anyway). |

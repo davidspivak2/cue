@@ -37,11 +37,11 @@ Buttons that do the same kind of action in the same context must use the same va
 
 ## Sizes
 
-- **default** — height 9, standard padding (main CTAs).
-- **sm** — height 8, smaller padding (e.g. Play, Open folder, Reset, Cancel in bars).
-- **lg** — height 10, larger padding (when you need more prominence).
-- **icon** — 9×9 (e.g. toolbar icon buttons).
-- **iconSm** — 8×8 (e.g. overlay video bar icons).
+- **default**: height 9, standard padding (main CTAs).
+- **sm**: height 8, smaller padding (e.g. Play, Open folder, Reset, Cancel in bars).
+- **lg**: height 10, larger padding (when you need more prominence).
+- **icon**: 9×9 (e.g. toolbar icon buttons).
+- **iconSm**: 8×8 (e.g. overlay video bar icons).
 
 ---
 

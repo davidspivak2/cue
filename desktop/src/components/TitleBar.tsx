@@ -425,7 +425,7 @@ const TitleBar = () => {
       )}
       style={{ "--title-bar-height": TITLE_BAR_HEIGHT_PX } as React.CSSProperties}
     >
-      {/* Left: logo + Cue — only this area is draggable so tab strip stays clickable */}
+      {/* Left: logo + Cue. Only this area is draggable so tab strip stays clickable */}
       <div
         className="relative z-10 flex shrink-0 cursor-default items-center gap-2 pl-3 pr-2"
         data-tauri-drag-region

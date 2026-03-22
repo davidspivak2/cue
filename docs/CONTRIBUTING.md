@@ -1,6 +1,6 @@
 # Contributing
 
-How to run Cue locally and submit changes. For layout of the repo and pipeline, see [ARCHITECTURE.md](ARCHITECTURE.md).
+This guide covers how to run Cue locally and how to send a pull request. For how the repo and pipeline are organized, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Non-maintainer pull requests need a signed contributor agreement before merge. See [CLA_POLICY.md](CLA_POLICY.md).
 
@@ -49,12 +49,12 @@ python -m pip install -r requirements-dev.txt
 
 The app needs FFmpeg and FFprobe. Either:
 
-**Option 1** (recommended) — run the bundled download script:
+**Option 1** (recommended): run the bundled download script:
 ```bat
 scripts\download_ffmpeg.bat
 ```
 
-**Option 2** — install via winget:
+**Option 2**: install via winget:
 ```bat
 winget install -e --id Gyan.FFmpeg
 ```
@@ -261,7 +261,7 @@ Preview still frames are cached at `%LOCALAPPDATA%\Cue\cache\preview_frames` (Wi
 
 ## Project status and issues
 
-- **[Roadmap](ROADMAP.md)** — What to work on next, milestones, and acceptance criteria.
-- **[Known issues](KNOWN_ISSUES.md)** — Detailed bug write-ups and validation notes.
+- **[Roadmap](ROADMAP.md)**: What to work on next, milestones, and acceptance criteria.
+- **[Known issues](KNOWN_ISSUES.md)**: Detailed bug write-ups and validation notes.
 
 Other planning material (UX specs, session handoffs, migration archives) may live under `docs/internal/` or `docs/handoffs/` **locally only**; those folders are not tracked on GitHub.

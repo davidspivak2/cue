@@ -13,9 +13,9 @@ Dialogs use the shared UI in `src/components/ui/dialog.tsx`. Use `Dialog`, `Dial
 
 ## Structure
 
-- **DialogTitle** — one short, clear question or statement.
-- **DialogDescription** — body copy (one or more paragraphs or lines). Use `text-sm text-muted-foreground` via the default `DialogDescription`; add extra paragraphs or “Video: …” lines as needed inside the same header or below.
-- **DialogFooter** — primary and secondary actions (e.g. Cancel + Remove from Cue). Follow the [button design system](design-system-buttons.md) for variants.
+- **DialogTitle**: one short, clear question or statement.
+- **DialogDescription**: body copy (one or more paragraphs or lines). Use `text-sm text-muted-foreground` via the default `DialogDescription`; add extra paragraphs or “Video: …” lines as needed inside the same header or below.
+- **DialogFooter**: primary and secondary actions (e.g. Cancel + Remove from Cue). Follow the [button design system](design-system-buttons.md) for variants.
 
 ---
 

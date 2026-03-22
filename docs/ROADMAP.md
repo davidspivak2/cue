@@ -1,7 +1,7 @@
 # Roadmap
 
-Product and pipeline schedule. Extra migration notes may live only under local `docs/internal/` (not on GitHub).
-The project list screen is titled **Home** in the UI (project hub / video list). Older milestones may still say “Projects” or “Project Hub.”
+What we plan to ship and in what order. One-off migration notes sometimes stay in local `docs/internal/` and never hit GitHub.
+In the app, the project list is titled **Home** (your videos). Older write-ups here may still say “Projects” or “Project Hub.”
 
 ## Rules
 - Use this file for what ships next and in what order.
@@ -21,7 +21,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
 ## Now / Next (Queue)
 (Use a numbered list. Status tags must be one of: NEXT, IN PROGRESS, BLOCKED, DONE.)
 
-1. [DONE] PR13 — Packaging hardening / smoke tests
+1. [DONE] PR13: Packaging hardening / smoke tests
    - Deliverable:
      - Packaging flow hardened for release and smoke tests run against packaged builds.
    - Current status:
@@ -80,7 +80,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
      - `Play` from active edit mode saves once, exits edit mode, and resumes playback without extra prompts.
    - UX spec reference: E) Editor
 
-6. [NEXT] PR12 — Support UX v1 (error details + copy diagnostics + hosted send logs)
+6. [NEXT] PR12: Support UX v1 (error details + copy diagnostics + hosted send logs)
    - Deliverable:
      - Error UI includes a details drawer and a “Copy diagnostics” action.
      - Settings support surface includes hosted “Send logs” with explicit user consent.
@@ -92,7 +92,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
      - If upload fails, user still has a visible fallback path (`Copy diagnostics`).
    - UX spec reference: H) Error UX + Diagnostics; J) Settings page
 
-7. [DONE] PR15 — Clarity pass (plain-language labels + CTA reduction)
+7. [DONE] PR15: Clarity pass (plain-language labels + CTA reduction)
    - Current status:
      - Completed on 2026-03-13.
    - Deliverable:
@@ -103,7 +103,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
      - Project and Editor statuses read clearly for non-technical users, with no ambiguous standalone labels.
    - UX spec reference: K) Copywriting glossary (approved strings); D) Projects; E) Editor
 
-8. [DONE] Navigation simplification — remove global left sidebar and standardize top-level header behavior
+8. [DONE] Navigation simplification: remove global left sidebar and standardize top-level header behavior
    - Deliverable:
      - Global left sidebar is removed from the redesign flow.
      - Header/back/title/status placement is consistent across Projects, Editor, and Settings.
@@ -195,7 +195,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
      - Entering subtitle edit mode does not cause disorienting subtitle jump.
    - UX spec reference: D) Projects; E) Editor; G) Export progress + success
 
-14. [NEXT] Export optimization — cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
+14. [NEXT] Export optimization: cache video stream info earlier + cheap revalidate; remove/adjust “Getting video info” checklist row if appropriate
    - Deliverable:
      - Video stream info cached earlier; export path uses cheap revalidation.
      - “Getting video info” checklist row removed or adjusted if no longer accurate.
@@ -203,7 +203,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
      - Export step uses cached stream info with a fast revalidation pass; UI checklist reflects the actual work.
    - UX spec reference: G) Export progress + success (in-Editor)
 
-15. [DONE] Redesign Milestone 1 — Project system backend (persistence + multi-project)
+15. [DONE] Redesign Milestone 1: Project system backend (persistence + multi-project)
    - Deliverable: app can create/open multiple projects with persisted state across restarts.
    - Acceptance criteria: see Milestone 1 checklist below.
    - UX spec reference: C) Project model (new backend capability; document behavior)
@@ -241,8 +241,8 @@ The project list screen is titled **Home** in the UI (project hub / video list).
 
 ## Milestones (Ordered to Completion)
 
-### Milestone 0 — Stabilization
-0.1 PR12 — Support UX v1 (error details + copy diagnostics + hosted send logs)
+### Milestone 0: Stabilization
+0.1 PR12: Support UX v1 (error details + copy diagnostics + hosted send logs)
 - Deliverable:
   - Error UI includes a details drawer and a “Copy diagnostics” action.
   - Settings provides a hosted “Send logs” support action with explicit consent and redaction summary.
@@ -253,7 +253,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
   - Upload failure path keeps a clear fallback (`Copy diagnostics`) visible.
   - No diagnostics tools appear outside Settings.
 
-0.2 PR13 — Packaging hardening / smoke tests
+0.2 PR13: Packaging hardening / smoke tests
 - Deliverable:
   - Packaging flow hardened for release and smoke tests run against packaged builds.
 - Current status:
@@ -262,7 +262,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
   - Packaged build launches and completes the golden-path smoke test without regressions.
   - NSIS `.exe` build succeeds in the default `npm run tauri build` path.
 
-0.3 PR15 — Clarity pass (plain-language labels + CTA reduction sweep)
+0.3 PR15: Clarity pass (plain-language labels + CTA reduction sweep)
 - Deliverable:
   - Copy polish applied and CTA reduction pass completed across UI surfaces.
   - Replace technical/ambiguous labels with plain-language wording.
@@ -270,7 +270,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
   - Strings match the approved copywriting glossary and CTA count is minimized per spec.
   - “Ready” and other ambiguous labels are replaced with user-meaningful statuses.
 
-0.4 Export optimization — cache video stream info earlier + cheap revalidate; adjust “Getting video info” checklist row if appropriate
+0.4 Export optimization: cache video stream info earlier + cheap revalidate; adjust “Getting video info” checklist row if appropriate
 - Deliverable:
   - Video stream info cached earlier; export path uses cheap revalidation.
   - “Getting video info” checklist row removed or adjusted if no longer accurate.
@@ -318,7 +318,7 @@ The project list screen is titled **Home** in the UI (project hub / video list).
 Definition of done:
 - App is stable enough to proceed with refactors needed for redesign without frequent regressions.
 
-### Milestone 1 — Project system backend (required for redesign)
+### Milestone 1: Project system backend (required for redesign)
 1.1 Persistence layer and project folder concept
 - Deliverable:
   - App-managed projects root folder concept.
@@ -348,7 +348,7 @@ Definition of done:
 Definition of done:
 - User can manage multiple projects across restarts and relink missing video without breaking the project.
 
-### Milestone 2 — Projects UI (new entry point)
+### Milestone 2: Projects UI (new entry point)
 2.1 Projects screen
 - Deliverable:
   - Grid of project cards, primary CTA “Add video”, drag-and-drop onto hub
@@ -392,11 +392,11 @@ Definition of done:
 Definition of done:
 - Projects is the stable home screen and projects open into Editor.
 
-### Milestone 3 — Editor shell (unified edit + style + preview + export; internal route/state naming may still use Workbench)
+### Milestone 3: Editor shell (unified edit + style + preview + export; internal route/state naming may still use Workbench)
 3.1 Editor layout regions
 - Deliverable:
   - Center video preview
-  - Left “All subtitles” panel **not in the current app UI** — documented here as planned only (no drawer or placeholder is shown to users; overlay-only when re-enabled in a future implementation)
+  - Left “All subtitles” list: not in the shipping UI. This milestone still describes it as a possible layout (no drawer today; overlay-only if it comes back).
   - Right style inspector
 - Acceptance criteria:
   - Workbench tab shows these regions with stable sizing.
@@ -439,7 +439,7 @@ Status: Deferred while left panel remains hidden/paused.
 Definition of done:
 - Editor behaves correctly across window sizes and supports the unified workflow.
 
-### Milestone 4 — In-app subtitle text editing (partially implemented)
+### Milestone 4: In-app subtitle text editing (partially implemented)
 Current status: Milestone 4.2 is implemented in Workbench, and Milestone 4.3 is implemented for the on-video path; Milestone 4.1 remains.
 4.1 Left list editing
 - Deliverable:
@@ -486,7 +486,7 @@ Current status: Milestone 4.2 is implemented in Workbench, and Milestone 4.3 is 
 Definition of done:
 - User can fully edit subtitles in-app with the specified interactions.
 
-### Milestone 5 — Pipeline contract change: WhisperX timing is part of “Create Subtitles”
+### Milestone 5: Pipeline contract change: WhisperX timing is part of “Create Subtitles”
 5.1 “Create Subtitles” completeness
 - Deliverable:
   - “Create Subtitles” is not complete until BOTH SRT generation and WhisperX timed words succeed.
@@ -518,7 +518,7 @@ Definition of done:
 Definition of done:
 - Word highlight mode is ready immediately after subtitle creation; export uses existing timings.
 
-### Milestone 6 — Editor CTAs + export UX (in-Editor)
+### Milestone 6: Editor CTAs + export UX (in-Editor)
 6.1 CTA placement rules
 - Deliverable:
   - **Current product:** Workbench uses a top action area: **Create subtitles** when subtitles are missing or not being generated; **Export** / **Export again** when subtitles exist and export is idle; **Play** and **Open folder** after a successful export when an output path is available; job progress and **Cancel** while work runs.
@@ -557,7 +557,7 @@ Definition of done:
 Definition of done:
 - Export is an Editor flow and matches the UX contract.
 
-### Milestone 7 — Settings integration rules + busy-state rules
+### Milestone 7: Settings integration rules + busy-state rules
 7.1 Settings navigation rules
 - Deliverable:
   - Settings accessible from Projects + Editor
@@ -601,7 +601,7 @@ Definition of done:
 Definition of done:
 - App obeys navigation + busy-state rules.
 
-### Milestone 8 — Visual system conformance pass
+### Milestone 8: Visual system conformance pass
 8.1 Token alignment (radius, borders, typography scale)
 - Deliverable:
   - Radius, border, and typography tokens aligned with UX spec.
@@ -639,7 +639,7 @@ Definition of done:
 Definition of done:
 - UI consistently matches the UX spec visual system.
 
-### Milestone 9 — Cleanup + ship readiness
+### Milestone 9: Cleanup + ship readiness
 9.1 Remove obsolete screens/states replaced by Projects/Editor
 - Deliverable:
   - Old screens/states removed and replaced by Projects/Editor flow.
@@ -758,16 +758,16 @@ Definition of done:
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.
-- 2026-02-11 — Added `KNOWN_ISSUES.md` as the detailed issue tracker; `ROADMAP.md` remains the scheduling source of truth.
-- 2026-02-11 — Reprioritized queue to address: export success action reliability, preview truthfulness (style parity + resize scaling), preview-only word-highlight sync, and inline edit reliability (3-line visibility + RTL textarea + Play auto-save).
-- 2026-02-11 — Editor tab visuals should follow browser/Figma-style attached tabs; style overlay close affordance should use icon-only `X`.
-- 2026-02-11 — Reprioritized queue to: packaging gate first, then Support UX v1, Clarity pass, sidebar removal, progress continuity, settings clarity, style modernization, and micro-interaction polish.
-- 2026-02-10 — User-facing label updated from "Project Hub" to "Projects"; no route/model change.
-- 2026-02-08 — Milestone 1 backend completed (projects storage + `/projects` API + job linkage) ahead of Project Hub UI.
+- 2026-02-11: Added `KNOWN_ISSUES.md` as the detailed issue tracker; `ROADMAP.md` remains the scheduling source of truth.
+- 2026-02-11: Reprioritized queue to address: export success action reliability, preview truthfulness (style parity + resize scaling), preview-only word-highlight sync, and inline edit reliability (3-line visibility + RTL textarea + Play auto-save).
+- 2026-02-11: Editor tab visuals should follow browser/Figma-style attached tabs; style overlay close affordance should use icon-only `X`.
+- 2026-02-11: Reprioritized queue to: packaging gate first, then Support UX v1, Clarity pass, sidebar removal, progress continuity, settings clarity, style modernization, and micro-interaction polish.
+- 2026-02-10: User-facing label updated from "Project Hub" to "Projects"; no route/model change.
+- 2026-02-08: Milestone 1 backend completed (projects storage + `/projects` API + job linkage) ahead of Project Hub UI.
 
 ## Appendix: Archived plans (original content)
 
-### Appendix: Archived — Caption graphics overlay plan (original)
+### Appendix: Archived: Caption graphics overlay plan (original)
 # Caption Graphics Overlay Plan
 
 > **Note:** Labels below describe the legacy single-page **Home** flow (`SUBTITLES_READY`). The shipping app uses the **Home** project list + **Workbench** tabs; burn-in uses **`Export`**, not **Create video with subtitles**.
@@ -879,7 +879,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
 
 ## Progressive multi-PR implementation plan (historical; all PRs completed)
 
-### Overlay PR1 — SUBTITLES_READY UI overhaul (no rendering changes)
+### Overlay PR1: SUBTITLES_READY UI overhaul (no rendering changes)
 - Purpose: Implement the new UI layout and controls without touching rendering or export logic.
 - Scope:
   - Rework the SUBTITLES_READY screen layout to the two-column design.
@@ -902,7 +902,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Confirm no playback controls are present.
   - Toggle line vs word background and ensure only one can be enabled.
 
-### Overlay PR2 — Style/config schema foundation
+### Overlay PR2: Style/config schema foundation
 - Purpose: Create a unified style schema that supports the graphics overlay rendering path.
 - Scope:
   - Define or extend a style/config model for caption graphics overlay options.
@@ -918,7 +918,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Load existing projects without schema errors.
   - Create a new preset and confirm it serializes and reloads.
 
-### Overlay PR3 — Graphics renderer for preview still (no export integration yet)
+### Overlay PR3: Graphics renderer for preview still (no export integration yet)
 - Purpose: Implement the graphics overlay renderer and wire it to still preview only.
 - Scope:
   - Add a graphics renderer that can draw a single frame overlay.
@@ -935,7 +935,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Word highlight preview uses 2nd word, not time-based alignment.
   - Rounded corners and line background render correctly in still preview.
 
-### Overlay PR4 — RTL/mixed text word rectangle correctness hardening
+### Overlay PR4: RTL/mixed text word rectangle correctness hardening
 - Purpose: Ensure word bounding boxes are correct for RTL and mixed-direction text.
 - Scope:
   - Implement robust text measurement for word rectangles.
@@ -950,7 +950,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Verify word highlights align with RTL samples (Arabic/Hebrew).
   - Verify mixed RTL/LTR sentences render correct word rectangles.
 
-### Overlay PR5 — Export integration with streaming overlay frames (no disk)
+### Overlay PR5: Export integration with streaming overlay frames (no disk)
 - Purpose: Stream overlay frames to FFmpeg during export without creating PNGs.
 - Scope:
   - Add a state-driven render loop that emits frames only when caption state changes.
@@ -968,7 +968,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Verify progress bar and worker behavior unchanged.
   - Confirm output matches the preview styling.
 
-### Overlay PR6 — Performance pass
+### Overlay PR6: Performance pass
 - Purpose: Optimize renderer and export performance for long videos.
 - Scope:
   - Cache static layout results across frames with identical state.
@@ -984,7 +984,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Export a longer clip and confirm runtime improves or stays stable.
   - Confirm output matches previous visual results.
 
-### Overlay PR7 — Word background controls + rendering with mutual exclusivity
+### Overlay PR7: Word background controls + rendering with mutual exclusivity
 - Status: ✅ Complete (merged).
 - Purpose: Implemented word background rendering and enforced mutual exclusivity in logic.
 - Scope (delivered):
@@ -1002,7 +1002,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Switch back to line background and verify word background turns off.
   - Export a short clip and confirm the correct background mode renders.
 
-### Overlay PR8 — Graphics-only export (graphics overlay only)
+### Overlay PR8: Graphics-only export (graphics overlay only)
 - Status: ✅ Complete.
 - Purpose: Make graphics overlay the only export renderer and remove subtitle-filter paths.
 - Scope (delivered):
@@ -1016,7 +1016,7 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
 - Manual test checklist:
   - Verify export uses graphics overlay renderer.
 
-### Overlay PR9 — Optional cleanup and follow-ups (completed)
+### Overlay PR9: Optional cleanup and follow-ups (completed)
 - Status: ✅ Complete.
 - Purpose: Remove dead code and document graphics overlay renderer usage.
 - Scope (delivered):
@@ -1042,8 +1042,8 @@ Optional: create a baseline branch as a convenience, but the tag above is the pr
   - Check logs for state change counts vs. expected word transitions.
   - Compare debug burn output to expected word indices at key timestamps.
 
-### Appendix: Archived — Word highlight plan (PR10) (original)
-# PR10 — Word Highlight Subtitles (Karaoke-Style) — Implementation Plan
+### Appendix: Archived: Word highlight plan (PR10) (original)
+# PR10: Word Highlight Subtitles (Karaoke-Style): Implementation Plan
 
 Status: Completed. This plan is kept for historical reference. For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
 
@@ -1080,7 +1080,7 @@ Last updated: 2026-02-27
 
 ## E) Progressive task breakdown
 
-### Codex Task 1 — Data model/config keys for `subtitle_mode` + highlight settings (no behavior change)
+### Codex Task 1: Data model/config keys for `subtitle_mode` + highlight settings (no behavior change)
 - **Goal:** Add config/state support for subtitle mode and highlight settings without changing behavior. ✅ Done.
 - **Scope:**
   - Add new config keys for `subtitle_mode` and highlight styling settings.
@@ -1096,7 +1096,7 @@ Last updated: 2026-02-27
   - Existing static subtitle flow unchanged.
 - **Depends on:** none.
 
-### Codex Task 2 — UI controls in `SUBTITLES_READY` (no behavior change)
+### Codex Task 2: UI controls in `SUBTITLES_READY` (no behavior change)
 - **Goal:** Add UI controls for subtitle mode and highlight settings in the Subtitles-ready view. ✅ Done.
 - **Scope:**
   - Add UI elements only; do not change preview/export behavior.
@@ -1111,13 +1111,13 @@ Last updated: 2026-02-27
   - No behavioral changes to preview/export.
 - **Depends on:** Task 1.
 
-### Codex Task 3 — Subtitle-filter rendering adapter (removed)
+### Codex Task 3: Subtitle-filter rendering adapter (removed)
 - **Status:** Removed in the graphics-only export PR (subtitle-filter pipeline deleted).
 
-### Codex Task 4 — Subtitle-filter export path (removed)
+### Codex Task 4: Subtitle-filter export path (removed)
 - **Status:** Removed in the graphics-only export PR (no FFmpeg subtitle filters remain).
 
-### Codex Task 5 — Preview still uses graphics renderer + cache key updates
+### Codex Task 5: Preview still uses graphics renderer + cache key updates
 - **Goal:** Preview still renderer supports word-highlight styling and updates cache keys. ✅ Done.
 - **Scope:**
   - Update preview still generator to draw graphics directly over a raw frame.
@@ -1132,7 +1132,7 @@ Last updated: 2026-02-27
   - Cache invalidates on mode/setting change.
 - **Depends on:** Task 4.
 
-### Codex Task 6 — Preview playback renderer alignment
+### Codex Task 6: Preview playback renderer alignment
 - **Goal:** Preview playback uses the graphics overlay renderer for both modes. ✅ Done.
 - **Scope:**
   - Update preview playback generator to stream overlay frames (no subtitle filters).
@@ -1147,7 +1147,7 @@ Last updated: 2026-02-27
   - Tests cover overlay clip planning.
 - **Depends on:** Task 5.
 
-### Codex Task 7 — Define and plumb a word-timing JSON contract end-to-end (staleness detection on SRT edits)
+### Codex Task 7: Define and plumb a word-timing JSON contract end-to-end (staleness detection on SRT edits)
 - **Goal:** Define a word-timing JSON schema and plumb it through the pipeline. ✅ Done.
 - **Scope:**
   - Define JSON contract for word timings.
@@ -1164,7 +1164,7 @@ Last updated: 2026-02-27
   - Stale word timings are detected and flagged.
 - **Depends on:** Task 4.
 
-### Codex Task 8 — Implement WhisperX alignment worker to produce word timestamps (no heuristics)
+### Codex Task 8: Implement WhisperX alignment worker to produce word timestamps (no heuristics)
 - **Goal:** Implement alignment worker for word timestamps using WhisperX. ✅ Done.
 - **Scope:**
   - Add worker process to run WhisperX alignment.
@@ -1181,7 +1181,7 @@ Last updated: 2026-02-27
   - No heuristic fallback in normal path.
 - **Depends on:** Task 7.
 
-### Codex Task 9 — Word highlight rendering using aligned word timings
+### Codex Task 9: Word highlight rendering using aligned word timings
 - **Goal:** Render karaoke-style word highlighting via the graphics overlay renderer. ✅ Done.
 - **Scope:**
   - Use aligned word timings to emit per-word highlight states.
@@ -1197,7 +1197,7 @@ Last updated: 2026-02-27
   - RTL ordering remains stable in graphics rendering.
 - **Depends on:** Task 8.
 
-### Codex Task 10 — Flip default to Word highlight + tighten UX + update diagnostics + docs references
+### Codex Task 10: Flip default to Word highlight + tighten UX + update diagnostics + docs references
 - **Goal:** Make Word highlight the default and finalize UX/diagnostics. ✅ Done.
 - **Scope:**
   - Update default mode to Word highlight.
