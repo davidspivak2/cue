@@ -259,6 +259,9 @@ Preview still frames are cached at `%LOCALAPPDATA%\Cue\cache\preview_frames` (Wi
 
 ---
 
-## Internal documentation
+## Project status and issues
 
-For internal planning documents (roadmap, UX spec, migration plans), see [`docs/internal/`](internal/).
+- **[Roadmap](ROADMAP.md)** — What to work on next, milestones, and acceptance criteria.
+- **[Known issues](KNOWN_ISSUES.md)** — Detailed bug write-ups and validation notes.
+
+Other planning material (UX specs, session handoffs, migration archives) may live under `docs/internal/` or `docs/handoffs/` **locally only**; those folders are not tracked on GitHub.

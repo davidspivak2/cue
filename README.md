@@ -61,7 +61,7 @@ For a deeper technical overview, see the [Architecture guide](docs/ARCHITECTURE.
 
 ## Contributing
 
-Contributions are welcome. See the [Contributing guide](docs/CONTRIBUTING.md) for setup instructions and the [Architecture guide](docs/ARCHITECTURE.md) for a codebase overview.
+Contributions are welcome. See the [Contributing guide](docs/CONTRIBUTING.md) for setup instructions and the [Architecture guide](docs/ARCHITECTURE.md) for a codebase overview. For what we are working on next and tracked issues, see [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
 External contributors must sign Cue's contributor agreement before a pull request can be merged. See the [CLA policy](docs/CLA_POLICY.md).
 
