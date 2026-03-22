@@ -113,7 +113,8 @@ bin/                              # Bundled FFmpeg/FFprobe binaries
 docs/                             # Documentation
   CONTRIBUTING.md                 # Setup and development guide
   ARCHITECTURE.md                 # This file
-  internal/                       # Internal planning docs (roadmap, UX spec, etc.)
+  ROADMAP.md                      # Product roadmap (published)
+  KNOWN_ISSUES.md                 # Detailed issue tracking (published)
 tests/                            # Test suite (pytest)
 tools/                            # Developer utilities (benchmarks, packaging)
 scripts/                          # Dev workflow scripts (Windows cmd/ps1)

@@ -2,7 +2,7 @@
 
 Purpose:
 - This file stores detailed bug write-ups (repro steps, expected vs actual, risks, and validation plans).
-- Scheduling and priority stay in `docs/internal/ROADMAP.md`.
+- Scheduling and priority stay in [`ROADMAP.md`](ROADMAP.md).
 
 Working rules:
 - Keep issue write-ups concrete and reproducible.

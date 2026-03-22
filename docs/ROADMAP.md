@@ -1,11 +1,11 @@
 # Project Roadmap (Single Source of Truth)
 
-Note: Tauri migration tracking lives in `docs/internal/TAURI_REACT_OVERHAUL_PLAN.md`; this roadmap is for product/pipeline priorities.
+Note: This file is the product/pipeline roadmap. Supplementary migration notes may exist in a local-only `docs/internal/` tree (not published to GitHub).
 Terminology note: the user-facing screen label is now **"Projects"** (same screen/route previously labeled "Project Hub").
 
 ## Rules
 - This file is the ONLY place to look for “what to do next”.
-- Detailed bug write-ups, repro steps, and issue-level validation notes live in `docs/internal/KNOWN_ISSUES.md`.
+- Detailed bug write-ups, repro steps, and issue-level validation notes live in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
 - If work is not listed here, it is not scheduled.
 - The UX spec defines target behavior; this file defines implementation order and acceptance criteria.
 - Each work item must include: Status, Deliverable, Acceptance criteria, and UX spec reference (section name).
@@ -759,7 +759,7 @@ Definition of done:
 
 ## Decision log
 - Date + short note for any decision that changes scope/order.
-- 2026-02-11 — Added `docs/internal/KNOWN_ISSUES.md` as the detailed issue tracker; `ROADMAP.md` remains the scheduling source of truth.
+- 2026-02-11 — Added `KNOWN_ISSUES.md` as the detailed issue tracker; `ROADMAP.md` remains the scheduling source of truth.
 - 2026-02-11 — Reprioritized queue to address: export success action reliability, preview truthfulness (style parity + resize scaling), preview-only word-highlight sync, and inline edit reliability (3-line visibility + RTL textarea + Play auto-save).
 - 2026-02-11 — Editor tab visuals should follow browser/Figma-style attached tabs; style overlay close affordance should use icon-only `X`.
 - 2026-02-11 — Reprioritized queue to: packaging gate first, then Support UX v1, Clarity pass, sidebar removal, progress continuity, settings clarity, style modernization, and micro-interaction polish.

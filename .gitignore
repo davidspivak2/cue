@@ -37,9 +37,9 @@ debug-*.log
 AGENTS.md
 .cursorrules
 
-# Local docs (not for repo)
-docs/handoffs
-docs/internal/SESSION_HANDOFF*.md
+# Local-only documentation (handoffs, internal planning — not published)
+docs/handoffs/
+docs/internal/
 
 # Playwright
 .playwright-cli/
