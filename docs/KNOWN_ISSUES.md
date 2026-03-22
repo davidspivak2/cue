@@ -21,7 +21,7 @@ Status legend:
 
 ---
 
-## KI-001 - Export success actions do nothing (`Play video` / `Open folder`)
+## KI-001 - Export success actions do nothing (`Play` / `Open folder`)
 
 - Status: `DONE`
 - Completed on: `2026-02-13`
@@ -38,15 +38,15 @@ User impact:
 Repro steps:
 1. Start app via `scripts/run_desktop_all.cmd`.
 2. Open a project, export video, and wait for success strip.
-3. Click `Play video`, then click `Open folder`.
+3. Click `Play`, then click `Open folder`.
 
 Expected:
-- `Play video` opens the exported video in the default player.
+- `Play` opens the exported video in the default player.
 - `Open folder` opens the folder containing the latest export.
 - If open fails, UI shows a clear message.
 
 Actual:
-- RESOLVED. `Play video` and `Open folder` now execute reliably in desktop runtime.
+- RESOLVED. `Play` and `Open folder` now execute reliably in desktop runtime.
 - Open failures now show visible, retryable feedback instead of silent no-op.
 
 Likely cause / notes:
@@ -654,7 +654,7 @@ Validation checklist:
 
 ## Capture checklist for issue evidence
 
-- Export success strip click behavior recording (`Play video`, `Open folder`).
+- Export success strip click behavior recording (`Play`, `Open folder`).
 - Preview vs export comparison frame(s) showing font/size/shadow mismatch.
 - Window resize recording showing subtitle/video relative-scale behavior.
 - Preview word-highlight drift clip.

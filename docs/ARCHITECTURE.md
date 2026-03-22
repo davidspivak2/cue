@@ -128,8 +128,9 @@ If you are new to the codebase, start here:
 2. **`app/workers.py`** — Orchestrates audio extraction, transcription subprocesses, FFmpeg burn-in, and progress reporting.
 3. **`app/transcribe_worker.py`** — The transcription subprocess. Loads the Whisper model, runs transcription, applies punctuation rescue, and writes the SRT file.
 4. **`desktop/src/pages/Workbench.tsx`** — The unified editor/export surface. Handles subtitle creation, on-video text editing, styling, export progress, cancel, and success actions.
-5. **`desktop/src/pages/ProjectHub.tsx`** — The project list and entry point (`New project`, relink, delete, and quick create-subtitles actions).
-6. **`desktop/src/pages/Settings.tsx`** — The settings screen (transcription quality, save policy, audio options, diagnostics).
+5. **`desktop/src/pages/ProjectHub.tsx`** — The project list and entry point (**Add video**, relink, delete, and related project actions).
+6. **`desktop/src/pages/TabHost.tsx`** — Renders the Home panel (`ProjectHub`) plus one mounted `Workbench` per open tab; URL `/` vs `/workbench/:projectId` stays in sync with the title-bar tab strip.
+7. **`desktop/src/pages/Settings.tsx`** — Settings content for the right-hand sheet opened from the title bar (transcription quality, save policy, audio options, diagnostics).
 
 ---
 
@@ -153,7 +154,7 @@ If you are new to the codebase, start here:
 Output files are placed according to the Save Policy setting:
 
 - **Same folder as the video** (default) — outputs live next to the original video.
-- **Always save to this folder** — outputs go to a fixed folder set in Settings.
+- **Specific folder** — outputs go to a fixed folder set in Settings.
 - **Ask every time** — the user picks the folder each run.
 
 Files produced per video:
