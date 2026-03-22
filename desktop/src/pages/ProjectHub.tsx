@@ -113,9 +113,6 @@ type ViewMode = "cards" | "list";
 
 const isValidViewMode = (v: string): v is ViewMode =>
   v === "cards" || v === "list";
-const EMPTY_WELCOME_LEAD = "Hello 👋";
-const EMPTY_WELCOME_REST =
-  " Cue adds subtitles to your videos using OpenAI's Whisper speech recognition.";
 const EMPTY_MAIN = "Drop a video here or click to browse to generate subtitles.";
 const EMPTY_SUPPORTED_FORMATS = "Supports MP4, MKV, MOV, M4V, WEBM.";
 const ACTIVE_TASK_POLL_MS = 2500;
@@ -1081,29 +1078,11 @@ const ProjectHub = () => {
       )}
 
       {showEmptyState && !isBackendUnreachable && (() => {
-        const showWelcome =
+        const isNewUser =
           typeof window !== "undefined" &&
           localStorage.getItem(HAS_HAD_VIDEOS_KEY) !== "true";
-        const isNewUser = showWelcome;
         return (
           <div className="flex min-h-[calc(100vh-6rem)] flex-1 flex-col items-center justify-center">
-            {showWelcome && (
-              <p className="mb-12 max-w-xl text-center text-xl font-medium text-foreground">
-                {isNewUser ? (
-                  <>
-                    <span className={isNewUser ? "empty-state-reveal-welcome" : undefined}>
-                      Hello{" "}
-                      <span className="noto-color-emoji" aria-hidden>👋</span>
-                    </span>
-                    <span className={cn(isNewUser && "empty-state-reveal-welcome-rest")}>
-                      {EMPTY_WELCOME_REST}
-                    </span>
-                  </>
-                ) : (
-                  EMPTY_WELCOME_LEAD + EMPTY_WELCOME_REST
-                )}
-              </p>
-            )}
             <div
               ref={emptyStateZoneRef}
               role="button"

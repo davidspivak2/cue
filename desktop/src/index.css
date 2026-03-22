@@ -201,7 +201,7 @@ button[data-cue-title-bar-window-control],
   cursor: default;
 }
 
-/* Empty state stagger: welcome -> rest of sentence -> upload */
+/* Empty state: first-visit drop zone fade-in */
 @keyframes empty-state-fade-in {
   from {
     opacity: 0;
@@ -211,24 +211,12 @@ button[data-cue-title-bar-window-control],
   }
 }
 
-.empty-state-reveal-welcome {
+.empty-state-reveal-upload {
   opacity: 0;
   animation: empty-state-fade-in 0.8s ease-out forwards;
 }
 
-.empty-state-reveal-welcome-rest {
-  opacity: 0;
-  animation: empty-state-fade-in 0.8s ease-out 1.4s forwards;
-}
-
-.empty-state-reveal-upload {
-  opacity: 0;
-  animation: empty-state-fade-in 0.9s ease-out 3.4s forwards;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .empty-state-reveal-welcome,
-  .empty-state-reveal-welcome-rest,
   .empty-state-reveal-upload {
     animation-duration: 0.01ms;
     animation-delay: 0s;
