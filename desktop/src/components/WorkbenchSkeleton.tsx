@@ -15,7 +15,7 @@ export function WorkbenchSkeleton({
       data-testid="workbench"
       className={cn("flex h-full min-h-0 flex-col gap-4 py-6 pr-6", className)}
       aria-busy="true"
-      aria-label="Loading workbench"
+      aria-label="Loading editor"
     >
       <header
         className="flex items-center gap-2 pb-2"

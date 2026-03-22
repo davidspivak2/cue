@@ -101,7 +101,7 @@ app/                              # Python backend and pipeline
 
 desktop/                          # Tauri + React desktop app
   src/                            # React frontend (TypeScript)
-    pages/                        # ProjectHub, Workbench, Settings screens
+    pages/                        # ProjectHub, Editor, Settings screens
     components/                   # UI components (shadcn/Tailwind)
     jobsClient.ts                 # Backend job API client
     settingsClient.ts             # Backend settings API client
@@ -127,9 +127,9 @@ If you are new to the codebase, start here:
 1. **`app/backend_server.py`**: The FastAPI server that the desktop UI talks to. Defines job endpoints and SSE event streaming.
 2. **`app/workers.py`**: Orchestrates audio extraction, transcription subprocesses, FFmpeg burn-in, and progress reporting.
 3. **`app/transcribe_worker.py`**: The transcription subprocess. Loads the Whisper model, runs transcription, applies punctuation rescue, and writes the SRT file.
-4. **`desktop/src/pages/Workbench.tsx`**: The unified editor/export surface. Handles subtitle creation, on-video text editing, styling, export progress, cancel, and success actions.
+4. **Editor** (`desktop/src/pages/Workbench.tsx`): The unified edit/export surface. Handles subtitle creation, on-video text editing, styling, export progress, cancel, and success actions.
 5. **`desktop/src/pages/ProjectHub.tsx`**: The project list and entry point (**Add video**, relink, delete, and related project actions).
-6. **`desktop/src/pages/TabHost.tsx`**: Renders the Home panel (`ProjectHub`) plus one mounted `Workbench` per open tab; URL `/` vs `/workbench/:projectId` stays in sync with the title-bar tab strip.
+6. **`desktop/src/pages/TabHost.tsx`**: Renders the Home panel (`ProjectHub`) plus one mounted Editor per open tab (implemented by `Workbench.tsx`); URL `/` vs `/workbench/:projectId` stays in sync with the title-bar tab strip.
 7. **`desktop/src/pages/Settings.tsx`**: Settings content for the right-hand sheet opened from the title bar (transcription quality, save policy, audio options, diagnostics).
 
 ---

@@ -8,7 +8,7 @@ import ProjectHub from "@/pages/ProjectHub";
 const Workbench = lazy(() => import("@/pages/Workbench"));
 
 /**
- * Renders Home + all open workbench tabs. Only the active tab's content is visible;
+ * Renders Home + all open Editor tabs. Only the active tab's content is visible;
  * others stay mounted but hidden so switching back is instant (no reload).
  * Uses inert on hidden panels so focus is not retained in hidden content (avoids
  * "Blocked aria-hidden" a11y violation when a focused descendant is hidden).
