@@ -44,8 +44,9 @@ docs/internal/
 # Playwright
 .playwright-cli/
 
-# Scripts — personal / machine-only helpers (shared scripts stay in scripts/)
-scripts/local/
+# Scripts — personal / machine-only helpers (contents ignored; README kept so folder exists)
+scripts/local/*
+!scripts/local/README.md
 
 # Desktop — frontend (Node)
 desktop/node_modules/
