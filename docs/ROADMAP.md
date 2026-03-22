@@ -31,3 +31,7 @@ Statuses: NEXT, IN PROGRESS, BLOCKED, DONE.
 5. **Left panel: all-subtitles list**
    - **Deliverable:** A left strip listing all cues (read-only timestamps, editable text); click a row to seek and select. Layout: collapsed by default; docked and resizable at wide widths; under ~1100px use an overlay drawer with scrim and Esc; only one overlay open at a time (this panel vs style).
    - **Acceptance:** Editing, seek, and selection stay in sync; dock/overlay behavior holds across resize.
+
+6. **Subtitle translation** (target language can differ from audio)
+   - **Deliverable:** A path distinct from same-language transcription: user chooses a subtitle language that may not match the spoken audio, and the app produces timed subtitles in that language (translation, not “wrong-language” transcribe).
+   - **Acceptance:** User can set an explicit target subtitle language independent of the audio language; cues appear in that language with usable timing; edit, preview, and export behave like other subtitle workflows.
