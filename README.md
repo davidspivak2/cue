@@ -2,7 +2,7 @@
 
 Create subtitles for any video, in any language, right on your computer.
 
-Cue is a desktop app that uses AI speech recognition to generate subtitles and burn them directly into your video. Everything runs locally on your machine — no uploads, no cloud, no subscriptions.
+Cue is a desktop app that uses speech recognition to generate subtitles and burn them into your video. Processing runs on your computer: no upload, no cloud account, no subscription.
 
 ## Screenshots
 
@@ -10,15 +10,15 @@ Cue is a desktop app that uses AI speech recognition to generate subtitles and b
 
 ## Features
 
-- **Automatic subtitles** — Drop a video in, get an SRT subtitle file out. Powered by Whisper large-v3.
-- **Burn subtitles into video** — Export a new MP4 with subtitles baked in. No extra tools needed.
-- **Word-by-word highlighting** — Karaoke-style word highlighting that follows the speaker in real time.
-- **Style customization** — Choose from presets or customize fonts, colors, outlines, shadows, and backgrounds.
-- **Any language** — Automatic language detection. Supports all languages that Whisper supports.
-- **RTL support** — Full right-to-left rendering for Hebrew, Arabic, and other RTL languages.
-- **GPU acceleration** — Uses your GPU (CUDA) when available for faster transcription. Falls back to CPU automatically.
-- **Runs offline** — Everything runs locally. Your videos never leave your computer.
-- **Open source** — Free to use. Built on top of open-source tools.
+- **Automatic subtitles:** Drop a video in, get an SRT file out. Uses Whisper large-v3.
+- **Burn-in export:** New MP4 with subtitles baked in; no separate encoder step.
+- **Word-by-word highlighting:** Karaoke-style timing that tracks the speaker in playback.
+- **Style customization:** Presets plus fonts, colors, outlines, shadows, and backgrounds.
+- **Languages:** Auto-detects language; supports what Whisper supports.
+- **RTL:** Right-to-left layout for Hebrew, Arabic, and other RTL scripts.
+- **GPU acceleration:** Uses CUDA when available; otherwise CPU.
+- **Offline:** Processing stays on your machine; videos are not uploaded.
+- **Open source:** GPL-3.0; see License below.
 
 ## Download and install
 
@@ -48,7 +48,7 @@ If you want to run the app from source or contribute, see the [Contributing guid
 
 1. **Open the app** and drop a video file into the window (or click "Choose video...").
 2. **Click "Create subtitles"** and wait for the AI to transcribe. The first run downloads the language model, which may take a few minutes.
-3. **Review and style your subtitles** — the app opens a “Review subtitles” screen where you can pick a style, choose between static or word-highlight mode, and adjust colors.
+3. **Review and style:** Pick a style, static or word-highlight mode, and colors on the review screen.
 4. **Click "Create video with subtitles"** to export a new MP4 with subtitles burned in.
 
 Your subtitle file (`.srt`) and the new video appear next to the original video by default. You can change the save location in Settings.
@@ -77,10 +77,10 @@ For end-user legal terms and privacy details, see [TERMS.md](TERMS.md) and [PRIV
 
 ## Acknowledgments
 
-Cue is built on top of these excellent open-source projects:
+Cue uses:
 
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — Fast Whisper transcription with CTranslate2
-- [WhisperX](https://github.com/m-bain/whisperX) — Word-level timestamp alignment
-- [FFmpeg](https://ffmpeg.org/) — Audio/video processing
-- [Tauri](https://tauri.app/) — Desktop app framework
-- [React](https://react.dev/) — UI framework
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Whisper via CTranslate2)
+- [WhisperX](https://github.com/m-bain/whisperX) (word-level alignment)
+- [FFmpeg](https://ffmpeg.org/)
+- [Tauri](https://tauri.app/)
+- [React](https://react.dev/)

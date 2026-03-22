@@ -9,7 +9,7 @@ For overall project info, see: [`../README.md`](../README.md).
 - WebView2 Runtime (Evergreen)
 
 ## Desktop (Tauri) development
-The recommended contributor workflow is still the one-command entrypoint from the repo root:
+From the repo root, the usual path is the one-command launcher:
 ```bat
 C:\Cue_repo\scripts\run_desktop_all.cmd
 ```

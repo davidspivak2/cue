@@ -1,10 +1,8 @@
 # Contributing
 
-Thanks for helping improve Cue! This guide covers everything you need to get the app running locally and start contributing.
+How to run Cue locally and submit changes. For layout of the repo and pipeline, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-For a high-level overview of how the codebase is organized, see [ARCHITECTURE.md](ARCHITECTURE.md).
-
-Before we merge a pull request from a non-maintainer, the contributor must sign Cue's contributor agreement. See [CLA_POLICY.md](CLA_POLICY.md).
+Non-maintainer pull requests need a signed contributor agreement before merge. See [CLA_POLICY.md](CLA_POLICY.md).
 
 ---
 
@@ -18,9 +16,9 @@ Before we merge a pull request from a non-maintainer, the contributor must sign 
    This installs dependencies, starts the backend, and opens the desktop app.
 3. Make your changes on a feature branch, test locally, and open a PR.
 
-That's it for the basics. The rest of this guide covers setup details for each platform.
+The sections below are platform-specific setup.
 
-Personal helper scripts can live under `scripts/local/` — that entire folder is gitignored and is not part of the shared workflow.
+Personal scripts can go in `scripts/local/` (gitignored; not part of the shared workflow).
 
 ---
 

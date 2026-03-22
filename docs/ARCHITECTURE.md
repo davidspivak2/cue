@@ -1,6 +1,6 @@
 # Architecture Overview
 
-This document is for contributors who want to understand how Cue is built. It covers the high-level system design, the processing pipeline, the repo layout, and where data lives on disk.
+For contributors: how Cue is wired together (system layout, pipeline, repo map, and where files land on disk).
 
 For setup and development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -125,7 +125,7 @@ scripts/                          # Dev workflow scripts (Windows cmd/ps1)
 If you are new to the codebase, start here:
 
 1. **`app/backend_server.py`** — The FastAPI server that the desktop UI talks to. Defines job endpoints and SSE event streaming.
-2. **`app/workers.py`** — The heavy lifter. Handles audio extraction, transcription subprocess management, FFmpeg burn-in, and progress reporting.
+2. **`app/workers.py`** — Orchestrates audio extraction, transcription subprocesses, FFmpeg burn-in, and progress reporting.
 3. **`app/transcribe_worker.py`** — The transcription subprocess. Loads the Whisper model, runs transcription, applies punctuation rescue, and writes the SRT file.
 4. **`desktop/src/pages/Workbench.tsx`** — The unified editor/export surface. Handles subtitle creation, on-video text editing, styling, export progress, cancel, and success actions.
 5. **`desktop/src/pages/ProjectHub.tsx`** — The project list and entry point (`New project`, relink, delete, and quick create-subtitles actions).
