@@ -10,10 +10,10 @@ Cue is a desktop app that uses speech recognition to generate subtitles and burn
 
 ## Features
 
-- **Automatic subtitles:** Drop a video in, get an SRT file out. Uses Whisper large-v3.
+- **Automatic subtitles:** Add a video from Home, get an SRT file out. Uses Whisper large-v3.
 - **Burn-in export:** New MP4 with subtitles baked in; no separate encoder step.
-- **Word-by-word highlighting:** Karaoke-style timing that tracks the speaker in playback.
-- **Style customization:** Presets plus fonts, colors, outlines, shadows, and backgrounds.
+- **Word-by-word highlighting:** Karaoke-style timing (the Karaoke effect in the Effects panel) that tracks the speaker in playback.
+- **Style customization:** Presets plus fonts, colors, outlines, shadows, and backgrounds in the workbench Effects panel.
 - **Languages:** Auto-detects language; supports what Whisper supports.
 - **RTL:** Right-to-left layout for Hebrew, Arabic, and other RTL scripts.
 - **GPU acceleration:** Uses CUDA when available; otherwise CPU.
@@ -46,12 +46,12 @@ If you want to run the app from source or contribute, see the [Contributing guid
 
 ## Quick start
 
-1. **Open the app** and drop a video file into the window (or click "Choose video...").
-2. **Click "Create subtitles"** and wait for the AI to transcribe. The first run downloads the language model, which may take a few minutes.
-3. **Review and style:** Pick a style, static or word-highlight mode, and colors on the review screen.
-4. **Click "Create video with subtitles"** to export a new MP4 with subtitles burned in.
+1. **Home (project hub):** Click **Add video** or drop a supported file on the empty area (MP4, MKV, MOV, M4V, WEBM). Cue opens the video in a **workbench tab** (you can keep several videos open and switch tabs in the title bar).
+2. **Create subtitles:** In the workbench, click **Create subtitles** and wait for transcription. The first run may download the Whisper model, which can take a few minutes.
+3. **Review and style:** Use the preview and the **Effects** panel for presets, typography, colors, outline, shadow, background, and **Karaoke** for word-by-word highlighting.
+4. **Export:** Click **Export** to burn subtitles into a new MP4.
 
-Your subtitle file (`.srt`) and the new video appear next to the original video by default. You can change the save location in Settings.
+Your `.srt` and exported video are saved according to **Settings** (gear in the title bar)—e.g. same folder as the source video, a fixed folder, or ask every time.
 
 ## How it works
 

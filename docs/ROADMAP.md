@@ -1,7 +1,7 @@
 # Roadmap
 
 Product and pipeline schedule. Extra migration notes may live only under local `docs/internal/` (not on GitHub).
-The main project list screen is labeled **Projects** (formerly "Project Hub" in copy).
+The project list screen is titled **Home** in the UI (project hub / video list). Older milestones may still say “Projects” or “Project Hub.”
 
 ## Rules
 - Use this file for what ships next and in what order.
@@ -33,13 +33,13 @@ The main project list screen is labeled **Projects** (formerly "Project Hub" in 
 
 2. [DONE] Export success actions reliability (Workbench success strip)
    - Deliverable:
-     - `Play video` and `Open folder` actions in Workbench success state reliably trigger OS open behavior in the desktop app.
+     - `Play` and `Open folder` actions in Workbench success state reliably trigger OS open behavior in the desktop app.
      - If open-path actions fail, users get immediate, visible, non-blocking feedback instead of silent no-op behavior.
    - Current status:
      - Completed on 2026-02-13.
      - Workbench success-strip handlers now surface explicit failure details, include folder reveal fallback, and opener scope permissions cover common user output paths.
    - Acceptance criteria:
-     - After a successful export, `Play video` opens the latest exported file and `Open folder` opens the containing folder.
+     - After a successful export, `Play` opens the latest exported file and `Open folder` opens the containing folder.
      - Failure paths provide a clear retryable message without breaking the rest of the Editor flow.
    - UX spec reference: G) Export progress + success (in-Editor)
 
@@ -123,7 +123,7 @@ The main project list screen is labeled **Projects** (formerly "Project Hub" in 
       - Progress surface reflects pre-transcription work instead of appearing stuck at 0%.
       - If user leaves Editor during an active task, background progress remains visible from other pages.
       - Checklist row detail text is displayed inline with clearer hierarchy.
-      - Remove the right-side step/status label above the progress bar in both Create subtitles (Home) and Export (Workbench), while keeping the percentage and progress bar.
+      - Remove the right-side step/status label above the progress bar in both Create subtitles and Export (Workbench), while keeping the percentage and progress bar.
    - Acceptance criteria:
       - Progress does not remain static at 0% during long startup phases without explanatory detail.
       - User can navigate back to Projects and still see active-task state/progress.
@@ -134,7 +134,7 @@ The main project list screen is labeled **Projects** (formerly "Project Hub" in 
 10. [DONE] Settings clarity pass
    - Deliverable:
      - Transcription quality control is redesigned as clear choice cards with plain-language hints.
-     - “Always save to this folder” and its path controls are visually grouped.
+     - “Specific folder” and its path controls are visually grouped.
      - Punctuation + audio controls are merged into one understandable section.
      - “Keep extracted WAV file” is removed; extracted WAV is auto-cleaned.
      - Theme toggle is exposed in Settings.
@@ -185,7 +185,7 @@ The main project list screen is labeled **Projects** (formerly "Project Hub" in 
    - Deliverable:
      - Delete dialog appears without side-swoop animation.
      - Delete-success feedback uses toast behavior (not persistent inline banner).
-     - Empty Projects state shows one primary “New project” action.
+     - Empty Home (project list) state shows one primary “Add video” action.
      - Edit action buttons do not shift subtitle layout when they appear.
      - Editor status appears next to video name to strengthen meaning.
      - Native video control affordances are simplified, including playback-speed discoverability.
@@ -279,7 +279,7 @@ The main project list screen is labeled **Projects** (formerly "Project Hub" in 
 
 0.5 Export success actions reliability (Workbench success strip)
 - Deliverable:
-  - `Play video` and `Open folder` actions reliably open the expected file/folder in desktop app builds.
+  - `Play` and `Open folder` actions reliably open the expected file/folder in desktop app builds.
   - Failure paths show clear user feedback instead of silent no-op behavior.
 - Current status:
   - Done on 2026-02-13 (`desktop/src/pages/Workbench.tsx` + opener capability scopes in `desktop/src-tauri/capabilities/main.json`).
@@ -351,9 +351,9 @@ Definition of done:
 ### Milestone 2 — Projects UI (new entry point)
 2.1 Projects screen
 - Deliverable:
-  - Grid of project cards, primary CTA “New project”, drag-and-drop onto hub
+  - Grid of project cards, primary CTA “Add video”, drag-and-drop onto hub
 - Acceptance criteria:
-  - Launch opens Projects; “New project” works; DnD works.
+  - Launch opens Home (project list); “Add video” works; DnD works.
 
 2.2 Card content + interactions
 - Deliverable:
@@ -383,11 +383,11 @@ Definition of done:
 - Deliverable:
   - Delete confirmation dialog appears without side-swoop entrance animation.
   - Delete success uses toast feedback (not a persistent inline banner).
-  - Empty state and non-empty state never show duplicate “New project” actions.
+  - Empty state and non-empty state never show duplicate “Add video” actions.
 - Acceptance criteria:
   - Deleting a project gives transient confirmation and the message auto-clears.
   - Empty-state layout has one clear primary CTA.
-  - Standard (non-empty) layout keeps top-right “New project” behavior unchanged.
+  - Standard (non-empty) layout keeps top-right “Add video” behavior unchanged.
 
 Definition of done:
 - Projects is the stable home screen and projects open into Editor.
@@ -521,11 +521,10 @@ Definition of done:
 ### Milestone 6 — Editor CTAs + export UX (in-Editor)
 6.1 CTA placement rules
 - Deliverable:
-  - Bottom action bar exists only in “Subtitles ready” and “Export success”
-  - Bottom bar has only “Create video with subtitles”
-  - Earlier states show “Create subtitles” in main content area (no bottom bar)
+  - **Current product:** Workbench uses a top action area: **Create subtitles** when subtitles are missing or not being generated; **Export** / **Export again** when subtitles exist and export is idle; **Play** and **Open folder** after a successful export when an output path is available; job progress and **Cancel** while work runs.
+  - **Historical note:** Older single-flow builds used a separate “Subtitles ready” step with a sticky **Create video with subtitles** CTA; that was replaced by the project hub + Workbench tab model.
 - Acceptance criteria:
-  - UI matches these CTA rules across states.
+  - Primary CTAs match the current Workbench layout; no legacy-only CTA placement rules block shipping.
 
 6.2 Export progress in Editor
 - Deliverable:
@@ -536,7 +535,7 @@ Definition of done:
 
 6.3 Export success state
 - Deliverable:
-  - In-place success with Play video, Open folder
+  - In-place success with `Play`, `Open folder`
   - User can continue editing and re-export
 - Acceptance criteria:
   - No separate “Done” screen required for success.
@@ -583,7 +582,7 @@ Definition of done:
 7.4 Settings clarity restructure
 - Deliverable:
   - Transcription quality is presented as four plain-language cards with helper hints.
-  - Save-subtitles path controls are grouped directly under “Always save to this folder”.
+  - Save-subtitles path controls are grouped directly under “Specific folder”.
   - Punctuation and audio controls are merged into one section with clear intent-first wording.
   - “Keep extracted WAV file” control is removed (auto-delete behavior only).
 - Acceptance criteria:
@@ -674,7 +673,7 @@ Definition of done:
 
 | Requested area | Existing coverage | Scheduled in roadmap |
 | --- | --- | --- |
-| Export success actions reliability (`Play video`, `Open folder`) | Done (success-strip open actions validated; explicit failure feedback in place) | Queue item 2 (DONE), Milestone 0.5 + 6.3 |
+| Export success actions reliability (`Play`, `Open folder`) | Done (success-strip open actions validated; explicit failure feedback in place) | Queue item 2 (DONE), Milestone 0.5 + 6.3 |
 | Preview style parity (font/size/shadow) vs export output | Gap | Queue item 3, Milestone 0.6 |
 | Preview subtitle scaling with video on window resize | Gap | Queue item 3, Milestone 0.6 |
 | Preview word-highlight drift while export timing is correct | Partial (`F`, `G`; export contract already enforced) | Queue item 4, Milestone 0.7 |
@@ -716,13 +715,13 @@ Definition of done:
   - Keep export/rendering behavior unchanged unless explicitly called out by milestone acceptance criteria.
   - Keep export word-timing behavior unchanged while addressing preview-only highlight drift.
   - Limit RTL punctuation/cursor fixes to inline edit textarea behavior; do not alter non-edit preview/export rendering unless explicitly scheduled.
-  - Export-success open actions (`Play video`, `Open folder`) must never fail silently; always surface clear retryable feedback.
+  - Export-success open actions (`Play`, `Open folder`) must never fail silently; always surface clear retryable feedback.
   - Send Logs must be opt-in, redact sensitive local data where possible, and exclude rendered output video by default.
   - If hosted log upload fails, keep local fallback actions (`Copy diagnostics`) available.
 - Regression tests (minimum):
   - Projects -> Editor -> Settings -> Back navigation without sidebar.
   - Create subtitles -> Back while running -> confirm background progress remains visible -> reopen project.
-  - Export success state -> click `Play video` and `Open folder` -> verify open succeeds (or explicit error message appears).
+  - Export success state -> click `Play` and `Open folder` -> verify open succeeds (or explicit error message appears).
   - Preview/export parity check on golden clip for font family, font size, shadow, and relative subtitle placement.
   - Resize Editor window -> verify subtitle overlay scales proportionally with video viewport.
   - Preview word highlight sync check using known timing clip; confirm no obvious spoken-word drift.
@@ -733,7 +732,7 @@ Definition of done:
   - Settings clarity checks for transcription quality, save policy/path grouping, and theme toggle.
   - Style pane checks for font list, color presets/picker behavior, default-color sanity, overlay `X` close affordance, collapsed-strip entry, and thin scrollbar usability.
 - Lightweight analytics (privacy-preserving):
-  - Export success actions click/success/failure counts (`Play video`, `Open folder`), without collecting opened paths.
+  - Export success actions click/success/failure counts (`Play`, `Open folder`), without collecting opened paths.
   - Preview/export parity mismatch report count (manual QA flag or lightweight telemetry event).
   - Preview highlight drift report count (no subtitle text payloads).
   - Inline edit auto-save-on-play usage count and failure count.
@@ -754,7 +753,7 @@ Definition of done:
 - Active routing cleanup complete: `/legacy` and `/review` were removed from `App.tsx`; Workbench is the only active editor/export flow.
 - Project Hub delete flow complete: confirmed delete in UI, project-data-only removal, and backend cancel-then-delete behavior.
 - Workbench on-video edit + style pane complete: on-video Enter/Esc editing contract is live and Workbench style pane now renders real `StyleControls` (wide + narrow overlay).
-- Projects entry flow update complete: top-right CTA is now `New project`, creating a project auto-opens its Workbench tab, and `needs_subtitles` cards now include a secondary `Create subtitles` action.
+- Projects entry flow update complete: top-right CTA is now **Add video**, creating a project auto-opens its Workbench tab, and `needs_subtitles` cards now include a secondary `Create subtitles` action.
 - Workbench no-subtitles state update complete: strict empty state (`No subtitles yet.` + primary `Create subtitles`) is live, style pane/drawer is hidden until subtitles exist, and create-subtitles now runs directly in Workbench with checklist/progress/cancel plus `project_id` job linkage.
 
 ## Decision log
@@ -770,6 +769,8 @@ Definition of done:
 
 ### Appendix: Archived — Caption graphics overlay plan (original)
 # Caption Graphics Overlay Plan
+
+> **Note:** Labels below describe the legacy single-page **Home** flow (`SUBTITLES_READY`). The shipping app uses the **Home** project list + **Workbench** tabs; burn-in uses **`Export`**, not **Create video with subtitles**.
 
 Status: Completed. This plan is kept for historical reference. For upcoming work, see [`ROADMAP.md`](ROADMAP.md).
 
