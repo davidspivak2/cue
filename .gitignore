@@ -3,6 +3,11 @@
 __pycache__/
 *.pyc
 _tmp_backend_server.pyc.*
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
 
 # Build outputs
 build/
@@ -39,6 +44,7 @@ docs/internal/SESSION_HANDOFF*.md
 
 # Desktop — frontend (Node)
 desktop/node_modules/
+desktop/.vite/
 
 # Desktop — Tauri / Rust
 desktop/src-tauri/target/
@@ -51,3 +57,4 @@ desktop/src-tauri/cue-engine-0[1-4]-*.zip
 # Tests
 **/test-results/**
 desktop/test-results/.last-run.json
+desktop/pw-results/
