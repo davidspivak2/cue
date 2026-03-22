@@ -34,10 +34,6 @@ Download the latest Windows installer from the [Releases](../../releases) page a
 
 Windows releases currently ship packaged desktop app installers for x64 only.
 
-The Windows installer bundle includes Cue's local engine as several resource archives (`cue-engine-01-executables.zip` … `cue-engine-04-internal.zip` plus a small manifest) and installs `TERMS.md`, `PRIVACY.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md` with the app.
-
-The NSIS `.exe` installer shows Cue's end-user terms during setup.
-
 ### macOS
 
 <!-- TODO: Add download link to the latest .dmg once macOS packaging is ready. -->
