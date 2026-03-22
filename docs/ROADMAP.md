@@ -1,10 +1,10 @@
-# Project Roadmap (Single Source of Truth)
+# Roadmap
 
-Note: This file is the product/pipeline roadmap. Supplementary migration notes may exist in a local-only `docs/internal/` tree (not published to GitHub).
-Terminology note: the user-facing screen label is now **"Projects"** (same screen/route previously labeled "Project Hub").
+Product and pipeline schedule. Extra migration notes may live only under local `docs/internal/` (not on GitHub).
+The main project list screen is labeled **Projects** (formerly "Project Hub" in copy).
 
 ## Rules
-- This file is the ONLY place to look for “what to do next”.
+- Use this file for what ships next and in what order.
 - Detailed bug write-ups, repro steps, and issue-level validation notes live in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
 - If work is not listed here, it is not scheduled.
 - The UX spec defines target behavior; this file defines implementation order and acceptance criteria.

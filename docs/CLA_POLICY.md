@@ -1,12 +1,10 @@
 # Cue Contributor Agreement Policy
 
-This page describes Cue's current CLA plan.
+How outside contributions are licensed and merged.
 
 ## Why Cue uses a CLA
 
-Cue is open source under `GPL-3.0-only`, but the maintainer wants to keep the option to relicense future versions later.
-
-A CLA helps with that by making sure outside contributions can still be used in a future relicensed version.
+Cue ships under `GPL-3.0-only`. The maintainer may want to relicense a future version. A CLA keeps that option open for code contributed by people outside the core team.
 
 ## Current policy
 

@@ -317,41 +317,34 @@ Validation checklist:
 
 ## KI-007 - Clicking Play during edit should auto-save and exit edit mode
 
-- Status: `FIXED`
+- Status: `DONE`
 - Priority: Medium
 - Tracked in roadmap: Queue item 5 (`Subtitle edit-mode reliability`)
 - Primary code pointers:
   - `desktop/src/pages/Workbench.tsx` (play/pause controls + inline edit save flow)
 
-**Resolution:** Added `onPlay` handler to the video element. When Play is triggered (native controls or space key) while in edit mode, the handler pauses the video, sets `shouldResumePlaybackRef`, and calls `handleSaveEdit`. On success, edit mode exits and playback resumes; on failure, `editError` banner shows and user stays in edit mode. E2E test: `on-video contract saves and resumes when Play is clicked during edit`.
+**Implemented:** Video `onPlay` handler: if edit mode is active, playback pauses, `shouldResumePlaybackRef` is set, and `handleSaveEdit` runs. On success, edit mode closes and playback resumes; on failure, the `editError` banner stays up and edit mode remains. E2E: `on-video contract saves and resumes when Play is clicked during edit`.
 
-User impact:
-- Current behavior can leave users unsure whether edits are saved when resuming playback.
+User impact (historical):
+- Before the fix, Play during edit could leave save state unclear.
 
 Repro steps:
-1. Enter inline edit mode on active subtitle.
+1. Enter inline edit on the active subtitle.
 2. Change text.
-3. Click Play without clicking Save/Cancel/Undo.
+3. Press Play without Save/Cancel/Undo.
 
 Expected:
-- App auto-saves, exits edit mode, and resumes playback immediately.
+- One save, edit mode exits, playback resumes.
 
 Actual:
-- Behavior does not currently guarantee this flow.
+- RESOLVED. Auto-save-on-play path matches the expected flow.
 
-Likely cause / notes:
-- Play action and edit-save lifecycle are not coordinated.
-
-Minimum-scope fix:
-- Add guarded auto-save-on-play path for active inline edits.
-
-Risks / regressions:
-- Potential double-save if save is already in progress.
-- Need clear fallback when save fails.
+Likely cause (historical):
+- Play and edit-save were not wired together.
 
 Validation checklist:
-- Play during edit saves once and resumes playback.
-- Save failure keeps user informed and prevents silent data loss.
+- [x] Play during edit saves once and resumes playback.
+- [x] Save failure surfaces in UI; no silent data loss.
 
 ---
 
