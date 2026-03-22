@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "cue-desktop"
-version = "0.1.0-beta.1"
+version = "0.1.0-1"
 dependencies = [
  "serde",
  "serde_json",

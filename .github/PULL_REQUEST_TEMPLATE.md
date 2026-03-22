@@ -8,7 +8,7 @@ Explain the user problem, bug, or product goal this solves.
 
 ## State ownership map
 
-Required for Workbench-heavy PRs. Name one canonical writer for each user-visible value or behavior you changed.
+Required for Editor-heavy PRs. Name one canonical writer for each user-visible value or behavior you changed.
 
 | User-visible value / behavior | Canonical writer | Allowed fallback | Notes |
 | --- | --- | --- | --- |
@@ -16,7 +16,7 @@ Required for Workbench-heavy PRs. Name one canonical writer for each user-visibl
 
 ## Fallback matrix
 
-Required for Workbench-heavy PRs. Show what happens when the happy path is unavailable.
+Required for Editor-heavy PRs. Show what happens when the happy path is unavailable.
 
 | Scenario | Expected behavior | Covered by |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ Required for Workbench-heavy PRs. Show what happens when the happy path is unava
 
 ## Regression risk
 
-Required for Workbench-heavy PRs.
+Required for Editor-heavy PRs.
 
 - Primary regression risk:
 - Secondary regression risk:
@@ -45,4 +45,4 @@ Required for Workbench-heavy PRs.
 - [ ] Tested locally (app launches, core flow works)
 - [ ] No new linter errors introduced
 - [ ] Updated documentation if needed
-- [ ] If this PR is Workbench-heavy, I filled in the state ownership map and fallback matrix
+- [ ] If this PR is Editor-heavy, I filled in the state ownership map and fallback matrix

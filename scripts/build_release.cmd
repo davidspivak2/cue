@@ -48,23 +48,30 @@ call :clean_nsis_outputs
 
 set "MSI_ONLY_FALLBACK=0"
 call npm run tauri build
+if errorlevel 1 goto :tauri_retry_after_fail
+goto :tauri_after_retry
+
+:tauri_retry_after_fail
+rem NOTE: Do not use "call :clean_nsis_outputs" inside a parenthesized IF block; cmd.exe often fails to resolve the label.
+echo [WARN] First Tauri build failed. Retrying once after NSIS cleanup and a short delay ^(often fixes "Access is denied" / error 5^)...
+call :clean_nsis_outputs
+timeout /t 3 /nobreak >nul
+call npm run tauri build
+
+:tauri_after_retry
+if errorlevel 1 goto :tauri_msi_fallback
+goto :after_subs
+
+:tauri_msi_fallback
+echo [WARN] Full Tauri installer build failed. Retrying MSI-only build...
+echo [HELP] If NSIS failed with "Access is denied" ^(os error 5^): close any Explorer window on bundle\nsis,
+echo        quit a running Cue setup.exe from that folder, wait for antivirus to finish, then run this script again.
+set "MSI_ONLY_FALLBACK=1"
+call npm run tauri build -- --bundles msi
 if errorlevel 1 (
-  echo [WARN] First Tauri build failed. Retrying once after NSIS cleanup and a short delay ^(often fixes "Access is denied" / error 5^)...
-  call :clean_nsis_outputs
-  timeout /t 3 /nobreak >nul
-  call npm run tauri build
-)
-if errorlevel 1 (
-  echo [WARN] Full Tauri installer build failed. Retrying MSI-only build...
-  echo [HELP] If NSIS failed with "Access is denied" ^(os error 5^): close any Explorer window on bundle\nsis,
-  echo        quit a running Cue setup.exe from that folder, wait for antivirus to finish, then run this script again.
-  set "MSI_ONLY_FALLBACK=1"
-  call npm run tauri build -- --bundles msi
-  if errorlevel 1 (
-    echo [ERROR] Tauri build failed.
-    pause
-    exit /b 1
-  )
+  echo [ERROR] Tauri build failed.
+  pause
+  exit /b 1
 )
 goto :after_subs
 

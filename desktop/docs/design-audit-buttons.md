@@ -27,7 +27,7 @@
 
 ## Audit Findings
 
-### 1. Create-subtitles checklist (Workbench empty state)
+### 1. Create-subtitles checklist (Editor empty state)
 
 | Button | Location | Current variant | Expected | Status |
 |--------|----------|-----------------|----------|--------|
@@ -39,7 +39,7 @@
 
 ---
 
-### 2. Top action bar (Workbench header)
+### 2. Top action bar (Editor header)
 
 | Button | Current variant | Expected | Status |
 |--------|-----------------|----------|--------|
@@ -76,7 +76,7 @@
 
 ## Corrective Actions (Applied)
 
-1. **Workbench – create-subtitles checklist**
+1. **Editor – create-subtitles checklist**
    - Elevator music button (short-window row): `variant="outline"` → `variant="secondary"`, keep `size="sm"`. ✓
    - Elevator music button (bottom row): `variant="outline"` → `variant="secondary"`, keep `size="sm"`. ✓
 

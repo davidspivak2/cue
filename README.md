@@ -9,7 +9,7 @@ Cue uses speech recognition to build subtitles and burn them into the video. Eve
 <p align="center">
   <img src="docs/images/readme-home-empty.png" width="32%" alt="Cue home screen with empty drop zone" />
   <img src="docs/images/readme-home-full.png" width="32%" alt="Cue home screen with video cards" />
-  <img src="docs/images/readme-workbench.png" width="32%" alt="Cue workbench with video preview and subtitles" />
+  <img src="docs/images/readme-editor.png" width="32%" alt="Cue Editor with video preview and subtitles" />
 </p>
 
 ## Features
@@ -17,7 +17,7 @@ Cue uses speech recognition to build subtitles and burn them into the video. Eve
 - **Automatic subtitles:** Add a video from Home, get an SRT file out. Uses Whisper large-v3.
 - **Burn-in export:** New MP4 with subtitles baked in; no separate encoder step.
 - **Word-by-word highlighting:** Karaoke in the Effects panel tracks the speaker as the video plays.
-- **Style customization:** Presets plus fonts, colors, outlines, shadows, and backgrounds in the workbench Effects panel.
+- **Style customization:** Presets plus fonts, colors, outlines, shadows, and backgrounds in the Editor Effects panel.
 - **Languages:** Auto-detects language; supports what Whisper supports.
 - **RTL:** Right-to-left layout for Hebrew, Arabic, and other RTL scripts.
 - **GPU acceleration:** Uses CUDA when available; otherwise CPU.
@@ -46,8 +46,8 @@ If you want to run the app from source or contribute, see the [Contributing guid
 
 ## Quick start
 
-1. **Home (project hub):** Click **Add video** or drop a supported file on the empty area (MP4, MKV, MOV, M4V, WEBM). Cue opens the video in a **workbench tab** (you can keep several videos open and switch tabs in the title bar).
-2. **Create subtitles:** In the workbench, click **Create subtitles** and wait for transcription. The first run may download the Whisper model, which can take a few minutes.
+1. **Home (project hub):** Click **Add video** or drop a supported file on the empty area (MP4, MKV, MOV, M4V, WEBM). Cue opens the video in an **Editor tab** (you can keep several videos open and switch tabs in the title bar).
+2. **Create subtitles:** In the Editor, click **Create subtitles** and wait for transcription. The first run may download the Whisper model, which can take a few minutes.
 3. **Review and style:** Use the preview and the **Effects** panel for presets, typography, colors, outline, shadow, background, and **Karaoke** for word-by-word highlighting.
 4. **Export:** Click **Export** to burn subtitles into a new MP4.
 

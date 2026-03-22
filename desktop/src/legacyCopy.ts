@@ -8,27 +8,6 @@ export const legacyCopy = {
     placeholder: "Preview not available",
     remove: "Remove video"
   },
-  videoSelected: {
-    cta: "Create subtitles"
-  },
-  working: {
-    createSubtitlesHeading: "Creating subtitles",
-    createVideoHeading: "Creating video with subtitles",
-    cancel: "Cancel"
-  },
-  subtitlesReady: {
-    header: "Subtitles created",
-    footerPrefix: "Saving as:",
-    cta: "Export"
-  },
-  done: {
-    header: "Your video is ready",
-    playVideo: "Play",
-    openFolder: "Open folder"
-  },
-  settings: {
-    back: "Back"
-  },
   progress: {
     elapsedPrefix: "Elapsed:"
   },
@@ -41,10 +20,7 @@ export const legacyCopy = {
     reviewPunctuation: "Reviewing punctuation",
     checkMissedSpeech: "Making sure no words were missed",
     matchWords: "Building word-by-word karaoke effect",
-    preparingPreview: "Preparing preview",
-    getVideoInfo: "Getting video info",
-    addSubtitles: "Adding subtitles to video",
-    saveVideo: "Saving video"
+    preparingPreview: "Preparing preview"
   }
 } as const;
 
@@ -56,10 +32,7 @@ export const checklistStepIds = {
   fixPunctuation: "fix_punctuation",
   fixMissingSubtitles: "fix_missing_subtitles",
   timingWordHighlights: "timing_word_highlights",
-  preparingPreview: "preparing_preview",
-  getVideoInfo: "get_video_info",
-  addSubtitles: "add_subtitles",
-  saveVideo: "save_video"
+  preparingPreview: "preparing_preview"
 } as const;
 
 export type ChecklistStepId = (typeof checklistStepIds)[keyof typeof checklistStepIds];
@@ -104,13 +77,4 @@ export const buildGenerateChecklist = (
   items.push({ id: checklistStepIds.timingWordHighlights, label: labels.matchWords });
   items.push({ id: checklistStepIds.preparingPreview, label: labels.preparingPreview });
   return items;
-};
-
-export const buildExportChecklist = (): ChecklistDefinition[] => {
-  const labels = legacyCopy.checklistLabels;
-  return [
-    { id: checklistStepIds.getVideoInfo, label: labels.getVideoInfo },
-    { id: checklistStepIds.addSubtitles, label: labels.addSubtitles },
-    { id: checklistStepIds.saveVideo, label: labels.saveVideo }
-  ];
 };
