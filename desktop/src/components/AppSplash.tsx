@@ -2,7 +2,7 @@ import { Loader2 } from "lucide-react";
 import { useAppSplash } from "@/contexts/AppSplashContext";
 
 export default function AppSplash() {
-  const { showSplash } = useAppSplash();
+  const { showSplash, splashDetail } = useAppSplash();
   if (!showSplash) return null;
 
   return (
@@ -17,6 +17,9 @@ export default function AppSplash() {
         aria-hidden
       />
       <p className="mt-4 text-sm text-muted-foreground">Starting Cue...</p>
+      {splashDetail ? (
+        <p className="mt-2 max-w-md px-6 text-center text-xs text-muted-foreground">{splashDetail}</p>
+      ) : null}
     </div>
   );
 }

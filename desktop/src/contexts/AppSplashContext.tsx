@@ -1,4 +1,6 @@
 import * as React from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 const SPLASH_DISMISSED_KEY = "cue-splash-dismissed";
 
@@ -11,9 +13,18 @@ function getSplashAlreadyDismissedThisSession(): boolean {
   }
 }
 
+type EngineExtractProgressPayload = {
+  label: string;
+  index: number;
+  total: number;
+  phase: string;
+};
+
 type AppSplashContextValue = {
   showSplash: boolean;
   setShowSplash: (value: boolean) => void;
+  splashDetail: string | null;
+  setSplashDetail: (value: string | null) => void;
 };
 
 const AppSplashContext = React.createContext<AppSplashContextValue | null>(null);
@@ -30,6 +41,7 @@ export const AppSplashProvider = ({ children }: { children: React.ReactNode }) =
   const [showSplash, setShowSplashState] = React.useState(
     () => !getSplashAlreadyDismissedThisSession()
   );
+  const [splashDetail, setSplashDetail] = React.useState<string | null>(null);
   const dismissedRef = React.useRef(getSplashAlreadyDismissedThisSession());
 
   const setShowSplash = React.useCallback((value: boolean) => {
@@ -45,9 +57,35 @@ export const AppSplashProvider = ({ children }: { children: React.ReactNode }) =
     setShowSplashState(value);
   }, []);
 
+  React.useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void listen<EngineExtractProgressPayload>("engine-extract-progress", (event) => {
+      const p = event.payload;
+      if (p.phase === "error") {
+        setSplashDetail(p.label);
+        return;
+      }
+      if (p.phase === "start" || p.phase === "part_done" || p.phase === "done") {
+        setSplashDetail(p.label);
+      }
+    }).then((fn) => {
+      if (!cancelled) {
+        unlisten = fn;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   const value = React.useMemo(
-    () => ({ showSplash, setShowSplash }),
-    [showSplash, setShowSplash]
+    () => ({ showSplash, setShowSplash, splashDetail, setSplashDetail }),
+    [showSplash, setShowSplash, splashDetail]
   );
 
   return (

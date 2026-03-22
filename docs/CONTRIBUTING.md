@@ -139,7 +139,7 @@ npm run tauri build
 ```
 
 This desktop-only build uses the current Tauri bundle config in `desktop/src-tauri/tauri.conf.json`.
-For packaged Windows installers, that config expects `desktop/src-tauri/cue-local-engine.zip` to exist.
+For packaged Windows installers, that config expects the engine payload under `desktop/src-tauri/`: `cue-engine-parts.json` plus `cue-engine-01-executables.zip` through `cue-engine-04-internal.zip` (small placeholders are committed; run `scripts\build_engine.cmd` before release to replace them with real archives).
 
 ---
 
@@ -224,7 +224,7 @@ For the full Windows release flow from the repo root:
 scripts\build_release.cmd
 ```
 
-That script rebuilds `desktop/src-tauri/cue-local-engine.zip` first, then runs the Tauri installer build.
+That script rebuilds the split engine zips and manifest under `desktop/src-tauri/` first, then runs the Tauri installer build.
 The engine rebuild step also refreshes the pinned FFmpeg package used for the packaged backend, so installer size is not affected by whichever FFmpeg happens to be installed on the build machine.
 
 If you only need to rebuild the Tauri installers and the engine archive is already current:
@@ -240,7 +240,7 @@ Windows installers are currently x64-only.
 
 The packaged Windows installer flow shows Cue's installer terms during setup and ships `TERMS.md`, `PRIVACY.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md` with the app bundle.
 
-The live Windows packaging flow uses the archive resource `desktop/src-tauri/cue-local-engine.zip`. The old mirrored `desktop/src-tauri/engine/` folder is not part of the active release path.
+The live Windows packaging flow uses those engine part zips and `cue-engine-parts.json` as Tauri bundle resources. The old mirrored `desktop/src-tauri/engine/` folder is not part of the active release path.
 
 ### macOS
 

@@ -2132,6 +2132,7 @@ class Worker(QtCore.QObject):
                 encoding="utf-8",
                 errors="replace",
                 env=env,
+                **get_subprocess_kwargs(),
             )
             self._process = process
 

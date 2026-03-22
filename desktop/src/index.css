@@ -2,6 +2,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Playwright specs contain selector strings like [data-testid='…']:visible; Tailwind must not scan them. */
+@source not "../tests";
+
 @custom-variant dark (&:is(.dark *));
 
 /* Noto Color Emoji for consistent emoji rendering (e.g. welcome wave) */

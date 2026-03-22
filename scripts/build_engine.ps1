@@ -27,6 +27,33 @@ function Remove-EngineRuntimePath {
     return $true
 }
 
+function Remove-PathWithRetries {
+    param(
+        [string]$Path,
+        [int]$Attempts = 8,
+        [int]$DelayMilliseconds = 750
+    )
+
+    if (-not (Test-Path $Path)) {
+        return $false
+    }
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            Remove-Item -Recurse -Force $Path
+            return $true
+        }
+        catch {
+            if ($attempt -eq $Attempts) {
+                throw
+            }
+            Start-Sleep -Milliseconds $DelayMilliseconds
+        }
+    }
+
+    return $false
+}
+
 function Remove-EngineRuntimeGlob {
     param([string]$Path)
 
@@ -216,10 +243,83 @@ function Remove-CTranslate2RuntimeSupportPayload {
     return $removed
 }
 
+function New-ZipFromFileEntries {
+    param(
+        [string]$ZipPath,
+        [System.Collections.Generic.List[hashtable]]$Entries
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    if (Test-Path $ZipPath) {
+        Remove-PathWithRetries -Path $ZipPath | Out-Null
+    }
+    $zip = [System.IO.Compression.ZipFile]::Open(
+        $ZipPath,
+        [System.IO.Compression.ZipArchiveMode]::Create
+    )
+    try {
+        foreach ($entry in $Entries) {
+            $fullPath = [string]$entry.FullPath
+            $entryName = ([string]$entry.EntryName) -replace '\\', '/'
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+                continue
+            }
+            $null = [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip,
+                $fullPath,
+                $entryName,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            )
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+}
+
+function Publish-FileWithReplaceRetries {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath,
+        [int]$Attempts = 8,
+        [int]$DelayMilliseconds = 750
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            if (Test-Path $DestinationPath) {
+                Remove-PathWithRetries -Path $DestinationPath -Attempts 1 | Out-Null
+            }
+            Move-Item -Force -Path $SourcePath -Destination $DestinationPath
+            return
+        }
+        catch {
+            if ($attempt -eq $Attempts) {
+                throw
+            }
+            Start-Sleep -Milliseconds $DelayMilliseconds
+        }
+    }
+}
+
+function Test-InternalPathIsTorchOrPySide6 {
+    param([string]$RelativePath)
+
+    $normalized = ($RelativePath -replace '/', '\').TrimStart('\')
+    if ($normalized -like 'torch\*' -or $normalized -eq 'torch') {
+        return $true
+    }
+    if ($normalized -like 'PySide6\*' -or $normalized -eq 'PySide6') {
+        return $true
+    }
+    return $false
+}
+
 function Write-EngineSizeReport {
     param(
         [string]$RepoRoot,
-        [string]$ArchivePath,
+        [string[]]$ArchivePaths,
         [string]$InternalRoot,
         [datetime]$BuildStartedAtUtc
     )
@@ -249,7 +349,20 @@ function Write-EngineSizeReport {
             Select-Object -First 40 @{Name = "path"; Expression = { $_.FullName } }, @{Name = "size_bytes"; Expression = { [int64]$_.Length } }
     }
 
-    $archiveItem = Get-Item -Path $ArchivePath
+    $archiveRows = @()
+    $totalBytes = [int64]0
+    foreach ($p in $ArchivePaths) {
+        if (-not (Test-Path -LiteralPath $p)) {
+            continue
+        }
+        $item = Get-Item -LiteralPath $p
+        $totalBytes += [int64]$item.Length
+        $archiveRows += [ordered]@{
+            path = $item.FullName
+            size_bytes = [int64]$item.Length
+            size_mb = [math]::Round($item.Length / 1MB, 2)
+        }
+    }
     $baseline = [ordered]@{
         engine_zip_mb = 709.68
         nsis_mb = 728.53
@@ -258,11 +371,9 @@ function Write-EngineSizeReport {
     $summary = [ordered]@{
         generated_utc = $BuildStartedAtUtc.ToString("o")
         baseline_sizes_mb = $baseline
-        engine_archive = [ordered]@{
-            path = $archiveItem.FullName
-            size_bytes = [int64]$archiveItem.Length
-            size_mb = [math]::Round($archiveItem.Length / 1MB, 2)
-        }
+        engine_archives_total_bytes = $totalBytes
+        engine_archives_total_mb = [math]::Round($totalBytes / 1MB, 2)
+        engine_archives = @($archiveRows)
         top_internal_directories = @(
             $topDirectories | ForEach-Object {
                 [ordered]@{
@@ -292,9 +403,15 @@ function Write-EngineSizeReport {
         "Baseline engine zip: $($baseline.engine_zip_mb) MB",
         "Baseline NSIS: $($baseline.nsis_mb) MB",
         "Baseline MSI: $($baseline.msi_mb) MB",
-        "Engine archive: $($summary.engine_archive.path)",
-        "Engine archive size: $($summary.engine_archive.size_bytes) bytes ($($summary.engine_archive.size_mb) MB)",
-        "",
+        "Engine archives total: $($summary.engine_archives_total_bytes) bytes ($($summary.engine_archives_total_mb) MB)",
+        ""
+    )
+    foreach ($row in $summary.engine_archives) {
+        $textLines += "  Part: $($row.path)"
+        $textLines += "    $($row.size_bytes) bytes ($($row.size_mb) MB)"
+    }
+    $textLines += ""
+    $textLines += @(
         "Top internal directories:"
     )
     $textLines += $summary.top_internal_directories | ForEach-Object {
@@ -365,27 +482,32 @@ if (-not (Test-Path $ffprobeTarget)) {
 }
 
 $engineSpec = Join-Path $repo "CueEngine.spec"
-$engineBuildDir = Join-Path $repo "build\CueEngine"
-$engineDistDir = Join-Path $repo "dist\CueEngine"
+$pyInstallerRunRoot = Join-Path $repo (".cursor\debug\pyinstaller\" + $buildStartedAtUtc.ToString("yyyyMMdd-HHmmss"))
+$engineBuildRoot = Join-Path $pyInstallerRunRoot "build"
+$engineDistRoot = Join-Path $pyInstallerRunRoot "dist"
+$engineBuildDir = Join-Path $engineBuildRoot "CueEngine"
+$engineDistDir = Join-Path $engineDistRoot "CueEngine"
 $engineTemplate = Join-Path $repo "tools\pyinstaller.engine.spec.in"
-$engineArchiveFileName = "cue-local-engine.zip"
-$engineArchivePath = Join-Path $repo (Join-Path "desktop\src-tauri" $engineArchiveFileName)
-$engineArchiveDirectory = Split-Path $engineArchivePath -Parent
+$engineArchiveDirectory = Join-Path $repo "desktop\src-tauri"
+$enginePartDefinitions = @(
+    @{ Name = "cue-engine-01-executables.zip"; Label = "Unpacking core engine programs..." }
+    @{ Name = "cue-engine-02-torch.zip"; Label = "Unpacking speech libraries..." }
+    @{ Name = "cue-engine-03-pyside6.zip"; Label = "Unpacking display libraries..." }
+    @{ Name = "cue-engine-04-internal.zip"; Label = "Unpacking remaining engine files..." }
+)
+$engineManifestName = "cue-engine-parts.json"
 
 if (Test-Path $engineSpec) {
     Remove-Item -Force $engineSpec
 }
-if (Test-Path $engineBuildDir) {
-    Remove-Item -Recurse -Force $engineBuildDir
-}
-if (Test-Path $engineDistDir) {
-    Remove-Item -Recurse -Force $engineDistDir
-}
+New-Item -ItemType Directory -Force -Path $engineBuildRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $engineDistRoot | Out-Null
 
 Copy-Item -Force $engineTemplate $engineSpec
 
 Write-Host "[INFO] Running PyInstaller for engine..."
-& $venvPython -m PyInstaller --noconfirm $engineSpec
+Write-Host "[INFO] PyInstaller temp output root: $pyInstallerRunRoot"
+& $venvPython -m PyInstaller --noconfirm --workpath $engineBuildRoot --distpath $engineDistRoot $engineSpec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed."
 }
@@ -451,23 +573,110 @@ if (-not (Test-Path $engineArchiveDirectory)) {
     throw "Engine archive directory is missing at $engineArchiveDirectory"
 }
 
-if (Test-Path $engineArchivePath) {
-    Remove-Item -Force $engineArchivePath
+$legacySingleZip = Join-Path $engineArchiveDirectory "cue-local-engine.zip"
+$manifestPath = Join-Path $engineArchiveDirectory $engineManifestName
+$tempPublishRoot = Join-Path $repo (".cursor\debug\engine-publish\" + $buildStartedAtUtc.ToString("yyyyMMdd-HHmmss"))
+New-Item -ItemType Directory -Force -Path $tempPublishRoot | Out-Null
+
+# Part 1: root executables and any non-_internal files
+$part1Entries = New-Object System.Collections.Generic.List[hashtable]
+Get-ChildItem -Path $engineDistDir -Force | Where-Object { $_.Name -ne "_internal" } | ForEach-Object {
+    if ($_.PSIsContainer) {
+        Get-ChildItem -Path $_.FullName -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $rel = $_.FullName.Substring($engineDistDir.Length).TrimStart('\', '/')
+            $part1Entries.Add(@{ FullPath = $_.FullName; EntryName = ($rel -replace '\\', '/') })
+        }
+    }
+    else {
+        $part1Entries.Add(@{ FullPath = $_.FullName; EntryName = $_.Name })
+    }
 }
-Write-Host "[INFO] Creating engine archive at $engineArchivePath"
-Compress-Archive -Path (Join-Path $engineDistDir "*") -DestinationPath $engineArchivePath -CompressionLevel Optimal
-if (-not (Test-Path $engineArchivePath)) {
-    throw "Engine archive was not created: $engineArchivePath"
+$zip1Temp = Join-Path $tempPublishRoot $enginePartDefinitions[0].Name
+$zip1 = Join-Path $engineArchiveDirectory $enginePartDefinitions[0].Name
+Write-Host "[INFO] Creating $($enginePartDefinitions[0].Name) ($($part1Entries.Count) entries)"
+New-ZipFromFileEntries -ZipPath $zip1Temp -Entries $part1Entries
+
+# Part 2: _internal/torch
+$torchRoot = Join-Path $internalRoot "torch"
+$part2Entries = New-Object System.Collections.Generic.List[hashtable]
+if (Test-Path $torchRoot) {
+    Get-ChildItem -Path $torchRoot -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $rel = $_.FullName.Substring($internalRoot.Length).TrimStart('\', '/')
+        $part2Entries.Add(@{ FullPath = $_.FullName; EntryName = "_internal/" + ($rel -replace '\\', '/') })
+    }
 }
-$archiveSizeBytes = (Get-Item $engineArchivePath).Length
-Write-Host ("[INFO] Engine archive size: {0:N0} bytes ({1:N2} MB)" -f $archiveSizeBytes, ($archiveSizeBytes / 1MB))
+$zip2Temp = Join-Path $tempPublishRoot $enginePartDefinitions[1].Name
+$zip2 = Join-Path $engineArchiveDirectory $enginePartDefinitions[1].Name
+Write-Host "[INFO] Creating $($enginePartDefinitions[1].Name) ($($part2Entries.Count) entries)"
+New-ZipFromFileEntries -ZipPath $zip2Temp -Entries $part2Entries
+
+# Part 3: _internal/PySide6
+$pysideRoot = Join-Path $internalRoot "PySide6"
+$part3Entries = New-Object System.Collections.Generic.List[hashtable]
+if (Test-Path $pysideRoot) {
+    Get-ChildItem -Path $pysideRoot -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $rel = $_.FullName.Substring($internalRoot.Length).TrimStart('\', '/')
+        $part3Entries.Add(@{ FullPath = $_.FullName; EntryName = "_internal/" + ($rel -replace '\\', '/') })
+    }
+}
+$zip3Temp = Join-Path $tempPublishRoot $enginePartDefinitions[2].Name
+$zip3 = Join-Path $engineArchiveDirectory $enginePartDefinitions[2].Name
+Write-Host "[INFO] Creating $($enginePartDefinitions[2].Name) ($($part3Entries.Count) entries)"
+New-ZipFromFileEntries -ZipPath $zip3Temp -Entries $part3Entries
+
+# Part 4: _internal remainder (not torch, not PySide6)
+$part4Entries = New-Object System.Collections.Generic.List[hashtable]
+Get-ChildItem -Path $internalRoot -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+    $rel = $_.FullName.Substring($internalRoot.Length).TrimStart('\', '/')
+    if (-not (Test-InternalPathIsTorchOrPySide6 -RelativePath $rel)) {
+        $part4Entries.Add(@{ FullPath = $_.FullName; EntryName = "_internal/" + ($rel -replace '\\', '/') })
+    }
+}
+$zip4Temp = Join-Path $tempPublishRoot $enginePartDefinitions[3].Name
+$zip4 = Join-Path $engineArchiveDirectory $enginePartDefinitions[3].Name
+Write-Host "[INFO] Creating $($enginePartDefinitions[3].Name) ($($part4Entries.Count) entries)"
+New-ZipFromFileEntries -ZipPath $zip4Temp -Entries $part4Entries
+
+$manifestParts = @()
+for ($i = 0; $i -lt $enginePartDefinitions.Count; $i++) {
+    $manifestParts += [ordered]@{
+        file = $enginePartDefinitions[$i].Name
+        label = $enginePartDefinitions[$i].Label
+    }
+}
+$manifestObj = [ordered]@{
+    version = 1
+    parts = $manifestParts
+}
+$manifestJson = $manifestObj | ConvertTo-Json -Depth 5
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText((Join-Path $tempPublishRoot $engineManifestName), $manifestJson, $utf8NoBom)
+
+if (Test-Path $legacySingleZip) {
+    Remove-PathWithRetries -Path $legacySingleZip | Out-Null
+}
+Publish-FileWithReplaceRetries -SourcePath $zip1Temp -DestinationPath $zip1
+Publish-FileWithReplaceRetries -SourcePath $zip2Temp -DestinationPath $zip2
+Publish-FileWithReplaceRetries -SourcePath $zip3Temp -DestinationPath $zip3
+Publish-FileWithReplaceRetries -SourcePath $zip4Temp -DestinationPath $zip4
+Publish-FileWithReplaceRetries -SourcePath (Join-Path $tempPublishRoot $engineManifestName) -DestinationPath $manifestPath
+Write-Host "[INFO] Wrote manifest $manifestPath"
+
+$allZipPaths = @($zip1, $zip2, $zip3, $zip4)
+foreach ($zp in $allZipPaths) {
+    if (-not (Test-Path $zp)) {
+        throw "Engine part zip was not created: $zp"
+    }
+    $sz = (Get-Item $zp).Length
+    Write-Host ("[INFO] {0}: {1:N0} bytes ({2:N2} MB)" -f (Split-Path $zp -Leaf), $sz, ($sz / 1MB))
+}
 
 $sizeReportDir = Write-EngineSizeReport `
     -RepoRoot $repo `
-    -ArchivePath $engineArchivePath `
+    -ArchivePaths $allZipPaths `
     -InternalRoot $internalRoot `
     -BuildStartedAtUtc $buildStartedAtUtc
 Write-Host "[INFO] Engine size report: $sizeReportDir"
 
 Write-Host "[OK] Engine build complete."
-Write-Host "[OK] Engine archive: $engineArchivePath"
+Write-Host "[OK] Engine parts and manifest under $engineArchiveDirectory"

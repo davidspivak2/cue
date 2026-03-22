@@ -4,6 +4,8 @@ import importlib
 import os
 import subprocess
 
+from app.ffmpeg_utils import get_subprocess_kwargs
+
 ULTRA_GPU_VRAM_MIN_BYTES = 8 * (1024**3)
 ULTRA_CPU_RAM_MIN_BYTES = 16 * (1024**3)
 ULTRA_CPU_MIN_CORES = 4
@@ -36,6 +38,7 @@ def get_gpu_name() -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            **get_subprocess_kwargs(),
         )
         if result.returncode == 0 and result.stdout:
             return result.stdout.strip().split("\n")[0].strip() or None
@@ -53,6 +56,7 @@ def get_gpu_vram_total_bytes() -> int | None:
             capture_output=True,
             text=True,
             timeout=5,
+            **get_subprocess_kwargs(),
         )
         if result.returncode != 0 or not result.stdout:
             return None

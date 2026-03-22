@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::{
     env,
     fs::{self, File},
@@ -15,24 +17,88 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::{path::BaseDirectory, App, AppHandle, Emitter, Manager, RunEvent, WindowEvent};
+use serde::{Deserialize, Serialize};
+use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 use zip::ZipArchive;
 
 const CALIBRATION_VIDEO_FILENAME: &str = "calibration_60s.mp4";
-const ENGINE_ARCHIVE_FILENAME: &str = "cue-local-engine.zip";
+const ENGINE_PARTS_MANIFEST_FILENAME: &str = "cue-engine-parts.json";
 const ENGINE_READY_SENTINEL: &str = ".extract-complete";
 const ENGINE_ARCHIVE_METADATA_FILENAME: &str = ".archive-metadata";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct EngineArchiveMetadata {
+macro_rules! dev_eprintln {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        eprintln!($($arg)*);
+    };
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct EngineArchivesFingerprint {
+    version: u32,
+    parts: Vec<PartFileMetadata>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct PartFileMetadata {
     len: u64,
     modified_unix_seconds: u64,
 }
 
-fn read_archive_metadata(path: &Path) -> Option<EngineArchiveMetadata> {
+#[derive(Deserialize)]
+struct EnginePartsManifest {
+    #[allow(dead_code)]
+    version: u32,
+    parts: Vec<EnginePartEntry>,
+}
+
+#[derive(Deserialize, Clone)]
+struct EnginePartEntry {
+    file: String,
+    label: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct EngineExtractProgressPayload {
+    label: String,
+    index: u32,
+    total: u32,
+    phase: String,
+}
+
+fn strip_utf8_bom(s: &str) -> &str {
+    s.strip_prefix('\u{feff}').unwrap_or(s)
+}
+
+fn read_cached_archives_fingerprint(path: &Path) -> Option<EngineArchivesFingerprint> {
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str(strip_utf8_bom(raw.trim())).ok()
+}
+
+fn write_cached_archives_fingerprint(
+    path: &Path,
+    fingerprint: &EngineArchivesFingerprint,
+) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(fingerprint)
+        .map_err(|err| format!("Failed to serialize archive fingerprint: {err}"))?;
+    fs::write(path, json).map_err(|err| format!("Failed to write archive metadata file {path:?}: {err}"))
+}
+
+fn fingerprint_for_zip_paths(paths: &[PathBuf]) -> Result<EngineArchivesFingerprint, String> {
+    let mut parts = Vec::new();
+    for path in paths {
+        let metadata = read_part_file_metadata(path).ok_or_else(|| {
+            format!("Failed to read engine part metadata for {}", path.display())
+        })?;
+        parts.push(metadata);
+    }
+    Ok(EngineArchivesFingerprint { version: 1, parts })
+}
+
+fn read_part_file_metadata(path: &Path) -> Option<PartFileMetadata> {
     let metadata = fs::metadata(path).ok()?;
     let modified_unix_seconds = metadata
         .modified()
@@ -40,42 +106,10 @@ fn read_archive_metadata(path: &Path) -> Option<EngineArchiveMetadata> {
         .duration_since(UNIX_EPOCH)
         .ok()?
         .as_secs();
-    Some(EngineArchiveMetadata {
+    Some(PartFileMetadata {
         len: metadata.len(),
         modified_unix_seconds,
     })
-}
-
-fn parse_archive_metadata(raw: &str) -> Option<EngineArchiveMetadata> {
-    let mut len: Option<u64> = None;
-    let mut modified_unix_seconds: Option<u64> = None;
-    for line in raw.lines() {
-        if let Some(value) = line.strip_prefix("len=") {
-            len = value.trim().parse::<u64>().ok();
-        } else if let Some(value) = line.strip_prefix("modified_unix_seconds=") {
-            modified_unix_seconds = value.trim().parse::<u64>().ok();
-        }
-    }
-    Some(EngineArchiveMetadata {
-        len: len?,
-        modified_unix_seconds: modified_unix_seconds?,
-    })
-}
-
-fn read_cached_archive_metadata(path: &Path) -> Option<EngineArchiveMetadata> {
-    let raw = fs::read_to_string(path).ok()?;
-    parse_archive_metadata(&raw)
-}
-
-fn write_cached_archive_metadata(path: &Path, metadata: EngineArchiveMetadata) -> Result<(), String> {
-    fs::write(
-        path,
-        format!(
-            "len={}\nmodified_unix_seconds={}\n",
-            metadata.len, metadata.modified_unix_seconds
-        ),
-    )
-    .map_err(|err| format!("Failed to write archive metadata file {path:?}: {err}"))
 }
 
 fn cue_root_dir() -> PathBuf {
@@ -139,14 +173,43 @@ fn extract_zip_archive(zip_path: &Path, destination: &Path) -> Result<(), String
     Ok(())
 }
 
-fn ensure_engine_extracted(app: &App) -> Result<PathBuf, String> {
-    let archive_path = app
+fn emit_engine_extract_progress(app: &AppHandle, payload: EngineExtractProgressPayload) {
+    let _ = app.emit("engine-extract-progress", &payload);
+}
+
+fn ensure_engine_extracted(app: &AppHandle) -> Result<PathBuf, String> {
+    let manifest_path = app
         .path()
-        .resolve(ENGINE_ARCHIVE_FILENAME, BaseDirectory::Resource)
-        .map_err(|err| format!("Failed to resolve engine archive resource path: {err}"))?;
-    if !archive_path.exists() {
-        return Err(format!("Engine archive missing: {archive_path:?}"));
+        .resolve(ENGINE_PARTS_MANIFEST_FILENAME, BaseDirectory::Resource)
+        .map_err(|err| format!("Failed to resolve engine parts manifest path: {err}"))?;
+    if !manifest_path.exists() {
+        return Err(format!("Engine parts manifest missing: {manifest_path:?}"));
     }
+
+    let manifest_raw = fs::read_to_string(&manifest_path)
+        .map_err(|err| format!("Failed to read engine parts manifest {manifest_path:?}: {err}"))?;
+    let manifest_json = strip_utf8_bom(manifest_raw.trim());
+    let manifest: EnginePartsManifest = serde_json::from_str(manifest_json).map_err(|err| {
+        format!("Failed to parse engine parts manifest {manifest_path:?}: {err}")
+    })?;
+
+    if manifest.parts.is_empty() {
+        return Err("Engine parts manifest lists no archives".to_string());
+    }
+
+    let mut zip_paths: Vec<PathBuf> = Vec::new();
+    for part in &manifest.parts {
+        let zip_path = app
+            .path()
+            .resolve(&part.file, BaseDirectory::Resource)
+            .map_err(|err| format!("Failed to resolve engine part {}: {err}", part.file))?;
+        if !zip_path.exists() {
+            return Err(format!("Engine part archive missing: {zip_path:?}"));
+        }
+        zip_paths.push(zip_path);
+    }
+
+    let archives_fingerprint = fingerprint_for_zip_paths(&zip_paths)?;
 
     let engine_root = cue_engine_root_dir();
     fs::create_dir_all(&engine_root)
@@ -157,13 +220,13 @@ fn ensure_engine_extracted(app: &App) -> Result<PathBuf, String> {
     let backend_path = extracted_engine_dir.join("CueBackend.exe");
     let ready_sentinel = extracted_engine_dir.join(ENGINE_READY_SENTINEL);
     let metadata_path = extracted_engine_dir.join(ENGINE_ARCHIVE_METADATA_FILENAME);
-    let archive_metadata = read_archive_metadata(&archive_path);
-    let cached_archive_metadata = read_cached_archive_metadata(&metadata_path);
+    let cached_fingerprint = read_cached_archives_fingerprint(&metadata_path);
     let has_cached_engine = backend_path.exists() && ready_sentinel.exists();
-    if has_cached_engine && archive_metadata.is_some() && archive_metadata == cached_archive_metadata {
+    if has_cached_engine && cached_fingerprint.as_ref() == Some(&archives_fingerprint) {
         return Ok(backend_path);
     }
 
+    let total = manifest.parts.len() as u32;
     let unix_seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -175,21 +238,63 @@ fn ensure_engine_extracted(app: &App) -> Result<PathBuf, String> {
     fs::create_dir_all(&temp_engine_dir)
         .map_err(|err| format!("Failed to create temp engine directory {temp_engine_dir:?}: {err}"))?;
 
-    if let Err(err) = extract_zip_archive(&archive_path, &temp_engine_dir) {
-        let _ = fs::remove_dir_all(&temp_engine_dir);
-        return Err(err);
+    for (index, (zip_path, part)) in zip_paths.iter().zip(manifest.parts.iter()).enumerate() {
+        let i = index as u32 + 1;
+        emit_engine_extract_progress(
+            app,
+            EngineExtractProgressPayload {
+                label: part.label.clone(),
+                index: i,
+                total,
+                phase: "start".to_string(),
+            },
+        );
+        if let Err(err) = extract_zip_archive(zip_path, &temp_engine_dir) {
+            let _ = fs::remove_dir_all(&temp_engine_dir);
+            emit_engine_extract_progress(
+                app,
+                EngineExtractProgressPayload {
+                    label: part.label.clone(),
+                    index: i,
+                    total,
+                    phase: "error".to_string(),
+                },
+            );
+            return Err(err);
+        }
+        emit_engine_extract_progress(
+            app,
+            EngineExtractProgressPayload {
+                label: part.label.clone(),
+                index: i,
+                total,
+                phase: "part_done".to_string(),
+            },
+        );
     }
+
+    emit_engine_extract_progress(
+        app,
+        EngineExtractProgressPayload {
+            label: "Almost ready...".to_string(),
+            index: total,
+            total,
+            phase: "done".to_string(),
+        },
+    );
 
     let extracted_backend_path = temp_engine_dir.join("CueBackend.exe");
     if !extracted_backend_path.exists() {
         let _ = fs::remove_dir_all(&temp_engine_dir);
-        return Err(format!(
-            "Engine archive did not contain CueBackend.exe at root: {archive_path:?}"
-        ));
+        return Err(
+            "Engine archives did not produce CueBackend.exe at the expected root path".to_string(),
+        );
     }
-    if let Some(metadata) = archive_metadata {
-        write_cached_archive_metadata(&temp_engine_dir.join(ENGINE_ARCHIVE_METADATA_FILENAME), metadata)?;
-    }
+
+    write_cached_archives_fingerprint(
+        &temp_engine_dir.join(ENGINE_ARCHIVE_METADATA_FILENAME),
+        &archives_fingerprint,
+    )?;
     File::create(temp_engine_dir.join(ENGINE_READY_SENTINEL))
         .map_err(|err| format!("Failed to write engine extraction sentinel file: {err}"))?;
 
@@ -217,11 +322,20 @@ fn build_backend_log_path(logs_dir: &Path) -> PathBuf {
     logs_dir.join(format!("backend_sidecar_{unix_seconds}.log"))
 }
 
-fn start_packaged_backend(app: &App) -> Option<Child> {
+fn start_packaged_backend(app: &AppHandle) -> Option<Child> {
     let backend_path = match ensure_engine_extracted(app) {
         Ok(path) => path,
         Err(err) => {
-            eprintln!("Failed to prepare packaged engine archive: {err}");
+            dev_eprintln!("Failed to prepare packaged engine archive: {err}");
+            let _ = app.emit(
+                "engine-extract-progress",
+                &EngineExtractProgressPayload {
+                    label: format!("Could not prepare engine: {err}"),
+                    index: 0,
+                    total: 0,
+                    phase: "error".to_string(),
+                },
+            );
             return None;
         }
     };
@@ -229,7 +343,9 @@ fn start_packaged_backend(app: &App) -> Option<Child> {
 
     let logs_dir = cue_logs_dir();
     if let Err(err) = fs::create_dir_all(&logs_dir) {
-        eprintln!("Failed to create backend logs directory {logs_dir:?}: {err}");
+        dev_eprintln!("Failed to create backend logs directory {logs_dir:?}: {err}");
+        #[cfg(not(debug_assertions))]
+        let _ = err;
     }
     let log_path = build_backend_log_path(&logs_dir);
 
@@ -247,12 +363,16 @@ fn start_packaged_backend(app: &App) -> Option<Child> {
                     .stderr(Stdio::from(stderr_file));
             }
             Err(err) => {
-                eprintln!("Failed to clone backend log handle {log_path:?}: {err}");
+                dev_eprintln!("Failed to clone backend log handle {log_path:?}: {err}");
+                #[cfg(not(debug_assertions))]
+                let _ = err;
                 command.stdout(Stdio::from(stdout_file)).stderr(Stdio::null());
             }
         },
         Err(err) => {
-            eprintln!("Failed to create backend log file {log_path:?}: {err}");
+            dev_eprintln!("Failed to create backend log file {log_path:?}: {err}");
+            #[cfg(not(debug_assertions))]
+            let _ = err;
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
     }
@@ -263,7 +383,9 @@ fn start_packaged_backend(app: &App) -> Option<Child> {
     match command.spawn() {
         Ok(child) => Some(child),
         Err(err) => {
-            eprintln!("Failed to start packaged backend at {backend_path:?}: {err}");
+            dev_eprintln!("Failed to start packaged backend at {backend_path:?}: {err}");
+            #[cfg(not(debug_assertions))]
+            let _ = err;
             None
         }
     }
@@ -280,7 +402,7 @@ fn repo_root_dir() -> PathBuf {
 }
 
 #[cfg(debug_assertions)]
-fn start_dev_backend(_app: &App) -> Option<Child> {
+fn start_dev_backend(_app: &tauri::App) -> Option<Child> {
     let repo_root = repo_root_dir();
     let venv_python = repo_root.join(".venv").join("Scripts").join("python.exe");
     let mut command = if venv_python.exists() {
@@ -291,7 +413,9 @@ fn start_dev_backend(_app: &App) -> Option<Child> {
 
     let logs_dir = cue_logs_dir();
     if let Err(err) = fs::create_dir_all(&logs_dir) {
-        eprintln!("Failed to create backend logs directory {logs_dir:?}: {err}");
+        dev_eprintln!("Failed to create backend logs directory {logs_dir:?}: {err}");
+        #[cfg(not(debug_assertions))]
+        let _ = err;
     }
     let log_path = build_backend_log_path(&logs_dir);
 
@@ -312,12 +436,16 @@ fn start_dev_backend(_app: &App) -> Option<Child> {
                     .stderr(Stdio::from(stderr_file));
             }
             Err(err) => {
-                eprintln!("Failed to clone backend log handle {log_path:?}: {err}");
+                dev_eprintln!("Failed to clone backend log handle {log_path:?}: {err}");
+                #[cfg(not(debug_assertions))]
+                let _ = err;
                 command.stdout(Stdio::from(stdout_file)).stderr(Stdio::null());
             }
         },
         Err(err) => {
-            eprintln!("Failed to create backend log file {log_path:?}: {err}");
+            dev_eprintln!("Failed to create backend log file {log_path:?}: {err}");
+            #[cfg(not(debug_assertions))]
+            let _ = err;
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
     }
@@ -328,22 +456,14 @@ fn start_dev_backend(_app: &App) -> Option<Child> {
     match command.spawn() {
         Ok(child) => Some(child),
         Err(err) => {
-            eprintln!(
+            dev_eprintln!(
                 "Failed to start dev backend from repo {repo_root:?}: {err}. Falling back to packaged backend."
             );
+            #[cfg(not(debug_assertions))]
+            let _ = err;
             None
         }
     }
-}
-
-fn start_backend(app: &App) -> Option<Child> {
-    #[cfg(debug_assertions)]
-    {
-        if let Some(child) = start_dev_backend(app) {
-            return Some(child);
-        }
-    }
-    start_packaged_backend(app)
 }
 
 fn wait_for_backend_listening(timeout: Duration, interval: Duration) {
@@ -391,7 +511,9 @@ fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
     let mut guard = match shared_child.lock() {
         Ok(lock) => lock,
         Err(err) => {
-            eprintln!("Failed to lock backend child state: {err}");
+            dev_eprintln!("Failed to lock backend child state: {err}");
+            #[cfg(not(debug_assertions))]
+            let _ = err;
             return;
         }
     };
@@ -409,7 +531,9 @@ fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
         }
         Ok(None) => {}
         Err(err) => {
-            eprintln!("Failed to check backend process status: {err}");
+            dev_eprintln!("Failed to check backend process status: {err}");
+            #[cfg(not(debug_assertions))]
+            let _ = err;
         }
     }
 
@@ -422,12 +546,15 @@ fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
 
     #[cfg(not(windows))]
     if let Err(err) = child.kill() {
-        eprintln!("Failed to terminate backend process: {err}");
+        dev_eprintln!("Failed to terminate backend process: {err}");
+        #[cfg(not(debug_assertions))]
+        let _ = err;
     }
     #[cfg(windows)]
     let _ = child.kill();
@@ -482,6 +609,7 @@ fn try_stop_dev_backend_by_pid_file() {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
         .status();
     let _ = fs::remove_file(pid_path);
 }
@@ -497,20 +625,49 @@ fn main() {
     builder
         .setup(move |app| {
             app.manage(AllowCloseState::default());
-            if let Some(child) = start_backend(app) {
-                match backend_child_for_setup.lock() {
-                    Ok(mut lock) => {
-                        *lock = Some(child);
+            let child_holder = Arc::clone(&backend_child_for_setup);
+
+            #[cfg(debug_assertions)]
+            {
+                if let Some(child) = start_dev_backend(app) {
+                    match child_holder.lock() {
+                        Ok(mut lock) => {
+                            *lock = Some(child);
+                        }
+                        Err(err) => {
+                            dev_eprintln!("Failed to store backend process handle: {err}");
+                            #[cfg(not(debug_assertions))]
+                            let _ = err;
+                        }
                     }
-                    Err(err) => {
-                        eprintln!("Failed to store backend process handle: {err}");
-                    }
+                    wait_for_backend_listening(
+                        Duration::from_secs(30),
+                        Duration::from_millis(300),
+                    );
+                    return Ok(());
                 }
-                wait_for_backend_listening(
-                    Duration::from_secs(30),
-                    Duration::from_millis(300),
-                );
             }
+
+            let handle = app.handle().clone();
+            if let Err(err) = std::thread::Builder::new()
+                .name("cue-backend".into())
+                .spawn(move || {
+                    if let Some(child) = start_packaged_backend(&handle) {
+                        if let Ok(mut guard) = child_holder.lock() {
+                            *guard = Some(child);
+                        }
+                        wait_for_backend_listening(
+                            Duration::from_secs(120),
+                            Duration::from_millis(300),
+                        );
+                    }
+                })
+            {
+                dev_eprintln!("Failed to spawn packaged backend thread: {err}");
+                #[cfg(not(debug_assertions))]
+                let _ = err;
+            }
+
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())

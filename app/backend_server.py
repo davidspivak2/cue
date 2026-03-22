@@ -1178,6 +1178,7 @@ def _kill_process_tree(pid: int) -> None:
             check=False,
             capture_output=True,
             text=True,
+            **get_subprocess_kwargs(),
         )
     else:
         try:
@@ -2394,6 +2395,7 @@ def _get_git_commit() -> Optional[str]:
             check=True,
             capture_output=True,
             text=True,
+            **get_subprocess_kwargs(),
         )
     except (OSError, subprocess.CalledProcessError):
         return None
