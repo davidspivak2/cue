@@ -1,37 +1,53 @@
+# Python
 .venv/
-_ffmpeg_tmp/
 __pycache__/
 *.pyc
+_tmp_backend_server.pyc.*
+
+# Build outputs
 build/
+build_temp/
 dist/
+_cargo_target_check*/
 HebrewSubtitleGUI.spec
 CueEngine.spec
+
+# Bundled binaries (local / downloaded)
 bin/ffmpeg.exe
 bin/ffprobe.exe
 bin/ffmpeg-source.json
+
+# Temporary & scratch
+_ffmpeg_tmp/
 debug_punct_matrix.py
 debug_raw_segments.py
-docs/handoffs
-.cursor/
-.codex/
-docs/internal/SESSION_HANDOFF*.md
-_cargo_target_check*/
-build_temp/
-_tmp_backend_server.pyc.*
+
+# Logs
 logs/
 debug-*.log
+
+# IDE & agent tooling
+.cursor/
+.codex/
+
+# Local docs (not for repo)
+docs/handoffs
+docs/internal/SESSION_HANDOFF*.md
+
+# Playwright
 .playwright-cli/
 
-# Desktop UI (Node)
+# Desktop — frontend (Node)
 desktop/node_modules/
 
-# Tauri (Rust)
+# Desktop — Tauri / Rust
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+
+# Engine bundles: full local builds are ignored; tiny placeholders stay tracked (git add -f)
 desktop/src-tauri/cue-local-engine.zip
-# Full engine part zips from local release builds; tiny placeholders are tracked via git add -f
 desktop/src-tauri/cue-engine-0[1-4]-*.zip
 
-# Cursor IDE debug artifacts and logs (debug.log, debug-*.log, etc.)
+# Tests
 **/test-results/**
 desktop/test-results/.last-run.json
