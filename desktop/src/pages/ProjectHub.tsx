@@ -1383,7 +1383,7 @@ const ProjectHub = () => {
                             />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                              —
+                              –
                             </div>
                           )}
                         </div>
@@ -1400,7 +1400,7 @@ const ProjectHub = () => {
                       </div>
                     </TableCell>
                     <TableCell className="min-w-0 pl-2 pr-6 tabular-nums text-muted-foreground">
-                      {durationLabel || "—"}
+                      {durationLabel || "–"}
                     </TableCell>
                     <TableCell className="min-w-0 overflow-hidden pl-6 pr-2">
                       <Tooltip>

@@ -1,8 +1,8 @@
 # Cue
 
-Create subtitles for any video, in any language, right on your computer.
+Create subtitles for any video, in any language, on your own computer.
 
-Cue is a desktop app that uses speech recognition to generate subtitles and burn them into your video. Processing runs on your computer: no upload, no cloud account, no subscription.
+Cue uses speech recognition to build subtitles and burn them into the video. Everything runs locally: no upload, no cloud account, no subscription.
 
 ## Screenshots
 
@@ -12,7 +12,7 @@ Cue is a desktop app that uses speech recognition to generate subtitles and burn
 
 - **Automatic subtitles:** Add a video from Home, get an SRT file out. Uses Whisper large-v3.
 - **Burn-in export:** New MP4 with subtitles baked in; no separate encoder step.
-- **Word-by-word highlighting:** Karaoke-style timing (the Karaoke effect in the Effects panel) that tracks the speaker in playback.
+- **Word-by-word highlighting:** Karaoke in the Effects panel tracks the speaker as the video plays.
 - **Style customization:** Presets plus fonts, colors, outlines, shadows, and backgrounds in the workbench Effects panel.
 - **Languages:** Auto-detects language; supports what Whisper supports.
 - **RTL:** Right-to-left layout for Hebrew, Arabic, and other RTL scripts.
@@ -51,7 +51,7 @@ If you want to run the app from source or contribute, see the [Contributing guid
 3. **Review and style:** Use the preview and the **Effects** panel for presets, typography, colors, outline, shadow, background, and **Karaoke** for word-by-word highlighting.
 4. **Export:** Click **Export** to burn subtitles into a new MP4.
 
-Your `.srt` and exported video are saved according to **Settings** (gear in the title bar)—e.g. same folder as the source video, a fixed folder, or ask every time.
+Choose where the `.srt` and exported video go in **Settings** (gear in the title bar): next to the source video, a fixed folder, or ask every time.
 
 ## How it works
 

@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * - primary / default: Single main CTA per section (Create subtitles, Export, Add video, Save).
  * - secondary: Supporting actions in a flow (Cancel in flow, Play, Open folder, Browse…, Reset).
  *   Use for label-only and icon+label in the same context; they must share this variant.
- * - tertiary / ghost: Low emphasis — dismiss, back, nav (Cancel in dialogs, Close, Back).
+ * - tertiary / ghost: Low emphasis (dismiss, back, nav: Cancel in dialogs, Close, Back).
  * - outline: Bordered alternate when you need a distinct border (e.g. Style, view toggle).
  * - overlay: On dark overlays only (e.g. video bar); white text, transparent, white/20 hover.
  * - destructive: Danger actions (Delete, Exit anyway). link: Text link style.

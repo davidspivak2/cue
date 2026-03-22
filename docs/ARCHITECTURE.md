@@ -1,6 +1,6 @@
 # Architecture Overview
 
-For contributors: how Cue is wired together (system layout, pipeline, repo map, and where files land on disk).
+If you contribute, start here for the big picture: desktop UI, Python backend, processing pipeline, repo layout, and where outputs land on disk.
 
 For setup and development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -13,7 +13,7 @@ Cue is a desktop app with two main layers:
 ```
 +---------------------------------------------+
 |         Desktop UI (Tauri + React)           |
-|   desktop/src/  —  TypeScript / React        |
+|   desktop/src/  |  TypeScript / React        |
 +---------------------------------------------+
         |  HTTP + SSE (localhost)
         v
@@ -30,9 +30,9 @@ Cue is a desktop app with two main layers:
 +---------------------------------------------+
 ```
 
-- **Desktop UI** — A Tauri + React app (`desktop/`) that provides the user interface. Communicates with the backend over HTTP and Server-Sent Events (SSE).
-- **Backend** — A Python FastAPI server (`app/backend_server.py`) that manages jobs, settings, and device info. Spawns pipeline workers as subprocesses.
-- **Pipeline** — The actual work: audio extraction (FFmpeg), transcription (faster-whisper), word alignment (WhisperX), and subtitle burn-in (FFmpeg with graphics overlay).
+- **Desktop UI**: A Tauri + React app (`desktop/`) that provides the user interface. Communicates with the backend over HTTP and Server-Sent Events (SSE).
+- **Backend**: A Python FastAPI server (`app/backend_server.py`) that manages jobs, settings, and device info. Spawns pipeline workers as subprocesses.
+- **Pipeline**: The actual work: audio extraction (FFmpeg), transcription (faster-whisper), word alignment (WhisperX), and subtitle burn-in (FFmpeg with graphics overlay).
 
 ---
 
@@ -124,13 +124,13 @@ scripts/                          # Dev workflow scripts (Windows cmd/ps1)
 
 If you are new to the codebase, start here:
 
-1. **`app/backend_server.py`** — The FastAPI server that the desktop UI talks to. Defines job endpoints and SSE event streaming.
-2. **`app/workers.py`** — Orchestrates audio extraction, transcription subprocesses, FFmpeg burn-in, and progress reporting.
-3. **`app/transcribe_worker.py`** — The transcription subprocess. Loads the Whisper model, runs transcription, applies punctuation rescue, and writes the SRT file.
-4. **`desktop/src/pages/Workbench.tsx`** — The unified editor/export surface. Handles subtitle creation, on-video text editing, styling, export progress, cancel, and success actions.
-5. **`desktop/src/pages/ProjectHub.tsx`** — The project list and entry point (**Add video**, relink, delete, and related project actions).
-6. **`desktop/src/pages/TabHost.tsx`** — Renders the Home panel (`ProjectHub`) plus one mounted `Workbench` per open tab; URL `/` vs `/workbench/:projectId` stays in sync with the title-bar tab strip.
-7. **`desktop/src/pages/Settings.tsx`** — Settings content for the right-hand sheet opened from the title bar (transcription quality, save policy, audio options, diagnostics).
+1. **`app/backend_server.py`**: The FastAPI server that the desktop UI talks to. Defines job endpoints and SSE event streaming.
+2. **`app/workers.py`**: Orchestrates audio extraction, transcription subprocesses, FFmpeg burn-in, and progress reporting.
+3. **`app/transcribe_worker.py`**: The transcription subprocess. Loads the Whisper model, runs transcription, applies punctuation rescue, and writes the SRT file.
+4. **`desktop/src/pages/Workbench.tsx`**: The unified editor/export surface. Handles subtitle creation, on-video text editing, styling, export progress, cancel, and success actions.
+5. **`desktop/src/pages/ProjectHub.tsx`**: The project list and entry point (**Add video**, relink, delete, and related project actions).
+6. **`desktop/src/pages/TabHost.tsx`**: Renders the Home panel (`ProjectHub`) plus one mounted `Workbench` per open tab; URL `/` vs `/workbench/:projectId` stays in sync with the title-bar tab strip.
+7. **`desktop/src/pages/Settings.tsx`**: Settings content for the right-hand sheet opened from the title bar (transcription quality, save policy, audio options, diagnostics).
 
 ---
 
@@ -153,9 +153,9 @@ If you are new to the codebase, start here:
 
 Output files are placed according to the Save Policy setting:
 
-- **Same folder as the video** (default) — outputs live next to the original video.
-- **Specific folder** — outputs go to a fixed folder set in Settings.
-- **Ask every time** — the user picks the folder each run.
+- **Same folder as the video** (default): outputs live next to the original video.
+- **Specific folder**: outputs go to a fixed folder set in Settings.
+- **Ask every time**: the user picks the folder each run.
 
 Files produced per video:
 
