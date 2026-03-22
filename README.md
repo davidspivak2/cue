@@ -6,7 +6,17 @@ Cue uses speech recognition to build subtitles and burn them into the video. Eve
 
 ## Screenshots
 
-<!-- TODO: Add 2-3 screenshots or a GIF of the app once the UI is stable. -->
+### Home (empty)
+
+![Home — empty state](docs/images/readme-home-empty.png)
+
+### Home (with videos)
+
+![Home — project list](docs/images/readme-home-full.png)
+
+### Workbench
+
+![Workbench — review and style](docs/images/readme-workbench.png)
 
 ## Features
 

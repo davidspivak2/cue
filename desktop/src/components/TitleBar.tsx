@@ -35,14 +35,15 @@ const TITLE_BAR_LOGO_WIDTH = 90;
 const TITLE_BAR_HOME_WIDTH = 40;
 /** Width for window controls (4 × w-10). */
 const TITLE_BAR_CONTROLS_WIDTH = 160;
-/** Preferred tab width used to decide when "wide" mode still fits. */
-const TITLE_BAR_WIDE_LAYOUT_TARGET_PX = 180;
-/** Maximum tab width in "wide" mode at 100% interface scale. */
-const TITLE_BAR_WIDE_TAB_MAX_PX = 224;
-/** Maximum tab width in "medium" mode at 100% interface scale. */
-const TITLE_BAR_MEDIUM_TAB_MAX_PX = 64;
-/** Maximum tab width in "narrow" mode at 100% interface scale. */
+/** Per-tab share at or above this (100% scale) uses comfortable tab chrome ("wide"). */
+const TITLE_BAR_WIDE_LAYOUT_MIN_SHARE_PX = 88;
+/** Below this per-tab share (100% scale) show icon-only tabs ("narrow"); between this and wide → compact ("medium"). */
 const TITLE_BAR_NARROW_TAB_MAX_PX = 56;
+/**
+ * Maximum width of one video tab when the strip has spare room (browser-style).
+ * Tabs only grow to fill the title bar once there are enough tabs that each would be narrower than this.
+ */
+const TITLE_BAR_TAB_MAX_WIDTH_PX = 224;
 type TabLayoutMode = "wide" | "medium" | "narrow";
 
 type IconProps = React.ComponentProps<"svg">;
@@ -64,38 +65,44 @@ const WindowsRestoreIcon = ({ className, ...props }: IconProps) => (
   </svg>
 );
 
-function getTabLayoutMode(
+function getAvailableWidthForVideoTabs(
   windowWidth: number,
+  interfaceScale: number
+): number {
+  const reservedWidth =
+    (TITLE_BAR_LOGO_WIDTH + TITLE_BAR_HOME_WIDTH + TITLE_BAR_CONTROLS_WIDTH) *
+    interfaceScale;
+  return Math.max(0, windowWidth - reservedWidth);
+}
+
+/** Layout mode from per-tab horizontal share (compact / icon-only when crowded). */
+function getTabLayoutMode(
+  availableForVideoTabs: number,
   tabCount: number,
   interfaceScale: number
 ): TabLayoutMode {
   if (tabCount <= 0) {
     return "wide";
   }
-  const reservedWidth =
-    (TITLE_BAR_LOGO_WIDTH + TITLE_BAR_HOME_WIDTH + TITLE_BAR_CONTROLS_WIDTH) *
-    interfaceScale;
-  const availableForTabs = Math.max(0, windowWidth - reservedWidth);
-  const requiredForWide = tabCount * TITLE_BAR_WIDE_LAYOUT_TARGET_PX * interfaceScale;
-  const requiredForMedium = tabCount * TITLE_BAR_MEDIUM_TAB_MAX_PX * interfaceScale;
-  if (availableForTabs >= requiredForWide) return "wide";
-  if (availableForTabs >= requiredForMedium) return "medium";
+  const sharePerTab = availableForVideoTabs / tabCount;
+  const wideMin = TITLE_BAR_WIDE_LAYOUT_MIN_SHARE_PX * interfaceScale;
+  /** Below this, tab strip is too tight for readable text — icon-only tabs. */
+  const textModeMin = TITLE_BAR_NARROW_TAB_MAX_PX * interfaceScale;
+  if (sharePerTab >= wideMin) return "wide";
+  if (sharePerTab >= textModeMin) return "medium";
   return "narrow";
 }
 
-function getTitleTabSizeStyle(
-  layoutMode: TabLayoutMode,
-  interfaceScale: number
-): React.CSSProperties {
-  if (layoutMode === "wide") {
-    return {
-      maxWidth: TITLE_BAR_WIDE_TAB_MAX_PX * interfaceScale,
-    };
-  }
-  if (layoutMode === "medium") {
-    return { maxWidth: TITLE_BAR_MEDIUM_TAB_MAX_PX * interfaceScale };
-  }
-  return { maxWidth: TITLE_BAR_NARROW_TAB_MAX_PX * interfaceScale };
+/**
+ * Chrome-like sizing: each tab grows only up to TITLE_BAR_TAB_MAX_WIDTH_PX, unless tabs are crowded
+ * (then sharePerTab caps width so the row fills before truncating).
+ */
+function getTitleTabFlexStyle(tabCellMaxWidthPx: number): React.CSSProperties {
+  return {
+    flex: "1 1 0%",
+    minWidth: 0,
+    maxWidth: tabCellMaxWidthPx,
+  };
 }
 
 export const TITLE_BAR_HEIGHT = 36;
@@ -106,14 +113,14 @@ function SortableTitleTab({
   tab,
   isActive,
   layoutMode,
-  interfaceScale,
+  tabCellMaxWidthPx,
   onTabClick,
   onCloseTab,
 }: {
   tab: WorkbenchTab;
   isActive: boolean;
   layoutMode: TabLayoutMode;
-  interfaceScale: number;
+  tabCellMaxWidthPx: number;
   onTabClick: (projectId: string) => void;
   onCloseTab: (projectId: string, e: React.MouseEvent) => void;
 }) {
@@ -129,7 +136,7 @@ function SortableTitleTab({
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    ...getTitleTabSizeStyle(layoutMode, interfaceScale),
+    ...getTitleTabFlexStyle(tabCellMaxWidthPx),
   };
 
   const isIconOnly = layoutMode === "narrow";
@@ -179,9 +186,10 @@ function SortableTitleTab({
       ref={setNodeRef}
       style={style}
       data-testid={`title-bar-tab-${tab.projectId}`}
+      data-tauri-drag-region="false"
       onAuxClick={handleAuxClick}
       className={cn(
-        "flex h-full shrink-0 items-center border-b-2 border-r border-foreground/15 transition-colors duration-200",
+        "flex h-full min-w-0 items-center border-b-2 border-r border-foreground/15 transition-colors duration-200",
         isIconOnly
           ? "gap-0.5 pl-1.5 pr-1"
           : isMedium
@@ -274,6 +282,7 @@ function HomeTab({
   return (
     <button
       type="button"
+      data-tauri-drag-region="false"
       onClick={(e) => {
         if (activeView === HOME_TAB_ID) {
           e.preventDefault();
@@ -302,7 +311,8 @@ function HomeTab({
 /**
  * Custom window title bar shown only in Tauri (replaces native decorations).
  * Left: Cue logo (draggable). Middle: tab strip (Home icon + video tabs). Right: Settings, Minimize, Maximize, Close.
- * Only the logo area has data-tauri-drag-region so the tab strip stays clickable and future drag-to-reorder works.
+ * Drag regions: `-webkit-app-region` does not inherit — empty space uses the tab-row wrapper; Home/tabs use
+ * `data-tauri-drag-region="false"` so they stay interactive (see Tauri window drag docs).
  */
 const TitleBar = () => {
   const navigate = useNavigate();
@@ -315,7 +325,13 @@ const TitleBar = () => {
   const [interfaceScale, setInterfaceScale] = React.useState(() => readStoredInterfaceScale());
   const prevSettingsOpenRef = React.useRef(settingsOpen);
   const { tabs, activeView, setActiveView, closeTab, reorderTabs } = useWorkbenchTabs();
-  const tabLayoutMode = getTabLayoutMode(width, tabs.length, interfaceScale);
+  const availableForVideoTabs = getAvailableWidthForVideoTabs(width, interfaceScale);
+  const tabLayoutMode = getTabLayoutMode(availableForVideoTabs, tabs.length, interfaceScale);
+  const tabMaxWidthPx = TITLE_BAR_TAB_MAX_WIDTH_PX * interfaceScale;
+  const sharePerTab =
+    tabs.length > 0 ? availableForVideoTabs / tabs.length : 0;
+  /** Fills the strip when crowded; caps width when there is spare room (like Chrome). */
+  const tabCellMaxWidthPx = Math.min(tabMaxWidthPx, sharePerTab);
 
   React.useEffect(
     () => subscribeToInterfaceScaleChanges((scale) => setInterfaceScale(scale)),
@@ -458,17 +474,22 @@ const TitleBar = () => {
             items={tabs.map((t) => t.projectId)}
             strategy={horizontalListSortingStrategy}
           >
-            {tabs.map((tab) => (
-              <SortableTitleTab
-                key={tab.projectId}
-                tab={tab}
-                isActive={activeView === tab.projectId}
-                layoutMode={tabLayoutMode}
-                interfaceScale={interfaceScale}
-                onTabClick={handleTabClick}
-                onCloseTab={handleCloseTab}
-              />
-            ))}
+            <div
+              className="flex min-h-0 min-w-0 flex-1 flex-row justify-start"
+              data-tauri-drag-region
+            >
+              {tabs.map((tab) => (
+                <SortableTitleTab
+                  key={tab.projectId}
+                  tab={tab}
+                  isActive={activeView === tab.projectId}
+                  layoutMode={tabLayoutMode}
+                  tabCellMaxWidthPx={tabCellMaxWidthPx}
+                  onTabClick={handleTabClick}
+                  onCloseTab={handleCloseTab}
+                />
+              ))}
+            </div>
           </SortableContext>
         </DndContext>
       </div>

@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useRef } from "react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWorkbenchTabs, HOME_TAB_ID } from "@/workbenchTabs";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { WorkbenchSkeleton } from "@/components/WorkbenchSkeleton";
@@ -48,7 +49,11 @@ const TabHost = () => {
         style={{ display: isHomeActive ? "flex" : "none" }}
         tabIndex={-1}
       >
-        <ProjectHub />
+        <ScrollArea type="always" className="min-h-0 flex-1">
+          <div className="pt-6 pb-6 pr-6">
+            <ProjectHub />
+          </div>
+        </ScrollArea>
       </div>
       {tabs.map((tab) => {
         const isActive = activeView === tab.projectId;

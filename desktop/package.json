@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run generate:theme-icons && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "test:e2e": "playwright test",

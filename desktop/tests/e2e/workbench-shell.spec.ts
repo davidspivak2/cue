@@ -1876,7 +1876,9 @@ test("title bar: single tab label stays untruncated at 150% interface size", asy
   expect(titleMetrics.scrollWidth).toBeLessThanOrEqual(titleMetrics.clientWidth + 1);
 });
 
-test("title bar: shorter labels stay compact at 150% interface size", async ({ page }) => {
+test("title bar: multiple tabs share equal width to fill strip at 150% interface size", async ({
+  page
+}) => {
   const seedProject = buildProjects()[0];
   const projects = [
     {
@@ -1917,7 +1919,7 @@ test("title bar: shorter labels stay compact at 150% interface size", async ({ p
     longTab.evaluate((node) => node.getBoundingClientRect().width),
     shortTab.evaluate((node) => node.getBoundingClientRect().width)
   ]);
-  expect(shortTabWidth + 40).toBeLessThan(longTabWidth);
+  expect(Math.abs(longTabWidth - shortTabWidth)).toBeLessThan(2);
 });
 
 test("title bar: small 150% window with a few tabs still shows tab labels", async ({
