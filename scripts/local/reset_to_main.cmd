@@ -1,8 +1,9 @@
 @echo off
 setlocal EnableExtensions
 
+rem Repo root: scripts\local\ -> ..\..
 set "SCRIPT_DIR=%~dp0"
-set "REPO_ROOT=%SCRIPT_DIR%.."
+set "REPO_ROOT=%SCRIPT_DIR%..\.."
 for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
 
 echo [info] Using repo root: "%REPO_ROOT%"
@@ -45,7 +46,11 @@ if /i "%CLEAN%"=="Y" (
   if errorlevel 1 goto :die_clean
 )
 
-call "%REPO_ROOT%\scripts\start_app.cmd"
+if exist "%SCRIPT_DIR%start_app.cmd" (
+  call "%SCRIPT_DIR%start_app.cmd"
+) else (
+  call "%REPO_ROOT%\scripts\run_desktop_dev.cmd"
+)
 
 :done_ok
 pause

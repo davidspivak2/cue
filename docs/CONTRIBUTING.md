@@ -20,7 +20,7 @@ Before we merge a pull request from a non-maintainer, the contributor must sign 
 
 That's it for the basics. The rest of this guide covers setup details for each platform.
 
-If you keep personal or machine-only helper scripts, put them in `scripts/local/` — that folder is gitignored and is not part of the shared workflow.
+Optional git helpers and any extra personal scripts can live under `scripts/local/` — see [`scripts/local/README.md`](../scripts/local/README.md). Most files in that folder are gitignored; a few optional helpers are tracked there intentionally.
 
 ---
 
