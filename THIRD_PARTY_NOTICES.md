@@ -23,7 +23,7 @@ Important note:
 
 ## Python Engine and Runtime Components
 
-Cue ships a packaged Python engine in `cue-local-engine.zip`. This section calls out the primary redistributed components Cue uses directly.
+Cue ships a packaged Python engine as split zip resources under `desktop/src-tauri/` (`cue-engine-01-executables.zip` through `cue-engine-04-internal.zip`, driven by `cue-engine-parts.json`). Together they are equivalent to one engine tree. This section calls out the primary redistributed components Cue uses directly.
 
 | Component | Version | Cue use | Upstream | Reported license |
 | --- | --- | --- | --- | --- |
@@ -95,5 +95,5 @@ These items are referenced by Cue but are not redistributed as packaged app asse
 ## Packaging Notes
 
 - The live Windows packaging flow ships `THIRD_PARTY_NOTICES.md` alongside the desktop app bundle.
-- The packaged local engine artifact is `desktop/src-tauri/cue-local-engine.zip`.
+- The packaged local engine artifacts are `desktop/src-tauri/cue-engine-01-executables.zip` … `cue-engine-04-internal.zip` and `cue-engine-parts.json`.
 - The retired mirrored `desktop/src-tauri/engine/` folder is not part of the active packaged Windows release path.

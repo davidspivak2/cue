@@ -2,7 +2,7 @@
 
 Last updated: March 17, 2026
 
-These Terms of Use apply to the Cue desktop app and related releases published by David Spivak.
+These Terms of Use apply to the Cue desktop app and its related releases.
 
 ## 1. Using Cue
 

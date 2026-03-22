@@ -29,6 +29,8 @@ desktop/node_modules/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/src-tauri/cue-local-engine.zip
+# Full engine part zips from local release builds; tiny placeholders are tracked via git add -f
+desktop/src-tauri/cue-engine-0[1-4]-*.zip
 
 # Cursor IDE debug artifacts and logs (debug.log, debug-*.log, etc.)
 **/test-results/**

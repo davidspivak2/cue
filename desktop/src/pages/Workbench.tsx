@@ -6946,7 +6946,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                         </Button>
                         <div className="w-[100px] shrink-0 cursor-pointer">
                           <Slider
-                            className="h-8 w-[100px] shrink-0 cursor-pointer px-1 [&_.bg-primary\\/20]:bg-white/40 [&_.bg-primary]:bg-white [&_.border-primary\\/50]:border-white/80 [&_.bg-background]:bg-white"
+                            variant="overlay"
+                            className="h-8 w-[100px] shrink-0 cursor-pointer px-1"
                             value={[isMuted ? 0 : volume]}
                             onValueChange={([v]) => handleVolumeChange(v ?? 0)}
                             min={0}
@@ -7006,7 +7007,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   <Minus className="h-4 w-4" />
                                 </Button>
                                 <Slider
-                                  className="flex-1 [&_.bg-primary\\/20]:bg-white/40 [&_.bg-primary]:bg-white [&_.border-primary\\/50]:border-white/80 [&_.bg-background]:bg-white"
+                                  variant="overlay"
+                                  className="flex-1"
                                   value={[playbackSpeed]}
                                   onValueChange={([v]) => setPlaybackSpeed(v ?? 1)}
                                   min={0.25}

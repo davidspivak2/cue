@@ -7,6 +7,8 @@ export interface SliderProps
   extends React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root> {
   stops?: number;
   hideRange?: boolean;
+  /** High-contrast styling for dark video overlays (avoids parent arbitrary selectors in consuming code). */
+  variant?: "default" | "overlay";
   /** When set, thumb translates outward by this many px at min/max so it aligns with edge labels. */
   thumbEdgeOffset?: number;
 }
@@ -14,7 +16,7 @@ export interface SliderProps
 const Slider = React.forwardRef<
   React.ElementRef<typeof SliderPrimitive.Root>,
   SliderProps
->(({ className, "aria-label": ariaLabel, "aria-describedby": ariaDescribedBy, stops, value, hideRange, thumbEdgeOffset, min = 0, max = 100, ...props }, ref) => {
+>(({ className, "aria-label": ariaLabel, "aria-describedby": ariaDescribedBy, stops, value, hideRange, variant = "default", thumbEdgeOffset, min = 0, max = 100, ...props }, ref) => {
   const thumbVal = Array.isArray(value) ? value[0] : undefined;
   const atMin = thumbVal !== undefined && thumbVal <= min;
   const atMax = thumbVal !== undefined && thumbVal >= max;
@@ -41,11 +43,26 @@ const Slider = React.forwardRef<
     <SliderPrimitive.Track
       className={cn(
         "relative h-1.5 w-full grow overflow-hidden rounded-full",
-        hideRange ? "bg-muted-foreground/25" : "bg-primary/20"
+        variant === "overlay"
+          ? hideRange
+            ? "bg-white/25"
+            : "bg-white/40"
+          : hideRange
+            ? "bg-muted-foreground/25"
+            : "bg-primary/20"
       )}
     >
       <SliderPrimitive.Range
-        className={cn("absolute h-full", hideRange ? "bg-transparent" : "bg-primary")}
+        className={cn(
+          "absolute h-full",
+          variant === "overlay"
+            ? hideRange
+              ? "bg-transparent"
+              : "bg-white"
+            : hideRange
+              ? "bg-transparent"
+              : "bg-primary"
+        )}
       />
     </SliderPrimitive.Track>
     {stops != null && stops > 0 ? (
@@ -74,10 +91,14 @@ const Slider = React.forwardRef<
       aria-describedby={ariaDescribedBy}
       style={thumbStyle}
       className={cn(
-        "relative z-20 block h-4 w-4 cursor-pointer rounded-full bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
-        hideRange
-          ? "border-2 border-primary ring-2 ring-primary/30"
-          : "border border-primary/50"
+        "relative z-20 block h-4 w-4 cursor-pointer rounded-full shadow transition-colors focus-visible:outline-none focus-visible:ring-1 disabled:pointer-events-none disabled:opacity-50",
+        variant === "overlay"
+          ? hideRange
+            ? "border-2 border-white bg-white ring-2 ring-white/30 focus-visible:ring-white/50"
+            : "border border-white/80 bg-white focus-visible:ring-white/50"
+          : hideRange
+            ? "border-2 border-primary bg-background ring-2 ring-primary/30 focus-visible:ring-ring"
+            : "border border-primary/50 bg-background focus-visible:ring-ring"
       )}
     />
   </SliderPrimitive.Root>

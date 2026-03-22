@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAppSplash } from "@/contexts/AppSplashContext";
+import { waitForBackendHealthy } from "@/backendHealth";
 import { CalibrationProvider } from "@/contexts/CalibrationContext";
 import { DeviceInfoProvider } from "@/contexts/DeviceInfoContext";
 import { RunningJobsProvider } from "@/contexts/RunningJobsContext";
@@ -55,8 +56,28 @@ const AppLayout = () => {
   const hasLaunchedRef = React.useRef(false);
 
   React.useEffect(() => {
-    setShowSplash(false);
     if (typeof document !== "undefined") document.body.removeAttribute("data-tauri-drag-region");
+  }, []);
+
+  React.useEffect(() => {
+    if (!isTauri()) {
+      setShowSplash(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        await waitForBackendHealthy({ timeoutMs: 120_000, intervalMs: 400 });
+      } catch {
+        /* splash still dismissed so ProjectHub / errors can show */
+      }
+      if (!cancelled) {
+        setShowSplash(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [setShowSplash]);
   const seenNoticeIdsRef = React.useRef<Set<string>>(new Set());
   const seenExportCompleteRef = React.useRef<Set<string>>(new Set());

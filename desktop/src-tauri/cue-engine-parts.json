@@ -1,0 +1,21 @@
+{
+    "version":  1,
+    "parts":  [
+                  {
+                      "file":  "cue-engine-01-executables.zip",
+                      "label":  "Unpacking core engine programs..."
+                  },
+                  {
+                      "file":  "cue-engine-02-torch.zip",
+                      "label":  "Unpacking speech libraries..."
+                  },
+                  {
+                      "file":  "cue-engine-03-pyside6.zip",
+                      "label":  "Unpacking display libraries..."
+                  },
+                  {
+                      "file":  "cue-engine-04-internal.zip",
+                      "label":  "Unpacking remaining engine files..."
+                  }
+              ]
+}
