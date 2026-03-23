@@ -23,6 +23,10 @@ use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, RunEvent, WindowEv
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[cfg(windows)]
+const DETACHED_PROCESS: u32 = 0x0000_0008;
+#[cfg(windows)]
+const HIDDEN_PROCESS_FLAGS: u32 = CREATE_NO_WINDOW | DETACHED_PROCESS;
+#[cfg(windows)]
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
     UI::WindowsAndMessaging::{
@@ -386,7 +390,7 @@ fn start_packaged_backend(app: &AppHandle) -> Option<Child> {
     }
 
     #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
+    command.creation_flags(HIDDEN_PROCESS_FLAGS);
 
     match command.spawn() {
         Ok(child) => Some(child),
@@ -461,7 +465,7 @@ fn start_dev_backend(_app: &tauri::App) -> Option<Child> {
     }
 
     #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
+    command.creation_flags(HIDDEN_PROCESS_FLAGS);
 
     match command.spawn() {
         Ok(child) => Some(child),
@@ -556,7 +560,7 @@ fn stop_backend_process(shared_child: &Arc<Mutex<Option<Child>>>) {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
+            .creation_flags(HIDDEN_PROCESS_FLAGS)
             .status();
     }
 
@@ -793,7 +797,7 @@ fn try_stop_dev_backend_by_pid_file() {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
+        .creation_flags(HIDDEN_PROCESS_FLAGS)
         .status();
     let _ = fs::remove_file(pid_path);
 }
