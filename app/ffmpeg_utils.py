@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 BIN_DIR_NAME = "bin"
+WINDOWS_HIDDEN_SUBPROCESS_CREATIONFLAGS = 0
+if os.name == "nt":
+    WINDOWS_HIDDEN_SUBPROCESS_CREATIONFLAGS = (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+    )
+
 MISSING_FFMPEG_MESSAGE = (
     "Video tools not found. Run scripts\\download_ffmpeg.bat or install them with winget."
 )
@@ -82,7 +89,7 @@ def get_subprocess_kwargs() -> dict[str, Any]:
     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startupinfo.wShowWindow = subprocess.SW_HIDE
     return {
-        "creationflags": subprocess.CREATE_NO_WINDOW,
+        "creationflags": WINDOWS_HIDDEN_SUBPROCESS_CREATIONFLAGS,
         "startupinfo": startupinfo,
     }
 
@@ -277,4 +284,3 @@ def generate_thumbnail(
     if extract_raw_frame(path, timestamp, out_path, width=640):
         return out_path
     return None
-
