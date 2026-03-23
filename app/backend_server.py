@@ -707,16 +707,26 @@ def _reuses_existing_subtitles(payload: JobRequest) -> bool:
 
 
 def _resolve_create_subtitles_request_from_project(payload: JobRequest) -> None:
-    if not payload.project_id or not _reuses_existing_subtitles(payload):
+    if payload.kind != "create_subtitles" or not payload.project_id:
         return
-    artifacts = project_store.get_project_export_artifacts(payload.project_id)
-    video_path = artifacts.get("video_path")
-    subtitles_path = artifacts.get("subtitles_path")
-    if isinstance(video_path, str) and video_path:
+    project_id = payload.project_id
+    project_dir = get_projects_dir() / project_id
+    payload.output_dir = str(project_dir)
+    payload.srt_path = str(project_dir / project_store.SUBTITLES_FILENAME)
+    payload.word_timings_path = str(project_dir / project_store.WORD_TIMINGS_FILENAME)
+
+    if _reuses_existing_subtitles(payload):
+        artifacts = project_store.get_project_export_artifacts(project_id)
+        video_path = artifacts.get("video_path")
+        if isinstance(video_path, str) and video_path:
+            payload.input_path = video_path
+        return
+
+    manifest = project_store.get_project(project_id)
+    video = manifest.get("video") if isinstance(manifest.get("video"), dict) else {}
+    video_path = video.get("path")
+    if isinstance(video_path, str) and video_path.strip():
         payload.input_path = video_path
-    if isinstance(subtitles_path, str) and subtitles_path:
-        payload.srt_path = subtitles_path
-    payload.word_timings_path = artifacts.get("word_timings_path")
 
 
 def _resolve_port() -> int:

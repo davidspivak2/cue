@@ -22,6 +22,13 @@ use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, RunEvent, WindowEv
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
+use windows::Win32::{
+    Foundation::{HWND, LPARAM, WPARAM},
+    UI::WindowsAndMessaging::{
+        CreateIcon, DestroyIcon, SendMessageW, HICON, ICON_BIG, ICON_SMALL, WM_SETICON,
+    },
+};
 use zip::ZipArchive;
 
 const CALIBRATION_VIDEO_FILENAME: &str = "calibration_60s.mp4";
@@ -84,15 +91,15 @@ fn write_cached_archives_fingerprint(
 ) -> Result<(), String> {
     let json = serde_json::to_string_pretty(fingerprint)
         .map_err(|err| format!("Failed to serialize archive fingerprint: {err}"))?;
-    fs::write(path, json).map_err(|err| format!("Failed to write archive metadata file {path:?}: {err}"))
+    fs::write(path, json)
+        .map_err(|err| format!("Failed to write archive metadata file {path:?}: {err}"))
 }
 
 fn fingerprint_for_zip_paths(paths: &[PathBuf]) -> Result<EngineArchivesFingerprint, String> {
     let mut parts = Vec::new();
     for path in paths {
-        let metadata = read_part_file_metadata(path).ok_or_else(|| {
-            format!("Failed to read engine part metadata for {}", path.display())
-        })?;
+        let metadata = read_part_file_metadata(path)
+            .ok_or_else(|| format!("Failed to read engine part metadata for {}", path.display()))?;
         parts.push(metadata);
     }
     Ok(EngineArchivesFingerprint { version: 1, parts })
@@ -141,8 +148,8 @@ fn cue_engine_root_dir() -> PathBuf {
 }
 
 fn extract_zip_archive(zip_path: &Path, destination: &Path) -> Result<(), String> {
-    let archive_file =
-        File::open(zip_path).map_err(|err| format!("Failed to open engine archive {zip_path:?}: {err}"))?;
+    let archive_file = File::open(zip_path)
+        .map_err(|err| format!("Failed to open engine archive {zip_path:?}: {err}"))?;
     let mut archive = ZipArchive::new(archive_file)
         .map_err(|err| format!("Failed to read engine archive {zip_path:?}: {err}"))?;
 
@@ -161,9 +168,8 @@ fn extract_zip_archive(zip_path: &Path, destination: &Path) -> Result<(), String
             continue;
         }
         if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
-                format!("Failed to create extracted directory {parent:?}: {err}")
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create extracted directory {parent:?}: {err}"))?;
         }
         let mut output_file = File::create(&output_path)
             .map_err(|err| format!("Failed to create extracted file {output_path:?}: {err}"))?;
@@ -189,9 +195,8 @@ fn ensure_engine_extracted(app: &AppHandle) -> Result<PathBuf, String> {
     let manifest_raw = fs::read_to_string(&manifest_path)
         .map_err(|err| format!("Failed to read engine parts manifest {manifest_path:?}: {err}"))?;
     let manifest_json = strip_utf8_bom(manifest_raw.trim());
-    let manifest: EnginePartsManifest = serde_json::from_str(manifest_json).map_err(|err| {
-        format!("Failed to parse engine parts manifest {manifest_path:?}: {err}")
-    })?;
+    let manifest: EnginePartsManifest = serde_json::from_str(manifest_json)
+        .map_err(|err| format!("Failed to parse engine parts manifest {manifest_path:?}: {err}"))?;
 
     if manifest.parts.is_empty() {
         return Err("Engine parts manifest lists no archives".to_string());
@@ -235,8 +240,9 @@ fn ensure_engine_extracted(app: &AppHandle) -> Result<PathBuf, String> {
     if temp_engine_dir.exists() {
         let _ = fs::remove_dir_all(&temp_engine_dir);
     }
-    fs::create_dir_all(&temp_engine_dir)
-        .map_err(|err| format!("Failed to create temp engine directory {temp_engine_dir:?}: {err}"))?;
+    fs::create_dir_all(&temp_engine_dir).map_err(|err| {
+        format!("Failed to create temp engine directory {temp_engine_dir:?}: {err}")
+    })?;
 
     for (index, (zip_path, part)) in zip_paths.iter().zip(manifest.parts.iter()).enumerate() {
         let i = index as u32 + 1;
@@ -366,7 +372,9 @@ fn start_packaged_backend(app: &AppHandle) -> Option<Child> {
                 dev_eprintln!("Failed to clone backend log handle {log_path:?}: {err}");
                 #[cfg(not(debug_assertions))]
                 let _ = err;
-                command.stdout(Stdio::from(stdout_file)).stderr(Stdio::null());
+                command
+                    .stdout(Stdio::from(stdout_file))
+                    .stderr(Stdio::null());
             }
         },
         Err(err) => {
@@ -439,7 +447,9 @@ fn start_dev_backend(_app: &tauri::App) -> Option<Child> {
                 dev_eprintln!("Failed to clone backend log handle {log_path:?}: {err}");
                 #[cfg(not(debug_assertions))]
                 let _ = err;
-                command.stdout(Stdio::from(stdout_file)).stderr(Stdio::null());
+                command
+                    .stdout(Stdio::from(stdout_file))
+                    .stderr(Stdio::null());
             }
         },
         Err(err) => {
@@ -569,6 +579,177 @@ impl Default for AllowCloseState {
     }
 }
 
+#[cfg(windows)]
+#[derive(Default)]
+struct ThemeTaskbarIconState(Mutex<ThemeTaskbarIconHandles>);
+
+#[cfg(windows)]
+#[derive(Default)]
+struct ThemeTaskbarIconHandles {
+    small: Option<isize>,
+    big: Option<isize>,
+}
+
+#[cfg(windows)]
+fn resolve_theme_icon_path(app: &AppHandle, icon_name: &str, size: u32) -> Result<PathBuf, String> {
+    let relative = format!("icons/{icon_name}-{size}.png");
+    let bundled = app
+        .path()
+        .resolve(&relative, BaseDirectory::Resource)
+        .map_err(|err| format!("Failed to resolve bundled theme icon {relative}: {err}"))?;
+    if bundled.exists() {
+        return Ok(bundled);
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let dev_path = repo_root_dir()
+            .join("desktop")
+            .join("public")
+            .join("icons")
+            .join(format!("{icon_name}-{size}.png"));
+        if dev_path.exists() {
+            return Ok(dev_path);
+        }
+    }
+
+    Err(format!("Theme icon asset is missing: {relative}"))
+}
+
+#[cfg(windows)]
+fn destroy_theme_icon(raw: isize) {
+    if raw != 0 {
+        let _ = unsafe { DestroyIcon(HICON(raw as _)) };
+    }
+}
+
+#[cfg(windows)]
+fn create_theme_icon_handle(path: &Path) -> Result<HICON, String> {
+    let image = tauri::image::Image::from_path(path)
+        .map_err(|err| format!("Failed to load theme icon {}: {err}", path.display()))?;
+    let mut rgba = image.rgba().to_vec();
+    let pixel_count = rgba.len() / 4;
+    let mut and_mask = Vec::with_capacity(pixel_count);
+    for pixel in rgba.chunks_exact_mut(4) {
+        and_mask.push(pixel[3].wrapping_sub(u8::MAX));
+        pixel.swap(0, 2);
+    }
+
+    unsafe {
+        CreateIcon(
+            None,
+            image.width() as i32,
+            image.height() as i32,
+            1,
+            32,
+            and_mask.as_ptr(),
+            rgba.as_ptr(),
+        )
+        .map_err(|_| {
+            format!(
+                "Failed to create Windows icon handle from {}: {}",
+                path.display(),
+                io::Error::last_os_error()
+            )
+        })
+    }
+}
+
+#[cfg(windows)]
+fn replace_theme_icon_handles(app: &AppHandle, small: HICON, big: HICON) -> Result<(), String> {
+    let state = app
+        .try_state::<ThemeTaskbarIconState>()
+        .ok_or_else(|| "ThemeTaskbarIconState not found".to_string())?;
+    let (old_small, old_big) = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|err| format!("Failed to lock theme icon state: {err}"))?;
+        (
+            guard.small.replace(small.0 as isize),
+            guard.big.replace(big.0 as isize),
+        )
+    };
+    if let Some(raw) = old_small {
+        destroy_theme_icon(raw);
+    }
+    if let Some(raw) = old_big {
+        destroy_theme_icon(raw);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn clear_theme_icon_handles(app: &AppHandle) {
+    let Some(state) = app.try_state::<ThemeTaskbarIconState>() else {
+        return;
+    };
+    let (small, big) = match state.0.lock() {
+        Ok(mut guard) => (guard.small.take(), guard.big.take()),
+        Err(err) => {
+            dev_eprintln!("Failed to lock theme icon state during cleanup: {err}");
+            return;
+        }
+    };
+    if let Some(raw) = small {
+        destroy_theme_icon(raw);
+    }
+    if let Some(raw) = big {
+        destroy_theme_icon(raw);
+    }
+}
+
+#[cfg(windows)]
+fn apply_theme_taskbar_icon(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let icon_name = if matches!(window.theme(), Ok(tauri::Theme::Dark)) {
+        "dark"
+    } else {
+        "light"
+    };
+    let app = window.app_handle();
+    let small_path = resolve_theme_icon_path(&app, icon_name, 32)?;
+    let big_path = resolve_theme_icon_path(&app, icon_name, 256)?;
+    let small = create_theme_icon_handle(&small_path)?;
+    let big = match create_theme_icon_handle(&big_path) {
+        Ok(handle) => handle,
+        Err(err) => {
+            destroy_theme_icon(small.0 as isize);
+            return Err(err);
+        }
+    };
+    let hwnd: HWND = match window.hwnd() {
+        Ok(handle) => handle,
+        Err(err) => {
+            destroy_theme_icon(small.0 as isize);
+            destroy_theme_icon(big.0 as isize);
+            return Err(format!("Failed to read main window handle: {err}"));
+        }
+    };
+
+    unsafe {
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_SMALL as usize)),
+            Some(LPARAM(small.0 as isize)),
+        );
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_BIG as usize)),
+            Some(LPARAM(big.0 as isize)),
+        );
+    }
+
+    if let Err(err) = replace_theme_icon_handles(&app, small, big) {
+        destroy_theme_icon(small.0 as isize);
+        destroy_theme_icon(big.0 as isize);
+        return Err(err);
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn get_calibration_video_path(app: AppHandle) -> Result<String, String> {
     let path = app
@@ -599,7 +780,10 @@ fn try_stop_dev_backend_by_pid_file() {
     let Ok(contents) = fs::read_to_string(&pid_path) else {
         return;
     };
-    let rest = contents.trim().strip_prefix("{\"pid\":").or_else(|| contents.trim().strip_prefix("{\"pid\": "));
+    let rest = contents
+        .trim()
+        .strip_prefix("{\"pid\":")
+        .or_else(|| contents.trim().strip_prefix("{\"pid\": "));
     let pid: u32 = match rest.and_then(|s| s.trim().trim_end_matches('}').trim().parse().ok()) {
         Some(p) => p,
         None => return,
@@ -625,7 +809,18 @@ fn main() {
     builder
         .setup(move |app| {
             app.manage(AllowCloseState::default());
+            #[cfg(windows)]
+            app.manage(ThemeTaskbarIconState::default());
             let child_holder = Arc::clone(&backend_child_for_setup);
+
+            #[cfg(windows)]
+            {
+                if let Some(main_window) = app.get_webview_window("main") {
+                    if let Err(err) = apply_theme_taskbar_icon(&main_window) {
+                        dev_eprintln!("Failed to apply initial Windows theme icon: {err}");
+                    }
+                }
+            }
 
             #[cfg(debug_assertions)]
             {
@@ -640,10 +835,7 @@ fn main() {
                             let _ = err;
                         }
                     }
-                    wait_for_backend_listening(
-                        Duration::from_secs(30),
-                        Duration::from_millis(300),
-                    );
+                    wait_for_backend_listening(Duration::from_secs(30), Duration::from_millis(300));
                     return Ok(());
                 }
             }
@@ -672,8 +864,8 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 if window.label() != "main" {
                     return;
                 }
@@ -687,6 +879,17 @@ fn main() {
                     let _ = window.app_handle().emit("close-requested", ());
                 }
             }
+            #[cfg(windows)]
+            WindowEvent::ThemeChanged(_) => {
+                if window.label() == "main" {
+                    if let Some(main_window) = window.app_handle().get_webview_window("main") {
+                        if let Err(err) = apply_theme_taskbar_icon(&main_window) {
+                            dev_eprintln!("Failed to update Windows theme icon: {err}");
+                        }
+                    }
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             get_calibration_video_path,
@@ -694,7 +897,7 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(move |_app, event| {
+        .run(move |app, event| {
             let should_stop = matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit)
                 || matches!(
                     event,
@@ -705,6 +908,8 @@ fn main() {
                     } if label == "main"
                 );
             if should_stop {
+                #[cfg(windows)]
+                clear_theme_icon_handles(app);
                 stop_backend_process(&backend_child_for_run);
             }
         });

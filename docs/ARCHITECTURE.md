@@ -157,6 +157,8 @@ Output files are placed according to the Save Policy setting:
 - **Specific folder**: outputs go to a fixed folder set in Settings.
 - **Ask every time**: the user picks the folder each run.
 
+For **Editor projects**, the subtitle pipeline (SRT, word timings, extracted WAV, and `transcribe_control_*` temp folders) is written under `%LOCALAPPDATA%\Cue\projects\<project_id>\` rather than next to the source file; exported video output still follows the Save Policy above.
+
 Files produced per video:
 
 | File | Description |

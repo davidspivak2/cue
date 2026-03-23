@@ -1024,6 +1024,7 @@ class Worker(QtCore.QObject):
             ffmpeg_path=ffmpeg_path,
             video_path=self.video_path,
             output_path=output_path,
+            stats_dir=srt_path.parent,
             width=stream_info.width,
             height=stream_info.height,
             fps=stream_info.fps,
@@ -1237,6 +1238,7 @@ class Worker(QtCore.QObject):
                 self._burn_in_command += " ; " + subprocess.list2cmdline(plan.two_pass_pass2_command)
                 self._burn_in_audio_mode = "copy"
                 stats_base_name = output_path.stem + "_x264pass"
+                stats_dir = srt_path.parent
                 try:
                     self._run_ffmpeg_two_pass_single_pipeline(
                         plan.two_pass_pass1_command,
@@ -1271,7 +1273,7 @@ class Worker(QtCore.QObject):
                             cwd=cwd,
                         )
                 finally:
-                    for p in output_path.parent.glob(stats_base_name + "*"):
+                    for p in stats_dir.glob(stats_base_name + "*"):
                         try:
                             p.unlink(missing_ok=True)
                         except OSError:
