@@ -141,6 +141,7 @@ def build_graphics_overlay_plan(
     ffmpeg_path: Path,
     video_path: Path,
     output_path: Path,
+    stats_dir: Optional[Path] = None,
     width: int,
     height: int,
     fps: float,
@@ -321,7 +322,13 @@ def build_graphics_overlay_plan(
     if video_bitrate and video_bitrate > 0:
         br = video_bitrate
         bufsize = 8 * br
-        stats_base = output_path.parent / (output_path.stem + "_x264pass")
+        # ffmpeg creates temporary x264 two-pass stats via -passlogfile.
+        # For Workbench projects we want those temps in the project dir
+        # (next to the SRT + word timings), even if the final MP4 output
+        # follows the UI save policy.
+        resolved_stats_dir = stats_dir or output_path.parent
+        resolved_stats_dir.mkdir(parents=True, exist_ok=True)
+        stats_base = resolved_stats_dir / (output_path.stem + "_x264pass")
         single_pipeline_head = [
             str(ffmpeg_path),
             "-y",

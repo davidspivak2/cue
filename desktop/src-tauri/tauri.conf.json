@@ -54,6 +54,8 @@
       "cue-engine-04-internal.zip": "cue-engine-04-internal.zip",
       "icons/light-32.png": "icons/light-32.png",
       "icons/dark-32.png": "icons/dark-32.png",
+      "icons/light-256.png": "icons/light-256.png",
+      "icons/dark-256.png": "icons/dark-256.png",
       "calibration_60s.mp4": "calibration_60s.mp4",
       "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
     },

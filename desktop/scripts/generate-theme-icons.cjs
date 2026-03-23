@@ -1,6 +1,6 @@
 /**
- * Generates 32x32 PNG icons from public/light.svg and public/dark.svg
- * into src-tauri/icons/ for theme-aware native window icon.
+ * Generates themed PNG icons from public/light.svg and public/dark.svg
+ * into src-tauri/icons/ and public/icons/ for native Windows taskbar icons.
  * Run: node scripts/generate-theme-icons.cjs
  */
 const sharp = require("sharp");
@@ -17,12 +17,14 @@ async function main() {
   fs.mkdirSync(TAURI_ICONS, { recursive: true });
   for (const name of ["light", "dark"]) {
     const src = path.join(PUBLIC, `${name}.svg`);
-    const buf = await sharp(src).resize(32, 32).png().toBuffer();
-    const publicDest = path.join(PUBLIC_ICONS, `${name}-32.png`);
-    const tauriDest = path.join(TAURI_ICONS, `${name}-32.png`);
-    fs.writeFileSync(publicDest, buf);
-    fs.writeFileSync(tauriDest, buf);
-    console.log(`Wrote ${publicDest} and ${tauriDest}`);
+    for (const size of [32, 256]) {
+      const buf = await sharp(src).resize(size, size).png().toBuffer();
+      const publicDest = path.join(PUBLIC_ICONS, `${name}-${size}.png`);
+      const tauriDest = path.join(TAURI_ICONS, `${name}-${size}.png`);
+      fs.writeFileSync(publicDest, buf);
+      fs.writeFileSync(tauriDest, buf);
+      console.log(`Wrote ${publicDest} and ${tauriDest}`);
+    }
   }
 }
 
