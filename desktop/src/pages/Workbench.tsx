@@ -20,6 +20,7 @@ import WorkbenchEffectsPanel, {
   type WorkbenchEffectId
 } from "@/components/SubtitleStyle/WorkbenchEffectsPanel";
 import { useToast } from "@/contexts/ToastContext";
+import { useCalibration } from "@/contexts/CalibrationContext";
 import SubtitleTextControls from "@/components/SubtitleStyle/SubtitleTextControls";
 import { WorkbenchSkeleton } from "@/components/WorkbenchSkeleton";
 import { TITLE_BAR_HEIGHT } from "@/components/TitleBar";
@@ -783,6 +784,9 @@ const isVideoPlayingForEditSession = (videoElement: HTMLVideoElement | null): bo
 const defaultChecklist = (items: { id: string; label: string }[]): ChecklistItem[] =>
   items.map((item) => ({ ...item, state: "pending" }));
 
+const CALIBRATION_QUEUED_MESSAGE =
+  "Cue is still finishing first-time setup. Your subtitles will start automatically as soon as that setup finishes.";
+
 const isChecklistState = (value: unknown): value is NonNullable<ChecklistItem["state"]> =>
   value === "pending" ||
   value === "active" ||
@@ -1097,6 +1101,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const paramsProjectId = useParams().projectId;
   const projectId = projectIdProp ?? paramsProjectId ?? undefined;
   const { pushToast, markExportCompleteSeen, haveExportCompleteBeenSeen } = useToast();
+  const { isCalibrating } = useCalibration();
   const { ensureTab, updateTabMeta } = useWorkbenchTabs();
   const width = useWindowWidth();
   const isNarrow = width < 1100;
@@ -1267,6 +1272,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   const [createSubtitlesChecklist, setCreateSubtitlesChecklist] = React.useState<ChecklistItem[]>(
     []
   );
+  const [createSubtitlesQueuedForCalibration, setCreateSubtitlesQueuedForCalibration] =
+    React.useState(false);
   const createSubtitlesJobStreamRef = React.useRef<JobEventStream | null>(null);
   const [createSubtitlesStreamHealth, setCreateSubtitlesStreamHealth] =
     React.useState<StreamHealth>("idle");
@@ -1666,6 +1673,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setTimingFallbackDetail(null);
   }, []);
 
+  React.useEffect(() => {
+    if (!isCalibrating) {
+      setCreateSubtitlesQueuedForCalibration(false);
+    }
+  }, [isCalibrating]);
+
   const withTimingFallbackChecklist = React.useCallback(
     (items: ChecklistItem[]): ChecklistItem[] => {
       const fallback = timingFallbackProgressRef.current;
@@ -2054,6 +2067,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setCreateSubtitlesProgressPct(0);
     setCreateSubtitlesProgressMessage("");
     setCreateSubtitlesChecklist([]);
+    setCreateSubtitlesQueuedForCalibration(false);
     if (preparingPreviewDelayTimerRef.current !== null) {
       clearTimeout(preparingPreviewDelayTimerRef.current);
       preparingPreviewDelayTimerRef.current = null;
@@ -2436,6 +2450,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     (event: JobEvent) => {
       noteCreateLiveEventTimestamp(event);
       if (event.type === "started") {
+        setCreateSubtitlesQueuedForCalibration(false);
         setCreateSubtitlesHeading(asNonEmptyString(event.heading) ?? "Creating subtitles");
         setCreateSubtitlesStartedAt((prev) => {
           const ts = asString(event.ts) ?? new Date().toISOString();
@@ -2468,6 +2483,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         return;
       }
       if (event.type === "progress") {
+        setCreateSubtitlesQueuedForCalibration(false);
         if (typeof event.pct === "number") {
           setCreateSubtitlesProgressPct(event.pct);
         }
@@ -2503,15 +2519,18 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         return;
       }
       if (event.type === "result") {
+        setCreateSubtitlesQueuedForCalibration(false);
         return;
       }
       if (event.type === "completed") {
+        setCreateSubtitlesQueuedForCalibration(false);
         completedCreateSubtitlesJobIdRef.current =
           typeof event.job_id === "string" && event.job_id ? event.job_id : createSubtitlesJobIdRef.current;
         scheduleCreateSubtitlesCompletion();
         return;
       }
       if (event.type === "cancelled") {
+        setCreateSubtitlesQueuedForCalibration(false);
         completedCreateSubtitlesJobIdRef.current = null;
         clearPreparingPreviewTimers();
         preparingPreviewStartedAtRef.current = null;
@@ -2538,6 +2557,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         return;
       }
       if (event.type === "error") {
+        setCreateSubtitlesQueuedForCalibration(false);
         completedCreateSubtitlesJobIdRef.current = null;
         clearPreparingPreviewTimers();
         preparingPreviewStartedAtRef.current = null;
@@ -2735,6 +2755,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       createSubtitlesJobIdRef.current = job.jobId;
       createSubtitlesJustStartedRef.current = false;
       createSubtitlesJobStreamRef.current = job;
+      const queuedForCalibration = job.status === "queued" && isCalibrating;
+      setCreateSubtitlesQueuedForCalibration(queuedForCalibration);
+      if (queuedForCalibration) {
+        setCreateSubtitlesProgressPct(0);
+        setCreateSubtitlesProgressMessage(CALIBRATION_QUEUED_MESSAGE);
+        setCreateSubtitlesChecklist(defaultChecklist(genItems));
+      }
       setPersistedRunningJob(projectId, {
         jobId: job.jobId,
         eventsUrl: job.eventsUrl,
@@ -2800,7 +2827,8 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     resolveOutputDir,
     setCreateStreamHealthValue,
     settings,
-    startCreateStreamCooldown
+    startCreateStreamCooldown,
+    isCalibrating
   ]);
 
   const cancelCreateSubtitles = React.useCallback(() => {
@@ -3072,6 +3100,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     project?.active_task?.kind === "create_subtitles" && !hasStaleCompletedCreateFromApi;
   const showNoSubtitlesState = !isLoading && !error && !subtitleLoadError && !hasSubtitles;
   const persistedCreateJob = projectId ? getPersistedRunningJob(projectId) : null;
+  const hasQueuedCreateFromApi =
+    project?.active_task?.status === "queued" &&
+    project?.active_task?.kind === "create_subtitles";
+  const showCalibrationQueuedCreateSubtitlesState =
+    createSubtitlesQueuedForCalibration || (hasQueuedCreateFromApi && isCalibrating);
+  const showQueuedCreateSubtitlesState =
+    hasQueuedCreateFromApi || showCalibrationQueuedCreateSubtitlesState;
   const hasActiveCreateSubtitles =
     isCreatingSubtitles ||
     project?.active_task?.kind === "create_subtitles" ||
@@ -3266,6 +3301,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       const snapshotUpdatedAtMs = parseIsoTimestampMs(activeTask.updated_at);
       const checklist = buildChecklistFromActiveTask(activeTask);
       if (activeTask.kind === "create_subtitles") {
+        const queuedForCalibration = activeTask.status === "queued" && isCalibrating;
         const shouldIgnoreCompletedCreateSnapshot =
           completedCreateSubtitlesJobIdRef.current === activeTask.job_id &&
           activeTask.status !== "completed";
@@ -3280,6 +3316,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           snapshotUpdatedAtMs >= latestCreateLiveEventAtMsRef.current;
         setIsCreatingSubtitles(true);
         setCreateSubtitlesError(null);
+        setCreateSubtitlesQueuedForCalibration(queuedForCalibration);
         setIsExporting(false);
         setExportStartedAt(null);
         exportJobIdRef.current = null;
@@ -3290,7 +3327,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
             activeTask.status === "queued" ? "Queued" : (activeTask.heading ?? "Creating subtitles")
           );
           setCreateSubtitlesProgressPct(pct);
-          setCreateSubtitlesProgressMessage(message);
+          setCreateSubtitlesProgressMessage(
+            queuedForCalibration ? CALIBRATION_QUEUED_MESSAGE : message
+          );
           const fullList = defaultChecklist(buildCreateSubtitlesChecklistItems(settings));
           const merged =
             checklist.length > 0
@@ -3379,19 +3418,23 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
         const isSameSessionJustStarted =
           createSubtitlesJustStartedRef.current ||
           (createSubtitlesJobIdRef.current === persisted.jobId && createSubtitlesStartedAt != null);
+        const queuedForCalibration = isCalibrating;
         setIsCreatingSubtitles(true);
         setCreateSubtitlesError(null);
+        setCreateSubtitlesQueuedForCalibration(queuedForCalibration);
         setIsExporting(false);
         setExportStartedAt(null);
         exportJobIdRef.current = null;
         closeExportStream("resume_persisted_create");
         setExportStreamHealthValue("idle");
-        setCreateSubtitlesHeading("Creating subtitles");
+        setCreateSubtitlesHeading(queuedForCalibration ? "Queued" : "Creating subtitles");
         setCreateSubtitlesProgressPct(0);
-        if (!isSameSessionJustStarted) {
-          setCreateSubtitlesProgressMessage("");
+        if (queuedForCalibration || !isSameSessionJustStarted) {
+          setCreateSubtitlesProgressMessage(
+            queuedForCalibration ? CALIBRATION_QUEUED_MESSAGE : ""
+          );
           setCreateSubtitlesChecklist(
-            defaultChecklist(buildCreateSubtitlesChecklistItems(settings))
+            queuedForCalibration ? [] : defaultChecklist(buildCreateSubtitlesChecklistItems(settings))
           );
           setCreateSubtitlesStartedAt(null);
         }
@@ -3470,6 +3513,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     createSubtitlesStreamHealth,
     exportStreamHealth,
     finalizeCreateSubtitlesCompleted,
+    isCalibrating,
     isCreatingSubtitles,
     isExporting,
     openCreateSubtitlesStream,
@@ -6006,11 +6050,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     !pendingAutoStartSubtitles &&
     !incomingState?.autoStartSubtitles;
   const showCreateElevatorMusicPromptShell =
-    hasActiveCreateSubtitles &&
-    !(
-      project?.active_task?.status === "queued" &&
-      project?.active_task?.kind === "create_subtitles"
-    );
+    hasActiveCreateSubtitles && !showQueuedCreateSubtitlesState;
   const createSubtitlesStateContentClassName = cn(
     "mx-auto flex w-full flex-col gap-4",
     isCreateSubtitlesIdleState
@@ -6089,10 +6129,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                   </Button>
                 </div>
               </>
-            ) : project?.active_task?.status === "queued" &&
-              project?.active_task?.kind === "create_subtitles" ? (
+            ) : showQueuedCreateSubtitlesState ? (
               <>
                 <p className="text-lg font-semibold text-foreground">Queued</p>
+                {showCalibrationQueuedCreateSubtitlesState && (
+                  <p className="text-sm text-muted-foreground">
+                    {CALIBRATION_QUEUED_MESSAGE}
+                  </p>
+                )}
                 <div className="flex justify-center">
                   <Button
                     variant="secondary"

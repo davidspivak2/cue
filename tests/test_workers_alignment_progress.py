@@ -117,6 +117,76 @@ def test_alignment_emits_intermediate_progress_without_stdout_updates(
     assert any(detail not in {"0/364 words", "364/364 words"} for detail in timing_details)
 
 
+def test_alignment_runs_inline_on_windows_create_subtitles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "video.mp4"
+    output_path = tmp_path / "sample.word_timings.json"
+    srt_path = tmp_path / "sample.srt"
+    audio_path = tmp_path / "sample_audio_for_whisper.wav"
+    video_path.write_bytes(b"video")
+    audio_path.write_bytes(b"wav")
+    _write_srt(
+        srt_path,
+        "1\n00:00:00,000 --> 00:00:01,000\nhello world test\n",
+    )
+
+    plan = SimpleNamespace(
+        should_run=True,
+        command=["CueAlignWorker.exe", "--fake"],
+        output_path=output_path,
+        reason="missing",
+        device=None,
+        align_model=None,
+        prefer_gpu=True,
+    )
+    monkeypatch.setattr(workers_module, "build_alignment_plan", lambda **_kwargs: plan)
+
+    doc = SimpleNamespace(cues=[SimpleNamespace(words=[object()] * 3)])
+    monkeypatch.setattr(workers_module, "load_word_timings_json", lambda _path: doc)
+
+    worker = workers_module.Worker(
+        task_type=workers_module.TaskType.GENERATE_SRT,
+        video_path=video_path,
+        output_dir=tmp_path,
+        subtitle_mode="word_highlight",
+    )
+    worker._write_subtitles_words_total = 3
+
+    inline_calls: list[tuple[Path, Path]] = []
+
+    def _fake_run_alignment_inline(
+        *,
+        plan: object,
+        srt_path: Path,
+        audio_path: Path,
+        stdout_handler,
+        stderr_handler,
+    ) -> None:
+        del plan, stderr_handler
+        inline_calls.append((srt_path, audio_path))
+        stdout_handler("ALIGN_WORDS_TIMED current=3 total=3")
+        output_path.write_text("{}", encoding="utf-8")
+
+    def _unexpected_popen(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Alignment subprocess should not start in inline mode.")
+
+    monkeypatch.setattr(worker, "_should_run_alignment_inline", lambda **_kwargs: True)
+    monkeypatch.setattr(worker, "_run_alignment_inline", _fake_run_alignment_inline)
+    monkeypatch.setattr(workers_module.subprocess, "Popen", _unexpected_popen)
+
+    state, reason = worker._run_alignment_if_needed(
+        srt_path,
+        audio_path,
+        context="create_subtitles",
+    )
+
+    assert state == StepState.DONE
+    assert reason == "Matching complete"
+    assert inline_calls == [(srt_path, audio_path)]
+
+
 def test_resolve_word_timings_path_prefers_srt_derived_file(
     tmp_path: Path,
 ) -> None:

@@ -163,6 +163,13 @@ if os.path.exists(ffprobe_path):
 datas: list[tuple[str, str]] = []
 hiddenimports: list[str] = []
 
+fonts_dir = os.path.join(project_dir, "app", "fonts")
+if os.path.isdir(fonts_dir):
+    for entry in sorted(os.listdir(fonts_dir)):
+        if os.path.splitext(entry)[1].lower() not in {".ttf", ".otf"}:
+            continue
+        datas.append((os.path.join(fonts_dir, entry), os.path.join("app", "fonts")))
+
 for package_name in (
     "faster_whisper",
     "ctranslate2",

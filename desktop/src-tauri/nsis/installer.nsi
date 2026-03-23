@@ -875,6 +875,8 @@ Section Uninstall
     DeleteRegKey /ifempty HKCU "${MANUKEY}"
 
     SetShellVarContext current
+    RmDir /r "$APPDATA\${PRODUCTNAME}"
+    RmDir /r "$LOCALAPPDATA\${PRODUCTNAME}"
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
   ${EndIf}

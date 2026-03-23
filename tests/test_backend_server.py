@@ -630,10 +630,10 @@ def test_calibration_completion_includes_ultra_when_ultra_available(
     assert isinstance(saved[0]["ultra"], int)
 
 
-def test_calibrate_accepted_while_create_subtitles_running(
+def test_calibrate_queued_while_create_subtitles_running(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Calibration is not blocked by a running create_subtitles job (Chunk 1)."""
+    """Calibration shares the transcription lane and queues behind subtitle creation."""
     _setup_env(tmp_path, monkeypatch)
     video_path = tmp_path / "video.mp4"
     video_path.write_text("video", encoding="utf-8")
@@ -678,7 +678,7 @@ def test_calibrate_accepted_while_create_subtitles_running(
         assert cal_resp.status_code == 201
         cal_data = cal_resp.json()
         assert cal_data["job_id"] in backend_server.JOBS
-        assert cal_data["status"] == "running"
+        assert cal_data["status"] == "queued"
         assert backend_server.JOBS[cal_data["job_id"]].kind == "calibrate"
 
 

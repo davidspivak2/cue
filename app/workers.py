@@ -243,6 +243,55 @@ class Worker(QtCore.QObject):
         self._write_subtitles_words_total: Optional[int] = None
         self._write_subtitles_done_emitted = False
 
+    def _should_run_alignment_inline(self, *, context: str) -> bool:
+        return (
+            os.name == "nt"
+            and bool(getattr(sys, "frozen", False))
+            and context == "create_subtitles"
+        )
+
+    def _run_alignment_inline(
+        self,
+        *,
+        plan: object,
+        srt_path: Path,
+        audio_path: Path,
+        stdout_handler: Callable[[str], None],
+        stderr_handler: Callable[[str], None],
+    ) -> None:
+        from . import align_worker as align_worker_module
+
+        original_print = align_worker_module._print
+        original_eprint = align_worker_module._eprint
+
+        def _captured_stdout(message: str) -> None:
+            if self._cancelled.is_set():
+                raise CancelledError("Operation cancelled.")
+            stdout_handler(str(message))
+
+        def _captured_stderr(message: str) -> None:
+            if self._cancelled.is_set():
+                raise CancelledError("Operation cancelled.")
+            stderr_handler(str(message))
+
+        align_worker_module._print = _captured_stdout
+        align_worker_module._eprint = _captured_stderr
+        try:
+            align_worker_module.run_alignment(
+                align_worker_module.AlignmentConfig(
+                    wav_path=audio_path,
+                    srt_path=srt_path,
+                    output_path=plan.output_path,
+                    language=self._get_subtitle_language(srt_path),
+                    prefer_gpu=bool(plan.prefer_gpu),
+                    device=plan.device,
+                    align_model=plan.align_model,
+                )
+            )
+        finally:
+            align_worker_module._print = original_print
+            align_worker_module._eprint = original_eprint
+
     def cancel(self) -> None:
         with self._skip_lock:
             self._cancelled.set()
@@ -2304,7 +2353,9 @@ class Worker(QtCore.QObject):
                             current_real = real_progress
                             has_real = real_progress_seen
                             has_started = transcribe_started
-                        if not has_real:
+                        if not has_started:
+                            step_progress_est = min(step_progress_est, 0.12)
+                        elif not has_real:
                             step_progress_est = min(step_progress_est, 0.85)
                         else:
                             step_progress_est = min(
@@ -3023,19 +3074,9 @@ class Worker(QtCore.QObject):
                     f"Alignment command: {subprocess.list2cmdline(plan.command)}",
                     True,
                 )
-                process = subprocess.Popen(
-                    plan.command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    **get_subprocess_kwargs(),
-                )
-                self._process = process
                 stdout_tail: deque[str] = deque(maxlen=50)
                 stderr_tail: deque[str] = deque(maxlen=50)
+                process: Optional[subprocess.Popen[str]] = None
 
                 def _handle_alignment_line(line: str) -> None:
                     nonlocal alignment_total_mismatch_logged
@@ -3090,49 +3131,91 @@ class Worker(QtCore.QObject):
                                 target.append(stripped)
                                 self.signals.log.emit(stripped, True)
 
-                stdout_thread = threading.Thread(
-                    target=_read_stream,
-                    args=(process.stdout, stdout_tail, _handle_alignment_line),
-                    daemon=True,
-                )
-                stderr_thread = threading.Thread(
-                    target=_read_stream,
-                    args=(process.stderr, stderr_tail, None),
-                    daemon=True,
-                )
-                stdout_thread.start()
-                stderr_thread.start()
-                try:
-                    next_alignment_tick = time.monotonic()
-                    while True:
-                        if emit_step_events:
-                            now = time.monotonic()
-                            if now >= next_alignment_tick:
-                                _advance_alignment_progress(now)
-                                next_alignment_tick = now + 0.1
-                        if self._cancelled.is_set():
-                            process.terminate()
-                            try:
-                                process.wait(timeout=1)
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                            break
-                        if process.poll() is not None:
-                            break
-                        time.sleep(0.05)
-                    return_code = process.wait()
-                finally:
-                    if self._process is process:
-                        self._process = None
-                stdout_thread.join(timeout=1)
-                stderr_thread.join(timeout=1)
+                if self._should_run_alignment_inline(context=context):
+                    self.signals.log.emit(
+                        "Alignment running inline on Windows to avoid helper window flash.",
+                        True,
+                    )
+                    try:
+                        self._run_alignment_inline(
+                            plan=plan,
+                            srt_path=srt_path,
+                            audio_path=audio_path,
+                            stdout_handler=_handle_alignment_line,
+                            stderr_handler=lambda line: (
+                                stderr_tail.append(line.strip()),
+                                self.signals.log.emit(line.strip(), True),
+                            ),
+                        )
+                        return_code = 0
+                    except CancelledError:
+                        raise
+                    except Exception as exc:
+                        raise AlignmentError(
+                            f"Alignment failed: {exc}",
+                            "align_process_failed",
+                        ) from exc
+                else:
+                    process = subprocess.Popen(
+                        plan.command,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        **get_subprocess_kwargs(),
+                    )
+                    self._process = process
+                    stdout_thread = threading.Thread(
+                        target=_read_stream,
+                        args=(process.stdout, stdout_tail, _handle_alignment_line),
+                        daemon=True,
+                    )
+                    stderr_thread = threading.Thread(
+                        target=_read_stream,
+                        args=(process.stderr, stderr_tail, None),
+                        daemon=True,
+                    )
+                    stdout_thread.start()
+                    stderr_thread.start()
+                    try:
+                        next_alignment_tick = time.monotonic()
+                        while True:
+                            if emit_step_events:
+                                now = time.monotonic()
+                                if now >= next_alignment_tick:
+                                    _advance_alignment_progress(now)
+                                    next_alignment_tick = now + 0.1
+                            if self._cancelled.is_set():
+                                process.terminate()
+                                try:
+                                    process.wait(timeout=1)
+                                except subprocess.TimeoutExpired:
+                                    process.kill()
+                                break
+                            if process.poll() is not None:
+                                break
+                            time.sleep(0.05)
+                        return_code = process.wait()
+                    finally:
+                        if self._process is process:
+                            self._process = None
+                    stdout_thread.join(timeout=1)
+                    stderr_thread.join(timeout=1)
                 stderr_text = "\n".join(stderr_tail)
                 if stderr_text:
                     self.signals.log.emit(stderr_text, True)
-                self.signals.log.emit(
-                    f"Alignment finished: exit_code={return_code} output={plan.output_path}",
-                    True,
-                )
+                if process is None:
+                    self.signals.log.emit(
+                        f"Alignment finished inline: output={plan.output_path}",
+                        True,
+                    )
+                else:
+                    self.signals.log.emit(
+                        f"Alignment finished: exit_code={return_code} output={plan.output_path}",
+                        True,
+                    )
                 if self._cancelled.is_set():
                     try:
                         plan.output_path.unlink(missing_ok=True)
