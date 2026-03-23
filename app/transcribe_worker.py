@@ -11,12 +11,13 @@ import sys
 import threading
 import time
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from dataclasses import dataclass
 from tempfile import TemporaryDirectory
 from typing import Callable, NoReturn, Optional
 
-from .srt_utils import SrtSegment, segments_to_srt
+from .srt_utils import SrtSegment, compute_srt_sha256, segments_to_srt
 from .punctuation_stats import (
     DEFAULT_PUNCTUATION,
     build_transcription_stats,
@@ -38,6 +39,14 @@ from .ffmpeg_utils import (
 )
 from .paths import get_models_dir
 from .transcription_config import build_transcription_config
+from .word_timing_schema import (
+    CueWordTimings,
+    SCHEMA_VERSION,
+    WordSpan,
+    WordTimingDocument,
+    save_word_timings_json,
+    word_timings_path_for_srt,
+)
 
 MODEL_NAME = "large-v3"
 DEFAULT_MODEL_NAME = MODEL_NAME
@@ -63,6 +72,22 @@ PUNCTUATION_RESCUE_DEFAULTS = {
 VAD_GAP_RESCUE_THRESHOLD_SEC = 5.0
 VAD_GAP_RESCUE_MAX_GAPS = 5
 VAD_GAP_RESCUE_MAX_TOTAL_DURATION_SEC = 60.0
+
+
+@dataclass(frozen=True)
+class RawWordTimestamp:
+    word: str
+    start: Optional[float]
+    end: Optional[float]
+    probability: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class RawTranscriptionSegment:
+    start: float
+    end: float
+    text: str
+    words: list[RawWordTimestamp]
 
 
 def _print(message: str) -> None:
@@ -241,6 +266,128 @@ def _load_model(
 def _write_srt(segments: list[SrtSegment], srt_path: Path) -> None:
     srt_content = segments_to_srt(segments)
     srt_path.write_text(srt_content, encoding="utf-8")
+
+
+def _is_real_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _segment_word_payload(word: object) -> Optional[dict[str, object]]:
+    if isinstance(word, dict):
+        raw_text = word.get("word")
+        raw_start = word.get("start")
+        raw_end = word.get("end")
+        raw_probability = word.get("probability", word.get("score"))
+    else:
+        raw_text = getattr(word, "word", None)
+        raw_start = getattr(word, "start", None)
+        raw_end = getattr(word, "end", None)
+        raw_probability = getattr(word, "probability", getattr(word, "score", None))
+
+    if raw_text is None:
+        return None
+    text = str(raw_text).strip()
+    if not text:
+        return None
+    if not _is_real_number(raw_start) or not _is_real_number(raw_end):
+        return None
+    probability = float(raw_probability) if _is_real_number(raw_probability) else None
+    return {
+        "word": text,
+        "start": float(raw_start),
+        "end": float(raw_end),
+        "probability": probability,
+    }
+
+
+def _collect_raw_words(raw_segments: list[object]) -> list[dict[str, object]]:
+    words: list[dict[str, object]] = []
+    for segment in raw_segments:
+        segment_words = getattr(segment, "words", None)
+        if not isinstance(segment_words, list):
+            continue
+        for word in segment_words:
+            payload = _segment_word_payload(word)
+            if payload is not None:
+                words.append(payload)
+    words.sort(key=lambda item: (float(item["start"]), float(item["end"])))
+    return words
+
+
+def _assign_words_to_output_segments(
+    segments: list[SrtSegment],
+    words: list[dict[str, object]],
+    *,
+    tolerance: float = 0.1,
+) -> list[list[WordSpan]]:
+    cue_words: list[list[WordSpan]] = []
+    word_index = 0
+    total_words = len(words)
+    for segment in segments:
+        window_start = float(segment.start) - tolerance
+        window_end = float(segment.end) + tolerance
+        assigned: list[WordSpan] = []
+        while word_index < total_words:
+            item = words[word_index]
+            start = float(item["start"])
+            end = float(item["end"])
+            if end < window_start:
+                word_index += 1
+                continue
+            if start > window_end:
+                break
+            assigned.append(
+                WordSpan(
+                    text=str(item["word"]),
+                    start=start,
+                    end=end,
+                    confidence=(
+                        float(item["probability"])
+                        if item.get("probability") is not None
+                        else None
+                    ),
+                )
+            )
+            word_index += 1
+        cue_words.append(assigned)
+    return cue_words
+
+
+def _write_word_timings_from_transcription(
+    *,
+    raw_segments: list[object],
+    output_segments: list[SrtSegment],
+    srt_path: Path,
+    language: str,
+) -> int:
+    words = _collect_raw_words(raw_segments)
+    if not words:
+        return 0
+    cue_words = _assign_words_to_output_segments(output_segments, words)
+    total_words = sum(len(cue) for cue in cue_words)
+    if total_words <= 0:
+        return 0
+
+    output_path = word_timings_path_for_srt(srt_path)
+    doc = WordTimingDocument(
+        schema_version=SCHEMA_VERSION,
+        created_utc=datetime.now(timezone.utc).isoformat(),
+        language=language,
+        srt_sha256=compute_srt_sha256(srt_path),
+        cues=[
+            CueWordTimings(
+                cue_index=index,
+                cue_start=segment.start,
+                cue_end=segment.end,
+                cue_text=segment.text,
+                words=cue_words[index - 1],
+            )
+            for index, segment in enumerate(output_segments, start=1)
+        ],
+    )
+    save_word_timings_json(output_path, doc)
+    _print(f"WORD_TIMINGS_WRITTEN words={total_words} output={output_path}")
+    return total_words
 
 
 def _build_raw_punctuation_summary(raw_segments: list[object]) -> dict[str, float | int]:
@@ -520,7 +667,7 @@ def _apply_vad_gap_rescue(
                 temp_wav = tmp_root / f"vad_gap_{gap.idx}.wav"
                 _extract_gap_wav(wav_path, gap.start_sec, gap.dur_sec, temp_wav)
                 try:
-                    raw_segments, _, rescue_segments, _ = _run_transcription_attempt(
+                    raw_segments, _, rescue_segments, _, _ = _run_transcription_attempt(
                         model=model,
                         wav_path=temp_wav,
                         transcribe_kwargs=rescue_kwargs,
@@ -593,6 +740,11 @@ def _serialize_raw_segments(raw_segments: list[object]) -> list[dict[str, object
             "start": float(getattr(segment, "start", 0.0)),
             "end": float(getattr(segment, "end", 0.0)),
             "text": str(getattr(segment, "text", "")),
+            "words": [
+                payload
+                for word in (getattr(segment, "words", None) or [])
+                if (payload := _segment_word_payload(word)) is not None
+            ],
         }
         for segment in raw_segments
     ]
@@ -621,15 +773,36 @@ def _serialize_srt_segments(segments: list[SrtSegment]) -> list[dict[str, object
     ]
 
 
-def _deserialize_raw_segments(payload: list[dict[str, object]]) -> list[SrtSegment]:
-    raw_segments: list[SrtSegment] = []
-    for idx, segment in enumerate(payload, start=1):
+def _deserialize_raw_segments(payload: list[dict[str, object]]) -> list[RawTranscriptionSegment]:
+    raw_segments: list[RawTranscriptionSegment] = []
+    for segment in payload:
+        words_payload = segment.get("words")
+        words: list[RawWordTimestamp] = []
+        if isinstance(words_payload, list):
+            for word in words_payload:
+                if not isinstance(word, dict):
+                    continue
+                item = _segment_word_payload(word)
+                if item is None:
+                    continue
+                words.append(
+                    RawWordTimestamp(
+                        word=str(item["word"]),
+                        start=float(item["start"]),
+                        end=float(item["end"]),
+                        probability=(
+                            float(item["probability"])
+                            if item.get("probability") is not None
+                            else None
+                        ),
+                    )
+                )
         raw_segments.append(
-            SrtSegment(
-                index=idx,
+            RawTranscriptionSegment(
                 start=float(segment.get("start", 0.0)),
                 end=float(segment.get("end", 0.0)),
                 text=str(segment.get("text", "")),
+                words=words,
             )
         )
     return raw_segments
@@ -666,7 +839,7 @@ def _run_transcription_attempt(
     splitter_config: SplitterConfig,
     duration_seconds: float | None,
     should_abort: Optional[Callable[[], bool]] = None,
-) -> tuple[list[object], list[object], list[SrtSegment], SplitterStats]:
+) -> tuple[list[object], list[object], list[SrtSegment], SplitterStats, str]:
     transcribe_heartbeat_stop = threading.Event()
     transcribe_heartbeat_thread = _start_heartbeat("TRANSCRIBE", transcribe_heartbeat_stop)
     try:
@@ -706,7 +879,7 @@ def _run_transcription_attempt(
     finally:
         transcribe_heartbeat_stop.set()
         transcribe_heartbeat_thread.join(timeout=1)
-    return raw_segments, cues, segments, splitter_stats
+    return raw_segments, cues, segments, splitter_stats, str(info.language or "unknown")
 
 
 def _run_punctuation_child_attempt(
@@ -740,7 +913,7 @@ def _run_punctuation_child_attempt(
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=1)
 
-    raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
+    raw_segments, cues, segments, splitter_stats, detected_language = _run_transcription_attempt(
         model=model,
         wav_path=wav_path,
         transcribe_kwargs=transcribe_kwargs,
@@ -760,6 +933,7 @@ def _run_punctuation_child_attempt(
         "cues": _serialize_cues(cues),
         "segments": _serialize_srt_segments(segments),
         "splitter_stats": {"alignment_failures": splitter_stats.alignment_failures},
+        "detected_language": detected_language,
         **raw_summary,
     }
     output_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -782,6 +956,7 @@ def _load_punctuation_child_output(payload: dict[str, object]) -> dict[str, obje
     payload["cues"] = _deserialize_cues(cues_payload)
     payload["segments"] = _deserialize_srt_segments(segments_payload)
     payload["splitter_stats"] = SplitterStats(alignment_failures=alignment_failures)
+    payload["detected_language"] = str(payload.get("detected_language") or "unknown")
     return payload
 
 
@@ -1173,7 +1348,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
         def _should_skip_gaps() -> bool:
             return _should_skip(control_dir, "skip_gaps.flag")
         attempts: list[dict[str, object]] = []
-        raw_segments, cues, segments, splitter_stats = _run_transcription_attempt(
+        raw_segments, cues, segments, splitter_stats, detected_language = _run_transcription_attempt(
             model=model,
             wav_path=wav_path,
             transcribe_kwargs=transcribe_kwargs,
@@ -1196,6 +1371,7 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
                 "cues": cues,
                 "segments": segments,
                 "splitter_stats": splitter_stats,
+                "detected_language": detected_language,
                 **raw_summary,
             }
         )
@@ -1423,6 +1599,14 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = False) -> int:
             if hard_exit:
                 _hard_exit(2)
             return 2
+        direct_word_timings = _write_word_timings_from_transcription(
+            raw_segments=list(chosen_attempt["raw_segments"]),
+            output_segments=vad_gap_segments,
+            srt_path=srt_path,
+            language=str(chosen_attempt.get("detected_language") or args.lang or "unknown"),
+        )
+        if direct_word_timings <= 0:
+            _print("WORD_TIMINGS_SKIPPED reason=no_direct_word_timestamps")
         _print(f"DONE {srt_path}")
         if hard_exit:
             _hard_exit(0)

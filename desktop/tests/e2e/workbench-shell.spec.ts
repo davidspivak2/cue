@@ -2887,6 +2887,125 @@ test("workbench shows Queued and cancel when project active_task is queued", asy
   await cancelRequest;
 });
 
+test("workbench shows first-time setup queued message while persisted create job waits on calibration", async ({
+  page
+}) => {
+  let calibrationJobRequestCount = 0;
+
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis, "isTauri", {
+      configurable: true,
+      value: true
+    });
+    Object.defineProperty(globalThis, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {
+        convertFileSrc: (filePath) => `data:,${encodeURIComponent(String(filePath ?? ""))}`,
+        metadata: {
+          currentWindow: { label: "main" },
+          currentWebview: { windowLabel: "main", label: "main" }
+        },
+        invoke: async (cmd: string) => {
+          if (cmd === "get_calibration_video_path") {
+            return "C:\\fake\\calibration.mp4";
+          }
+          throw new Error(`Unexpected invoke: ${cmd}`);
+        }
+      }
+    });
+    localStorage.setItem(
+      "cue_device_info_cache_v1",
+      JSON.stringify({
+        version: 1,
+        data: {
+          gpu_available: true,
+          gpu_name: "Fake GPU",
+          calibration_done: false,
+          estimate_5min_sec: {
+            auto: 450,
+            speed: 450,
+            quality: 450
+          }
+        }
+      })
+    );
+    localStorage.setItem(
+      "cue_running_jobs",
+      JSON.stringify({
+        "project-1": {
+          jobId: "job-persisted-queued",
+          eventsUrl: "http://127.0.0.1:8765/jobs/job-persisted-queued/events",
+          kind: "create_subtitles"
+        }
+      })
+    );
+  });
+
+  await page.route("**://127.0.0.1:8765/device", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        gpu_available: true,
+        gpu_name: "Fake GPU",
+        calibration_done: false,
+        estimate_5min_sec: {
+          auto: 450,
+          speed: 450,
+          quality: 450
+        }
+      })
+    });
+  });
+
+  const projects = buildProjects();
+  const api = await mockProjects(page, projects, null);
+  await page.route("**://127.0.0.1:8765/jobs", async (route) => {
+    calibrationJobRequestCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        job_id: "job-calibration-1",
+        events_url: "http://127.0.0.1:8765/jobs/job-calibration-1/events",
+        status: "running"
+      })
+    });
+  });
+  await page.route("**://127.0.0.1:8765/jobs/job-calibration-1/events", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache"
+      },
+      body: toSseBody([
+        {
+          job_id: "job-calibration-1",
+          ts: new Date().toISOString(),
+          type: "progress",
+          pct: 26,
+          message: "Loading model"
+        }
+      ])
+    });
+  });
+  api.setJobEvents("job-persisted-queued", toSseBody([]));
+
+  await page.goto("/");
+  await expect.poll(() => calibrationJobRequestCount).toBe(1);
+
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await expect(page.getByTestId("workbench-empty-state")).toContainText("Queued");
+  await expect(page.getByTestId("workbench-empty-state")).toContainText(
+    "Cue is still finishing first-time setup. Your subtitles will start automatically as soon as that setup finishes."
+  );
+  await expect(page.getByTestId("workbench-cancel-create-subtitles")).toBeVisible();
+  await expect(page.getByTestId("workbench-create-checklist")).toHaveCount(0);
+});
+
 test("workbench keeps export cancel available after resume attach", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const projects = buildProjects();

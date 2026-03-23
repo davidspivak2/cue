@@ -48,6 +48,7 @@ from app.paths import (
     get_config_path,
     get_diagnostics_dir,
     get_logs_dir,
+    get_models_dir,
     get_projects_dir,
 )
 from app.backend_pipeline_adapter import _resolve_device_and_compute
@@ -229,6 +230,7 @@ class JobState:
     enqueue_lock: threading.Lock = field(default_factory=threading.Lock)
     trace_path: Optional[Path] = None
     trace_warn_at: float = 0.0
+    calibration_cold_start: bool = False
 
 
 JOBS: dict[str, JobState] = {}
@@ -898,7 +900,10 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
             _set_project_task_notice(job, event)
         if event_type == "completed" and getattr(job, "kind", None) == "calibrate":
             try:
-                if job.started_at and job.finished_at:
+                estimate_5min_sec: dict[str, int]
+                if _calibration_should_use_default_estimate(job):
+                    estimate_5min_sec = _build_default_estimate_5min_sec()
+                elif job.started_at and job.finished_at:
                     elapsed = (job.finished_at - job.started_at).total_seconds()
                     effective_sec = max(
                         0.0, elapsed - CALIBRATION_PREPARING_PREVIEW_SEC
@@ -925,7 +930,7 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
                     rtf_quality = get_rtf_est(
                         "quality", device_quality, compute_quality
                     )
-                    estimate_5min_sec: dict[str, int] = {
+                    estimate_5min_sec = {
                         "speed": estimate_speed,
                         "auto": int(
                             round(
@@ -956,6 +961,9 @@ def _update_job_snapshot(job: JobState, event: dict[str, Any]) -> None:
                                 * (rtf_ultra / rtf_speed_est)
                             )
                         )
+                else:
+                    estimate_5min_sec = {}
+                if estimate_5min_sec:
                     _save_calibration_estimates(estimate_5min_sec)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Calibration save failed: %s", exc)
@@ -1581,6 +1589,35 @@ def _count_running_by_kind(kind: str) -> int:
     )
 
 
+def _count_running_transcription_lane() -> int:
+    return sum(
+        1
+        for job in JOBS.values()
+        if job.kind in {"create_subtitles", "calibrate"} and job.status == "running"
+    )
+
+
+def _build_default_estimate_5min_sec() -> dict[str, int]:
+    estimate_5min_sec: dict[str, int] = {}
+    qualities = ("speed", "auto", "quality") + (("ultra",) if ultra_available() else ())
+    for quality in qualities:
+        try:
+            device, compute_type = _resolve_device_and_compute(
+                quality, gpu_available_fn=gpu_available
+            )
+            rtf = get_rtf_est_for_device(
+                quality,
+                device,
+                compute_type,
+                gpu_name=get_gpu_name() if gpu_available() else None,
+                cpu_cores=get_cpu_cores(),
+            )
+            estimate_5min_sec[quality] = int(round(AUDIO_DURATION_5MIN_SEC * rtf))
+        except Exception:  # noqa: BLE001
+            continue
+    return estimate_5min_sec
+
+
 def _active_job_for_project(project_id: str) -> Optional[JobState]:
     active_jobs = [
         job
@@ -1732,7 +1769,8 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
             output_dir=output_dir,
             options=calibrate_options,
         )
-        slot_free = _count_running_by_kind("calibrate") == 0
+        job.calibration_cold_start = not (get_models_dir() / TRANSCRIBE_MODEL_NAME).exists()
+        slot_free = _count_running_transcription_lane() == 0
         if slot_free:
             job.status = "running"
             job.started_at = datetime.now(timezone.utc)
@@ -1774,7 +1812,7 @@ async def create_job(payload: JobRequest) -> dict[str, str]:
             if _reuses_existing_subtitles(payload)
             else "Creating subtitles"
         )
-        slot_free = _count_running_by_kind("create_subtitles") == 0
+        slot_free = _count_running_transcription_lane() == 0
         if slot_free:
             job.status = "running"
             job.started_at = datetime.now(timezone.utc)
@@ -2289,6 +2327,7 @@ def preview_overlay(payload: PreviewOverlayRequest) -> dict[str, Any]:
 AUDIO_DURATION_5MIN_SEC = 300
 CALIBRATION_PREPARING_PREVIEW_SEC = 5
 CALIBRATION_FILENAME = "calibration.json"
+TRANSCRIBE_MODEL_NAME = "large-v3"
 
 
 def _load_calibration_estimates() -> Optional[dict[str, int]]:
@@ -2316,6 +2355,10 @@ def _save_calibration_estimates(estimate_5min_sec: dict[str, int]) -> None:
         )
     except OSError as exc:
         logger.warning("Failed to save calibration: %s", exc)
+
+
+def _calibration_should_use_default_estimate(job: JobState) -> bool:
+    return bool(getattr(job, "calibration_cold_start", False))
 
 
 @app.get("/device")
