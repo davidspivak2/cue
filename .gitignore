@@ -34,6 +34,7 @@ debug-*.log
 # Cursor / Codex: agent skills, rules, local project instructions
 .cursor/
 .codex/
+.claude/
 AGENTS.md
 .cursorrules
 

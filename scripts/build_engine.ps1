@@ -431,10 +431,38 @@ $repo = Split-Path $PSScriptRoot -Parent
 Set-Location $repo
 $buildStartedAtUtc = [datetime]::UtcNow
 
+$supportedMinPython = [version]"3.11"
+$supportedMaxPythonExclusive = [version]"3.13"
+
+$venvDir = Join-Path $repo ".venv"
+$venvConfig = Join-Path $venvDir "pyvenv.cfg"
 $venvPython = Join-Path $repo ".venv\Scripts\python.exe"
+if ((Test-Path $venvConfig) -and (Test-Path $venvPython)) {
+    $venvConfigValues = @{}
+    foreach ($line in Get-Content -Path $venvConfig -ErrorAction SilentlyContinue) {
+        if ($line -match "^\s*([^=]+?)\s*=\s*(.+?)\s*$") {
+            $venvConfigValues[$matches[1].Trim()] = $matches[2].Trim()
+        }
+    }
+
+    $basePython = $null
+    if ($venvConfigValues.ContainsKey("executable")) {
+        $basePython = $venvConfigValues["executable"]
+    }
+    elseif ($venvConfigValues.ContainsKey("home")) {
+        $basePython = Join-Path $venvConfigValues["home"] "python.exe"
+    }
+
+    if ($basePython -and -not (Test-Path $basePython)) {
+        Write-Host "[INFO] Existing virtual environment points to missing Python: $basePython"
+        Write-Host "[INFO] Recreating virtual environment..."
+        Remove-PathWithRetries -Path $venvDir | Out-Null
+    }
+}
+
 if (-not (Test-Path $venvPython)) {
     Write-Host "[INFO] Creating virtual environment..."
-    & python -m venv ".venv"
+    & py -3 -m venv ".venv"
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create virtual environment."
     }
@@ -442,6 +470,16 @@ if (-not (Test-Path $venvPython)) {
 
 if (-not (Test-Path $venvPython)) {
     throw "Virtual environment python not found at $venvPython"
+}
+
+$pythonVersionText = (& $venvPython -c "import sys; print('.'.join(str(part) for part in sys.version_info[:3]))").Trim()
+if (-not $pythonVersionText) {
+    throw "Failed to detect virtual environment Python version."
+}
+
+$pythonVersion = [version]$pythonVersionText
+if ($pythonVersion -lt $supportedMinPython -or $pythonVersion -ge $supportedMaxPythonExclusive) {
+    throw "Cue packaging currently supports Python $supportedMinPython through 3.12.x. Found $pythonVersion at $venvPython. Install Python 3.12, then recreate C:\Cue_repo\.venv or rerun this script so it can recreate the environment automatically."
 }
 
 Write-Host "[INFO] Installing/refreshing Python dependencies..."
@@ -455,7 +493,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to install requirements."
 }
 
-& $venvPython -m pip show pyinstaller *> $null
+& $venvPython -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('PyInstaller') else 1)"
 if ($LASTEXITCODE -ne 0) {
     & $venvPython -m pip install pyinstaller
     if ($LASTEXITCODE -ne 0) {
