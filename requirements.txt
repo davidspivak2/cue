@@ -1,8 +1,11 @@
 PySide6==6.7.2
-numpy>=1.24,<3
+numpy==2.4.1
 faster-whisper==1.1.1
-psutil>=5.9.0
-requests>=2.31,<3
-whisperx>=3.7.4
-fastapi>=0.115
-uvicorn>=0.30
+ctranslate2==4.6.3
+onnxruntime==1.23.2
+av==16.1.0
+psutil==7.2.2
+requests==2.32.5
+whisperx==3.7.6
+fastapi==0.128.0
+uvicorn==0.40.0

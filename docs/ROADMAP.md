@@ -35,3 +35,11 @@ Statuses: NEXT, IN PROGRESS, BLOCKED, DONE.
 6. **Subtitle translation** (target language can differ from audio)
    - **Deliverable:** A path distinct from same-language transcription: user chooses a subtitle language that may not match the spoken audio, and the app produces timed subtitles in that language (translation, not “wrong-language” transcribe).
    - **Acceptance:** User can set an explicit target subtitle language independent of the audio language; cues appear in that language with usable timing; edit, preview, and export behave like other subtitle workflows.
+
+7. **Subtitle segmentation controls** (adjust words per subtitle)
+   - **Deliverable:** Add a user-facing control for subtitle segmentation so people can decide how aggressively Cue splits speech into subtitle blocks, including a simple way to set a rough max words-per-subtitle target for shorter or longer captions.
+   - **Acceptance:** User can change the segmentation setting before generating subtitles, then see that choice reflected in the resulting subtitle length and pacing. The setting is clear enough that a non-expert can predict the effect without knowing subtitle jargon.
+
+8. **Style presets**
+   - **Deliverable:** Let users save style presets from their current design choices, give each preset a name, and reapply it later instead of rebuilding the same look by hand.
+   - **Acceptance:** User can save the current subtitle style as a preset, find saved presets later, apply one in a couple of clicks, and still tweak the result before export.

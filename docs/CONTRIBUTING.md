@@ -26,7 +26,7 @@ Personal scripts can go in `scripts/local/` (gitignored; not part of the shared 
 
 ### Prerequisites
 
-- **Python 3.11+**
+- **Python 3.11 to 3.12**
 - **Node.js** (LTS)
 - **Rust toolchain** (stable) with `cargo`
 - **Visual Studio C++ build tools** (for native compilation)
@@ -39,6 +39,8 @@ python -m venv .venv
 .venv\Scripts\activate
 python -m pip install -r requirements.txt
 ```
+
+Python 3.13 and 3.14 are not currently supported for packaging because `PySide6==6.7.2` does not provide wheels for those Python versions.
 
 Optional dev/test dependencies:
 ```bat
@@ -78,7 +80,7 @@ This handles everything: installs backend and frontend dependencies, starts the 
 
 ### Prerequisites
 
-- **Python 3.11+** (via Homebrew: `brew install python@3.11`)
+- **Python 3.11 to 3.12** (via Homebrew: `brew install python@3.12`)
 - **Node.js** (LTS, via Homebrew: `brew install node`)
 - **Rust toolchain** (via rustup: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
 - **Xcode Command Line Tools** (`xcode-select --install`)

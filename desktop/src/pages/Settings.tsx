@@ -28,6 +28,7 @@ import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCalibration } from "@/contexts/CalibrationContext";
+import { useRunningJobs } from "@/contexts/RunningJobsContext";
 import { useDeviceInfo, useDeviceInfoLoading } from "@/contexts/DeviceInfoContext";
 import { useSettings } from "@/contexts/SettingsContext";
 import {
@@ -246,7 +247,9 @@ const Settings = () => {
   const [legalDocOpen, setLegalDocOpen] = React.useState<LegalDocKey | null>(null);
   const deviceInfo = useDeviceInfo();
   const isDeviceInfoLoading = useDeviceInfoLoading();
-  const { isCalibrating, calibrationPct } = useCalibration();
+  const { isCalibrating, calibrationPct, runCalibration } = useCalibration();
+  const { getRunningJobs } = useRunningJobs();
+  const hasRunningJob = getRunningJobs().length > 0;
   const gpuAvailable = deviceInfo?.gpu_available ?? null;
   const ultraAvailable = deviceInfo?.ultra_available === true;
   const ultraDevice = deviceInfo?.ultra_device ?? null;
@@ -579,12 +582,11 @@ const Settings = () => {
                     role="status"
                     aria-live="polite"
                   >
-                    {!calibrationDone && isCalibrating && (
+                    {isCalibrating ? (
                       <p className="text-xs text-muted-foreground">
                         Estimating transcription time… {calibrationPct}%
                       </p>
-                    )}
-                    {showEstimate && selectedValue && (
+                    ) : showEstimate && selectedValue ? (
                       <p className="text-xs">
                         {formatEstimate5Min(
                           getDisplayEstimateSec(
@@ -593,7 +595,29 @@ const Settings = () => {
                           )!
                         )}
                       </p>
-                    )}
+                    ) : !calibrationDone ? (
+                      <TooltipProvider delayDuration={0}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex">
+                                <button
+                                  type="button"
+                                  onClick={() => { void runCalibration(); }}
+                                  disabled={hasRunningJob}
+                                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
+                                >
+                                  Estimate transcription time
+                                </button>
+                              </span>
+                            </TooltipTrigger>
+                          {hasRunningJob && (
+                            <TooltipContent>
+                              <p>A project is running. Wait for it to finish before estimating.</p>
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : null}
                     <p className="text-xs">
                       For nerds:{" "}
                       {getQualityNerdsLine(
@@ -629,10 +653,9 @@ const Settings = () => {
                       )}
                     </p>
                     <div className="text-xs text-muted-foreground" role="status" aria-live="polite">
-                      {!calibrationDone && isCalibrating && (
+                      {isCalibrating ? (
                         <p className="mt-0.5">Estimating transcription time… {calibrationPct}%</p>
-                      )}
-                      {showEstimate && selectedValue && (
+                      ) : showEstimate && selectedValue ? (
                         <p className="mt-0.5">
                           {formatEstimate5Min(
                             getDisplayEstimateSec(
@@ -641,7 +664,29 @@ const Settings = () => {
                             )!
                           )}
                         </p>
-                      )}
+                      ) : !calibrationDone ? (
+                        <TooltipProvider delayDuration={0}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="mt-0.5 inline-flex">
+                                <button
+                                  type="button"
+                                  onClick={() => { void runCalibration(); }}
+                                  disabled={hasRunningJob}
+                                  className="underline underline-offset-2 hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
+                                >
+                                  Estimate transcription time
+                                </button>
+                              </span>
+                            </TooltipTrigger>
+                            {hasRunningJob && (
+                              <TooltipContent>
+                                <p>A project is running. Wait for it to finish before estimating.</p>
+                              </TooltipContent>
+                            )}
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : null}
                     </div>
                     <p className="text-xs text-muted-foreground">
                       For nerds:{" "}
