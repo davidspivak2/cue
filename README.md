@@ -28,9 +28,7 @@ Cue uses speech recognition to build subtitles and burn them into the video. Eve
 
 ### Windows
 
-<!-- TODO: Add download link to the latest .msi or .exe installer once packaging is ready. -->
-
-Download the latest Windows installer from the [Releases](../../releases) page and run it.
+[Download Cue Beta for Windows](https://github.com/davidspivak2/cue/releases/download/v0.1.0-beta.1/Cue_0.1.0-1_x64-setup.exe)
 
 Windows releases currently ship packaged desktop app installers for x64 only.
 
