@@ -43,3 +43,7 @@ Statuses: NEXT, IN PROGRESS, BLOCKED, DONE.
 8. **Style presets**
    - **Deliverable:** Let users save style presets from their current design choices, give each preset a name, and reapply it later instead of rebuilding the same look by hand.
    - **Acceptance:** User can save the current subtitle style as a preset, find saved presets later, apply one in a couple of clicks, and still tweak the result before export.
+
+9. **More fonts + custom font import**
+   - **Deliverable:** Expand the built-in subtitle font options and let users add their own font files so they are not limited to the bundled list when styling subtitles.
+   - **Acceptance:** User can choose from a larger built-in font list, import a supported font file from their computer, see that font appear in the style controls, preview it in the editor, and use it successfully in export without manual file copying.
