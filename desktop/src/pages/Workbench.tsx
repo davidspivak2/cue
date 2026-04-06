@@ -6070,7 +6070,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
           className="flex min-w-0 flex-1 items-center gap-2"
           data-testid="workbench-heading"
         >
-          <h1 className="min-w-0 max-w-[min(100%,280px)] truncate text-lg font-semibold tracking-tight text-foreground">
+          <h1 className="min-w-0 truncate text-lg font-semibold tracking-tight text-foreground">
             {title && title !== "Untitled video" ? title : ""}
           </h1>
         </div>

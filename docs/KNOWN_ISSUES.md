@@ -56,6 +56,45 @@ Validation checklist:
 
 ---
 
+## KI-016 - Multi-video queue: stuck on “creating subtitles” until other jobs finish; possible repeated transcription steps
+
+- Status: `OPEN`
+- Priority: Medium (needs investigation to confirm frequency and exact trigger)
+- Tracked in roadmap: Queue item 14 (`Multi-queue transcription: progress and navigation (KI-016)`)
+
+User impact:
+- With several videos queued for transcription, after the first video completes transcription the UI can remain on the “creating subtitles” progress screen until the other queued videos also finish, instead of opening the editor for that video as soon as it is ready.
+- In some cases (conditions unclear), transcription-related steps for a video may appear to run again after other videos in the queue complete.
+
+Repro steps:
+1. Queue multiple videos for transcription (exact count and order may matter; capture when reproducing).
+2. Let the first video complete its transcription pipeline.
+3. Observe whether navigation to the editor happens immediately or the progress UI stays up until remaining jobs finish.
+4. If steps repeat, note queue size, completion order, and any errors in logs.
+
+Expected:
+- When a video’s transcription and subtitle creation for that video are done, the app should proceed to the editor (or the next appropriate step) for that video without waiting for unrelated queued videos.
+- Transcription steps for a given video should not re-run spuriously after sibling jobs complete.
+
+Actual:
+- Progress can appear to block on “creating subtitles” until other videos finish.
+- Transcription UI steps may sometimes repeat after other videos finish (needs confirmation).
+
+Likely cause / notes:
+- Possible race or shared state between concurrent/sequenced transcription jobs and the navigation/progress state machine; needs tracing in frontend progress handling and backend job completion ordering.
+
+Minimum-scope fix:
+- TBD after investigation: ensure per-video completion drives UI and routing independently; guard against duplicate step transitions when sibling jobs complete.
+
+Risks / regressions:
+- Fixes must not break single-video flows or legitimate re-runs when the user explicitly retries.
+
+Validation checklist:
+- Multi-video queue: first completed video opens editor promptly; no duplicate step spam; remaining videos still process correctly.
+
+---
+
 ## Capture checklist for issue evidence
 
 - Project folder tree with diagnostics disabled showing SRT/`word_timings.json` retention (KI-015).
+- Multi-video transcription queue: logs and screen recording for KI-016 (completion order, stuck progress, repeated steps).
