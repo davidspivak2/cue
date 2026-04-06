@@ -74,7 +74,7 @@ const TabHost = () => {
           >
             <Suspense fallback={<WorkbenchSkeleton />}>
               <RouteErrorBoundary>
-                <Workbench projectId={tab.projectId} />
+                <Workbench projectId={tab.projectId} isActive={isActive} />
               </RouteErrorBoundary>
             </Suspense>
           </div>

@@ -109,32 +109,91 @@ def get_media_duration(path: Path) -> Optional[float]:
     _, ffprobe_path, _ = ensure_ffmpeg_available()
     if not ffprobe_path:
         return None
-    command = [
-        str(ffprobe_path),
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        str(path),
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-            **get_subprocess_kwargs(),
+
+    def _run_ffprobe_text(
+        extra_args: list[str],
+        *,
+        output_format: str = "default=noprint_wrappers=1:nokey=1",
+    ) -> Optional[str]:
+        command = [
+            str(ffprobe_path),
+            "-v",
+            "error",
+            *extra_args,
+        ]
+        if output_format:
+            command.extend(["-of", output_format])
+        command.append(str(path))
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                **get_subprocess_kwargs(),
+            )
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        text = result.stdout.strip()
+        return text or None
+
+    def _run_ffprobe(extra_args: list[str]) -> Optional[float]:
+        text = _run_ffprobe_text(extra_args)
+        if text is None:
+            return None
+        try:
+            value = float(text)
+            return value if value > 0 else None
+        except ValueError:
+            return None
+
+    def _estimate_duration_from_packets() -> Optional[float]:
+        text = _run_ffprobe_text(
+            ["-show_entries", "packet=pts_time,duration_time", "-select_streams", "v:0"],
+            output_format="csv=p=0",
         )
-    except Exception:
-        return None
-    if result.returncode != 0:
-        return None
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        return None
+        if text is None:
+            return None
+
+        last_pts: Optional[float] = None
+        last_duration = 0.0
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            parts = [part.strip() for part in line.split(",")]
+            if not parts:
+                continue
+            try:
+                pts_time = float(parts[0])
+            except ValueError:
+                continue
+            duration_time = 0.0
+            if len(parts) > 1:
+                try:
+                    duration_time = max(0.0, float(parts[1]))
+                except ValueError:
+                    duration_time = 0.0
+            last_pts = pts_time
+            last_duration = duration_time
+
+        if last_pts is None:
+            return None
+        estimated_duration = last_pts + last_duration
+        return estimated_duration if estimated_duration > 0 else None
+
+    # Primary: read container duration (fast, works for most formats)
+    duration = _run_ffprobe(["-show_entries", "format=duration"])
+    if duration is not None:
+        return duration
+    # Fallback: scan streams (handles WebM files that omit container duration)
+    duration = _run_ffprobe(["-show_entries", "stream=duration", "-select_streams", "v:0"])
+    if duration is not None:
+        return duration
+    # Last resort: derive duration from the last packet timestamp.
+    return _estimate_duration_from_packets()
 
 
 def get_ffprobe_json(path: Path) -> Optional[dict[str, Any]]:

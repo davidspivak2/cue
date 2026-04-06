@@ -118,9 +118,9 @@ async def _run_startup_warmup() -> None:
 @asynccontextmanager
 async def _app_lifespan(app: FastAPI):  # noqa: ARG001
     global _queue_worker_tasks, _startup_warmup_task
-    _queue_worker_tasks = [
-        asyncio.create_task(_queue_worker_create_subtitles()),
-    ]
+    _queue_worker_tasks = []
+    for _ in range(CREATE_SUBTITLES_CONCURRENCY):
+        _queue_worker_tasks.append(asyncio.create_task(_queue_worker_create_subtitles()))
     for _ in range(EXPORT_CONCURRENCY):
         _queue_worker_tasks.append(asyncio.create_task(_queue_worker_export()))
     _startup_warmup_task = asyncio.create_task(_run_startup_warmup())
@@ -243,6 +243,7 @@ _create_subtitles_queue: asyncio.Queue[tuple[JobState, JobRequest]] = asyncio.Qu
 _export_queue: asyncio.Queue[tuple[JobState, JobRequest]] = asyncio.Queue()
 _queue_worker_tasks: list[asyncio.Task[None]] = []
 EXPORT_CONCURRENCY = 10
+CREATE_SUBTITLES_CONCURRENCY = 2
 
 
 class JobRequest(BaseModel):

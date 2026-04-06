@@ -98,11 +98,10 @@ function getTabLayoutMode(
  * (then sharePerTab caps width so the row fills before truncating).
  */
 function getTitleTabFlexStyle(tabCellMaxWidthPx: number): React.CSSProperties {
-  return {
-    flex: "1 1 0%",
-    minWidth: 0,
-    maxWidth: tabCellMaxWidthPx,
-  };
+  // flex: 0 1 auto — size to content, shrink if needed, never grow beyond content.
+  // maxWidth caps each tab at its equal share of available space so truncation only
+  // happens when tabs are genuinely crowded (Chrome-like behaviour).
+  return { flex: "0 1 auto", minWidth: 0, maxWidth: tabCellMaxWidthPx };
 }
 
 export const TITLE_BAR_HEIGHT = 36;
@@ -327,11 +326,10 @@ const TitleBar = () => {
   const { tabs, activeView, setActiveView, closeTab, reorderTabs } = useWorkbenchTabs();
   const availableForVideoTabs = getAvailableWidthForVideoTabs(width, interfaceScale);
   const tabLayoutMode = getTabLayoutMode(availableForVideoTabs, tabs.length, interfaceScale);
-  const tabMaxWidthPx = TITLE_BAR_TAB_MAX_WIDTH_PX * interfaceScale;
   const sharePerTab =
-    tabs.length > 0 ? availableForVideoTabs / tabs.length : 0;
-  /** Fills the strip when crowded; caps width when there is spare room (like Chrome). */
-  const tabCellMaxWidthPx = Math.min(tabMaxWidthPx, sharePerTab);
+    tabs.length > 0 ? availableForVideoTabs / tabs.length : availableForVideoTabs;
+  /** Each tab's max width = its equal share of available space. Tabs only truncate when genuinely crowded. */
+  const tabCellMaxWidthPx = sharePerTab;
 
   React.useEffect(
     () => subscribeToInterfaceScaleChanges((scale) => setInterfaceScale(scale)),

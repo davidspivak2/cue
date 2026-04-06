@@ -85,6 +85,8 @@ type WorkbenchLocationState = {
 type WorkbenchProps = {
   /** When provided (e.g. from TabHost), used instead of route params so the same instance can stay mounted. */
   projectId?: string;
+  /** Whether this tab is currently visible. Used to pause video when switching away. */
+  isActive?: boolean;
 };
 
 const SUBTITLE_FONT_SIZE_MIN = 18;
@@ -205,7 +207,7 @@ const DEFAULT_APPEARANCE: SubtitleStyleAppearance = {
   vertical_anchor: "bottom",
   vertical_offset: 28,
   position_x: 0.5,
-  position_y: 0.92,
+  position_y: 0.85,
   subtitle_mode: "static",
   highlight_color: "#FFD400"
 };
@@ -899,6 +901,8 @@ const clampVideoSeekTime = (seconds: number, durationValue?: number) => {
     : safeTime;
 };
 
+const SUBTITLE_VIEWPORT_EDGE_PADDING = 0.04; // 4% of video height kept clear at top/bottom edges
+
 const clampSubtitleCenterToVisibleBounds = (
   x: number,
   y: number,
@@ -918,8 +922,8 @@ const clampSubtitleCenterToVisibleBounds = (
   const halfH = Math.min(0.5, constrainedBoxHeight / (2 * layerHeight));
   const minX = halfW;
   const maxX = 1 - halfW;
-  const minY = halfH;
-  const maxY = 1 - halfH;
+  const minY = halfH + SUBTITLE_VIEWPORT_EDGE_PADDING;
+  const maxY = 1 - halfH - SUBTITLE_VIEWPORT_EDGE_PADDING;
   if (minX >= maxX) {
     return { x: 0.5, y: Math.max(minY, Math.min(maxY, safeY)) };
   }
@@ -1094,7 +1098,7 @@ const useScrollAreaShadow = (enabled: boolean) => {
   return { scrollAreaRef, scrolled };
 };
 
-const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
+const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) => {
   const location = useLocation();
   const incomingState = location.state as WorkbenchLocationState;
   const navigate = useNavigate();
@@ -1226,6 +1230,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     startX: number;
     startY: number;
     startFontSize: number;
+    dragCausedPause: boolean;
   } | null>(null);
   const [subtitlePositionDrag, setSubtitlePositionDrag] = React.useState<{
     startX: number;
@@ -1395,10 +1400,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     [clearPendingVideoSeek]
   );
 
-  const syncMediaTimingStateFromVideo = React.useCallback((element: HTMLVideoElement) => {
+  const syncMediaTimingStateFromVideo = React.useCallback((element: HTMLVideoElement, fallbackDurationSeconds?: number | null) => {
     const durationValue = element.duration;
     setCurrentTimeSeconds(element.currentTime || 0);
-    setDurationSeconds(Number.isFinite(durationValue) && durationValue >= 0 ? durationValue : 0);
+    const resolvedDuration =
+      Number.isFinite(durationValue) && durationValue >= 0
+        ? durationValue
+        : (fallbackDurationSeconds != null && fallbackDurationSeconds > 0 ? fallbackDurationSeconds : 0);
+    setDurationSeconds(resolvedDuration);
     setVolume(element.volume);
     setIsMuted(element.muted);
     setVideoNaturalSize({
@@ -2111,6 +2120,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setExportOutputPath(null);
     setVideoNaturalSize({ width: 0, height: 0 });
     setDurationSeconds(0);
+    videoRef.current?.pause();
     setIsPlaying(false);
     autoEnterEditOnNextCueLoadRef.current = false;
     clearPendingVideoSeek();
@@ -2128,6 +2138,13 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     setCreateStreamHealthValue,
     setExportStreamHealthValue
   ]);
+
+  // Pause video when switching to another tab or home — settings/effects overlays don't change isActive
+  React.useEffect(() => {
+    if (isActive === false) {
+      videoRef.current?.pause();
+    }
+  }, [isActive]);
 
   React.useEffect(() => {
     if (selectedCueId && !cues.some((cue) => cue.id === selectedCueId)) {
@@ -4787,12 +4804,103 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
     subtitlePositionDrag
   ]);
 
+  const videoSingleClickTimeoutRef = React.useRef<BrowserTimeout | null>(null);
+  const videoClickSurfaceRef = React.useRef<HTMLDivElement | null>(null);
+  const floatingToolbarPointerDownInsideRef = React.useRef(false);
+  const suppressEditModeReleaseClickRef = React.useRef(false);
+  const suppressEditModeReleaseClickTimeoutRef = React.useRef<BrowserTimeout | null>(null);
+
+  const clearEditModeReleaseClickSuppression = React.useCallback(() => {
+    if (suppressEditModeReleaseClickTimeoutRef.current !== null) {
+      window.clearTimeout(suppressEditModeReleaseClickTimeoutRef.current);
+      suppressEditModeReleaseClickTimeoutRef.current = null;
+    }
+    suppressEditModeReleaseClickRef.current = false;
+  }, []);
+
+  const suppressNextEditModeReleaseClick = React.useCallback(() => {
+    suppressEditModeReleaseClickRef.current = true;
+    if (suppressEditModeReleaseClickTimeoutRef.current !== null) {
+      window.clearTimeout(suppressEditModeReleaseClickTimeoutRef.current);
+    }
+    suppressEditModeReleaseClickTimeoutRef.current = window.setTimeout(() => {
+      suppressEditModeReleaseClickTimeoutRef.current = null;
+      suppressEditModeReleaseClickRef.current = false;
+    }, 0);
+  }, []);
+
+  const isWithinFloatingToolbarInteractionLayer = React.useCallback((target: EventTarget | null) => {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    if (subtitleEditorControlsRef.current?.contains(target)) {
+      return true;
+    }
+    if (target.closest(FLOATING_TOOLBAR_POPOVER_SELECTOR)) {
+      return true;
+    }
+    const popoverWrapper = target.closest(FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR);
+    return Boolean(popoverWrapper?.querySelector(FLOATING_TOOLBAR_POPOVER_SELECTOR));
+  }, []);
+
+  React.useEffect(() => {
+    if (!isEditingActiveCue) {
+      floatingToolbarPointerDownInsideRef.current = false;
+      clearEditModeReleaseClickSuppression();
+      return;
+    }
+
+    const resetFloatingToolbarPointerSequence = () => {
+      floatingToolbarPointerDownInsideRef.current = false;
+      clearEditModeReleaseClickSuppression();
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      floatingToolbarPointerDownInsideRef.current = isWithinFloatingToolbarInteractionLayer(
+        event.target
+      );
+      if (!floatingToolbarPointerDownInsideRef.current) {
+        clearEditModeReleaseClickSuppression();
+      }
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const startedInsideFloatingToolbar = floatingToolbarPointerDownInsideRef.current;
+      floatingToolbarPointerDownInsideRef.current = false;
+      if (!startedInsideFloatingToolbar) {
+        return;
+      }
+      if (isWithinFloatingToolbarInteractionLayer(event.target)) {
+        clearEditModeReleaseClickSuppression();
+        return;
+      }
+      suppressNextEditModeReleaseClick();
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointerup", handlePointerUp, true);
+    window.addEventListener("pointercancel", resetFloatingToolbarPointerSequence, true);
+    window.addEventListener("blur", resetFloatingToolbarPointerSequence);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointerup", handlePointerUp, true);
+      window.removeEventListener("pointercancel", resetFloatingToolbarPointerSequence, true);
+      window.removeEventListener("blur", resetFloatingToolbarPointerSequence);
+      resetFloatingToolbarPointerSequence();
+    };
+  }, [
+    clearEditModeReleaseClickSuppression,
+    isEditingActiveCue,
+    isWithinFloatingToolbarInteractionLayer,
+    suppressNextEditModeReleaseClick
+  ]);
+
   React.useEffect(() => {
     const drag = subtitleResizeDrag;
     if (!drag) return;
     const onMouseMove = (e: MouseEvent) => {
       if ((e.buttons & 1) !== 1) {
-        resumePlaybackIfNeededRef.current();
+        if (drag.dragCausedPause) resumePlaybackIfNeededRef.current();
         setSubtitleResizeDrag(null);
         return;
       }
@@ -4812,8 +4920,9 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       handleAppearanceChangeRef.current({ font_size: newSize });
     };
     const onMouseUp = () => {
-      resumePlaybackIfNeededRef.current();
+      if (drag.dragCausedPause) resumePlaybackIfNeededRef.current();
       setSubtitleResizeDrag(null);
+      suppressNextEditModeReleaseClick();
     };
     document.addEventListener("mousemove", onMouseMove, true);
     document.addEventListener("mouseup", onMouseUp, true);
@@ -4821,7 +4930,12 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       document.removeEventListener("mousemove", onMouseMove, true);
       document.removeEventListener("mouseup", onMouseUp, true);
     };
-  }, [displayedVideoRect.height, displayedVideoRect.scale, subtitleResizeDrag]);
+  }, [
+    displayedVideoRect.height,
+    displayedVideoRect.scale,
+    subtitleResizeDrag,
+    suppressNextEditModeReleaseClick
+  ]);
 
   const SUBTITLE_POSITION_SNAP_THRESHOLD = 0.02;
   React.useEffect(() => {
@@ -5504,94 +5618,6 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
       setSpeedPopoverOpen(true);
     }, 250);
   }, []);
-  const videoSingleClickTimeoutRef = React.useRef<BrowserTimeout | null>(null);
-  const videoClickSurfaceRef = React.useRef<HTMLDivElement | null>(null);
-  const floatingToolbarPointerDownInsideRef = React.useRef(false);
-  const suppressFloatingToolbarDragReleaseClickRef = React.useRef(false);
-  const suppressFloatingToolbarDragReleaseClickTimeoutRef = React.useRef<BrowserTimeout | null>(
-    null
-  );
-
-  const clearFloatingToolbarDragReleaseClickSuppression = React.useCallback(() => {
-    if (suppressFloatingToolbarDragReleaseClickTimeoutRef.current !== null) {
-      window.clearTimeout(suppressFloatingToolbarDragReleaseClickTimeoutRef.current);
-      suppressFloatingToolbarDragReleaseClickTimeoutRef.current = null;
-    }
-    suppressFloatingToolbarDragReleaseClickRef.current = false;
-  }, []);
-
-  const isWithinFloatingToolbarInteractionLayer = React.useCallback((target: EventTarget | null) => {
-    if (!(target instanceof Element)) {
-      return false;
-    }
-    if (subtitleEditorControlsRef.current?.contains(target)) {
-      return true;
-    }
-    if (target.closest(FLOATING_TOOLBAR_POPOVER_SELECTOR)) {
-      return true;
-    }
-    const popoverWrapper = target.closest(FLOATING_TOOLBAR_POPOVER_WRAPPER_SELECTOR);
-    return Boolean(popoverWrapper?.querySelector(FLOATING_TOOLBAR_POPOVER_SELECTOR));
-  }, []);
-
-  React.useEffect(() => {
-    if (!isEditingActiveCue) {
-      floatingToolbarPointerDownInsideRef.current = false;
-      clearFloatingToolbarDragReleaseClickSuppression();
-      return;
-    }
-
-    const resetFloatingToolbarPointerSequence = () => {
-      floatingToolbarPointerDownInsideRef.current = false;
-      clearFloatingToolbarDragReleaseClickSuppression();
-    };
-
-    const handlePointerDown = (event: PointerEvent) => {
-      floatingToolbarPointerDownInsideRef.current = isWithinFloatingToolbarInteractionLayer(
-        event.target
-      );
-      if (!floatingToolbarPointerDownInsideRef.current) {
-        clearFloatingToolbarDragReleaseClickSuppression();
-      }
-    };
-
-    const handlePointerUp = (event: PointerEvent) => {
-      const startedInsideFloatingToolbar = floatingToolbarPointerDownInsideRef.current;
-      floatingToolbarPointerDownInsideRef.current = false;
-      if (!startedInsideFloatingToolbar) {
-        return;
-      }
-      if (isWithinFloatingToolbarInteractionLayer(event.target)) {
-        clearFloatingToolbarDragReleaseClickSuppression();
-        return;
-      }
-      suppressFloatingToolbarDragReleaseClickRef.current = true;
-      if (suppressFloatingToolbarDragReleaseClickTimeoutRef.current !== null) {
-        window.clearTimeout(suppressFloatingToolbarDragReleaseClickTimeoutRef.current);
-      }
-      suppressFloatingToolbarDragReleaseClickTimeoutRef.current = window.setTimeout(() => {
-        suppressFloatingToolbarDragReleaseClickTimeoutRef.current = null;
-        suppressFloatingToolbarDragReleaseClickRef.current = false;
-      }, 0);
-    };
-
-    window.addEventListener("pointerdown", handlePointerDown, true);
-    window.addEventListener("pointerup", handlePointerUp, true);
-    window.addEventListener("pointercancel", resetFloatingToolbarPointerSequence, true);
-    window.addEventListener("blur", resetFloatingToolbarPointerSequence);
-    return () => {
-      window.removeEventListener("pointerdown", handlePointerDown, true);
-      window.removeEventListener("pointerup", handlePointerUp, true);
-      window.removeEventListener("pointercancel", resetFloatingToolbarPointerSequence, true);
-      window.removeEventListener("blur", resetFloatingToolbarPointerSequence);
-      resetFloatingToolbarPointerSequence();
-    };
-  }, [
-    clearFloatingToolbarDragReleaseClickSuppression,
-    isEditingActiveCue,
-    isWithinFloatingToolbarInteractionLayer
-  ]);
-
   const handleSpeedPopoverMouseLeave = React.useCallback(() => {
     if (speedPopoverOpenDelayRef.current) {
       window.clearTimeout(speedPopoverOpenDelayRef.current);
@@ -5802,7 +5828,7 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
   React.useEffect(() => {
     if (!isEditingActiveCue) return;
     const handleDocumentClick = (event: MouseEvent) => {
-      if (suppressFloatingToolbarDragReleaseClickRef.current) {
+      if (suppressEditModeReleaseClickRef.current) {
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -6306,7 +6332,14 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                     onLoadedMetadata={(event) => {
                       const element = event.currentTarget;
                       consumePendingVideoSeek(element);
-                      syncMediaTimingStateFromVideo(element);
+                      syncMediaTimingStateFromVideo(element, project?.video?.duration_seconds);
+                    }}
+                    onDurationChange={(event) => {
+                      const element = event.currentTarget;
+                      const d = element.duration;
+                      if (Number.isFinite(d) && d > 0) {
+                        setDurationSeconds(d);
+                      }
                     }}
                     onTimeUpdate={(event) =>
                       setCurrentTimeSeconds(event.currentTarget.currentTime || 0)
@@ -6741,12 +6774,15 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   className="group absolute left-0 top-0 z-20 flex min-h-7 min-w-7 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize! items-center justify-center"
                                   onMouseDown={(e) => {
                                     e.preventDefault();
+                                    const el = videoRef.current;
+                                    const wasPlaying = !!el && !el.paused && !el.ended;
                                     pauseVideoForDragIfPlaying();
                                     setSubtitleResizeDrag({
                                       corner: "nw",
                                       startX: e.clientX,
                                       startY: e.clientY,
-                                      startFontSize: appearance.font_size
+                                      startFontSize: appearance.font_size,
+                                      dragCausedPause: wasPlaying
                                     });
                                   }}
                                 >
@@ -6760,12 +6796,15 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   className="group absolute right-0 top-0 z-20 flex min-h-7 min-w-7 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize! items-center justify-center"
                                   onMouseDown={(e) => {
                                     e.preventDefault();
+                                    const el = videoRef.current;
+                                    const wasPlaying = !!el && !el.paused && !el.ended;
                                     pauseVideoForDragIfPlaying();
                                     setSubtitleResizeDrag({
                                       corner: "ne",
                                       startX: e.clientX,
                                       startY: e.clientY,
-                                      startFontSize: appearance.font_size
+                                      startFontSize: appearance.font_size,
+                                      dragCausedPause: wasPlaying
                                     });
                                   }}
                                 >
@@ -6779,12 +6818,15 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   className="group absolute bottom-0 right-0 z-20 flex min-h-7 min-w-7 translate-x-1/2 translate-y-1/2 cursor-nwse-resize! items-center justify-center"
                                   onMouseDown={(e) => {
                                     e.preventDefault();
+                                    const el = videoRef.current;
+                                    const wasPlaying = !!el && !el.paused && !el.ended;
                                     pauseVideoForDragIfPlaying();
                                     setSubtitleResizeDrag({
                                       corner: "se",
                                       startX: e.clientX,
                                       startY: e.clientY,
-                                      startFontSize: appearance.font_size
+                                      startFontSize: appearance.font_size,
+                                      dragCausedPause: wasPlaying
                                     });
                                   }}
                                 >
@@ -6798,12 +6840,15 @@ const Workbench = ({ projectId: projectIdProp }: WorkbenchProps = {}) => {
                                   className="group absolute bottom-0 left-0 z-20 flex min-h-7 min-w-7 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize! items-center justify-center"
                                   onMouseDown={(e) => {
                                     e.preventDefault();
+                                    const el = videoRef.current;
+                                    const wasPlaying = !!el && !el.paused && !el.ended;
                                     pauseVideoForDragIfPlaying();
                                     setSubtitleResizeDrag({
                                       corner: "sw",
                                       startX: e.clientX,
                                       startY: e.clientY,
-                                      startFontSize: appearance.font_size
+                                      startFontSize: appearance.font_size,
+                                      dragCausedPause: wasPlaying
                                     });
                                   }}
                                 >

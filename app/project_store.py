@@ -187,6 +187,19 @@ def _build_video_info(video_path: Optional[str]) -> dict[str, Any]:
     return info
 
 
+def _refresh_video_info_if_missing_duration(manifest: dict[str, Any]) -> bool:
+    video = manifest.get("video")
+    if not isinstance(video, dict):
+        return False
+    if video.get("duration_seconds") not in (None, ""):
+        return False
+    video_path = video.get("path")
+    if not isinstance(video_path, str) or not video_path.strip():
+        return False
+    manifest["video"] = _build_video_info(video_path)
+    return True
+
+
 def _artifact_path(manifest: dict[str, Any], key: str) -> Path:
     project_id = str(manifest.get("project_id") or "")
     artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), dict) else {}
@@ -327,9 +340,10 @@ def _refresh_index() -> list[ProjectSummary]:
         manifest = _read_json_file(manifest_path)
         if not manifest:
             continue
+        video_refreshed = _refresh_video_info_if_missing_duration(manifest)
         summary = _manifest_to_summary(manifest)
         summaries.append(summary)
-        if summary.status != manifest.get("status"):
+        if video_refreshed or summary.status != manifest.get("status"):
             manifest["status"] = summary.status
             _atomic_write_json(manifest_path, manifest)
     _write_index(summaries)
@@ -354,6 +368,8 @@ def list_projects(active_project_ids: Optional[set[str]] = None) -> list[Project
                 manifest = _read_manifest(project_id)
             except HTTPException:
                 continue
+            if _refresh_video_info_if_missing_duration(manifest):
+                _write_manifest(manifest)
             allow_exporting = (
                 active_project_ids is not None and project_id in active_project_ids
             )
@@ -367,6 +383,7 @@ def get_project(project_id: str) -> dict[str, Any]:
     with _STORE_LOCK:
         _ensure_store()
         manifest = _read_manifest(project_id)
+        _refresh_video_info_if_missing_duration(manifest)
         manifest["status"] = _compute_status(manifest)
         _write_manifest(manifest)
         response = dict(manifest)

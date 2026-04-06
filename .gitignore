@@ -64,3 +64,4 @@ desktop/src-tauri/cue-engine-0[1-4]-*.zip
 **/test-results/**
 desktop/test-results/.last-run.json
 desktop/pw-results/
+.tmp/

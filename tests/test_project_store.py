@@ -295,3 +295,21 @@ def test_delete_then_recreate_same_video_starts_from_fresh_default_style(
     assert recreated_appearance["font_size"] == 44
     assert recreated_appearance["background_mode"] == "line"
     assert recreated_appearance["outline_enabled"] is False
+
+
+def test_get_project_repairs_missing_duration_metadata(tmp_path: Path, monkeypatch) -> None:
+    _setup_env(tmp_path, monkeypatch)
+
+    video_path = tmp_path / "repair.webm"
+    video_path.write_text("video", encoding="utf-8")
+
+    summary = project_store.create_project(str(video_path))
+    project_id = summary["project_id"]
+
+    monkeypatch.setattr(project_store, "get_media_duration", lambda *args, **kwargs: 50.983)
+
+    detail = project_store.get_project(project_id)
+    assert detail["video"]["duration_seconds"] == pytest.approx(50.983)
+
+    projects = project_store.list_projects()
+    assert projects[0].duration_seconds == pytest.approx(50.983)

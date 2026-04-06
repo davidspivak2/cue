@@ -1414,6 +1414,26 @@ const dragResizeHandleByDeltaY = async (
   );
 };
 
+const dragResizeHandleWithMouseByOffset = async (
+  page: Page,
+  handleAriaLabel: string,
+  { deltaX = 0, deltaY = 0, steps = 20 }: { deltaX?: number; deltaY?: number; steps?: number }
+) => {
+  const handle = page.locator(
+    `[data-subtitle-resize-handle][aria-label="${handleAriaLabel}"]`
+  );
+  const rect = await handle.boundingBox();
+  if (!rect) {
+    throw new Error(`Resize handle not found: ${handleAriaLabel}`);
+  }
+  const startX = rect.x + rect.width / 2;
+  const startY = rect.y + rect.height / 2;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + deltaX, startY + deltaY, { steps });
+  await page.mouse.up();
+};
+
 
 const ensureAdvancedStyleControlsVisible = async (page) => {
   const toolbar = page.getByTestId("workbench-subtitle-editor-controls");
@@ -3729,6 +3749,36 @@ test("subtitle corner handles resize text", async ({ page }) => {
   const afterBottomDragFontSizePx = Number.parseFloat((await readTypographyMetrics(editor)).fontSize);
   expect(Number.isFinite(afterBottomDragFontSizePx)).toBe(true);
   expect(afterBottomDragFontSizePx).toBeGreaterThan(beforeBottomDragFontSizePx + 2);
+});
+
+test("subtitle resize release does not unpause paused video while toolbar is visible", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const projects = buildProjects();
+  await mockProjects(page, projects);
+
+  await page.goto("/");
+  await page.getByText("good.mp4").click();
+  await page.waitForURL("**/workbench/project-1");
+
+  await primeVideoState(page, { playing: false, currentTime: 1.2 });
+  await domClick(page.getByTestId("workbench-active-subtitle"));
+
+  const editor = page.getByTestId("workbench-subtitle-editor");
+  const toolbar = page.getByTestId("workbench-subtitle-editor-controls");
+  await expect(editor).toBeVisible();
+  await expect(toolbar).toBeVisible();
+
+  await dragResizeHandleWithMouseByOffset(page, "Resize subtitle from top-left", {
+    deltaY: -120
+  });
+
+  await expect(editor).toBeVisible();
+  await expect(toolbar).toBeVisible();
+  expect(
+    await page.evaluate(() => Boolean(document.querySelector("video")?.__cueState?.playCalled))
+  ).toBe(false);
 });
 
 test("subtitle move starts only from border handles", async ({ page }) => {
