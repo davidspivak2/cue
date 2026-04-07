@@ -302,7 +302,7 @@ const SubtitleTextControls = ({
   const isCurrentFontUnavailable =
     !fontsLoading && !fontsError && matchedFont === null;
   const fontOptions = React.useMemo<FontOption[]>(() => {
-    const nextOptions = isCurrentFontUnavailable
+    const nextOptions: FontOption[] = isCurrentFontUnavailable
       ? [{ ...selectedFont, unavailable: true }, ...fonts]
       : [...fonts];
     const deduped = nextOptions.filter(

@@ -39,11 +39,6 @@ const TITLE_BAR_CONTROLS_WIDTH = 160;
 const TITLE_BAR_WIDE_LAYOUT_MIN_SHARE_PX = 88;
 /** Below this per-tab share (100% scale) show icon-only tabs ("narrow"); between this and wide → compact ("medium"). */
 const TITLE_BAR_NARROW_TAB_MAX_PX = 56;
-/**
- * Maximum width of one video tab when the strip has spare room (browser-style).
- * Tabs only grow to fill the title bar once there are enough tabs that each would be narrower than this.
- */
-const TITLE_BAR_TAB_MAX_WIDTH_PX = 224;
 type TabLayoutMode = "wide" | "medium" | "narrow";
 
 type IconProps = React.ComponentProps<"svg">;

@@ -78,6 +78,7 @@ import {
 
 type WorkbenchLocationState = {
   autoStartSubtitles?: boolean;
+  focusSampleCue?: boolean;
   cancelledCreateProjectId?: string;
   cancelledCreateProjectTitle?: string;
 } | null;
@@ -1323,7 +1324,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
   const { registerJob: registerRunningJob } = useRunningJobs();
   const createSubtitlesUnregisterRef = React.useRef<(() => void) | null>(null);
   const exportUnregisterRef = React.useRef<(() => void) | null>(null);
-  const [exportStartedAt, setExportStartedAt] = React.useState<string | null>(null);
   const [exportOutputPath, setExportOutputPath] = React.useState<string | null>(null);
   const [projectReloadTick, setProjectReloadTick] = React.useState(0);
   const [subtitlesReloadTick, setSubtitlesReloadTick] = React.useState(0);
@@ -1334,6 +1334,7 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
   const timingFallbackProgressRef = React.useRef<TimingFallbackProgress | null>(null);
   const [pendingAutoStartSubtitles, setPendingAutoStartSubtitles] = React.useState(false);
   const handledAutoStartKeyRef = React.useRef<string | null>(null);
+  const handledSampleCueFocusKeyRef = React.useRef<string | null>(null);
   const styleBootstrapKeyRef = React.useRef<string | null>(null);
   const autoEnterEditOnNextCueLoadRef = React.useRef(false);
   const pendingVideoSeekSecondsRef = React.useRef<number | null>(null);
@@ -2106,7 +2107,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
     setExportProgressPct(0);
     setExportProgressMessage("");
     setIsExporting(false);
-    setExportStartedAt(null);
     exportJobIdRef.current = null;
     latestExportLiveEventAtMsRef.current = 0;
     if (exportStreamCooldownTimerRef.current !== null) {
@@ -2235,6 +2235,18 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
     handledAutoStartKeyRef.current = location.key;
     autoEnterEditOnNextCueLoadRef.current = true;
     setPendingAutoStartSubtitles(true);
+    window.history.replaceState({}, "");
+  }, [incomingState, location.key]);
+
+  React.useEffect(() => {
+    if (!incomingState?.focusSampleCue) {
+      return;
+    }
+    if (handledSampleCueFocusKeyRef.current === location.key) {
+      return;
+    }
+    handledSampleCueFocusKeyRef.current = location.key;
+    autoEnterEditOnNextCueLoadRef.current = true;
     window.history.replaceState({}, "");
   }, [incomingState, location.key]);
 
@@ -2920,7 +2932,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
     (event: JobEvent) => {
       noteExportLiveEventTimestamp(event);
       if (event.type === "started") {
-        setExportStartedAt(asString(event.ts) ?? new Date().toISOString());
         return;
       }
       if (event.type === "progress") {
@@ -2977,7 +2988,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
         exportUnregisterRef.current = null;
         setExportProgressPct(100);
         setIsExporting(false);
-        setExportStartedAt(null);
         exportJobIdRef.current = null;
         if (exportStreamCooldownTimerRef.current !== null) {
           clearTimeout(exportStreamCooldownTimerRef.current);
@@ -2995,7 +3005,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
         setExportProgressPct(0);
         setExportProgressMessage("");
         setIsExporting(false);
-        setExportStartedAt(null);
         exportJobIdRef.current = null;
         if (exportStreamCooldownTimerRef.current !== null) {
           clearTimeout(exportStreamCooldownTimerRef.current);
@@ -3012,7 +3021,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
         setExportProgressPct(0);
         setExportProgressMessage("");
         setIsExporting(false);
-        setExportStartedAt(null);
         exportJobIdRef.current = null;
         if (exportStreamCooldownTimerRef.current !== null) {
           clearTimeout(exportStreamCooldownTimerRef.current);
@@ -3199,7 +3207,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
     closeExportStream("start_export");
     setExportStreamHealthValue("connecting");
     setIsExporting(true);
-    setExportStartedAt(new Date().toISOString());
     let streamOpened = false;
     try {
       const job = await createVideoWithSubtitlesJob(
@@ -3249,13 +3256,11 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
         setIsExporting(false);
         closeExportStream("export_start_conflict");
         setExportStreamHealthValue("idle");
-        setExportStartedAt(null);
         return;
       }
       setIsExporting(false);
       closeExportStream("export_start_failed");
       setExportStreamHealthValue("idle");
-      setExportStartedAt(null);
     }
   }, [
     buildProjectStylePayload,
@@ -3335,7 +3340,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
         setCreateSubtitlesError(null);
         setCreateSubtitlesQueuedForCalibration(queuedForCalibration);
         setIsExporting(false);
-        setExportStartedAt(null);
         exportJobIdRef.current = null;
         closeExportStream("switch_to_create_subtitles");
         setExportStreamHealthValue("idle");
@@ -3409,7 +3413,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
         if (shouldApplyExportSnapshot) {
           setExportProgressPct(pct);
           setExportProgressMessage(message);
-          setExportStartedAt(startedAt);
         }
         exportJobIdRef.current = activeTask.job_id;
         if (!exportStreamOpenForJob) {
@@ -3440,7 +3443,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
         setCreateSubtitlesError(null);
         setCreateSubtitlesQueuedForCalibration(queuedForCalibration);
         setIsExporting(false);
-        setExportStartedAt(null);
         exportJobIdRef.current = null;
         closeExportStream("resume_persisted_create");
         setExportStreamHealthValue("idle");
@@ -3508,7 +3510,6 @@ const Workbench = ({ projectId: projectIdProp, isActive }: WorkbenchProps = {}) 
       const finishedJobId = exportJobIdRef.current;
       exportJobIdRef.current = null;
       setIsExporting(false);
-      setExportStartedAt(null);
       setExportProgressMessage("");
       if (
         taskNotice?.job_id === finishedJobId &&

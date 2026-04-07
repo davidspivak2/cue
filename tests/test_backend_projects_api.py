@@ -10,6 +10,14 @@ from fastapi.testclient import TestClient
 
 from app import backend_server, project_store
 from app.paths import get_config_path
+from app.srt_utils import compute_srt_sha256
+from app.word_timing_schema import (
+    CueWordTimings,
+    SCHEMA_VERSION,
+    WordSpan,
+    WordTimingDocument,
+    save_word_timings_json,
+)
 
 
 def _setup_env(tmp_path: Path, monkeypatch) -> None:
@@ -53,6 +61,40 @@ def _assert_built_in_default_project_style(style: dict[str, object]) -> None:
     assert appearance["background_mode"] == "line"
     assert appearance["outline_enabled"] is False
     assert appearance["subtitle_mode"] == "static"
+
+
+def _write_sample_assets(tmp_path: Path) -> tuple[Path, Path, Path, str]:
+    video_path = tmp_path / "sample.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    subtitles_path = tmp_path / "sample.srt"
+    subtitles_text = "1\n00:00:00,000 --> 00:00:01,000\nHello there\n"
+    subtitles_path.write_text(subtitles_text, encoding="utf-8")
+
+    word_timings_path = tmp_path / "sample.word_timings.json"
+    save_word_timings_json(
+        word_timings_path,
+        WordTimingDocument(
+            schema_version=SCHEMA_VERSION,
+            created_utc=datetime.now(timezone.utc).isoformat(),
+            language="en",
+            srt_sha256=compute_srt_sha256(subtitles_path),
+            cues=[
+                CueWordTimings(
+                    cue_index=0,
+                    cue_start=0.0,
+                    cue_end=1.0,
+                    cue_text="Hello there",
+                    words=[
+                        WordSpan(text="Hello", start=0.0, end=0.4, confidence=0.99),
+                        WordSpan(text="there", start=0.45, end=0.9, confidence=0.98),
+                    ],
+                )
+            ],
+        ),
+    )
+
+    return video_path, subtitles_path, word_timings_path, subtitles_text
 
 
 def test_projects_endpoints(tmp_path: Path, monkeypatch) -> None:
@@ -200,6 +242,109 @@ def test_project_import_endpoint_uses_built_in_default_style(
         assert response.status_code == 200
         project_id = response.json()["project_id"]
         _assert_built_in_default_project_style(_get_project_style(client, project_id))
+
+
+def test_create_sample_project_endpoint_returns_ready_project_without_active_task(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path, subtitles_path, word_timings_path, subtitles_text = _write_sample_assets(
+        tmp_path
+    )
+
+    with TestClient(backend_server.app) as client:
+        response = client.post(
+            "/projects/sample",
+            json={
+                "video_path": str(video_path),
+                "subtitles_path": str(subtitles_path),
+                "word_timings_path": str(word_timings_path),
+            },
+        )
+        assert response.status_code == 200
+        project = response.json()
+        assert project["status"] == "ready"
+        assert project.get("active_task") is None
+
+        project_id = project["project_id"]
+
+        subtitles_response = client.get(f"/projects/{project_id}/subtitles")
+        assert subtitles_response.status_code == 200
+        assert subtitles_response.json()["subtitles_srt_text"] == subtitles_text
+
+        word_timings_response = client.get(f"/projects/{project_id}/word-timings")
+        assert word_timings_response.status_code == 200
+        payload = word_timings_response.json()
+        assert payload["available"] is True
+        assert payload["stale"] is False
+        assert payload["document"]["cues"][0]["words"][0]["text"] == "Hello"
+
+        detail_response = client.get(f"/projects/{project_id}")
+        assert detail_response.status_code == 200
+        detail_payload = detail_response.json()
+        assert detail_payload["status"] == "ready"
+        assert detail_payload.get("active_task") is None
+
+
+def test_create_sample_project_endpoint_reuses_existing_project_without_overwriting_edits(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path, subtitles_path, word_timings_path, _ = _write_sample_assets(tmp_path)
+    edited_subtitles = "1\n00:00:00,000 --> 00:00:01,000\nEdited demo line\n"
+
+    with TestClient(backend_server.app) as client:
+        first_response = client.post(
+            "/projects/sample",
+            json={
+                "video_path": str(video_path),
+                "subtitles_path": str(subtitles_path),
+                "word_timings_path": str(word_timings_path),
+            },
+        )
+        assert first_response.status_code == 200
+        project_id = first_response.json()["project_id"]
+
+        edit_response = client.put(
+            f"/projects/{project_id}",
+            json={"subtitles_srt_text": edited_subtitles},
+        )
+        assert edit_response.status_code == 200
+
+        second_response = client.post(
+            "/projects/sample",
+            json={
+                "video_path": str(video_path),
+                "subtitles_path": str(subtitles_path),
+                "word_timings_path": str(word_timings_path),
+            },
+        )
+        assert second_response.status_code == 200
+        assert second_response.json()["project_id"] == project_id
+
+        subtitles_response = client.get(f"/projects/{project_id}/subtitles")
+        assert subtitles_response.status_code == 200
+        assert subtitles_response.json()["subtitles_srt_text"] == edited_subtitles
+
+
+def test_create_sample_project_endpoint_rejects_missing_assets(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _setup_env(tmp_path, monkeypatch)
+    video_path = tmp_path / "sample.mp4"
+    video_path.write_text("video", encoding="utf-8")
+
+    with TestClient(backend_server.app) as client:
+        response = client.post(
+            "/projects/sample",
+            json={
+                "video_path": str(video_path),
+                "subtitles_path": str(tmp_path / "missing.srt"),
+                "word_timings_path": str(tmp_path / "missing.word_timings.json"),
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "sample_subtitles_not_found"
 
 
 @pytest.mark.parametrize(

@@ -27,3 +27,17 @@ def test_subtitle_fonts_endpoint_returns_curated_metadata(tmp_path: Path, monkey
     assert heebo["weights"] == [100, 200, 300, 400, 500, 600, 700, 800, 900]
     assert heebo["default_weight"] == 400
     assert heebo["italic_supported"] is False
+    fredoka = next(font for font in payload["fonts"] if font["family"] == "Fredoka")
+    assert fredoka["weights"] == [300, 400, 500, 600, 700]
+    fredoka_hebrew = next(
+        font for font in payload["fonts"] if font["family"] == "Fredoka One Hebrew"
+    )
+    assert fredoka_hebrew["weights"] == [300, 400, 500, 600, 700]
+    playpen_hebrew = next(
+        font for font in payload["fonts"] if font["family"] == "Playpen Sans Hebrew"
+    )
+    assert playpen_hebrew["weights"] == [100, 200, 300, 400, 500, 600, 700, 800]
+    assert any(font["family"] == "Baloo 2" for font in payload["fonts"])
+    assert any(font["family"] == "Lilita One" for font in payload["fonts"])
+    assert any(font["family"] == "Luckiest Guy" for font in payload["fonts"])
+    assert any(font["family"] == "Titan One" for font in payload["fonts"])

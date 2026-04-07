@@ -15,9 +15,9 @@ const Workbench = lazy(() => import("@/pages/Workbench"));
  */
 const TabHost = () => {
   const { tabs, activeView } = useWorkbenchTabs();
-  const homePanelRef = useRef<HTMLDivElement>(null);
+  const homePanelRef = useRef<HTMLDivElement | null>(null);
   const activePanelRef = useRef<HTMLDivElement | null>(null);
-  const panelRefsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const panelRefsRef = useRef<Map<string, HTMLDivElement> | null>(new Map());
 
   useEffect(() => {
     const el = activePanelRef.current;
@@ -31,7 +31,7 @@ const TabHost = () => {
     if (homePanelRef.current) {
       homePanelRef.current.inert = !isHomeActive;
     }
-    panelRefsRef.current.forEach((panel, projectId) => {
+    panelRefsRef.current?.forEach((panel, projectId) => {
       panel.inert = activeView !== projectId;
     });
   }, [activeView, tabs.length]);
@@ -62,10 +62,10 @@ const TabHost = () => {
             key={tab.projectId}
             ref={(el) => {
               if (el) {
-                panelRefsRef.current.set(tab.projectId, el);
+                panelRefsRef.current?.set(tab.projectId, el);
                 if (isActive) activePanelRef.current = el;
               } else {
-                panelRefsRef.current.delete(tab.projectId);
+                panelRefsRef.current?.delete(tab.projectId);
               }
             }}
             className="flex min-h-0 flex-1 flex-col outline-none"

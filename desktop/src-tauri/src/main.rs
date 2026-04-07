@@ -36,6 +36,9 @@ use windows::Win32::{
 use zip::ZipArchive;
 
 const CALIBRATION_VIDEO_FILENAME: &str = "calibration_60s.mp4";
+const SAMPLE_VIDEO_FILENAME: &str = "demo/sample-video.mp4";
+const SAMPLE_SUBTITLES_FILENAME: &str = "demo/sample-video.srt";
+const SAMPLE_WORD_TIMINGS_FILENAME: &str = "demo/sample-video.word_timings.json";
 const ENGINE_PARTS_MANIFEST_FILENAME: &str = "cue-engine-parts.json";
 const ENGINE_READY_SENTINEL: &str = ".extract-complete";
 const ENGINE_ARCHIVE_METADATA_FILENAME: &str = ".archive-metadata";
@@ -78,6 +81,14 @@ struct EngineExtractProgressPayload {
     index: u32,
     total: u32,
     phase: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SampleProjectAssetPaths {
+    video_path: String,
+    subtitles_path: String,
+    word_timings_path: String,
 }
 
 fn strip_utf8_bom(s: &str) -> &str {
@@ -767,6 +778,45 @@ fn get_calibration_video_path(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_sample_project_asset_paths(app: AppHandle) -> Result<SampleProjectAssetPaths, String> {
+    let video_path = app
+        .path()
+        .resolve(SAMPLE_VIDEO_FILENAME, BaseDirectory::Resource)
+        .map_err(|e| format!("Failed to resolve sample video path: {e}"))?;
+    if !video_path.exists() {
+        return Err(format!("Sample video not found: {}", video_path.display()));
+    }
+
+    let subtitles_path = app
+        .path()
+        .resolve(SAMPLE_SUBTITLES_FILENAME, BaseDirectory::Resource)
+        .map_err(|e| format!("Failed to resolve sample subtitles path: {e}"))?;
+    if !subtitles_path.exists() {
+        return Err(format!(
+            "Sample subtitles not found: {}",
+            subtitles_path.display()
+        ));
+    }
+
+    let word_timings_path = app
+        .path()
+        .resolve(SAMPLE_WORD_TIMINGS_FILENAME, BaseDirectory::Resource)
+        .map_err(|e| format!("Failed to resolve sample word timings path: {e}"))?;
+    if !word_timings_path.exists() {
+        return Err(format!(
+            "Sample word timings not found: {}",
+            word_timings_path.display()
+        ));
+    }
+
+    Ok(SampleProjectAssetPaths {
+        video_path: video_path.to_string_lossy().into_owned(),
+        subtitles_path: subtitles_path.to_string_lossy().into_owned(),
+        word_timings_path: word_timings_path.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
 fn allow_exit_and_close(app: AppHandle) -> Result<(), String> {
     app.try_state::<AllowCloseState>()
         .ok_or_else(|| "AllowCloseState not found".to_string())?
@@ -897,6 +947,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_calibration_video_path,
+            get_sample_project_asset_paths,
             allow_exit_and_close
         ])
         .build(tauri::generate_context!())

@@ -109,6 +109,7 @@ const STATIC_CARD_PREVIEW_APPEARANCE: SubtitleStyleAppearance = {
   outline_width: 2,
   outline_color: "#000000",
   shadow_enabled: true,
+  shadow_strength: 0.45,
   shadow_offset_x: 3.44,
   shadow_offset_y: 4.92,
   shadow_color: "#000000",

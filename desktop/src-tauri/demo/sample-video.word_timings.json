@@ -1,0 +1,894 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-04-07T07:25:42.973847+00:00",
+  "language": "en",
+  "srt_sha256": "5a147c0b3c71aec01f39204e19abb2309d5b7a59a75a3055a37ee97e579849a5",
+  "cues": [
+    {
+      "cue_index": 1,
+      "cue_start": 0.0,
+      "cue_end": 4.28,
+      "cue_text": " I am delighted to be here, and I'm particularly delighted to be here on this occasion.",
+      "words": [
+        {
+          "text": "I",
+          "start": 0.0,
+          "end": 0.26,
+          "confidence": 0.6043531894683838
+        },
+        {
+          "text": "am",
+          "start": 0.26,
+          "end": 0.44,
+          "confidence": 0.9708685278892517
+        },
+        {
+          "text": "delighted",
+          "start": 0.44,
+          "end": 0.64,
+          "confidence": 0.99410480260849
+        },
+        {
+          "text": "to",
+          "start": 0.64,
+          "end": 0.88,
+          "confidence": 0.9994848966598511
+        },
+        {
+          "text": "be",
+          "start": 0.88,
+          "end": 1.02,
+          "confidence": 0.9996961355209351
+        },
+        {
+          "text": "here,",
+          "start": 1.02,
+          "end": 1.3,
+          "confidence": 0.9990171194076538
+        },
+        {
+          "text": "and",
+          "start": 1.4,
+          "end": 2.18,
+          "confidence": 0.9961602687835693
+        },
+        {
+          "text": "I'm",
+          "start": 2.18,
+          "end": 2.38,
+          "confidence": 0.8777145445346832
+        },
+        {
+          "text": "particularly",
+          "start": 2.38,
+          "end": 2.7,
+          "confidence": 0.9970096349716187
+        },
+        {
+          "text": "delighted",
+          "start": 2.7,
+          "end": 3.1,
+          "confidence": 0.9987924098968506
+        },
+        {
+          "text": "to",
+          "start": 3.1,
+          "end": 3.36,
+          "confidence": 0.9990843534469604
+        },
+        {
+          "text": "be",
+          "start": 3.36,
+          "end": 3.44,
+          "confidence": 0.9996787309646606
+        },
+        {
+          "text": "here",
+          "start": 3.44,
+          "end": 3.7,
+          "confidence": 0.9971835017204285
+        },
+        {
+          "text": "on",
+          "start": 3.7,
+          "end": 3.86,
+          "confidence": 0.9964260458946228
+        },
+        {
+          "text": "this",
+          "start": 3.86,
+          "end": 3.98,
+          "confidence": 0.9996498823165894
+        },
+        {
+          "text": "occasion.",
+          "start": 3.98,
+          "end": 4.28,
+          "confidence": 0.9966076612472534
+        }
+      ]
+    },
+    {
+      "cue_index": 2,
+      "cue_start": 5.18,
+      "cue_end": 11.66,
+      "cue_text": "We meet at a college noted for knowledge, in a city noted for progress,",
+      "words": [
+        {
+          "text": "We",
+          "start": 5.18,
+          "end": 5.72,
+          "confidence": 0.995080828666687
+        },
+        {
+          "text": "meet",
+          "start": 5.72,
+          "end": 6.04,
+          "confidence": 0.9958970546722412
+        },
+        {
+          "text": "at",
+          "start": 6.04,
+          "end": 6.26,
+          "confidence": 0.9323963522911072
+        },
+        {
+          "text": "a",
+          "start": 6.26,
+          "end": 6.34,
+          "confidence": 0.9982314705848694
+        },
+        {
+          "text": "college",
+          "start": 6.34,
+          "end": 6.74,
+          "confidence": 0.9701064229011536
+        },
+        {
+          "text": "noted",
+          "start": 6.74,
+          "end": 8.02,
+          "confidence": 0.9760794043540955
+        },
+        {
+          "text": "for",
+          "start": 8.5,
+          "end": 8.7,
+          "confidence": 0.9993495345115662
+        },
+        {
+          "text": "knowledge,",
+          "start": 8.7,
+          "end": 9.14,
+          "confidence": 0.9942348599433899
+        },
+        {
+          "text": "in",
+          "start": 9.24,
+          "end": 10.22,
+          "confidence": 0.9964945912361145
+        },
+        {
+          "text": "a",
+          "start": 10.38,
+          "end": 10.48,
+          "confidence": 0.9993409514427185
+        },
+        {
+          "text": "city",
+          "start": 10.48,
+          "end": 10.78,
+          "confidence": 0.997767448425293
+        },
+        {
+          "text": "noted",
+          "start": 10.78,
+          "end": 11.06,
+          "confidence": 0.9985905289649963
+        },
+        {
+          "text": "for",
+          "start": 11.06,
+          "end": 11.26,
+          "confidence": 0.9980670809745789
+        },
+        {
+          "text": "progress,",
+          "start": 11.26,
+          "end": 11.66,
+          "confidence": 0.9984666109085083
+        }
+      ]
+    },
+    {
+      "cue_index": 3,
+      "cue_start": 11.88,
+      "cue_end": 16.78,
+      "cue_text": "in a state noted for strength, and we stand in need of all three.",
+      "words": [
+        {
+          "text": "in",
+          "start": 11.88,
+          "end": 12.86,
+          "confidence": 0.9919511079788208
+        },
+        {
+          "text": "a",
+          "start": 12.86,
+          "end": 12.96,
+          "confidence": 0.9992087483406067
+        },
+        {
+          "text": "state",
+          "start": 12.96,
+          "end": 13.24,
+          "confidence": 0.9938566088676453
+        },
+        {
+          "text": "noted",
+          "start": 13.24,
+          "end": 13.56,
+          "confidence": 0.999226450920105
+        },
+        {
+          "text": "for",
+          "start": 13.56,
+          "end": 13.72,
+          "confidence": 0.9985326528549194
+        },
+        {
+          "text": "strength,",
+          "start": 13.72,
+          "end": 14.06,
+          "confidence": 0.9993672966957092
+        },
+        {
+          "text": "and",
+          "start": 14.22,
+          "end": 15.1,
+          "confidence": 0.9987179040908813
+        },
+        {
+          "text": "we",
+          "start": 15.1,
+          "end": 15.28,
+          "confidence": 0.9992801547050476
+        },
+        {
+          "text": "stand",
+          "start": 15.28,
+          "end": 15.64,
+          "confidence": 0.9996323585510254
+        },
+        {
+          "text": "in",
+          "start": 15.64,
+          "end": 15.92,
+          "confidence": 0.9995803236961365
+        },
+        {
+          "text": "need",
+          "start": 15.92,
+          "end": 16.12,
+          "confidence": 0.9985929131507874
+        },
+        {
+          "text": "of",
+          "start": 16.12,
+          "end": 16.28,
+          "confidence": 0.9992514252662659
+        },
+        {
+          "text": "all",
+          "start": 16.28,
+          "end": 16.44,
+          "confidence": 0.9996201992034912
+        },
+        {
+          "text": "three.",
+          "start": 16.44,
+          "end": 16.78,
+          "confidence": 0.9970126152038574
+        }
+      ]
+    },
+    {
+      "cue_index": 4,
+      "cue_start": 17.78,
+      "cue_end": 27.36,
+      "cue_text": " For we meet in an hour of change and challenge, in a decade of hope and fear, in an age of both knowledge and ignorance.",
+      "words": [
+        {
+          "text": "For",
+          "start": 17.78,
+          "end": 18.32,
+          "confidence": 0.8363835215568542
+        },
+        {
+          "text": "we",
+          "start": 18.32,
+          "end": 18.52,
+          "confidence": 0.9925439357757568
+        },
+        {
+          "text": "meet",
+          "start": 18.52,
+          "end": 18.84,
+          "confidence": 0.9973805546760559
+        },
+        {
+          "text": "in",
+          "start": 18.84,
+          "end": 19.04,
+          "confidence": 0.9943709969520569
+        },
+        {
+          "text": "an",
+          "start": 19.04,
+          "end": 19.14,
+          "confidence": 0.9980140924453735
+        },
+        {
+          "text": "hour",
+          "start": 19.14,
+          "end": 19.42,
+          "confidence": 0.9991773962974548
+        },
+        {
+          "text": "of",
+          "start": 19.42,
+          "end": 19.64,
+          "confidence": 0.9990248680114746
+        },
+        {
+          "text": "change",
+          "start": 19.64,
+          "end": 19.92,
+          "confidence": 0.9981314539909363
+        },
+        {
+          "text": "and",
+          "start": 19.92,
+          "end": 20.54,
+          "confidence": 0.9971965551376343
+        },
+        {
+          "text": "challenge,",
+          "start": 20.54,
+          "end": 21.02,
+          "confidence": 0.9995576739311218
+        },
+        {
+          "text": "in",
+          "start": 21.18,
+          "end": 22.14,
+          "confidence": 0.9952776432037354
+        },
+        {
+          "text": "a",
+          "start": 22.36,
+          "end": 22.46,
+          "confidence": 0.9995656609535217
+        },
+        {
+          "text": "decade",
+          "start": 22.46,
+          "end": 22.82,
+          "confidence": 0.9999027252197266
+        },
+        {
+          "text": "of",
+          "start": 22.82,
+          "end": 23.16,
+          "confidence": 0.999548614025116
+        },
+        {
+          "text": "hope",
+          "start": 23.16,
+          "end": 23.28,
+          "confidence": 0.999396562576294
+        },
+        {
+          "text": "and",
+          "start": 23.28,
+          "end": 23.74,
+          "confidence": 0.9995040893554688
+        },
+        {
+          "text": "fear,",
+          "start": 23.74,
+          "end": 24.0,
+          "confidence": 0.9997645020484924
+        },
+        {
+          "text": "in",
+          "start": 24.18,
+          "end": 25.22,
+          "confidence": 0.9965680837631226
+        },
+        {
+          "text": "an",
+          "start": 25.22,
+          "end": 25.3,
+          "confidence": 0.9984527826309204
+        },
+        {
+          "text": "age",
+          "start": 25.3,
+          "end": 25.58,
+          "confidence": 0.9996435642242432
+        },
+        {
+          "text": "of",
+          "start": 25.58,
+          "end": 25.78,
+          "confidence": 0.998573899269104
+        },
+        {
+          "text": "both",
+          "start": 25.78,
+          "end": 25.96,
+          "confidence": 0.9985319375991821
+        },
+        {
+          "text": "knowledge",
+          "start": 25.96,
+          "end": 26.46,
+          "confidence": 0.9996591806411743
+        },
+        {
+          "text": "and",
+          "start": 26.46,
+          "end": 27.04,
+          "confidence": 0.9994533658027649
+        },
+        {
+          "text": "ignorance.",
+          "start": 27.04,
+          "end": 27.36,
+          "confidence": 0.9996780157089233
+        },
+        {
+          "text": "The",
+          "start": 27.36,
+          "end": 27.7,
+          "confidence": 0.44313880801200867
+        }
+      ]
+    },
+    {
+      "cue_index": 5,
+      "cue_start": 27.36,
+      "cue_end": 33.05,
+      "cue_text": " The greater our knowledge increases, the greater our ignorance unfolds.",
+      "words": [
+        {
+          "text": "greater",
+          "start": 27.83,
+          "end": 28.77,
+          "confidence": 0.9879388809204102
+        },
+        {
+          "text": "our",
+          "start": 28.77,
+          "end": 29.13,
+          "confidence": 0.9931407570838928
+        },
+        {
+          "text": "knowledge",
+          "start": 29.13,
+          "end": 29.45,
+          "confidence": 0.9926607608795166
+        },
+        {
+          "text": "increases,",
+          "start": 29.45,
+          "end": 29.99,
+          "confidence": 0.993668258190155
+        },
+        {
+          "text": "the",
+          "start": 30.25,
+          "end": 31.15,
+          "confidence": 0.9965651631355286
+        },
+        {
+          "text": "greater",
+          "start": 31.15,
+          "end": 31.41,
+          "confidence": 0.998569130897522
+        },
+        {
+          "text": "our",
+          "start": 31.41,
+          "end": 31.73,
+          "confidence": 0.9955904483795166
+        },
+        {
+          "text": "ignorance",
+          "start": 31.73,
+          "end": 32.07,
+          "confidence": 0.9970352649688721
+        },
+        {
+          "text": "unfolds.",
+          "start": 32.07,
+          "end": 33.05,
+          "confidence": 0.9964898824691772
+        }
+      ]
+    },
+    {
+      "cue_index": 6,
+      "cue_start": 33.77,
+      "cue_end": 42.16,
+      "cue_text": " Despite the striking fact that most of the scientists that the world has ever known are alive and working today,",
+      "words": [
+        {
+          "text": "Despite",
+          "start": 33.77,
+          "end": 34.41,
+          "confidence": 0.9943816065788269
+        },
+        {
+          "text": "the",
+          "start": 34.41,
+          "end": 34.65,
+          "confidence": 0.9980475902557373
+        },
+        {
+          "text": "striking",
+          "start": 34.65,
+          "end": 34.93,
+          "confidence": 0.9907566905021667
+        },
+        {
+          "text": "fact",
+          "start": 34.93,
+          "end": 35.39,
+          "confidence": 0.9988407492637634
+        },
+        {
+          "text": "that",
+          "start": 35.39,
+          "end": 36.49,
+          "confidence": 0.9813698530197144
+        },
+        {
+          "text": "most",
+          "start": 36.62,
+          "end": 36.9,
+          "confidence": 0.9976275563240051
+        },
+        {
+          "text": "of",
+          "start": 36.9,
+          "end": 37.16,
+          "confidence": 0.9972630739212036
+        },
+        {
+          "text": "the",
+          "start": 37.16,
+          "end": 37.24,
+          "confidence": 0.998646080493927
+        },
+        {
+          "text": "scientists",
+          "start": 37.24,
+          "end": 37.76,
+          "confidence": 0.992427408695221
+        },
+        {
+          "text": "that",
+          "start": 37.76,
+          "end": 38.04,
+          "confidence": 0.9703631401062012
+        },
+        {
+          "text": "the",
+          "start": 38.04,
+          "end": 38.16,
+          "confidence": 0.9983676075935364
+        },
+        {
+          "text": "world",
+          "start": 38.16,
+          "end": 38.54,
+          "confidence": 0.9992330074310303
+        },
+        {
+          "text": "has",
+          "start": 38.54,
+          "end": 38.76,
+          "confidence": 0.9965938925743103
+        },
+        {
+          "text": "ever",
+          "start": 38.76,
+          "end": 38.98,
+          "confidence": 0.9956896901130676
+        },
+        {
+          "text": "known",
+          "start": 38.98,
+          "end": 39.28,
+          "confidence": 0.9910244941711426
+        },
+        {
+          "text": "are",
+          "start": 39.28,
+          "end": 40.22,
+          "confidence": 0.9844345450401306
+        },
+        {
+          "text": "alive",
+          "start": 40.22,
+          "end": 40.56,
+          "confidence": 0.9990725517272949
+        },
+        {
+          "text": "and",
+          "start": 40.56,
+          "end": 41.12,
+          "confidence": 0.9950277209281921
+        },
+        {
+          "text": "working",
+          "start": 41.12,
+          "end": 41.9,
+          "confidence": 0.9990442395210266
+        },
+        {
+          "text": "today,",
+          "start": 41.9,
+          "end": 42.16,
+          "confidence": 0.9989627599716187
+        }
+      ]
+    },
+    {
+      "cue_index": 7,
+      "cue_start": 43.08,
+      "cue_end": 49.94,
+      "cue_text": "despite the fact that this nation's own scientific manpower is doubling every 12 years",
+      "words": [
+        {
+          "text": "despite",
+          "start": 43.08,
+          "end": 43.72,
+          "confidence": 0.994649350643158
+        },
+        {
+          "text": "the",
+          "start": 43.72,
+          "end": 44.02,
+          "confidence": 0.9991222023963928
+        },
+        {
+          "text": "fact",
+          "start": 44.02,
+          "end": 44.34,
+          "confidence": 0.9998435974121094
+        },
+        {
+          "text": "that",
+          "start": 44.34,
+          "end": 44.56,
+          "confidence": 0.9979440569877625
+        },
+        {
+          "text": "this",
+          "start": 44.56,
+          "end": 44.78,
+          "confidence": 0.9975972771644592
+        },
+        {
+          "text": "nation's",
+          "start": 44.78,
+          "end": 45.48,
+          "confidence": 0.994633138179779
+        },
+        {
+          "text": "own",
+          "start": 45.48,
+          "end": 45.7,
+          "confidence": 0.995551347732544
+        },
+        {
+          "text": "scientific",
+          "start": 45.7,
+          "end": 46.5,
+          "confidence": 0.998875081539154
+        },
+        {
+          "text": "manpower",
+          "start": 46.5,
+          "end": 47.26,
+          "confidence": 0.991173505783081
+        },
+        {
+          "text": "is",
+          "start": 47.26,
+          "end": 48.32,
+          "confidence": 0.9966354966163635
+        },
+        {
+          "text": "doubling",
+          "start": 48.32,
+          "end": 48.72,
+          "confidence": 0.9992250204086304
+        },
+        {
+          "text": "every",
+          "start": 48.72,
+          "end": 49.14,
+          "confidence": 0.9985045194625854
+        },
+        {
+          "text": "12",
+          "start": 49.14,
+          "end": 49.44,
+          "confidence": 0.8912215828895569
+        },
+        {
+          "text": "years",
+          "start": 49.44,
+          "end": 49.94,
+          "confidence": 0.9995443224906921
+        },
+        {
+          "text": "in",
+          "start": 49.94,
+          "end": 51.12,
+          "confidence": 0.9264270663261414
+        }
+      ]
+    },
+    {
+      "cue_index": 8,
+      "cue_start": 49.94,
+      "cue_end": 56.1,
+      "cue_text": "in a rate of growth more than three times that of our population as",
+      "words": [
+        {
+          "text": "a",
+          "start": 51.12,
+          "end": 51.22,
+          "confidence": 0.9988133907318115
+        },
+        {
+          "text": "rate",
+          "start": 51.22,
+          "end": 51.52,
+          "confidence": 0.9995837807655334
+        },
+        {
+          "text": "of",
+          "start": 51.52,
+          "end": 51.62,
+          "confidence": 0.9995656609535217
+        },
+        {
+          "text": "growth",
+          "start": 51.62,
+          "end": 51.94,
+          "confidence": 0.9995976090431213
+        },
+        {
+          "text": "more",
+          "start": 51.94,
+          "end": 53.02,
+          "confidence": 0.9840164184570312
+        },
+        {
+          "text": "than",
+          "start": 53.14,
+          "end": 53.38,
+          "confidence": 0.9990512728691101
+        },
+        {
+          "text": "three",
+          "start": 53.38,
+          "end": 53.6,
+          "confidence": 0.9542242288589478
+        },
+        {
+          "text": "times",
+          "start": 53.6,
+          "end": 53.88,
+          "confidence": 0.9995157718658447
+        },
+        {
+          "text": "that",
+          "start": 53.88,
+          "end": 54.26,
+          "confidence": 0.9988252520561218
+        },
+        {
+          "text": "of",
+          "start": 54.26,
+          "end": 55.12,
+          "confidence": 0.9984807372093201
+        },
+        {
+          "text": "our",
+          "start": 55.12,
+          "end": 55.32,
+          "confidence": 0.9991896748542786
+        },
+        {
+          "text": "population",
+          "start": 55.32,
+          "end": 55.76,
+          "confidence": 0.9993890523910522
+        },
+        {
+          "text": "as",
+          "start": 55.76,
+          "end": 56.1,
+          "confidence": 0.9977040886878967
+        },
+        {
+          "text": "a",
+          "start": 56.1,
+          "end": 56.22,
+          "confidence": 0.9996691942214966
+        }
+      ]
+    },
+    {
+      "cue_index": 9,
+      "cue_start": 56.1,
+      "cue_end": 56.4,
+      "cue_text": "a whole,",
+      "words": [
+        {
+          "text": "whole,",
+          "start": 56.22,
+          "end": 56.4,
+          "confidence": 0.9997144341468811
+        }
+      ]
+    },
+    {
+      "cue_index": 10,
+      "cue_start": 57.1,
+      "cue_end": 58.04,
+      "cue_text": " despite that,",
+      "words": [
+        {
+          "text": "despite",
+          "start": 57.1,
+          "end": 57.74,
+          "confidence": 0.9922707080841064
+        },
+        {
+          "text": "that,",
+          "start": 57.74,
+          "end": 58.04,
+          "confidence": 0.021401161327958107
+        },
+        {
+          "text": "the",
+          "start": 58.06,
+          "end": 59.14,
+          "confidence": 0.024675922468304634
+        }
+      ]
+    },
+    {
+      "cue_index": 11,
+      "cue_start": 58.06,
+      "cue_end": 59.77,
+      "cue_text": " the very",
+      "words": [
+        {
+          "text": "very",
+          "start": 59.53,
+          "end": 59.77,
+          "confidence": 0.28528502583503723
+        }
+      ]
+    }
+  ]
+}

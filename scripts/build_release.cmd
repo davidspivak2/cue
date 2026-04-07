@@ -27,6 +27,22 @@ if not exist "%REPO%\scripts\build_engine.cmd" (
   exit /b 1
 )
 
+rem Rust installed via rustup usually lives here even before PATH is refreshed in a new shell.
+if exist "%USERPROFILE%\.cargo\bin\cargo.exe" (
+  set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+)
+
+where cargo >nul 2>nul
+if not %errorlevel%==0 (
+  echo [ERROR] Rust's cargo tool was not found in PATH.
+  echo        Tauri uses Rust to build the Windows installer, so the release build cannot continue yet.
+  echo.
+  echo        Install Rust from https://rustup.rs/
+  echo        After the install finishes, close this window, open a new PowerShell window, and run this script again.
+  pause
+  exit /b 1
+)
+
 echo [INFO] Building packaged backend engine...
 call "%REPO%\scripts\build_engine.cmd"
 if errorlevel 1 (

@@ -47,6 +47,7 @@ import {
   type ActiveTaskSummary,
   createProject,
   createProjectFromFile,
+  createSampleProject,
   deleteProject,
   fetchProjects,
   type ProjectSummary,
@@ -113,8 +114,9 @@ type ViewMode = "cards" | "list";
 
 const isValidViewMode = (v: string): v is ViewMode =>
   v === "cards" || v === "list";
+const EMPTY_HEADING = "Subtitle any video, in any language, no upload required.";
 const EMPTY_MAIN = "Drop a video here or click to browse to generate subtitles.";
-const EMPTY_SUPPORTED_FORMATS = "Supports MP4, MKV, MOV, M4V, WEBM.";
+const EMPTY_SUPPORTED_FORMATS = ["MP4", "MKV", "MOV", "M4V", "WEBM"];
 const ACTIVE_TASK_POLL_MS = 2500;
 const IDLE_TASK_POLL_MS = 10000;
 
@@ -581,6 +583,34 @@ const ProjectHub = () => {
     },
     [loadProjects, navigate, openOrActivateTab, showBanner]
   );
+
+  const handleOpenSampleProject = React.useCallback(async () => {
+    if (!isTauriEnv || isCreating || isBusyOperation) {
+      return;
+    }
+    setBanner(null);
+    setIsCreating(true);
+    try {
+      const sampleProject = await createSampleProject();
+      await loadProjects();
+      openOrActivateTab({
+        projectId: sampleProject.project_id,
+        title: resolveProjectTitle(sampleProject),
+        path: sampleProject.video_path ?? undefined,
+        thumbnail_path: sampleProject.thumbnail_path ?? undefined
+      });
+      navigate(`/workbench/${encodeURIComponent(sampleProject.project_id)}`, {
+        state: { focusSampleCue: true }
+      });
+    } catch (err) {
+      showBanner(
+        "error",
+        err instanceof Error ? err.message : "Failed to open sample video."
+      );
+    } finally {
+      setIsCreating(false);
+    }
+  }, [isTauriEnv, isCreating, isBusyOperation, loadProjects, navigate, openOrActivateTab, showBanner]);
 
   const handleFileSelected = React.useCallback(
     async (file: File) => {
@@ -1082,40 +1112,74 @@ const ProjectHub = () => {
           typeof window !== "undefined" &&
           localStorage.getItem(HAS_HAD_VIDEOS_KEY) !== "true";
         return (
-          <div className="flex min-h-[calc(100vh-6rem)] flex-1 flex-col items-center justify-center">
-            <div
-              ref={emptyStateZoneRef}
-              role="button"
-              tabIndex={0}
-              className={cn(
-                "flex w-full max-w-2xl cursor-pointer flex-col items-center gap-6 rounded-lg border-2 border-dashed px-6 py-12 text-center transition",
-                isNewUser && "empty-state-reveal-upload",
-                isDragging
-                  ? "border-primary bg-accent/10"
-                  : "border-border bg-background/95 hover:border-primary/60"
-              )}
-              onClick={() => {
-                if (!isCreating && !isBusyOperation) openFileDialog();
-              }}
-              onKeyDown={(e) => {
-                if ((e.key === "Enter" || e.key === " ") && !isCreating && !isBusyOperation) {
-                  e.preventDefault();
-                  openFileDialog();
-                }
-              }}
-              onDragEnter={enableRootDrop ? handleDragEnter : undefined}
-              onDragOver={enableRootDrop ? handleDragOver : undefined}
-              onDragLeave={enableRootDrop ? handleDragLeave : undefined}
-              onDrop={enableRootDrop ? handleDrop : undefined}
-              data-testid="empty-state-drop-zone"
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-current text-muted-foreground">
-                <Upload className="h-6 w-6" aria-hidden />
+          <div className="flex min-h-[calc(100vh-6rem)] flex-1 flex-col items-center justify-center gap-14">
+            <p className="mb-2 text-center text-xl font-semibold text-foreground">{EMPTY_HEADING}</p>
+            <div className="flex w-full max-w-2xl flex-col items-center gap-4">
+              <div
+                ref={emptyStateZoneRef}
+                role="button"
+                tabIndex={0}
+                className={cn(
+                  "flex w-full cursor-pointer flex-col items-center gap-6 rounded-lg border-2 border-dashed px-6 py-12 text-center transition",
+                  isNewUser && "empty-state-reveal-upload",
+                  isDragging
+                    ? "border-primary bg-accent/10"
+                    : "border-border bg-background/95 hover:border-primary/60"
+                )}
+                onClick={() => {
+                  if (!isCreating && !isBusyOperation) openFileDialog();
+                }}
+                onKeyDown={(e) => {
+                  if ((e.key === "Enter" || e.key === " ") && !isCreating && !isBusyOperation) {
+                    e.preventDefault();
+                    openFileDialog();
+                  }
+                }}
+                onDragEnter={enableRootDrop ? handleDragEnter : undefined}
+                onDragOver={enableRootDrop ? handleDragOver : undefined}
+                onDragLeave={enableRootDrop ? handleDragLeave : undefined}
+                onDrop={enableRootDrop ? handleDrop : undefined}
+                data-testid="empty-state-drop-zone"
+              >
+                <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-current text-muted-foreground">
+                  <Upload className="h-6 w-6" aria-hidden />
+                </div>
+                <div className="space-y-4">
+                  <p className="text-base font-medium text-muted-foreground">{EMPTY_MAIN}</p>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Supported:
+                    </span>
+                    {EMPTY_SUPPORTED_FORMATS.map((fmt) => (
+                      <span
+                        key={fmt}
+                        className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+                      >
+                        {fmt}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1">
-                <p className="text-lg font-semibold text-foreground">{EMPTY_MAIN}</p>
-                <p className="text-sm text-muted-foreground">{EMPTY_SUPPORTED_FORMATS}</p>
-              </div>
+              {isTauriEnv ? (
+                <div className="flex flex-wrap items-center justify-center gap-3 text-center">
+                  <span className="text-sm text-muted-foreground">
+                    Want to see how Cue works?
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      void handleOpenSampleProject();
+                    }}
+                    disabled={isCreating || isBusyOperation}
+                    data-testid="empty-state-sample-video"
+                  >
+                    Try sample video
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </div>
         );

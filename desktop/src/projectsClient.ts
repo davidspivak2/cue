@@ -1,3 +1,5 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const PROJECTS_URL = `${BACKEND_BASE_URL}/projects`;
 const BROWSER_UPLOAD_FILENAME_HEADER = "X-Cue-Filename";
@@ -121,6 +123,12 @@ export type ProjectWordTimingsResponse = {
   error?: string | null;
 };
 
+type SampleProjectAssetPaths = {
+  videoPath: string;
+  subtitlesPath: string;
+  wordTimingsPath: string;
+};
+
 const ensureOk = async (response: Response) => {
   if (response.ok) {
     return;
@@ -168,6 +176,24 @@ export const createProject = async (videoPath: string): Promise<ProjectSummary> 
 
 export const createProjectFromFile = async (file: File): Promise<ProjectSummary> => {
   return uploadProjectFile(`${PROJECTS_URL}/import`, file);
+};
+
+export const createSampleProject = async (): Promise<ProjectSummary> => {
+  if (!isTauri()) {
+    throw new Error("sample_project_requires_tauri");
+  }
+  const assets = await invoke<SampleProjectAssetPaths>("get_sample_project_asset_paths");
+  const response = await fetch(`${PROJECTS_URL}/sample`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      video_path: assets.videoPath,
+      subtitles_path: assets.subtitlesPath,
+      word_timings_path: assets.wordTimingsPath
+    })
+  });
+  await ensureOk(response);
+  return (await response.json()) as ProjectSummary;
 };
 
 export const relinkProject = async (

@@ -37,6 +37,7 @@ debug-*.log
 .claude/
 AGENTS.md
 .cursorrules
+docs/ai/
 
 # Local-only documentation (handoffs, internal planning; not published)
 docs/handoffs/

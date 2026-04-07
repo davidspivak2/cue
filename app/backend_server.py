@@ -73,6 +73,7 @@ BROWSER_UPLOAD_FILENAME_HEADER = "x-cue-filename"
 
 logger = logging.getLogger(__name__)
 _startup_warmup_task: Optional[asyncio.Task[None]] = None
+_model_warmup_task: Optional[asyncio.Task[None]] = None
 BACKEND_SESSION_STARTED_AT = time.time()
 
 
@@ -115,15 +116,44 @@ async def _run_startup_warmup() -> None:
     logger.info("Startup warmup: complete")
 
 
+async def _run_model_warmup() -> None:
+    """Download Whisper model files to disk if not already cached.
+
+    Uses faster_whisper.utils.download_model which fetches files only —
+    it does NOT load the model into memory. Errors are logged as warnings
+    and never surfaced to the user.
+    """
+    models_dir = get_models_dir()
+    if (models_dir / TRANSCRIBE_MODEL_NAME).exists():
+        logger.info("Model warmup: already cached, skipping")
+        return
+    logger.info("Model warmup: starting background download of %s", TRANSCRIBE_MODEL_NAME)
+    try:
+        from faster_whisper.utils import download_model
+
+        await asyncio.to_thread(
+            download_model,
+            TRANSCRIBE_MODEL_NAME,
+            output_dir=str(models_dir),
+        )
+        logger.info("Model warmup: download complete")
+    except asyncio.CancelledError:
+        logger.info("Model warmup: cancelled (app shutting down)")
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Model warmup: download failed: %s", exc)
+
+
 @asynccontextmanager
 async def _app_lifespan(app: FastAPI):  # noqa: ARG001
-    global _queue_worker_tasks, _startup_warmup_task
+    global _queue_worker_tasks, _startup_warmup_task, _model_warmup_task
     _queue_worker_tasks = []
     for _ in range(CREATE_SUBTITLES_CONCURRENCY):
         _queue_worker_tasks.append(asyncio.create_task(_queue_worker_create_subtitles()))
     for _ in range(EXPORT_CONCURRENCY):
         _queue_worker_tasks.append(asyncio.create_task(_queue_worker_export()))
     _startup_warmup_task = asyncio.create_task(_run_startup_warmup())
+    _model_warmup_task = asyncio.create_task(_run_model_warmup())
     yield
     if _startup_warmup_task is not None:
         _startup_warmup_task.cancel()
@@ -134,6 +164,15 @@ async def _app_lifespan(app: FastAPI):  # noqa: ARG001
         except Exception:  # noqa: BLE001 - ensure shutdown completes
             pass
         _startup_warmup_task = None
+    if _model_warmup_task is not None:
+        _model_warmup_task.cancel()
+        try:
+            await _model_warmup_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # noqa: BLE001 - ensure shutdown completes
+            pass
+        _model_warmup_task = None
     for task in _queue_worker_tasks:
         task.cancel()
         try:
@@ -306,6 +345,12 @@ class ProjectUpdateRequest(BaseModel):
 
 class ProjectRelinkRequest(BaseModel):
     video_path: str
+
+
+class ProjectSampleCreateRequest(BaseModel):
+    video_path: str
+    subtitles_path: str
+    word_timings_path: str
 
 
 VALID_SAVE_POLICIES = {"same_folder", "fixed_folder", "ask_every_time"}
@@ -1955,6 +2000,52 @@ def list_projects() -> list[dict[str, Any]]:
 @app.post("/projects")
 def create_project(payload: ProjectCreateRequest) -> dict[str, Any]:
     return project_store.create_project(**payload.to_project_store_kwargs())
+
+
+@app.post("/projects/sample")
+def create_sample_project(payload: ProjectSampleCreateRequest) -> dict[str, Any]:
+    video_path = Path(payload.video_path)
+    subtitles_path = Path(payload.subtitles_path)
+    word_timings_path = Path(payload.word_timings_path)
+
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=422, detail="sample_video_not_found")
+    if not subtitles_path.exists() or not subtitles_path.is_file():
+        raise HTTPException(status_code=422, detail="sample_subtitles_not_found")
+    if not word_timings_path.exists() or not word_timings_path.is_file():
+        raise HTTPException(status_code=422, detail="sample_word_timings_not_found")
+
+    canonical_video_path = str(video_path.expanduser().resolve(strict=False))
+    existing_summary = next(
+        (
+            item
+            for item in project_store.list_projects()
+            if item.video_path
+            and str(Path(item.video_path).expanduser().resolve(strict=False))
+            == canonical_video_path
+        ),
+        None,
+    )
+    if existing_summary is not None:
+        return existing_summary.model_dump()
+
+    summary = project_store.create_project(str(video_path))
+    project_id = summary.get("project_id")
+    if not isinstance(project_id, str) or not project_id:
+        raise HTTPException(status_code=500, detail="sample_project_create_failed")
+
+    project_store.record_subtitles_result(
+        project_id,
+        srt_path=str(subtitles_path),
+        word_timings_path=str(word_timings_path),
+    )
+    project_store.refresh_project_status(project_id)
+
+    summaries = project_store.list_projects()
+    for item in summaries:
+        if item.project_id == project_id:
+            return item.model_dump()
+    raise HTTPException(status_code=500, detail="sample_project_summary_missing")
 
 
 @app.post("/projects/import")
