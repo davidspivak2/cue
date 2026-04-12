@@ -1,4 +1,4 @@
-export const legacyCopy = {
+export const uiStrings = {
   dropZone: {
     headline: "Drop a video here",
     subtext: "or choose one from your computer",
@@ -51,7 +51,7 @@ export type ChecklistDefinition = {
 export const buildGenerateChecklist = (
   options: ChecklistOptions = {}
 ): ChecklistDefinition[] => {
-  const labels = legacyCopy.checklistLabels;
+  const labels = uiStrings.checklistLabels;
   const useAudioFilter = options.apply_audio_filter !== false;
   const includePunctuation = options.punctuation_rescue_fallback_enabled !== false;
   const includeGapRescue = options.vad_gap_rescue_enabled !== false;

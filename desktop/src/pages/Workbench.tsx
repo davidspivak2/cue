@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
 import {
   buildGenerateChecklist,
   checklistStepIds
-} from "@/legacyCopy";
+} from "@/uiStrings";
 import {
   attachToJobEvents,
   cancelJob,

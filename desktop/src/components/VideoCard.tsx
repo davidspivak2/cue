@@ -2,7 +2,7 @@ import * as React from "react";
 import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { legacyCopy } from "@/legacyCopy";
+import { uiStrings } from "@/uiStrings";
 import { cn } from "@/lib/utils";
 
 export type VideoCardProps = {
@@ -130,7 +130,7 @@ const VideoCard = ({
           )
         ) : (
           <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-            {legacyCopy.videoCard.placeholder}
+            {uiStrings.videoCard.placeholder}
           </div>
         )}
         {onClear && (
@@ -140,7 +140,7 @@ const VideoCard = ({
             size="icon"
             className="absolute right-2 top-2 h-8 w-8 rounded-full border border-border bg-background/90 text-foreground shadow-sm transition-colors duration-200 hover:bg-background"
             onClick={onClear}
-            aria-label={legacyCopy.videoCard.remove}
+            aria-label={uiStrings.videoCard.remove}
             disabled={disabled}
           >
             <Trash2 className="h-4 w-4" />

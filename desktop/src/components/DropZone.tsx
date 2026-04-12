@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
-import { legacyCopy } from "@/legacyCopy";
+import { uiStrings } from "@/uiStrings";
 import { cn } from "@/lib/utils";
 
 export type DropZoneProps = {
@@ -102,10 +102,10 @@ const DropZone = ({
         onChange={handleInputChange}
         disabled={disabled}
       />
-      <p className="text-lg font-semibold text-foreground">{legacyCopy.dropZone.headline}</p>
-      <p className="text-sm text-muted-foreground">{legacyCopy.dropZone.subtext}</p>
+      <p className="text-lg font-semibold text-foreground">{uiStrings.dropZone.headline}</p>
+      <p className="text-sm text-muted-foreground">{uiStrings.dropZone.subtext}</p>
       <Button type="button" onClick={openFileDialog} disabled={disabled}>
-        {legacyCopy.dropZone.chooseButton}
+        {uiStrings.dropZone.chooseButton}
       </Button>
     </div>
   );
